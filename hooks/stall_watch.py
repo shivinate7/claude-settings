@@ -7,6 +7,7 @@ Modes:
   in the payload (17 lowercase hex), it puts the agent marker ahead of the wrapper.
 - --stop: At Stop, lists each open background job whose output file did not change for
   the quiet age, and blocks a Stop while a CI wait has no check-in.
+- --post: After a Bash or PowerShell call that merges a PR, prints the note that names the check-ins to delete.
 
 Planned pause (pause_seconds, one parse for --hook and --stop): the one `sleep` that has a command after it,
   anywhere in a background command, is a known silent wait, so the quiet time starts after it. The length is
@@ -80,6 +81,17 @@ Watcher: stall_watch.py --watch-pid PID --log LOG [--quiet SECS] [--beat BEAT] [
   not listed, and a TERM trap that returns respawns a loop body (SIGKILL ends it). When the job
   ends first, it exits 0.
 
+Post: stall_watch.py --post
+  PostToolUse hook, registered for Bash and PowerShell. Reads the payload and the transcript. A call that merges
+  a PR (bin/merge N --confirm, merge N --confirm, gh pr merge N without --auto, the same words as the Stop's) that
+  closes a CI wait whose check-in has not fired prints one hookSpecificOutput line (hookEventName PostToolUse,
+  additionalContext) that names the PR, the check-in tool and the id its tool returned, and says to delete it, so the
+  session deletes it in the turn of the merge. The Stop prints the same line when a merge left it unsaid. A gh pr
+  close, a return to draft, a dry run, a background call, a call the tool refused and a merge of another PR print
+  none. A later call that is no merge prints none. The settings command reads the payload line in the shell and
+  starts python only when it holds "merge". Cost: per tool call, no python start unless the payload names a merge,
+  no gh call, no network, no file written; per merge, one python start and one transcript read.
+
 Stop: stall_watch.py --stop
   Stop hook. Reads the Stop JSON on stdin, scans the session transcript for background shells
   (also a foreground call that its timeout moved to the background, which --hook never sees),
@@ -112,8 +124,10 @@ Stop: stall_watch.py --stop
   `CI red` line keeps it open and voids the check-ins before it. A later send_later, create_trigger,
   CronCreate or ScheduleWakeup call covers it, unless its tool_result has is_error true. An open wait with no check-in prints
   {"decision": "block", "reason": ...} naming the PR (the systemMessage of any stale job rides in the same
-  line). Rule git-ci-wait-checks-in. Cost: one more read of the transcript at Stop, zero process starts, zero
-  files written, zero timers, no network. Any error prints nothing.
+  line). Rule git-ci-wait-checks-in. Cost: one more read of the transcript at Stop, zero timers, zero
+  files written. A numbered wait left open with a check-in not yet fired costs one `gh api` read of the PR's state,
+  at most PR_STATE_TIMEOUT (2 s), which with BUSY_BUDGET (6 s) stays under the Stop's 10 s; a wait with no check-in,
+  or one whose check-ins fired, starts no process and no network read. Any error prints nothing.
   A shell job about to be listed is dropped when a process under it burns CPU, the watcher's rule (posix with
   lsof only). The job has no pid at Stop, so its processes are the ones that hold its output file as stdout or
   stderr. Two ps reads 1.5 s apart, only when a quiet shell job has such a process. The job shell's own time
@@ -1108,7 +1122,8 @@ def ci_events(rec):
     is no message, so a verdict it prints is not one, but its error flag voids the check-in it answers. refused is true when the error text is a
     PreToolUse hook refusal (HOOK_REFUSAL): the call never ran. ('merge', pr) is a merge or close that names
     pr (pr_ref); ('mergeany', ...) is a gh pr merge or close that names no PR at all, only flags, which aims at
-    the current branch's PR. A check-in's result carries its returned id and fire time only in the record's
+    the current branch's PR. Each carries a fifth item: true for a merge, false for a gh pr close, which ends the
+    wait but leaves its check-ins to the session (the cancel line is for a merge only). A check-in's result carries its returned id and fire time only in the record's
     toolUseResult (CronCreate: id and nextFireAt; ScheduleWakeup: scheduledFor, no id)."""
     kind = rec.get("type")
     if kind == "attachment":
@@ -1143,7 +1158,7 @@ def ci_events(rec):
                 events.append(("delete", b.get("id"), str(inp["id"])))
         elif tool == "merge_pull_request":
             if inp.get("pullNumber"):
-                events.append(("merge", str(inp["pullNumber"]), b.get("id"), "now"))
+                events.append(("merge", str(inp["pullNumber"]), b.get("id"), "now", True))
         elif tool == "update_pull_request" and inp.get("draft") is False:
             events.append(("ready", str(inp.get("pullNumber") or ""), b.get("id"),
                            "%s/%s" % (inp["owner"], inp["repo"]) if inp.get("owner") and inp.get("repo") else None))
@@ -1161,11 +1176,13 @@ def ci_events(rec):
                     if not {"--auto", "--disable-auto"} & set(gh[1]):
                         pr = pr_ref(gh[1])
                         how = "bg" if background else "now"
-                        events.append(("merge", pr, b.get("id"), how) if pr else ("mergeany", None, b.get("id"), how))
+                        merged = gh[0] == "merge"  # a close ends the wait but leaves its check-ins alone
+                        events.append(("merge", pr, b.get("id"), how, merged) if pr
+                                      else ("mergeany", None, b.get("id"), how, merged))
                 elif words[0] == "merge" or words[0].replace("\\", "/").endswith("bin/merge"):
                     pr = pr_ref(words[1:])
                     if pr:
-                        events.append(("merge", pr, b.get("id"), ("bg" if background else "now") if "--confirm" in words else "dry"))
+                        events.append(("merge", pr, b.get("id"), ("bg" if background else "now") if "--confirm" in words else "dry", True))
     return events
 
 
@@ -1313,10 +1330,11 @@ def scan_ci_wait(transcript):
                 if target is None:
                     continue
                 elif ev[0] in ("merge", "mergeany", "undo") and hits(target, ev):
+                    merges = ev[0] != "undo" and ev[4]
                     if ev[3] == "now":
-                        pending += owed(ev, target)
+                        pending += owed(ev, target) if merges else []
                     elif ev[3] == "bg":
-                        held[ev[2]] = owed(ev, target)
+                        held[ev[2]] = owed(ev, target) if merges else []
                     wait, last = None, (target if ev[3] == "dry" else None)  # a wait that names no number closes on any PR
                 elif wait is None:
                     continue
@@ -1354,7 +1372,9 @@ def cancel_line(cancels, now):
     return ("The CI wait of this turn is closed. " + "; ".join(parts) + ".") if parts else ""
 
 
-PR_STATE_TIMEOUT = 5  # seconds the one gh call may take
+# The Stop hook is killed at 10 s (settings.json). Its two bounded reads, the busy check (BUSY_BUDGET, 6 s) and the one
+# gh call (PR_STATE_TIMEOUT), run one after the other, so their sum is 8 s and leaves 2 s for the python start and scans.
+PR_STATE_TIMEOUT = 2  # seconds the one gh call may take
 SESSION_CWD = None  # the Stop payload's cwd: where pr_state runs gh for a PR with no named repo
 
 
@@ -1505,9 +1525,10 @@ def stop():
         unknown = ""
         if live:
             # The one GitHub read of a Stop. A numbered wait the transcript left open may have been merged or closed by
-            # hand: read it when the ask would print, or when a check-in not yet fired could need deleting.
+            # hand: read it only when a check-in not yet fired could need deleting. A wait with no check-in starts no
+            # process (owner pick): its ask can name a PR merged by hand, which is the cost of that.
             number, repo, kept = live
-            if pr is not None or any(not has_fired(c[3], now) for c in kept):
+            if any(not has_fired(c[3], now) for c in kept):
                 try:
                     state = pr_state(repo, number)
                 except Exception as exc:  # a read that failed is unknown, never read as open or as merged
@@ -1617,9 +1638,39 @@ def stop():
     return 0
 
 
+def post():
+    """PostToolUse: a Bash or PowerShell call that merges a PR prints the cancel note for the check-ins its wait held, as
+    the merge returns, so the session deletes them in the turn of the merge and not only at Stop. One transcript read,
+    no process, no network, no file written. Only the call's own merge counts: a later unrelated call prints nothing, and
+    a merge of another PR holds no check-in of this PR's wait. Any error prints nothing and exits 0."""
+    try:
+        call = json.load(sys.stdin)
+        command = call["tool_input"]["command"]
+        name = str(call.get("tool_name"))
+        if name not in ("Bash", "PowerShell") or not isinstance(command, str):
+            return 0
+        own = ci_events({"type": "assistant", "message": {"content": [
+            {"type": "tool_use", "id": "post", "name": name, "input": {"command": command}}]}})
+        merged = [ev for ev in own if ev[0] in ("merge", "mergeany") and ev[3] == "now" and ev[4]]
+        if not merged:  # not a merge, a dry run, a background call (its notice hands over later) or a gh pr close
+            return 0
+        now = float(os.environ.get("STALL_WATCH_NOW") or time.time())
+        named = {ev[1] for ev in merged if ev[0] == "merge"}
+        cancels = [c for c in scan_ci_wait(call["transcript_path"])[1]
+                   if any(ev[0] == "mergeany" for ev in merged) or c[0] in named]
+        line = cancel_line(cancels, now)
+        if line:
+            print(json.dumps({"hookSpecificOutput": {"hookEventName": "PostToolUse", "additionalContext": line}}))
+    except Exception:  # guard-hooks-fail-closed: a failed check prints nothing and does not block
+        pass
+    return 0
+
+
 def main(argv):
     if argv[:1] == ["--hook"]:
         return hook()
+    if argv[:1] == ["--post"]:
+        return post()
     if argv[:1] == ["--stop"]:
         return stop()
     opts = {"--quiet": DEFAULT_QUIET, "--watch-pid": None, "--log": None, "--beat": None,
