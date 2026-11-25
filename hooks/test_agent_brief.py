@@ -25,7 +25,8 @@ the hook prints one JSON object on stdout and exits 0:
   commits (builder, test-author, record-writer, designer and any other type) and never for a
   read-only type. Decision lanes-start-in-tool-worktrees.
 - The commit-evidence line (`Commit test evidence ...`) appears once, word for word, in the brief of each writer
-  role: builder, test-author, record-writer and designer. No read-only type, general type or missing type gets it.
+  role: builder, test-author, record-writer and designer, and of a general or missing type, which the hook treats
+  as a writer. No read-only type gets it.
 - A plugin-namespaced type (`my-plugin:builder`) gets the scope of its bare name. The match ignores
   case: `Builder` and `explore` get the scope and the line set of their role.
 - When the payload's cwd holds a .github/stamp.json whose cite.form is set, one brief line
@@ -119,12 +120,21 @@ READER_RULES = [
     "- Make no gh call unless your brief names it.",
     "- Report in 25 lines or fewer unless the brief sets a cap. Order: Done, Deviations, Input Needed, Next.",
 ]
-# The commit-evidence line goes to the four writer roles only, once per brief. Its place in the brief is not pinned
-# here: line_set_check leaves it out, and the commit-evidence cases below pin its text and its readers.
+# The commit-evidence line goes to every writer: the four writer roles, and a general or missing type, which the hook
+# treats as a writer. Its place in the brief is not pinned here: line_set_check leaves it out, and the commit-evidence
+# cases below pin its text and its readers.
 COMMIT_EVIDENCE_LINE = ("- Commit test evidence (a test-result bundle, a kept red run) in your worktree. "
                         "Never leave it untracked there.")
 EVIDENCE_KEYS = ("Commit test evidence", "Never leave it untracked")  # stable fragments: a line of any wording that holds one counts
-EVIDENCE_WRITERS = ["builder", "test-author", "record-writer", "designer"]
+# (label, agent type) for each writer. A missing type is MISSING: payload() then leaves agent_type out of the JSON.
+EVIDENCE_WRITERS = [
+    ("builder", "builder"),
+    ("test-author", "test-author"),
+    ("record-writer", "record-writer"),
+    ("designer", "designer"),
+    ("a general (unknown) type", "some-new-agent"),
+    ("a missing agent type", MISSING),
+]
 EVIDENCE_NONWRITERS = ["reviewer", "Explore", "Plan", "claude-code-guide", "design-reviewer", REFUTER]
 PUSH_KEY = "Push only with"
 TRAILER_KEY = "End each commit message with"
@@ -400,8 +410,8 @@ for _t in ["my-plugin:reviewer", "ns:Explore"]:
         line_set_check(READER_RULES))
 
 
-# COMMIT EVIDENCE: a writer role commits its test evidence in its own worktree and never leaves it untracked there. The
-# line goes to the four writer roles only, once per brief. A read-only role never commits, so it never gets the line.
+# COMMIT EVIDENCE: a writer commits its test evidence in its own worktree and never leaves it untracked there. The line
+# goes to every writer once per brief. A read-only role never commits, so it never gets the line.
 def evidence_lines(text):
     """The lines of the brief that hold a commit-evidence fragment, whatever their wording."""
     return [line for line in text.split("\n") if any(key in line for key in EVIDENCE_KEYS)]
@@ -456,16 +466,12 @@ def standing_rules_check():
     return None
 
 
-for _t in EVIDENCE_WRITERS:
-    add("commit evidence: %s gets the line word for word" % _t, "custom", fn=evidence_word_check(_t))
-for _t in EVIDENCE_WRITERS:
-    add("commit evidence: %s gets the line once per brief" % _t, "custom", fn=evidence_once_check(_t))
+for _name, _t in EVIDENCE_WRITERS:
+    add("commit evidence: %s gets the line word for word" % _name, "custom", fn=evidence_word_check(_t))
+for _name, _t in EVIDENCE_WRITERS:
+    add("commit evidence: %s gets the line once per brief" % _name, "custom", fn=evidence_once_check(_t))
 for _t in EVIDENCE_NONWRITERS:
     add("commit evidence control: %s gets no commit-evidence line" % _t, "custom", fn=evidence_absent_check(_t))
-add("commit evidence control: a general (unknown) type gets no commit-evidence line", "custom",
-    fn=evidence_absent_check("some-new-agent"))
-add("commit evidence control: a missing agent type gets no commit-evidence line", "custom",
-    fn=evidence_absent_check(MISSING))
 add("commit evidence control: every role still gets the standing rules line", "custom", fn=standing_rules_check)
 
 
