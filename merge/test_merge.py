@@ -2986,20 +2986,40 @@ class CutBranchTree(Env):
     def test_clean_merged_tree_is_removed_with_its_branch(self):
         self.assert_clean_tree_removed(self.merged_feat())
 
+    def record_at(self, cwd):
+        """A live session record whose cwd is CWD, in this case's own config folder. -> the patch that points
+        CLAUDE_CONFIG_DIR there."""
+        cfg = os.path.join(self.t, "cfg")
+        os.makedirs(os.path.join(cfg, "sessions"))
+        record = {"pid": os.getpid(), "startedAt": hook_guard._process_start_ms(os.getpid()), "cwd": cwd}
+        with open(os.path.join(cfg, "sessions", "gone-record.json"), "w", encoding="utf-8") as handle:
+            json.dump(record, handle)
+        return unittest.mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": cfg})
+
     def test_clean_merged_tree_is_removed_beside_a_record_whose_folder_is_gone(self):
         """A session record whose folder was removed stands in no tree (owner, 20:53 CST 11-24, 2026): the clean merged
-        tree goes with its branch, as it does with no record at all."""
+        tree goes with its branch, as it does with no record at all. The folder's parent stays: a missing parent reads
+        unknown (`_folder_is_gone`), so only the leaf is absent here."""
+        gone = os.path.join(self.t, "gone-session", "wt")
+        os.makedirs(gone)
+        os.rmdir(gone)
+        self.assertFalse(os.path.exists(gone), "scope: the record's folder must be absent")
+        self.assertTrue(os.path.isdir(os.path.dirname(gone)), "scope: the record's parent folder must stay")
+        with self.record_at(gone):
+            self.assert_clean_tree_removed(self.merged_feat())
+
+    def test_clean_merged_tree_is_kept_beside_a_record_whose_parent_folder_is_gone(self):
+        """With the record's parent gone too, the read is unknown, not gone: the tree stays, and its one kept line says
+        the read failed. The sibling of the case above."""
         gone = os.path.join(self.t, "gone-session", "wt")
         os.makedirs(gone)
         os.rmdir(gone)
         os.rmdir(os.path.dirname(gone))
-        cfg = os.path.join(self.t, "cfg")
-        os.makedirs(os.path.join(cfg, "sessions"))
-        record = {"pid": os.getpid(), "startedAt": hook_guard._process_start_ms(os.getpid()), "cwd": gone}
-        with open(os.path.join(cfg, "sessions", "gone-record.json"), "w", encoding="utf-8") as handle:
-            json.dump(record, handle)
-        with unittest.mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": cfg}):
-            self.assert_clean_tree_removed(self.merged_feat())
+        self.assertFalse(os.path.exists(os.path.dirname(gone)), "scope: the record's parent folder must be absent")
+        with self.record_at(gone):
+            self.worktree()
+            out = self.cut(self.merged_feat())
+        self.assertKept(out, "a read on it failed")
 
     def test_clean_merged_tree_is_removed_when_merged_is_the_pr_head(self):
         # Production passes the PR head sha (merge.py `cut_branch(root, branch, sha)`), not origin/main.
