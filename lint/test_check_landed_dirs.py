@@ -212,6 +212,15 @@ class CheckLandedDirsTests(unittest.TestCase):
                          "a helper in hooks/test_support/ passed the check, so the verdict widened: %s" % result.stdout)
         self.assertIn("cost_probe.py", result.stderr, "the refusal does not name the helper: %s" % result.stderr)
 
+    def test_a_commented_out_guard_entry_is_not_counted(self):
+        # Why: a commented-out os.path.normcase("...") line in CONFIG_FROZEN_DIRS is no frozen dir, so the check
+        # must not count it. A regex over the literal counts it; a read of the Python tuple does not.
+        result = run_in_copy(edit_file("hooks/guard_frozen.py", "CONFIG_FROZEN_DIRS = (\n",
+                                       'CONFIG_FROZEN_DIRS = (\n    # os.path.normcase("newdir"),\n'))
+        self.assertEqual(result.returncode, 0,
+                         "a commented-out entry was counted as a frozen dir: %s" % result.stderr)
+
+
 
 RECORD_PATH = os.path.join(ROOT, "docs", "decisions", "builders-cannot-edit-tests.md")
 HELPER_HOME_HEADING = "## Where a test-support helper lives"
