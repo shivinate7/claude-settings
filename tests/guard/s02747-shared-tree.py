@@ -1048,6 +1048,9 @@ sh("agent worktree: a textual .claude/worktrees/.. that resolves back outside st
 if SYMWT_MADE:
     sh("agent worktree: a symlink into .claude/worktrees/ aliasing an outside worktree still denies",
        VCS + " reset --hard", "deny", "shared-tree", cwd=SYMWT)
+else:
+    skip_case("agent worktree: a symlink into .claude/worktrees/ aliasing an outside worktree still denies",
+              NO_LINK_HERE)
 sh("agent worktree: the main checkout nested under its own .claude/worktrees/-shaped path "
    "still denies", VCS + " reset --hard", "deny", "shared-tree", cwd=DECOYMAIN)
 sh("agent worktree: a stash push there still denies, the stack is clone-wide",

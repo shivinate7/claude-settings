@@ -10,7 +10,6 @@ FAMILY = "scratchpad-message"
 SCRATCH_RULE = "scratchpad-commit-msg-owner"  # the rule id the refusal prints: the lane slug
 SCRATCH_REMEDY = ("-F -",)                    # the refusal names the heredoc form as a way to pass a message
 SCRATCH_AGENT = "9f3c1a7e5b2d4c8f6"           # an agent's id on its payload
-NO_LINK_HERE = "this host gives no symlink, so the link case does not run here"
 
 
 def scratch_refuse(name, command, cwd=NOGIT, session=FAKE_SESSION, agent_id=SCRATCH_AGENT,
