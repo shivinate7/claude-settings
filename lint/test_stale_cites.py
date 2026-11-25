@@ -3074,6 +3074,55 @@ class CitedExcerptTests(unittest.TestCase):
         block_a = shown[shown.index("== lint/a.py"):shown.index("== lint/b.py")].split("\n")[1:]
         self.assertLessEqual(len([row for row in block_a if row.strip()]), 40, "the lint/a.py block is over the per-path cap of 40 rows")
 
+    # FILL_ROWS are rows 1 to 60, so a def placed after them sits past the first 40 rows. BODY_ROWS is 60 rows of a def body.
+    FILL_ROWS = "".join("x%d = %d\n" % (n, n) for n in range(60))
+    BODY_ROWS = "".join("    v%d = 1\n" % n for n in range(60))
+
+    def test_two_names_after_one_path_each_show_their_definition(self):
+        # One path and two names, the second def more than 40 rows below the first: the excerpt shows both defs.
+        text = self.FILL_ROWS + "\n\ndef alpha():\n" + self.BODY_ROWS + "\n\ndef beta():\n    return 2\n"
+        shown = self.stale.cited_excerpt("read lint/mod.py alpha, beta", text)
+        self.assertIn("63: def alpha():", shown, "a cite naming alpha and beta does not show alpha's def")
+        self.assertIn("126: def beta():", shown, "a cite naming alpha and beta does not show beta's def")
+
+    def test_a_line_range_after_a_second_path_does_not_move_the_first_paths_window(self):
+        # The cite's first path starts at its name. The line range after the second path belongs to that second path.
+        text = self.FILL_ROWS + "\n\ndef alpha():\n" + self.BODY_ROWS
+        shown = self.stale.cited_excerpt("read lint/a.py alpha, lint/b.py:3-4", text)
+        self.assertEqual(shown.split("\n")[0], "63: def alpha():",
+                         "a line range after a second path moved the first path's window to %r, not to alpha's def"
+                         % shown.split("\n")[0])
+
+    def test_a_dotted_name_starts_at_the_method_of_that_class(self):
+        # Guard.check names one method. Another class's check comes first in the file, and the file head is not the start.
+        text = ("class Other:\n    def check(self):\n        return 0\n\n\n" + self.FILL_ROWS
+                + "\n\nclass Guard:\n    def check(self):\n        return 1\n")
+        shown = self.stale.cited_excerpt("read lint/mod.py Guard.check", text)
+        self.assertEqual(shown.split("\n")[0], "69:     def check(self):",
+                         "a dotted name starts at %r, not at the method Guard.check" % shown.split("\n")[0])
+
+    def test_a_name_followed_by_prose_words_is_not_a_symbol(self):
+        # The rule: a name followed by more lower-case prose words is not a symbol, so the excerpt starts at the file head.
+        # The file defines read, and the cite's prose uses that word, so a scan that takes the word as a symbol starts at def read.
+        text = "import os\n\n\ndef read(path):\n    return open(path).read()\n"
+        shown = self.stale.cited_excerpt("read lint/widget.py read the refusal text", text)
+        self.assertEqual(shown.split("\n")[0], "1: import os",
+                         "a word followed by lower-case prose is read as a symbol: the excerpt starts at %r" % shown.split("\n")[0])
+
+    def test_a_non_python_read_cite_naming_a_heading_gives_the_file_head(self):
+        # Control: a file that is not Python has no def to find, so the cite gives the top of the file, with no error.
+        text = "intro line\n\nmore text\n\n# Heading\nrow\n"
+        shown = self.stale.cited_excerpt("read docs/notes.md Heading", text)
+        self.assertEqual(shown.split("\n")[0], "1: intro line",
+                         "a non-Python read cite starts at %r, not at the file head" % shown.split("\n")[0])
+
+    def test_a_name_defined_twice_shows_the_earliest_definition(self):
+        # Control: the same method name in two classes. The first def in the file is the one the excerpt starts at.
+        text = "class A:\n    def render(self):\n        return 1\n\n\nclass B:\n    def render(self):\n        return 2\n"
+        shown = self.stale.cited_excerpt("read lint/widget.py render", text)
+        self.assertEqual(shown.split("\n")[0], "2:     def render(self):",
+                         "a name defined twice starts at %r, not at the earliest def" % shown.split("\n")[0])
+
 
 CONFIG = "hooks/config.py"  # the Python file the value cites name
 LIMIT_BASE = "LIMIT = 4\n\n\ndef keep():\n    return 1\n"
