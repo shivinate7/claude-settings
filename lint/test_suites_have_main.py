@@ -78,6 +78,48 @@ RUNNER_RESULT_SETS_EXIT_CODE = "import sys\n" + SUITE_WITHOUT_MAIN + (
     "    sys.exit(0 if result.wasSuccessful() else 1)\n"
 )
 
+RUN_CLASS_ATTRIBUTE_UNDER_MAIN = "import sys\nimport cost_probe\n" + SUITE_WITHOUT_MAIN + (
+    "\n"
+    "\n"
+    "def main():\n"
+    "    return 0 if cost_probe.run_class(Cases) else 1\n"
+    "\n"
+    "\n"
+    'if __name__ == "__main__":\n'
+    "    sys.exit(main())\n"
+)
+# The shape of hooks/test_local_time.py: run_class sits in a case function, and run_cases is handed that function by name
+# inside a list that suite_cases() returns. No call reaches case_cost_tests, so the walk from the __main__ block misses it.
+RUN_CLASS_IN_A_LISTED_CASE = (
+    "import sys\n"
+    "import unittest\n"
+    "import cost_probe\n"
+    "from case_runner_test import run_cases\n"
+    "\n"
+    "\n"
+    "class CostTests(unittest.TestCase):\n"
+    "    def test_one(self):\n"
+    "        self.assertTrue(True)\n"
+    "\n"
+    "\n"
+    "def case_cost_tests():\n"
+    "    if cost_probe.run_class(CostTests):\n"
+    "        return None\n"
+    "    return ['the CostTests class has a failing case']\n"
+    "\n"
+    "\n"
+    "def suite_cases():\n"
+    "    return [case_cost_tests]\n"
+    "\n"
+    "\n"
+    "def main():\n"
+    "    return run_cases(suite_cases())\n"
+    "\n"
+    "\n"
+    'if __name__ == "__main__":\n'
+    "    sys.exit(main())\n"
+)
+
 
 def checker():
     """The checker module. It is loaded from lint/check_suites_have_main.py by path, as the other lint tests load tools."""
@@ -140,6 +182,14 @@ class FixtureCases(unittest.TestCase):
     def test_text_runner_result_sets_exit_code_is_clean(self):
         found = checker().problems(fixture("text_runner_exit_code", RUNNER_RESULT_SETS_EXIT_CODE))
         self.assertEqual(found, [], "a TextTestRunner run under the __main__ block is reported: %r" % found)
+
+    def test_run_class_attribute_call_under_main_is_clean(self):
+        found = checker().problems(fixture("run_class_attribute", RUN_CLASS_ATTRIBUTE_UNDER_MAIN))
+        self.assertEqual(found, [], "a TestCase run by cost_probe.run_class under the __main__ block is reported: %r" % found)
+
+    def test_run_class_in_a_case_run_cases_reaches_by_name_is_clean(self):
+        found = checker().problems(fixture("run_class_in_listed_case", RUN_CLASS_IN_A_LISTED_CASE))
+        self.assertEqual(found, [], "a TestCase run by run_class in a case function that run_cases reaches by name is reported: %r" % found)
 
 
 class RepoRun(unittest.TestCase):
