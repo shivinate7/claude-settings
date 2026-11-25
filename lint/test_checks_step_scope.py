@@ -511,6 +511,7 @@ MAIN_STEPS = [
     'Opt-in CI template fixture suites',
     'Mod and map-skill tests',
     'Checks step scope suite',
+    'Tool pins (this runner)',
 ]
 
 # Each entry file that names a tracked .md file, with the names and one reason. A name here is written into a temp
@@ -1690,6 +1691,49 @@ class MutateVerdictCache(unittest.TestCase):
                     self.assertRegex(key, github_expr(name), "%s: the save key %r does not name github.%s" % (job, key, name))
                 self.assertEqual(yaml_scalar(with_.get("path")), folder, "%s: the save step's path is %r, want the shard folder %r"
                                  % (job, with_.get("path"), folder))
+
+
+TOOL_PINS_STEP = "Tool pins (this runner)"
+TOOL_PINS_JOBS = ("checks", "checks-windows", "checks-macos")  # the Linux lint job, one Windows job and one macOS job (decision tool-pins)
+
+
+class ToolPinsStep(unittest.TestCase):
+    """The tool-pins check runs on each runner class the pins name (decision tool-pins): one step in the checks job, one in a
+    Windows job and one in a macOS job. Each runs the checker without --local, so a mismatch fails it, and each is gated on
+    the scope flag tool_pins, which a pull request sets only when it moves a pin or the checker. The scope job exports the flag."""
+
+    def named(self, job):
+        block = ws.job_block(read_repo(WORKFLOW), job)
+        self.assertIsNotNone(block, "%s has no `%s` job" % (WORKFLOW, job))
+        for st in ws.step_blocks(block):
+            if identity(st) == TOOL_PINS_STEP:
+                return st
+        self.fail("job %r has no step named %r" % (job, TOOL_PINS_STEP))
+
+    def test_each_runner_class_runs_the_tool_pins_step(self):
+        for job in TOOL_PINS_JOBS:
+            with self.subTest(job=job):
+                self.named(job)
+
+    def test_each_step_runs_the_checker_without_local(self):
+        for job in TOOL_PINS_JOBS:
+            with self.subTest(job=job):
+                body = ws.run_body(self.named(job)) or ""
+                self.assertIn("lint/check_tool_pins.py", body, "the %s step must run lint/check_tool_pins.py: %r" % (job, body))
+                self.assertNotIn("--local", body, "the %s step must not pass --local, so a mismatch fails it: %r" % (job, body))
+
+    def test_each_step_is_gated_on_the_tool_pins_flag_and_keeps_running(self):
+        for job in TOOL_PINS_JOBS:
+            with self.subTest(job=job):
+                expr = value(self.named(job), "if") or ""
+                self.assertIn("needs.scope.outputs.tool_pins == 'true'", expr, "the %s step's if: must read the tool_pins flag: %r" % (job, expr))
+                self.assertIn("!cancelled()", expr, "the %s step's if: must keep running after a cancelled need: %r" % (job, expr))
+
+    def test_the_scope_job_exports_tool_pins(self):
+        block = ws.job_block(read_repo(WORKFLOW), "scope")
+        self.assertIsNotNone(block, "%s has no `scope` job" % WORKFLOW)
+        self.assertIn("tool_pins: ${{ steps.scope.outputs.tool_pins }}", block,
+                      "the scope job must export tool_pins, or the steps that read needs.scope.outputs.tool_pins read nothing")
 
 
 if __name__ == "__main__":
