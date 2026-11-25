@@ -29350,6 +29350,63 @@ class LocalSessionRoleCheck(CloudSession):
             self.assertEqual(len(self.host.pr_calls), reads, "the run read the host for a coordinator file that names another repo")
             self.assertEqual(self.refs(), refs, "the run claimed or pushed for a coordinator file that names another repo")
 
+    # The cloud remote id. A local session whose environment still carries CLAUDE_CODE_REMOTE_SESSION_ID reads its role from merge-role.json alone
+    # (read_merge_record), so a launcher's coordinator file gives no role and the standing checks are skipped. Each case below sets the id with an own
+    # coordinator file and no merge-role.json, and must be refused as the same confirm is refused without the id (the four coordinator cases above).
+    def run_with_remote_id(self, *argv):
+        """-> (rc, stdout, stderr) of a local confirm whose environment also carries the cloud remote id (CLAUDE_CODE_REMOTE unset)."""
+        return self.run_main(*argv, CLAUDE_CODE_REMOTE_SESSION_ID=ROLE_SESSION)
+
+    # RED on the old code: with the id set the coordinator gets no role, so the --head gate does not run and the confirm reads the host and merges.
+    def test_a_remote_id_does_not_lift_a_coordinator_files_head_flag_check(self):
+        self.put_local_role("coordinator")
+        refs = self.refs()
+        rc, out, err = self.run_with_remote_id("7", "--confirm")
+        self.assertEqual(rc, 1, "a local coordinator's confirm with no --head merged when the session also carried the remote id: " + out + err)
+        self.assertIn("--head flag", out + err, "the refusal does not name the --head flag")
+        self.assertEqual(self.refs(), refs, "a confirm with no head claimed or pushed")
+
+    # RED on the old code: the standing check of a code pull request is skipped, so the confirm with no review log merges it.
+    def test_a_remote_id_does_not_lift_a_coordinator_files_review_log_check(self):
+        self.put_local_role("coordinator")
+        self.host.changed = [("merge/merge.py", "modified", 3)]  # a guard path: the review record is owed
+        refs = self.refs()
+        rc, out, err = self.run_with_remote_id("7", "--confirm", "--head", self.head())
+        self.assertEqual(rc, 1, "a local coordinator's confirm of a code pull request with no review log merged when the session carried the remote id: " + out + err)
+        self.assertIn("its head has no passing review record", out + err, "the refusal does not come from the review record check")
+        self.assertEqual(self.refs(), refs, "a code pull request with no review log claimed or pushed")
+
+    # PIN, green on the old code: the head-checks phase every confirm runs refuses a red head before any claim, so the id does not lift this refusal.
+    # The probe found no red-head hole for a local coordinator; this case holds the outcome, not which gate speaks.
+    def test_a_remote_id_keeps_a_coordinator_files_red_head_refused(self):
+        self.put_local_role("coordinator")
+        self.host.state = "red: checks: fail"  # the head reads red before any wait
+        refs = self.refs()
+        rc, out, err = self.run_with_remote_id("7", "--confirm", "--head", self.head())
+        self.assertEqual(rc, 1, "a local coordinator's confirm of a red head went through when the session carried the remote id: " + out + err)
+        self.assertIn("a check is red", out + err, "the red head was refused for another cause")
+        self.assertEqual(self.refs(), refs, "a red head claimed or pushed")
+
+    # RED on the old code: the repo check is skipped, so a coordinator file that names another repo reads the host and merges.
+    def test_a_remote_id_does_not_lift_a_coordinator_files_repo_check(self):
+        self.put_local_role("coordinator", repo="other/repo")
+        reads, refs = len(self.host.pr_calls), self.refs()
+        rc, out, err = self.run_with_remote_id("7", "--confirm", "--head", self.head())
+        self.assertEqual(rc, 1, "a local coordinator's confirm for a file that names another repo went through when the session carried the remote id: " + out + err)
+        self.assertIn(merge.LOCAL_REPO_ROLE_REFUSAL, out + err, "the refusal is not the repo refusal")
+        self.assertEqual(len(self.host.pr_calls), reads, "the run read the host for a coordinator file that names another repo")
+        self.assertEqual(self.refs(), refs, "the run claimed or pushed for a coordinator file that names another repo")
+
+    # CONTROL, green on the old code: a real cloud coordinator reads merge-role.json, and its confirm with no --head is refused before any host read, as on main.
+    def test_a_cloud_coordinator_file_with_no_head_is_refused_as_on_main(self):
+        self.put_role("standing")  # merge-role.json for this session, read under the cloud environment
+        reads, refs = len(self.host.pr_calls), self.refs()
+        rc, out, err = CloudSession.run_main(self, "7", "--confirm")
+        self.assertEqual(rc, 1, out + err)
+        self.assertIn("--head flag", out + err, "the refusal does not name the --head flag")
+        self.assertEqual(len(self.host.pr_calls), reads, "the cloud run read the host before the head refusal")
+        self.assertEqual(self.refs(), refs, "the cloud run claimed or pushed before the head refusal")
+
     # Pin, green on the old code: a local session's lane file names no tier a local confirm may run as, so the confirm is refused.
     # The lane role joins MERGE_ROLES for cloud sessions only, so this pins the local path that must not follow it.
     def test_a_lane_file_refuses_a_local_confirm(self):
