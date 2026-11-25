@@ -10,6 +10,8 @@ Owner, 2026-11-25, typed in the consultant's chat unless said:
 - 10:19 CST: "i didnt say that at all? i said this concept of pins aligning between whats tested and whats worked on needs to be done for all repos, not that all repos need python 3.15 pinned forcefully... and remember i'm just trying to voice the conceptual here"
 - 10:19 CST, on installing the pinned git on his Mac with Homebrew and upgrading Git for Windows: "this"
 - 10:53 CST, on "may the tool-pins decision take over debt `gh-version-unpinned`": option a, "approved". Option a's text, the consultant's wording and not the owner's: "the tool-pins decision takes over the debt. Gain: one home, one check. Lose: the debt's older plan is dropped."
+- 10:47 CST, on where the check runs; the reason the plan ran: "i wonder how the check would run on cloud vs windows local vs mac local shd it be upon merge or some sorta start session thing or readying a pr? send an opus agent on this i actually dont know how to pick on this"
+- 11:05 CST, on "when a runner image moves a tool past its pin": option a, his word: "approved". Option a's text, the consultant's wording and not his: "CI's own tools are judged on the daily run, red on a mismatch, with a line naming the tool, the pin and the version found; a PR's run is red only when that PR moves a pin or the checker; a lane's local lint on a machine whose tools miss the pins reads unknown, so it is no proof and the merge waits for the PR's own CI run; session start, the ready mark and the merge add nothing." Stated cost, accepted (the consultant's wording): "after an image move main reads red until a one-line pin PR lands, and merges wait for full PR CI meanwhile; while a Mac or a cloud session lags, its lanes merge on CI only."
 
 ## What it means
 
@@ -31,10 +33,10 @@ Reported, not read from a CI log or a run:
 ## What is built
 
 - File format, `.tool-versions`:
-  - One `<tool> <version>` per line. `lint/check_tool_pins.py` `parse` refuses any other line; a file with no pin fails.
+  - One `<tool> <version>` per line. `lint/check_tool_pins.py` `parse` refuses any other line. A file with no pin, an empty file included, is refused and exits 1.
   - A comment sits on its own line. The file's header says actions/setup-python reads the python line with a strict pattern. Not checked here.
   - `# read: <tool> = <command>` gives a tool its own version command. The default is `<tool> --version`. `lint/check_tool_pins.py` `run_version_command` runs it with no shell (the Windows path is unrun).
-  - `# match: <tool> = <regex>` names the version. The regex has one group, and the group is the version. Both `read` and `match` are case-insensitive.
+  - `# match: <tool> = <regex>` names the version. The regex has one group, and the group is the version. The directive words `read` and `match` are case-insensitive.
   - A UTF-8 BOM is ignored.
 - Version: the first dotted number in the output, or a bare number when none is dotted. A number inside a path token is never the version.
 - Precision: `lint/check_tool_pins.py` `matches` accepts a pin at the precision it states. `3.15` accepts 3.15.2. `3` accepts 3.2.1. `2.56` accepts 2.56.1. `2.105` rejects 2.10.5. A pre-release (3.15.0rc1) matches only a pin that states it.
@@ -50,7 +52,8 @@ Reported, not read from a CI log or a run:
   - No CI job runs the check. Only its fixture suite runs.
   - The check must also run in one Windows job and one macOS job.
   - Other repos take the check through the lint action they already call.
-  - Where the check runs (session start, lane lint, ready run, PR run, daily; cloud, Windows, Mac) is planned, not built: an Opus plan and its refuter, on the owner's grant, 10:47 CST Nov 25.
+  - Where the check runs: the 11:05 CST ruling above. None of that wiring exists yet.
+  - Read (plan and refuter, Nov 25): a red daily run blames no PR and does not stop `stable` (`actions/ci-alarm/clear_rule.py` `blames`; `.github/workflows/stable.yml`).
   - Who moves a pin when a runner image moves a tool: the owner's open question QAG.
 - Machines: the Mac has Homebrew git 2.56.1 since 10:21 CST, 2026-11-25. The Windows upgrade is the owner's act.
 - Debt `gh-version-unpinned` stays open until one `gh` line lands in `.tool-versions`. The pin value needs a read of CI's gh first.
