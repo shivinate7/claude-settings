@@ -2181,8 +2181,8 @@ class Host:
 
     def main_merge_of(self, base, head):
         """-> the oid of the merge commit on `base` whose second parent is `head` (this run's merge landed), False when `base` holds none, None when the read failed.
-        A full window with no match is None too: the head's merge may lie older than the window. A lost or refused merge reply with the pull request still OPEN may have landed (the Nov 25 2026 outage: HTTP 405 and 502, merge commit on main). The one home of that read.
-        Cost: one `git fetch` of `base`, then one `git rev-list` of its newest MAIN_MERGE_WINDOW (50) first-parent merges, no gh call, once per call; never cached, since `base` moves. A failed fetch or read is None: unknown, never merged."""
+        A full window with no match is None too when main holds the head (or the read cannot tell): the head's merge may lie older than the window. A lost or refused merge reply with the pull request still OPEN may have landed (the Nov 25 2026 outage: HTTP 405 and 502, merge commit on main). The one home of that read.
+        Cost: one `git fetch` of `base`, then one `git rev-list` of its newest MAIN_MERGE_WINDOW (50) first-parent merges, plus two git reads when the window is full with no match, no gh call, once per call; never cached, since `base` moves. A failed fetch or read is None: unknown, never merged."""
         root = self.cwd or "."
         ref = f"refs/remotes/origin/{base}"
         c, out = git(root, "fetch", "-q", "origin", branch_refspec(base))
@@ -2196,7 +2196,12 @@ class Host:
             oid, *parents = line.split()
             if len(parents) > 1 and parents[1] == head:
                 return oid
-        return None if len(lines) >= MAIN_MERGE_WINDOW else False
+        if len(lines) < MAIN_MERGE_WINDOW:
+            return False
+        # A full window may cut off the head's merge. Main cannot hold it when this clone lacks the head, or when the head is no ancestor of main: False. Held or unread: None.
+        if git(root, "cat-file", "-e", f"{head}^{{commit}}")[0] or ancestor(root, head, ref) is False:
+            return False
+        return None
 
     def merge(self, n, method, sha):
         """`PUT pulls/<n>/merge` with `sha`, so GitHub refuses (409) a head that moved. `self.commit_message`, when set, is the merge commit's message. Never --admin, never --delete-branch (cut_branch does that).
