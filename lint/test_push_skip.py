@@ -53,7 +53,7 @@ from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _test_temp  # noqa: E402  test-temp-standard: every temp path comes from this run's folder
-from test_windows_split import ALL_JOBS_PASSED_JOB, CHECKS, MACOS_JOBS, NIGHTLY_SKIP_JOB, PUSH_SKIP_JOB, all_jobs, eval_if, eval_value, job_outputs_of  # noqa: E402  the one home of the checks.yml reader
+from test_windows_split import ALL_JOBS_PASSED_JOB, CHECKS, MACOS_JOBS, NIGHTLY_SKIP_JOB, PUSH_OFF_SHARDS, PUSH_SKIP_JOB, all_jobs, eval_if, eval_value, job_outputs_of  # noqa: E402  the one home of the checks.yml reader and the shard list
 from all_jobs_passed_rules import FAN_IN, needs_of, split_jobs  # noqa: E402  the one home of the needs reader
 from workflow_steps import job_block, step_blocks, step_env, step_key, step_with  # noqa: E402  the one home of the job parser
 import test_all_jobs_passed as all_jobs_home  # noqa: E402  the one home of the child workflow fixtures (CHILD_GOOD)
@@ -459,6 +459,16 @@ class SuiteRunsOfTheHead(LiveHead):
         changes[ALL_JOBS_PASSED_JOB] = {"conclusion": "failure"}
         value, _ = self.skip_on(ready_head_runs(changes))
         self.assertEqual(value, "false", "every suite job skipped and all-jobs-passed failed, so the rollup refused the skips: skip=false")
+
+    def test_a_ready_head_run_with_the_windows_shards_skipped_and_the_rest_green_skips_the_push(self):
+        # Ruling (owner, 21:19 CST Nov 24 2026): a ready pull_request skips the 13 Windows shards (PUSH_OFF_SHARDS), and the push still
+        # skips when every other suite job succeeded on the ready run. Named failure: a skipped shard counts as a missing suite job, so the
+        # push is never skipped and every merge loses its push-skip.
+        changes = {name: {"conclusion": "skipped"} for name in PUSH_OFF_SHARDS if name in ALL_RUN_JOBS}
+        self.assertTrue(changes, "no Windows shard is a job of checks.yml, so this case would prove nothing")
+        value, text = self.skip_on(ready_head_runs(changes))
+        self.assertEqual(value, "true", "the Windows shards skipped on the ready run and the rest succeeded: skip=true (%s)"
+                         % text.strip()[-200:])
 
     def test_one_suite_job_skipped_among_successes_does_not_skip_the_push(self):
         name = "checks-windows-rest"

@@ -17,7 +17,6 @@ module path.
 """
 import importlib.util
 import os
-import re
 import shutil
 import subprocess
 import sys
@@ -233,8 +232,9 @@ class GlossaryTests(Fixture):
 
 class CodeNameTests(Fixture):
     """The widened check: identifiers, rule anchors, record slugs and hook messages on added lines."""
+    # "sub" "agent" is split: the whole-tree retired-names scan reads this file, and must not read the name here.
     EXTRA = ("| refuse | What a guard does. | `rule:one-rule` | `deny (this sense)`, `block (this sense)` |\n"
-             "| agent | Anything the Agent tool starts. | `rule:one-rule` | `subagent` |\n"
+             "| agent | Anything the Agent tool starts. | `rule:one-rule` | `sub" "agent` |\n"
              "| safety hole | A guard that lets an act through. | `rule:one-rule` | `hole` |\n"
              "| helper | A worker that runs one task. | `rule:one-rule` | `worker (this sense)` |\n"
              "| record | One entry in a records folder. | `rule:one-rule` | `entry (this sense)` |\n")
@@ -283,7 +283,7 @@ class CodeNameTests(Fixture):
     def test_platform_names_pass_and_compounds_fail(self):
         self.green("hooks/x.py", 'subagent_type = "subagent_type"\nSubagentStop = 1\n')
         self.green("hooks/y.py", 'import os\nos.environ["CLAUDE_CODE_SUBAGENT_MODEL"] = "x"\n')
-        self.red("hooks/z.py", "subagent_count = 1\n", "hooks/z.py:1")
+        self.red("hooks/z.py", "sub" "agent_count = 1\n", "hooks/z.py:1")
 
     def test_this_sense_word_is_left_out_of_code_names(self):
         self.green("hooks/x.py", 'deny = 1\nblock_it = 2\nMSG = "The guard will deny it."\n')
@@ -1102,97 +1102,6 @@ def load_check():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
-
-
-def plural_forms(word):
-    """The word with a plural `s`, `es` or `ies` taken off, so gaps, tries and claims reach gap, try and claim."""
-    out = {word, word[:-1] if word.endswith("s") else word}
-    if word.endswith("es"):
-        out.add(word[:-2])
-    if word.endswith("ies"):
-        out.add(word[:-3] + "y")
-    return out
-
-
-class RepoGlossaryTests(unittest.TestCase):
-    def test_repo_glossary_homes_resolve(self):
-        """The real GLOSSARY.md: every home resolves. A path list keeps git out of it."""
-        r = subprocess.run([sys.executable, MODULE, "README.md"], cwd=os.path.dirname(HERE),
-                           capture_output=True, encoding="utf-8")
-        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
-
-    def test_real_not_names_use_this_sense_only_and_keep_gap_try_claim_plain(self):
-        """The real GLOSSARY.md, read through the check's own rows(): each tag is (this sense), and gap,
-        try and claim are everyday words, so no "not" name may be one of them."""
-        check = load_check()
-        with open(os.path.join(os.path.dirname(HERE), "GLOSSARY.md"), encoding="utf-8") as f:
-            table = check.rows(f.read())
-        self.assertTrue(table, "GLOSSARY.md has no rows under ## Terms")
-        problems = []
-        for term, _homes, names in table:
-            for name in names:
-                if "(" in name and not re.fullmatch(r"[^()]+ \(this sense\)", name):
-                    problems.append("row '%s': not name '%s' has a tag other than (this sense)" % (term, name))
-                for word in check.words(name.split(" (")[0]):
-                    if plural_forms(word) & {"gap", "try", "claim"}:
-                        problems.append("row '%s': not name '%s' holds '%s'; gap, try and claim are plain words"
-                                        % (term, name, word))
-        self.assertEqual(problems, [], "\n".join(problems))
-
-
-# o13 lane B retired these names (GLOSSARY.md rows agent, mutation test, red run, command). Claude
-# Code's own names stay: the hook events, `subagent_type`, the CLAUDE_CODE_* settings keys and the
-# `subagents/` transcript folder. Two old names stay readable until their end day, each in one file:
-# the `--subagent` flag of local_time.py and the `_subagentCapUntil` field of config_watch.py.
-RETIRED = (r"(?i)sub-?agent|harness[-_ ]scope|HARNESS_SCOPE|mutation harness|AUTHOR_HARNESS"
-           r"|ask-steps-run-alone|\b(?:ask|count|harmless|background)_steps?\b|\b(?:ask|harmless|chained) steps?\b"
-           r"|roles-one-role-per-worker|output-never-echo-worker-report|worker_transcript"
-           r"|WORKER_FOLDED_KEYS|(?i:red[- ]proof)")
-PLATFORM = (r"SubagentStop|SubagentStart|subagent_type|(?:\\u0043|C)LAUDE_CODE_\w+"
-            r"|[\"'/`]subagents(?=[\"'/`])|subagents/|SUBAGENT_MODEL")
-STAYS = {  # path: the one old name it may still hold, and why
-    "hooks/local_time.py": "--subagent",            # read until OLD_FLAG_ENDS
-    "hooks/config_watch.py": "_subagentCapUntil",   # read until OLD_NAME_ENDS
-    "hooks/test_local_time.py": "--subagent",       # pins the old flag until then
-    "hooks/test_config_watch.py": "_subagentCapUntil",
-    "testing/skip-locally-fail-in-ci.test.mjs": "Red proof",  # header shared with copies in other repos
-    "lint/test_find_copies.py": "Red proof",        # the fixture copy of that header
-    "mods/plain-diff/docs/mockup.html": "red proof",  # sample diff text
-    # the writer-label alternation of OTHER_WRITER_ROW_RE: the harness writes "Subagent report:". Only this fragment
-    # stays, so a bare "subagent" elsewhere in the file still fails.
-    "lint/report_guard.py": "agent|subagent|",
-}
-SKIP = ("skills/impeccable/", "lint/test_check_glossary.py", "GLOSSARY.md")  # GLOSSARY names them as "Not"
-
-
-class RepoRetiredNamesTests(unittest.TestCase):
-    def test_no_retired_name_in_tracked_files(self):
-        """Every tracked path and text file: no name o13 lane B retired, outside the platform's own."""
-        import re
-        root = os.path.dirname(HERE)
-        listed = subprocess.run(["git", "ls-files"], cwd=root, capture_output=True,
-                                encoding="utf-8")
-        self.assertEqual(listed.returncode, 0, listed.stderr)
-        retired, platform = re.compile(RETIRED), re.compile(PLATFORM)
-        found = []
-        for rel in listed.stdout.splitlines():
-            if rel.startswith(SKIP):
-                continue
-            if retired.search(rel):
-                found.append("%s: the path" % rel)
-            try:
-                with open(os.path.join(root, rel), encoding="utf-8") as f:
-                    text = f.read()
-            except (OSError, UnicodeDecodeError):
-                continue
-            text = platform.sub("", text)
-            if rel in STAYS:
-                text = text.replace(STAYS[rel], "")
-            for number, line in enumerate(text.splitlines(), 1):
-                hit = retired.search(line)
-                if hit:
-                    found.append("%s:%d: %s" % (rel, number, hit.group(0)))
-        self.assertEqual(found, [], "\n".join(found[:40]))
 
 
 if __name__ == "__main__":
