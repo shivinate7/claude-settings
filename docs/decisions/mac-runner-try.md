@@ -19,7 +19,7 @@ At head `e684473c18`, pull request 3950:
 - Unset or empty means hosted: the macOS leg runs on `macos-latest`.
 - The Windows leg never reads the variable. The `touched` job runs on Linux.
 - On: `gh variable set MAC_RUNS_ON --body <label>`. Off: `gh variable delete MAC_RUNS_ON`.
-- The value is the runner's own label, `claude-settings-mac` at this try. Note `mac-runs-on-bare-self-hosted` says why a bare label is wrong.
+- Set the value to the runner's own label, which is `claude-settings-mac`. Note `mac-runs-on-bare-self-hosted` says why a bare label is wrong.
 
 ## The expression is not the guard against fork code
 
@@ -45,7 +45,7 @@ This risk existed before this change. The runner was already registered on a pub
 
 ## Retire
 
-This try ends when the owner's larger plan lands: a clean guest account, or an ephemeral runner for each job. Debts `mac-runner-state-persists` and `fork-actions-setting-unchecked` name their own retirements.
+The try stops when the Mac does not seem faster. The owner's words: "if not then don't". It ends for good when the owner's larger plan lands: a clean account, or an ephemeral runner for each job. Debts `mac-runner-state-persists` and `fork-actions-setting-unchecked` name their own retirements.
 
 Kind: process
 Home: .github/workflows/lane-touched-tests.yml
