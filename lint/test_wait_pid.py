@@ -5,7 +5,8 @@
 Exit 0: the pid ended, or was not running at the start. Exit 124: still running at --timeout.
 Exit 2: a bad argument, or a pid that is not this session's (it returns at once, with no wait).
 Exit 3: unknown. `ps` failed or timed out, so the helper cannot tell whether the pid lives; a failed
-read is never taken as "ended".
+read is never taken as "ended". Exit 3 also when the environment read cannot run (macOS hides a system
+program's environment): the helper cannot tell whether the pid is this session's.
 
 A pid is this session's when it descends from the session root (`CLAUDE_GUARD_ROOT_PID` is the seam,
 as in hooks/test_guard.py), or when its ancestor walk reaches init and the pid itself, or any
@@ -61,12 +62,23 @@ Strand = namedtuple("Strand", "job stub")   # stub is None when the job is itsel
 # Runs bin/wait-pid as the macOS would: `ps` answers liveness, since sys.platform is not "linux".
 DARWIN_DRIVER = ("import runpy, sys\nsys.platform = 'darwin'\nsys.argv = sys.argv[1:]\n"
                  "runpy.run_path(sys.argv[0], run_name='__main__')\n")
+# Runs bin/wait-pid with the macOS environment read answering `entries` for every pid: the reader function is
+# replaced in the helper's own process (hooks/proc_env.py `_environ_entries_macos`), so the ownership read sees
+# what a process shows or hides.
+READER_DRIVER = ("import runpy, sys\nsys.platform = 'darwin'\nsys.path.insert(0, %r)\nimport proc_env\n"
+                 "proc_env._environ_entries_macos = lambda pid: %r\nsys.argv = sys.argv[1:]\n"
+                 "runpy.run_path(sys.argv[0], run_name='__main__')\n")
+# What the macOS reader gives for a process whose environment the OS hides: argv, then the trailing NUL, so [b""].
+HIDDEN = [b""]
+PRESENT_NO_TAG = [b"HOME=/Users/example", b"PATH=/usr/bin:/bin", b""]
 
 
-def run_helper(args, session=SESSION, root=None, heartbeat=None, timeout=20, darwin=False, path_first=None):
+def run_helper(args, session=SESSION, root=None, heartbeat=None, timeout=20, darwin=False, path_first=None,
+               entries=None):
     """Run bin/wait-pid itself (so its executable bit and shebang count). stdout and stderr are
     one stream. rc is None when it did not return in `timeout` seconds. `darwin` runs it through
-    DARWIN_DRIVER (the ps path); `path_first` is a folder put first on PATH."""
+    DARWIN_DRIVER (the ps path); `path_first` is a folder put first on PATH; `entries` runs it through
+    READER_DRIVER, with the macOS environment read answering those entries for every pid."""
     if not os.path.exists(WP):
         raise AssertionError("bin/wait-pid does not exist: %s" % WP)
     env = {k: v for k, v in os.environ.items()
@@ -78,7 +90,10 @@ def run_helper(args, session=SESSION, root=None, heartbeat=None, timeout=20, dar
         env["WAIT_PID_HEARTBEAT"] = str(heartbeat)
     if path_first:
         env["PATH"] = path_first + os.pathsep + env.get("PATH", os.defpath)
-    command = [sys.executable, "-c", DARWIN_DRIVER, WP] if darwin else [WP]
+    if entries is not None:
+        command = [sys.executable, "-c", READER_DRIVER % (os.path.abspath(HOOKS), entries), WP]
+    else:
+        command = [sys.executable, "-c", DARWIN_DRIVER, WP] if darwin else [WP]
     start = time.monotonic()
     try:
         done = subprocess.run(command + [str(a) for a in args], stdin=subprocess.DEVNULL,
@@ -149,6 +164,18 @@ def detach(argv, env):
 def tag_words(tag):
     """`env` words that give the job exactly this tag, or none at all when `tag` is None."""
     return ["env", "-u", TAG] if tag is None else ["env", "%s=%s" % (TAG, tag)]
+
+
+def os_shows_tag(pid):
+    """True when the OS shows this process's environment to this test and it holds the session tag. Read apart
+    from the reader under test: /proc/<pid>/environ on Linux, `ps -E` on macOS. Only the boolean leaves here."""
+    entry = "%s=%s" % (TAG, SESSION)
+    if sys.platform.startswith("linux"):
+        with open("/proc/%d/environ" % pid, "rb") as handle:
+            return entry.encode() in handle.read().split(b"\0")
+    out = subprocess.run(["ps", "-E", "-o", "command=", "-p", str(pid)], capture_output=True, text=True,
+                         timeout=10).stdout
+    return entry in out.split()
 
 
 def strand(stub_tag, job_tag, with_stub=True):
@@ -399,6 +426,53 @@ class T(unittest.TestCase):
         if top == os.getpid() or parents.get(top) != 1:
             self.skipTest("no ancestor of this test sits directly under init")
         self.assertRefusedAtOnce(top)
+
+    # An environment read that cannot run is unknown: exit 3, one line. Not the refusal, and not the liveness line.
+    def assertUnknownNamesPid(self, r, pid):
+        """Exit 3 with one line that says unknown, names the pid and names the environment read. It is neither
+        the liveness line (the state read failed) nor the refusal (exit 2, not this session)."""
+        self.assertEqual(r.rc, 3, "want exit 3, got %r: %s" % (r.rc, r.out))
+        lines = [line for line in r.out.splitlines() if line.strip()]
+        self.assertEqual(len(lines), 1, "want one line: " + r.out)
+        line = lines[0]
+        self.assertRegex(line, r"(?i)\bunknown\b", line)
+        self.assertIn(str(pid), line, line)
+        self.assertRegex(line, r"(?i)environ", line)
+        self.assertNotRegex(line, r"(?i)not this session|liveness|\bstate\b", line)
+
+    def test_unreadable_environment_is_unknown_not_not_this_session(self):
+        """The environment read cannot run (macOS hides it): exit 3 and one unknown line that names the pid.
+        Before the read says unknown, the helper answered "not this session" with exit 2."""
+        pid = self.stranded(None, SESSION)
+        r = run_helper([pid], entries=HIDDEN, timeout=15)
+        self.assertTrue(alive(pid), "the helper ended or signalled the pid, so this case proves nothing")
+        self.assertLess(r.elapsed, 5, "did not return at once")
+        self.assertUnknownNamesPid(r, pid)
+
+    def test_environment_without_the_tag_is_refused_at_once_not_unknown(self):
+        """Green control: an environment the read shows, without the session tag, is absent: exit 2 at once."""
+        other = subprocess.Popen(SLEEPER)
+        self.addCleanup(lambda: (stop(other.pid), other.wait()))
+        self.assertRefusedAtOnce(self.own_child(), root=other.pid, entries=PRESENT_NO_TAG)
+
+    def test_system_sleep_job_is_owned_where_the_os_shows_its_env_and_unknown_where_it_does_not(self):
+        """The one case with a system `sleep` as the job, which macOS may hide (an Apple-signed program). A probe
+        first, apart from the reader under test: the OS shows the environment (owned: the helper waits until the
+        job is killed) or hides it (unknown: exit 3, one line). The leg that ran is written to stderr."""
+        other = subprocess.Popen(SLEEPER)
+        self.addCleanup(lambda: (stop(other.pid), other.wait()))
+        env = {k: v for k, v in os.environ.items() if k != TAG}
+        env[TAG] = SESSION
+        job = subprocess.Popen(["sleep", LIFE], env=env)   # Popen returns once sleep has exec'd, so no wait is needed
+        self.addCleanup(lambda: (stop(job.pid), job.wait()))
+        if os_shows_tag(job.pid):
+            sys.stderr.write("\n  system sleep leg: owned, the OS shows its environment\n")
+            self.assertWaitsUntilKilled(job.pid, root=other.pid)
+        else:
+            sys.stderr.write("\n  system sleep leg: unknown, the OS hides its environment\n")
+            r = run_helper([job.pid], root=other.pid, timeout=15)
+            self.assertTrue(alive(job.pid), "the helper ended or signalled the pid, so this case proves nothing")
+            self.assertUnknownNamesPid(r, job.pid)
 
     # Pids that are not running.
     def test_pid_not_running_at_start_exits_0_and_says_so(self):
