@@ -1791,6 +1791,130 @@ class StaleCwdRecordTests(unittest.TestCase):
         self.assertFalse(delete, "trash_verdict deleted a trash folder whose second clone holds an uncommitted edit")
         self.assertEqual(reason, "dirty", "a trash folder with an edited clone was kept, but not as dirty: %s" % reason)
 
+    # Nested repos that hold work no HEAD read sees: a commit on a local branch that is not HEAD, a stash entry, and a
+    # detached HEAD's own commit. The first two sit on a pushed HEAD, so only a read of every local ref keeps them.
+    # The control has two pushed branches and may go. The last pins what an unreachable remote gives.
+
+    def test_trash_folder_is_kept_for_a_clone_with_an_unpushed_commit_on_a_side_branch_beside_such_a_record(self):
+        """Nested-clone case h1, shape 1. HEAD is back on main, a pushed commit, and a local branch `side` holds one commit
+        no remote holds. A HEAD-only read calls the clone clean and pushed, and the folder would go with that commit in it.
+        The folder is kept as dirty."""
+        self.assert_record_stands_nowhere()
+        wt = self.new_worktree("trash-side-branch")
+        trash = self.trash_from_build(wt)
+        clone = self.clone_from_remote(os.path.join(trash, "checkouts", "pkg"), "side-branch")
+        self.assertEqual(run_vcs(clone, "checkout", "-q", "-b", "side").returncode, 0,
+                         "scope: the side branch must be made")
+        write(os.path.join(clone, "side.txt"), "side\n")
+        self.assertEqual(run_vcs(clone, "add", "-A").returncode, 0, "scope: the side file must be staged")
+        self.assertEqual(run_vcs(clone, *IDENT, "commit", "-q", "-m", "side work").returncode, 0,
+                         "scope: the side commit must be made")
+        self.assertEqual(run_vcs(clone, "checkout", "-q", "main").returncode, 0, "scope: HEAD must move back to main")
+        self.assertEqual(sweep.git_reads.porcelain(clone), [], "scope: the clone must be clean on main")
+        self.assertTrue(run_vcs(clone, "branch", "-r", "--contains", "HEAD").stdout.strip(),
+                        "scope: HEAD's commit must sit on a remote-tracking ref")
+        self.assertFalse(run_vcs(clone, "branch", "-r", "--contains", "side").stdout.strip(),
+                         "scope: the side commit must sit on no remote-tracking ref")
+        with mock.patch.object(sweep, "processes_in", return_value=([], [])):
+            delete, reason = sweep.trash_verdict(trash)
+        self.assertFalse(delete, "trash_verdict deleted a trash folder whose clone holds an unpushed commit "
+                         "on a local branch that is not HEAD")
+        self.assertEqual(reason, "dirty", "a trash folder with an unpushed side-branch commit was kept, "
+                         "but not as dirty: %s" % reason)
+
+    def test_trash_folder_is_kept_for_a_clone_with_a_stash_entry_beside_such_a_record(self):
+        """Nested-clone case h2, shape 2. The clone is clean on a pushed HEAD, and its stash ref holds an entry with an
+        edit no remote holds. The stash is work the parent cannot see, and a HEAD-only read deletes it. The folder is
+        kept as dirty."""
+        self.assert_record_stands_nowhere()
+        wt = self.new_worktree("trash-stash-clone")
+        trash = self.trash_from_build(wt)
+        clone = self.clone_from_remote(os.path.join(trash, "checkouts", "pkg"), "stash")
+        edit = os.path.join(clone, "stashed.txt")
+        write(edit, "stashed\n")
+        self.assertEqual(run_vcs(clone, "add", "-A").returncode, 0, "scope: the edit must be staged")
+        tree = run_vcs(clone, "write-tree").stdout.strip()
+        head = run_vcs(clone, "rev-parse", "HEAD").stdout.strip()
+        stash = run_vcs(clone, *IDENT, "commit-tree", tree, "-p", head, "-m", "WIP on main").stdout.strip()
+        # The shape `git stash push` leaves: refs/stash names a commit on HEAD, with its reflog. Plumbing makes it, so no
+        # stash command runs.
+        self.assertEqual(run_vcs(clone, "update-ref", "--create-reflog", "-m", "WIP on main", "refs/stash", stash).returncode,
+                         0, "scope: the stash ref must be made")
+        os.remove(edit)
+        self.assertEqual(run_vcs(clone, "read-tree", "HEAD").returncode, 0, "scope: the index must return to HEAD")
+        self.assertEqual(sweep.git_reads.porcelain(clone), [], "scope: the clone must be clean with its edit in the stash")
+        self.assertTrue(run_vcs(clone, "rev-parse", "--verify", "-q", "refs/stash").stdout.strip(),
+                        "scope: the stash ref must name a commit")
+        self.assertFalse(run_vcs(clone, "branch", "-r", "--contains", stash).stdout.strip(),
+                         "scope: the stash commit must sit on no remote-tracking ref")
+        with mock.patch.object(sweep, "processes_in", return_value=([], [])):
+            delete, reason = sweep.trash_verdict(trash)
+        self.assertFalse(delete, "trash_verdict deleted a trash folder whose clone holds a stash entry no remote holds")
+        self.assertEqual(reason, "dirty", "a trash folder with a stash entry was kept, but not as dirty: %s" % reason)
+
+    def test_trash_folder_is_kept_for_a_clone_on_a_detached_head_with_its_own_commit_beside_such_a_record(self):
+        """Nested-clone case h3, shape 3. HEAD is detached on one new commit no remote holds, and the branch it left,
+        main, sits on a pushed commit. The HEAD read already keeps this. It is pinned so a rule that narrows the keep
+        cannot drop the HEAD read, the only read that sees this commit."""
+        self.assert_record_stands_nowhere()
+        wt = self.new_worktree("trash-detached-clone")
+        trash = self.trash_from_build(wt)
+        clone = self.clone_from_remote(os.path.join(trash, "checkouts", "pkg"), "detached")
+        self.assertEqual(run_vcs(clone, "checkout", "-q", "--detach").returncode, 0, "scope: HEAD must detach")
+        write(os.path.join(clone, "detached.txt"), "detached\n")
+        self.assertEqual(run_vcs(clone, "add", "-A").returncode, 0, "scope: the detached file must be staged")
+        self.assertEqual(run_vcs(clone, *IDENT, "commit", "-q", "-m", "detached work").returncode, 0,
+                         "scope: the detached commit must be made")
+        self.assertNotEqual(run_vcs(clone, "symbolic-ref", "-q", "HEAD").returncode, 0, "scope: HEAD must be detached")
+        self.assertEqual(sweep.git_reads.porcelain(clone), [], "scope: the clone must be clean")
+        self.assertTrue(run_vcs(clone, "branch", "-r", "--contains", "main").stdout.strip(),
+                        "scope: the branch HEAD left must sit on a remote-tracking ref")
+        self.assertFalse(run_vcs(clone, "branch", "-r", "--contains", "HEAD").stdout.strip(),
+                         "scope: the detached commit must sit on no remote-tracking ref")
+        with mock.patch.object(sweep, "processes_in", return_value=([], [])):
+            delete, reason = sweep.trash_verdict(trash)
+        self.assertFalse(delete, "trash_verdict deleted a trash folder whose detached HEAD holds a commit no remote holds")
+        self.assertEqual(reason, "dirty", "a trash folder with a detached clone commit was kept, but not as dirty: %s"
+                         % reason)
+
+    def test_trash_folder_is_deleted_for_a_clone_with_two_local_branches_both_pushed_beside_such_a_record(self):
+        """Nested-clone control. The clone holds two local branches, main and `second`, and each one's commit is on its
+        remote. No commit is unpushed and no stash exists, so the folder may go. A clone is not kept for having two
+        branches."""
+        self.assert_record_stands_nowhere()
+        wt = self.new_worktree("trash-two-pushed-branches")
+        trash = self.trash_from_build(wt)
+        clone = self.clone_from_remote(os.path.join(trash, "checkouts", "pkg"), "two-pushed")
+        self.assertEqual(run_vcs(clone, "branch", "second").returncode, 0, "scope: the second branch must be made")
+        self.assertEqual(run_vcs(clone, "push", "-q", "origin", "second").returncode, 0,
+                         "scope: the second branch must be pushed")
+        self.assertIn("refs/heads/second", run_vcs(clone, "ls-remote", "--heads", "origin").stdout,
+                      "scope: the remote must list the second branch")
+        self.assertEqual(sweep.git_reads.porcelain(clone), [], "scope: the clone must be clean")
+        with mock.patch.object(sweep, "processes_in", return_value=([], [])):
+            delete, reason = sweep.trash_verdict(trash)
+        self.assertTrue(delete, "trash_verdict kept a trash folder whose clone holds two local branches, both pushed: %s"
+                        % reason)
+        self.assertEqual(reason, "leftover trash")
+
+    def test_trash_folder_is_kept_unreadable_when_a_clone_remote_is_gone_beside_such_a_record(self):
+        """Nested-clone case h4. The clone is clean on a pushed HEAD, then its remote's folder is deleted. The live
+        `ls-remote` fails, so no read shows that the clone's commits are on a remote. The folder is kept as
+        unreadable-subject, never deleted. This pins the unreachable-remote answer."""
+        self.assert_record_stands_nowhere()
+        wt = self.new_worktree("trash-gone-remote")
+        trash = self.trash_from_build(wt)
+        clone = self.clone_from_remote(os.path.join(trash, "checkouts", "pkg"), "gone-remote")
+        shutil.rmtree(os.path.join(self.base, "remote-gone-remote.git"))
+        self.assertNotEqual(run_vcs(clone, "ls-remote", "--heads", "origin").returncode, 0,
+                            "scope: ls-remote must fail once the remote's folder is gone")
+        self.assertEqual(sweep.git_reads.porcelain(clone), [], "scope: the clone must be clean")
+        with mock.patch.object(sweep, "processes_in", return_value=([], [])):
+            delete, reason = sweep.trash_verdict(trash)
+        self.assertFalse(delete, "trash_verdict deleted a trash folder whose clone's remote is gone")
+        self.assertEqual(reason, "unreadable-subject", "a trash folder whose clone's remote is gone was kept, "
+                         "but not as unreadable-subject: %s" % reason)
+
     def test_a_trash_folder_is_judged_on_its_own_lines_beside_a_sibling_from_the_same_name(self):
         """Case 2f for the trash sweep. Two trash folders come from one original name, `build`, as two reaps of one build
         folder make. The first holds a moved tracked file; the second holds only untracked output. The pathspec for the
