@@ -9,7 +9,7 @@ slug: tests-set-config
 
 A test file must not pop, delete or `os.environ.clear()` `CLAUDE_CONFIG_DIR` at import and leave it unset. A case that reads the config folder either sets the variable, or uses `isolated_config(run)`, which points it at a fresh folder. An import-time removal is cleared only by a set at import (at module level, or in a function the module calls at import) or by a set in `setUpModule()`. A set in one case does not clear it.
 
-Mistake: `merge/test_merge.py:65` pops `CLAUDE_CONFIG_DIR` at import, in a loop over five names, and never sets it. A builder run of `python3 lint/check_tests_set_config.py` on 2026-11-24 found it: exit 1, one finding.
+Mistake: `merge/test_merge.py` popped `CLAUDE_CONFIG_DIR` at import, in a loop over five names, and never set it. A builder run of `python3 lint/check_tests_set_config.py` on 2026-11-24 found it: exit 1, one finding.
 
 Harm: a test passes or fails by what the owner's live config holds. A case that writes config may write to the owner's real `~/.claude`.
 
@@ -35,7 +35,7 @@ Limits:
 - `os.putenv` counts as a set, but it leaves `os.environ` unchanged. A `pop` then a `putenv` is clean, yet `os.environ.get` still returns None.
 - A set made by a function imported from another module. The file stays flagged, though the set runs at import.
 - A bare `isolated_config(...)` call that nothing enters does not count. The file stays flagged.
-- CI runs the check and both suites in job `checks`, after the stand-in signature suite, on a code change. `merge/test_merge.py` now sets the variable at import (line 68), so the repo run is clean. The case `test_repo_names_the_incident_file` in `lint/test_tests_set_config.py` still expects that file as a finding and fails; re-point it.
+- CI runs the check and both suites in job `checks`, after the stand-in signature suite, on a code change: steps `Test temp helper fixture suite`, `Tests set config fixture suite`, `Tests set config check`. `merge/test_merge.py` sets the variable at import (line 68), so the repo run is clean. In `lint/test_tests_set_config.py`, `test_incident_shape_is_named_at_its_path` names the incident's shape on a fixture path, and `test_repo_has_no_problems_now` asserts the clean repo run.
 
 Kind: process
 Home: lint/check_tests_set_config.py
