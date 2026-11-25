@@ -253,12 +253,13 @@ role_opus_refuse("role-model: a role with no row on opus is denied under agent-m
                "scout", "opus", "Look around.")
 role_opus_refuse("role-model: reviewer on opus with Round 3 of 3 is denied under agent-model-cap (item 127)",
                "reviewer", "opus", "Round 3 of 3. Re-check the diff.")
-# Standing grants stay allowed on Opus (rule 9d): Plan, the design reviewer, the refuter, and a builder's third round.
+# Standing grants stay allowed on Opus (rule 9d): Plan and the design reviewer. A builder's third round has no grant
+# (ruling own-round3-builder-sonnet, owner 00:04 CST 2026-11-16), so its Opus spawn is refused like any builder's.
 role_model_allow("role-model: Plan on opus is allowed (standing grant)", "Plan", "opus", "Plan the change.")
 role_model_allow("role-model: design-reviewer on opus is allowed (standing grant)", "design-reviewer", "opus",
                  "Review the mockup.")
-role_model_allow("role-model: builder on opus with Round 3 of 3 is allowed (standing grant)", "builder", "opus",
-                 "Round 3 of 3. Finish the fix.")
+role_opus_refuse("role-model: builder on opus with Round 3 of 3 is denied under agent-model-cap (no builder grant)",
+                 "builder", "opus", "Round 3 of 3. Finish the fix.")
 # The refuter's grant (page item 279, pick d): an Agent or Task spawn on Opus is allowed. Failure class: a false deny,
 # the spawn refused above its row, and a false allow, a reviewer or a near-miss name given the grant (the controls below).
 for _tool, _model in (("Agent", "opus"), ("Task", "claude-opus-5-5")):
@@ -392,10 +393,12 @@ workflow_allow("role-model: Workflow builder on sonnet with a variable brief is 
 # H3: a refusal for a brief the scan cannot read names the remedy that makes it readable, a literal string. One
 # constant holds the words, so each refusal of a variable brief carries the same remedy.
 BRIEF_LITERAL_REMEDY = "write the brief as a literal string so the marker is readable"
-workflow_refuse("role-model: Workflow builder on opus with a variable brief is denied and names the literal-brief remedy",
+# A builder on Opus gets no grant from a readable brief, so its refusal names no literal-brief remedy (ruling
+# own-round3-builder-sonnet, owner 00:04 CST 2026-11-16): the remedy would tell the builder that a marker lifts it.
+workflow_refuse("role-model: Workflow builder on opus with a variable brief is denied and names no literal-brief remedy",
                 "const brief = 'Fix the failing case.';\n"
                 + _step_flow("brief", "agentType: 'builder', model: 'opus'"),
-                carries=BRIEF_LITERAL_REMEDY)
+                lacks=BRIEF_LITERAL_REMEDY)
 workflow_refuse("role-model: Workflow Explore on sonnet with a variable brief is denied under agent-role-model and names the literal-brief remedy",
                 "const brief = 'Audit: check the glossary for meaning drift.';\n"
                 + _step_flow("brief", "agentType: 'Explore', model: 'sonnet'"),
@@ -598,6 +601,27 @@ def role_opus_role_lift_check():
     return True, "the test-author grant lifted a test-author on opus, and not a builder on opus"
 
 
+def role_opus_builder_third_try_lift_check():
+    """A builder's third try on Opus has no standing grant (ruling own-round3-builder-sonnet, owner 00:04 CST
+    2026-11-16): it is refused with no override, and `opus builders 2h` lifts it like any other builder spawn."""
+    config, session = ov_config("role-opus-third"), "role-opus-third"
+    third = {"prompt": "Round 3 of 3. Finish the fix.", "model": "opus", "subagent_type": "builder"}
+
+    def call(seconds):
+        return ov_call("Agent", dict(third), NOGIT, config, session, seconds)
+
+    ok, why = ov_story([("builder third try on opus, no override", lambda: call(0), "deny", "agent-model-cap")])
+    if not ok:
+        return False, why
+    note = ov_type(config, session, "opus builders 2h")
+    ok, why = ov_story([
+        ("builder third try on opus, under opus builders 2h", lambda: call(60), "allow", "agent-model-cap"),
+    ], note)
+    if not ok:
+        return False, why
+    return True, "a builder's third try on opus is refused with no override, and opus builders 2h lifts it"
+
+
 ROLE_OVERRIDE_CHECKS = (
     ("role-model: an owner override lifts a test-author on sonnet once, then refuses again",
      role_override_lift_check),
@@ -605,6 +629,8 @@ ROLE_OVERRIDE_CHECKS = (
      role_override_no_model_check),
     ("role-model: opus 2h lifts an Explore on opus with no Audit: marker (item 137)", role_opus_explore_lift_check),
     ("role-model: opus test-authors 2h lifts a test-author on opus, and no builder", role_opus_role_lift_check),
+    ("role-model: opus builders 2h lifts a builder's third try on opus, which has no grant of its own",
+     role_opus_builder_third_try_lift_check),
     ("role-model: the typed override lifts a Workflow builder on opus with a variable brief, once",
      workflow_opus_override_check),
 )
