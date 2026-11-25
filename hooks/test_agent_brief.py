@@ -61,6 +61,7 @@ import guard_shared_tree  # noqa: E402  the one home of the discard flags (RESET
 from tool_lists_test import tokens, unread_list  # noqa: E402  the one reader of tool lists (hooks/tool_lists_test.py)
 sys.path.append(os.path.join(os.path.dirname(HERE), "lint"))  # appended: a module already in sys.modules wins
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
+import layout  # noqa: E402  the one home of where records live (lint/layout.py)
 
 CWD = "/tmp/agent-brief-test"
 MISSING = object()  # payload() leaves agent_type out of the JSON when this is passed
@@ -1378,6 +1379,165 @@ def note_rules_unread_check():
 
 add("note rules unread: a check_record_slugs that will not import leaves the brief out with no note line",
     "custom", fn=note_rules_unread_check)
+
+
+# BRIEF ENTRIES (decision agents-get-standing-rules): each standing line carries a record slug beside its text. The helper
+# brief_entries() in hooks/agent_brief.py yields one (slug, text) pair per COMMON entry, per SCOPE value and for GENERAL.
+# The text is raw, so the "- {scope}" entry keeps its placeholder. Every case reads the pairs through brief_pairs(), which
+# returns a note when the helper is missing, so a missing helper is a FAIL line that names it, never a crash.
+BRIEF_HELPER = "brief_entries"
+BRIEF_HEADING = "Standing rules for this agent:"
+BRIEF_HEADING_SLUG = "agents-get-standing-rules"  # the one slug the heading may carry, or none
+BRIEF_TYPES = TYPES + ["Plan", "claude-code-guide", "some-new-agent", None]  # a missing type reads as None
+BRIEF_READERS = {"reviewer", "Explore", "Plan", "claude-code-guide", "design-reviewer", REFUTER}
+BRIEF_STAGED_LINE = ("- Before each commit, run `git diff --cached --stat`; if it names a file you did not change this round, "
+                     "commit nothing and report it (decision `lanes-start-in-tool-worktrees`: lanes start only in the tool's own "
+                     "worktrees).")
+
+
+def brief_pairs():
+    """(pairs, note): the (slug, text) pairs of brief_entries(), or (None, note) when the hook does not load, has no such
+    helper, or the helper raises or yields anything but (str, str) pairs."""
+    mod, problem = load_hook_fresh()
+    if problem:
+        return None, problem
+    helper = getattr(mod, BRIEF_HELPER, None)
+    if not callable(helper):
+        return None, "hooks/agent_brief.py has no %s() helper: its standing lines carry no record slug" % BRIEF_HELPER
+    try:
+        pairs = list(helper())
+    except Exception as exc:
+        return None, "%s() raised %s" % (BRIEF_HELPER, type(exc).__name__)
+    bad = [p for p in pairs if not (isinstance(p, tuple) and len(p) == 2 and all(isinstance(x, str) for x in p))]
+    if bad:
+        return None, ("%s() must yield (slug, text) str pairs, got %r" % (BRIEF_HELPER, bad[0]))[:120]
+    return pairs, None
+
+
+def safe_build(mod, agent_type):
+    """(text, note): build() for `agent_type`, or a note when build() raises."""
+    try:
+        return mod.build(agent_type), None
+    except Exception as exc:
+        return None, "build(%r) raised %s" % (agent_type, type(exc).__name__)
+
+
+def built_brief_lines(mod):
+    """(lines, note): the set of lines build() gives each type in BRIEF_TYPES, with no form and no notes."""
+    lines = set()
+    for agent_type in BRIEF_TYPES:
+        text, problem = safe_build(mod, agent_type)
+        if problem:
+            return None, problem
+        lines.update(text.split("\n"))
+    return lines, None
+
+
+def entries_cover_brief():
+    """Scope before subject: every line the hook builds is one entry's text, or that text behind the list mark, so the
+    helper's list is the brief's list and no shadow copy of it."""
+    pairs, problem = brief_pairs()
+    if problem:
+        return problem
+    mod, problem = load_hook_fresh()
+    if problem:
+        return problem
+    built, problem = built_brief_lines(mod)
+    if problem:
+        return problem
+    marked = {text for _, text in pairs} | {"- " + text for _, text in pairs}
+    stray = sorted(line for line in built if line not in marked)
+    if stray:
+        return "a built line no entry yields: %r" % stray[0][:90]
+    return None
+
+
+def entries_all_built():
+    """Each entry reaches some brief: no dead entry. The placeholder entry stands for the scope lines."""
+    pairs, problem = brief_pairs()
+    if problem:
+        return problem
+    mod, problem = load_hook_fresh()
+    if problem:
+        return problem
+    built, problem = built_brief_lines(mod)
+    if problem:
+        return problem
+    for _, text in pairs:
+        if "{scope}" in text:
+            if not any(line.startswith("- Scope:") for line in built):
+                return "the placeholder entry %r builds no scope line" % text[:60]
+            continue
+        if text not in built and "- " + text not in built:
+            return "an entry reaches no brief: %r" % text[:90]
+    return None
+
+
+def entries_carry_slugs():
+    """Every entry but the heading names a record slug; the heading names none or BRIEF_HEADING_SLUG."""
+    pairs, problem = brief_pairs()
+    if problem:
+        return problem
+    bare = [text for slug, text in pairs if not slug and text != BRIEF_HEADING]
+    if bare:
+        return "%d entr%s with no record slug, first %r" % (len(bare), "y" if len(bare) == 1 else "ies", bare[0][:70])
+    for slug, text in pairs:
+        if text == BRIEF_HEADING and slug not in ("", BRIEF_HEADING_SLUG):
+            return "the heading names %r, want %r or none" % (slug, BRIEF_HEADING_SLUG)
+    return None
+
+
+def entries_resolve():
+    """Each slug names a record file in a decisions folder: layout.candidates gives the folders records may sit in, the
+    same reader the aligned probe takes its records from."""
+    pairs, problem = brief_pairs()
+    if problem:
+        return problem
+    folders = [os.path.join(REPO_ROOT, *where.split("/")) for where in layout.candidates(REPO_ROOT, "decisions")]
+    missing = sorted({slug for slug, _ in pairs
+                      if slug and not any(os.path.isfile(os.path.join(folder, slug + ".md")) for folder in folders)})
+    if missing:
+        return "no record file for slug %r in the decisions folder" % missing[0][:60]
+    return None
+
+
+def expected_brief(agent_type):
+    """The text build() must return for `agent_type`, from the pins above: a reader gets its reader lines; a writer gets its
+    writer lines, with the staged-diff and commit-evidence lines. The scope line sits after the gh line in both."""
+    scope = SCOPE_LINE.get(agent_type, GENERAL_LINE) if isinstance(agent_type, str) else GENERAL_LINE
+    if agent_type in BRIEF_READERS:
+        r = READER_RULES
+        lines = [r[0], r[1], r[2], r[3], scope, r[4]]
+    else:
+        w = WRITER_RULES
+        lines = [w[0], w[1], w[2], w[3], w[4], scope, w[5], w[6], w[7], BRIEF_STAGED_LINE, COMMIT_EVIDENCE_LINE, w[8]]
+    return "\n".join(lines)
+
+
+def built_text_unchanged():
+    """The built brief of every type is the pinned text, in COMMON order. The first type and line that differ are named."""
+    mod, problem = load_hook_fresh()
+    if problem:
+        return problem
+    for agent_type in BRIEF_TYPES:
+        got, problem = safe_build(mod, agent_type)
+        if problem:
+            return problem
+        want = expected_brief(agent_type)
+        if got == want:
+            continue
+        got_lines, want_lines = got.split("\n"), want.split("\n")
+        at = next((i for i, (a, b) in enumerate(zip(got_lines, want_lines)) if a != b), min(len(got_lines), len(want_lines)))
+        shown = got_lines[at] if at < len(got_lines) else "<no line>"
+        return "the brief for %r differs at line %d: got %r" % (agent_type, at + 1, shown[:70])
+    return None
+
+
+add("brief entries: every built line is an entry's text (scope before subject)", "custom", fn=entries_cover_brief)
+add("brief entries: every entry reaches some brief", "custom", fn=entries_all_built)
+add("brief entries: every entry but the heading names a record slug", "custom", fn=entries_carry_slugs)
+add("brief entries: each slug names a record file in the decisions folder", "custom", fn=entries_resolve)
+add("built text: every type's brief is the pinned text, in COMMON order", "custom", fn=built_text_unchanged)
 
 
 def main():
