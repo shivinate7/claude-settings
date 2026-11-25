@@ -105,6 +105,7 @@ Cost: one python start per merge report, on demand (unmeasured: no test counts s
 - The cloud path is not built. A cloud session's transcript is not read.
 - No CI step (`.github/workflows/checks.yml`) runs `lint/test_pace_numbers.py` yet.
 - No case proves that no file is written. That case is owed.
+- A `completed` notice that says the agent "is waiting on its own background work" ends its span (`ENDING_STATUSES`). The gap to that agent's next SendMessage counts as no agent running, unless a later end notice, with no SendMessage between, moves the close to it. Whether the agent worked in that gap is unmeasured, so "minutes with no agent running" can read high and "most at once" low. Measured Nov 25 2026: 41 such notices in one session transcript.
 
 Kind: process
 Home: lint/pace_numbers.py
