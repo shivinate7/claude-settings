@@ -1089,6 +1089,61 @@ def case_stale_records_are_swept():
         c.cleanup()
 
 
+def precompact_module():
+    """hooks/precompact_handoff.py imported in this process, or None when the import fails."""
+    try:
+        spec = importlib.util.spec_from_file_location("precompact_under_test", PRECOMPACT)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+    except Exception:
+        return None
+
+
+def sweep_flag_step(ext):
+    """The reorient sweep drops a stale <sid><ext> record and keeps one under STALE_AGE old.
+    STALE_AGE is read from the module under test. The stale files are one day past it and
+    the control one day inside it, so no verdict sits on the boundary. The stale .dir record
+    goes first: its removal shows the sweep ran, so a surviving flag is the sweep's verdict."""
+    mod = precompact_module()
+    stale_age = getattr(mod, "STALE_AGE", None) if mod is not None else None
+    if not isinstance(stale_age, int):
+        check("sweep %s: STALE_AGE is an int in precompact_handoff" % ext, False,
+              "STALE_AGE is %r" % (stale_age,))
+        return
+    c = Case("sweep_%s" % ext.lstrip("."))
+    try:
+        c.link("live-1", c.proj, age=0)
+        c.session_end("live-1", "logout")   # records live-1.dir, any reason
+        put(c.state("dead-1.dir"), c.proj)
+        put(c.state("dead-1%s" % ext), "1")
+        put(c.state("live-1%s" % ext), "1")
+        set_age(c.state("dead-1.dir"), stale_age + 86400)
+        set_age(c.state("dead-1%s" % ext), stale_age + 86400)
+        set_age(c.state("live-1%s" % ext), stale_age - 86400)
+        res = c.reorient("new-1", "clear")
+        check("sweep %s: the reorient run exits 0" % ext, res.returncode == 0,
+              "returncode %r, stderr %r" % (res.returncode, tail(res.stderr)))
+        check("sweep %s: stale dead-1.dir is removed (the sweep ran)" % ext,
+              not os.path.exists(c.state("dead-1.dir")), "still on disk")
+        check("sweep %s: stale dead-1%s is removed" % (ext, ext),
+              not os.path.exists(c.state("dead-1%s" % ext)), "still on disk")
+        check("sweep %s: live-1%s, under STALE_AGE old, is kept" % (ext, ext),
+              os.path.exists(c.state("live-1%s" % ext)), "removed")
+    finally:
+        c.cleanup()
+
+
+def case_stale_rewrite_flag_is_swept():
+    """A stale .rewrite flag goes in a reorient run, and a .rewrite flag under STALE_AGE old stays."""
+    sweep_flag_step(".rewrite")
+
+
+def case_stale_audit_flag_is_swept():
+    """A stale .audit flag goes in a reorient run, and an .audit flag under STALE_AGE old stays."""
+    sweep_flag_step(".audit")
+
+
 def case_failed_pointer_delete_is_logged():
     """A pointer that cannot be deleted is logged to stderr, naming the pointer. The reorient
     still exits 0. Silence hides the stale pointer."""
@@ -3098,6 +3153,8 @@ def main() -> int:
     case_clear_pointer_without_handoff_names_none()
     case_unusable_pointers_are_removed()
     case_stale_records_are_swept()
+    case_stale_rewrite_flag_is_swept()
+    case_stale_audit_flag_is_swept()
     case_failed_pointer_delete_is_logged()
 
     print("Part 2: PostCompact flag, Read clears it, Stop blocks (hooks/reread_check.py)")
