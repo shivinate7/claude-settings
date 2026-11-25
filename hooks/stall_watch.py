@@ -1211,15 +1211,20 @@ def checkin_minutes_ahead(when, text):
         return None
 
 
-def checked_in(agent, crossed, sent):
-    """True when a check-in made at or after crossed (epoch seconds) names the agent id as a whole token and is set
-    at most AGENT_CHECKIN_AHEAD minutes ahead (its delay_minutes, or its `at` time against the call's time). sent is
+def checked_in(agent, crossed, sent, now):
+    """True when a check-in names the agent id as a whole token and fires at or after crossed (epoch seconds), at
+    most AGENT_CHECKIN_AHEAD minutes after now. Its fire time is its call time plus checkin_minutes_ahead (its
+    delay_minutes, or its `at` time), so a check-in made before the crossing that fires after it counts. sent is
     the (time, input text) pairs of scan_jobs's keep_waiting read. A check-in with no readable time never counts:
     it may be older than the crossing."""
     pat = re.compile(r"(?<![\w-])%s(?![\w-])" % re.escape(agent))
-    sent = [(when, text) for when, text in sent
-            if (checkin_minutes_ahead(when, text) or 0) <= AGENT_CHECKIN_AHEAD]  # one set too far ahead does not count
-    return any(when is not None and when >= crossed and pat.search(text) for when, text in sent)
+    for when, text in sent:
+        if when is None or not pat.search(text):
+            continue
+        fire = when + (checkin_minutes_ahead(when, text) or 0) * 60  # a check-in with no reading fires at its call time
+        if fire >= crossed and fire - now <= AGENT_CHECKIN_AHEAD * 60:  # one set too far ahead does not count
+            return True
+    return False
 
 
 def agent_transcripts(session, agent, output):
@@ -1302,7 +1307,7 @@ def stop():
             real = path
             if path and base:
                 real = os.path.join(base, re.split(r"[\\/]", path)[-1])
-            if agent and began is not None and now - began >= long_age and not checked_in(job, began + long_age, sent):
+            if agent and began is not None and now - began >= long_age and not checked_in(job, began + long_age, sent, now):
                 long_rows.append('Agent "%s" (%s) has run %d min and has not finished%s.' % (
                     desc or "no description", job, (now - began) // 60,
                     "; it " + AGENT_WAITING_TEXT if waiting and AGENT_WAITING_TEXT else ""))
