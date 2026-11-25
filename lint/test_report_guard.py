@@ -1696,17 +1696,18 @@ class DoneNamesModelsTests(unittest.TestCase):
         self.assertGreaterEqual(counted.low, last,
                                 "records_since_report read record %s, before the last report at %d" % (counted.low, last))
 
-    # A fix check or fix verifier reviewer is named by its phrase, not by a role word before its model. The model check
-    # reads no name for it. The window check needs one named model that a window spawn ran, so Done naming the window's
-    # haiku passes; Done naming only an earlier run's haiku is refused.
+    # A reviewer named by a fix verifier marker, or by the word fix verifier, is named by its phrase, not by a role word
+    # before its model. The model check reads no name for it. The window check needs one named model that a window spawn
+    # ran, so Done naming the window's haiku passes; Done naming only an earlier run's haiku is refused.
     REVIEWER_HAIKU_ROUND1 = {"subagent_type": "reviewer", "model": "haiku", "prompt": "Round 1 of 3"}
-    REVIEWER_FIX_CHECK = {"subagent_type": "reviewer", "model": "sonnet", "prompt": "fix check"}
+    # The marker's bare phrase is the input here. A string in a test file is a fixture, which the glossary lint does not read.
+    REVIEWER_FIX_VERIFIER_MARKER = {"subagent_type": "reviewer", "model": "sonnet", "prompt": "fix check"}
     REVIEWER_FIX_VERIFIER = {"subagent_type": "reviewer", "model": "sonnet", "prompt": "fix verifier"}
 
-    def test_dm_green_fix_check_sonnet_beside_window_haiku_passes(self):
-        # Control: the window's reviewers ran haiku (round 1) and sonnet (a fix check). Done names both. The window's
-        # haiku matches a named model, so the reply is allowed. A fix that reads "fix check" must keep it allowed.
-        records = self.turn_records(window=[self.REVIEWER_HAIKU_ROUND1, self.REVIEWER_FIX_CHECK])
+    def test_dm_green_fix_verifier_marker_sonnet_beside_window_haiku_passes(self):
+        # Control: the window's reviewers ran haiku and sonnet, the sonnet one named by the marker phrase. Done names both.
+        # The window's haiku matches a named model, so the reply is allowed. The marker form in Done keeps it allowed.
+        records = self.turn_records(window=[self.REVIEWER_HAIKU_ROUND1, self.REVIEWER_FIX_VERIFIER_MARKER])
         self.assertEqual(self.window_models(records), {"reviewer": ["haiku", "sonnet"]})
         out = self.stop(records, "> **Done** BUILT the guard, PR #5 (reviewer haiku round 1, fix check sonnet)\n"
                                  "> **Next** Unstarted: none")
@@ -1720,12 +1721,12 @@ class DoneNamesModelsTests(unittest.TestCase):
                                  "> **Next** Unstarted: none")
         self.assertIsNone(out, out and out["reason"])
 
-    def test_dm_false_alarm_fix_check_names_window_sonnet_passes(self):
-        # A reviewer ran haiku before the last report. The window's reviewer ran sonnet, as a fix check, beside a builder.
-        # Done names the earlier haiku run and the window's sonnet fix check. The fix check names no model, so the window's
-        # sonnet goes unnamed and the haiku name is refused against it. The reply is allowed.
+    def test_dm_false_alarm_fix_verifier_marker_names_window_sonnet_passes(self):
+        # A reviewer ran haiku before the last report. The window's reviewer ran sonnet, named by the marker phrase,
+        # beside a builder. Done names the earlier haiku run and the window's sonnet marker reviewer. The marker phrase
+        # names no model, so the window's sonnet goes unnamed and the haiku name is refused against it. The reply is allowed.
         records = self.turn_records(earlier=[self.REVIEWER_HAIKU_ROUND1],
-                                    window=[self.BUILDER_SONNET, self.REVIEWER_FIX_CHECK],
+                                    window=[self.BUILDER_SONNET, self.REVIEWER_FIX_VERIFIER_MARKER],
                                     report=self.PRIOR_BUILDER_REPORT)
         self.assertEqual(self.window_models(records), {"builder": ["sonnet"], "reviewer": ["sonnet"]})
         out = self.stop(records, "> **Done** BUILT the guard, PR #5 (builder sonnet, reviewer haiku, fix check sonnet)\n"
@@ -1742,18 +1743,18 @@ class DoneNamesModelsTests(unittest.TestCase):
                                  "> **Next** Unstarted: none")
         self.assertIsNone(out, out and out["reason"])
 
-    def test_dm_red_fix_check_haiku_against_window_sonnet_blocks(self):
-        # Control: the window's only reviewer ran sonnet, as a fix check. Done names "fix check haiku", a model no
-        # reviewer ran. The refusal names the reviewer, whatever the check reads for the phrase.
-        records = self.turn_records(window=[self.REVIEWER_FIX_CHECK])
+    def test_dm_red_fix_verifier_marker_haiku_against_window_sonnet_blocks(self):
+        # Control: the window's only reviewer ran sonnet, named by the marker phrase. Done names "fix check haiku", a model
+        # no reviewer ran. The refusal names the reviewer, whatever phrase the marker carries.
+        records = self.turn_records(window=[self.REVIEWER_FIX_VERIFIER_MARKER])
         self.assertEqual(self.window_models(records), {"reviewer": ["sonnet"]})
         out = self.stop(records, "> **Done** BUILT the guard, PR #5 (fix check haiku)\n> **Next** Unstarted: none")
         self.assertIsNotNone(out, "Done named a fix check on haiku against a window reviewer that ran sonnet, and passed")
         self.assertIn("reviewer", out["reason"])
 
-    def test_dm_green_fix_check_sonnet_with_no_reviewer_spawn_passes(self):
+    def test_dm_green_fix_verifier_marker_sonnet_with_no_reviewer_spawn_passes(self):
         # Control: no reviewer spawn anywhere in the transcript. The window's builder sonnet is the only spawn, so the
-        # check runs. Done names a fix check on sonnet, and no reviewer ran to name, so the reply is allowed.
+        # check runs. Done names the marker form on sonnet, and no reviewer ran to name, so the reply is allowed.
         records = self.turn_records(window=[self.BUILDER_SONNET])
         self.assertEqual(self.window_models(records), {"builder": ["sonnet"]})
         out = self.stop(records, "> **Done** BUILT the guard, PR #5 (builder sonnet, fix check sonnet)\n"
