@@ -7,6 +7,10 @@ README.md and lint/ste_lint.py state a floor of Python 3.9 for the guards and th
 finds newer calls, modules and syntax. An ast pass finds a union type `int | None`, which vermin does not flag.
 Both read the source with the host's `ast`, so the host Python must be 3.9 or newer.
 
+vermin keeps one table of names per file, so a name bound to an int in one function makes a same-spelled name in
+another function read as an int. The check drops a vermin line `'int.X' member` unless a read of `.X` has an int
+receiver: an int literal, `int`, `int(...)`, or a name bound to an int in its own scope or one around it.
+
 A product file is a .py file under hooks/ or lint/ that is not a test: a path `is_test_rel` (hooks/guard.py, the
 one home of what a test path is) calls a test, or a name `_test*.py`. A `# novermin` line comment excuses its
 line, in both passes; the same text in a string does not. Use it on an import that a try/except ImportError
@@ -41,7 +45,9 @@ never clean.
 Limits: vermin's tables miss `subprocess.run(process_group=)` and `datetime.fromisoformat` with a "Z" suffix, both
 3.11 behaviour, so neither is caught. A symlinked folder under hooks/ or lint/ is not followed. An assignment value
 or isinstance argument that joins non-builtin names (`Alias = Foo | Bar`) is not caught, since it reads the same
-as a bit-flag OR.
+as a bit-flag OR. The int-member rule keeps a line when any int receiver reads the member, and finds an int by an
+int literal or `int(...)` assignment or an `int` annotation only, so a name that gets its int another way
+(`x = y`, a loop target) is dropped.
 """
 import ast
 import io
@@ -72,6 +78,7 @@ BUILTIN_TYPES = frozenset(("int", "str", "float", "bool", "bytes", "list", "dict
                            "type", "object"))
 MARKER = re.compile(r"#\s*(?:novermin|novm)\b")  # vermin's own marker words
 UNION_NEEDS = "union type `|` needs 3.10"
+INT_MEMBER = re.compile(r"'int\.(\w+)' member requires")  # a vermin line for a member read on an int
 
 
 class Unreadable(Exception):
@@ -258,6 +265,111 @@ def run_vermin(root, files):
     raise Unreadable("vermin failed (exit %d): %s" % (proc.returncode, detail))
 
 
+def is_int_value(node):
+    """True for an int literal (a bool counts, as it does for vermin) or a call of `int`."""
+    if isinstance(node, ast.Constant):
+        return isinstance(node.value, int)
+    return isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "int"
+
+
+def is_int_annotation(node):
+    return isinstance(node, ast.Name) and node.id == "int"
+
+
+class IntMembers(ast.NodeVisitor):
+    """Finds each read of `.attr` on a value that is an int. A receiver counts when it is an int literal, `int`,
+    `int(...)`, or a name bound to an int in its own function or module, or one around it. A class body is a scope
+    only for its own statements, as in Python. vermin keeps one table of names per file, so it cannot tell this
+    from a same-spelled name bound to an int in another function (vermin 1.9.2, source_visitor name_res)."""
+
+    def __init__(self, attr):
+        self.attr = attr
+        self.scopes = [set()]  # one set of int-bound names per open scope, outermost first
+        self.kinds = ["module"]
+        self.reads = []  # (receiver, scopes visible from the read)
+
+    def visible(self):
+        last = len(self.scopes) - 1
+        return [names for i, (names, kind) in enumerate(zip(self.scopes, self.kinds))
+                if kind != "class" or i == last]
+
+    def bind(self, target):
+        if isinstance(target, ast.Name):
+            self.scopes[-1].add(target.id)
+
+    def function(self, node):
+        self.scopes.append(set())
+        self.kinds.append("function")
+        args = node.args
+        for arg in args.posonlyargs + args.args + args.kwonlyargs:
+            if is_int_annotation(arg.annotation):
+                self.bind(ast.Name(id=arg.arg))
+        for child in node.body:
+            self.visit(child)
+        self.scopes.pop()
+        self.kinds.pop()
+
+    visit_FunctionDef = visit_AsyncFunctionDef = function
+
+    def visit_ClassDef(self, node):
+        self.scopes.append(set())
+        self.kinds.append("class")
+        for child in node.body:
+            self.visit(child)
+        self.scopes.pop()
+        self.kinds.pop()
+
+    def visit_Assign(self, node):
+        if is_int_value(node.value):
+            for target in node.targets:
+                self.bind(target)
+        self.generic_visit(node)
+
+    def visit_AnnAssign(self, node):
+        if is_int_annotation(node.annotation) or (node.value is not None and is_int_value(node.value)):
+            self.bind(node.target)
+        self.generic_visit(node)
+
+    def visit_Attribute(self, node):
+        if node.attr == self.attr:
+            self.reads.append((node.value, self.visible()))
+        self.generic_visit(node)
+
+    def has_int_read(self):
+        for receiver, scopes in self.reads:
+            if is_int_value(receiver) or (isinstance(receiver, ast.Name) and receiver.id == "int"):
+                return True
+            if isinstance(receiver, ast.Name) and any(receiver.id in names for names in scopes):
+                return True
+        return False
+
+
+def drop_unproven_int_members(root, rel, features):
+    """-> features without each `'int.X' member` line that no read of `.X` backs with an int in scope. vermin reports
+    that line when a name bound to an int anywhere in the file shares its spelling with the receiver, so
+    `isinstance(x, float) and x.is_integer()` beside `x = 0` elsewhere reads as int.is_integer (3.12), a false
+    alarm. An unknown receiver stays silent, as for every other member. Raises Unreadable when the file does not
+    parse."""
+    wanted = [(f, INT_MEMBER.search(f)) for f in features]
+    if not any(m for _, m in wanted):
+        return features
+    path = os.path.join(root, *rel.split("/"))
+    try:
+        with open(path, "rb") as handle:
+            tree = ast.parse(handle.read(), filename=rel)
+    except (OSError, SyntaxError, ValueError) as err:
+        raise Unreadable("cannot parse %s: %s" % (rel, err))
+    kept = []
+    for feature, match in wanted:
+        if match:
+            reads = IntMembers(match.group(1))
+            reads.visit(tree)
+            if not reads.has_int_read():
+                continue
+        kept.append(feature)
+    return kept
+
+
 def is_type_operand(node):
     """True for None, a builtin type name, or a subscript of one: an operand that makes `|` a union type."""
     if isinstance(node, ast.Subscript):
@@ -367,6 +479,12 @@ def main(argv):
         problems = {}
         for start in range(0, len(files), CHUNK):
             problems.update(run_vermin(root, files[start:start + CHUNK]))
+        for rel in list(problems):
+            kept = drop_unproven_int_members(root, rel, problems[rel])
+            if problems[rel] and not kept:
+                del problems[rel]  # every line was an unproven int member: the file is clean
+            else:
+                problems[rel] = kept
         unions = {rel: union_findings(root, rel) for rel in files}
     except Unreadable as err:
         print("check_python_floor: cannot check: %s" % err)
