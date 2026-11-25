@@ -2,9 +2,9 @@
 """Cases for the list-lines check, lint/check_list_lines.py (decision lists-one-line-per-item). Run:
 `python3 lint/test_check_list_lines.py`.
 
-The check is not built yet. Each case asserts first that the file exists, with its claim in the message, so every
-case fails on that one named cause until the builder lands it. Each case drives the check's CLI as a child process,
-never an import. Fixtures are git repos in this run's folder: a base commit, then a head commit that adds the item.
+Each case drives the check's CLI as a child process, never an import. Fixtures are git repos in this run's folder:
+a base commit, then a head commit that adds the item. Where a case needs it, the head removes a file, or an untracked
+file is written after the head commit.
 
 Pinned for the builder (the cases build to these):
 - CLI: `python3 lint/check_list_lines.py --root DIR --base REF` judges the lists the head of DIR adds an item to,
@@ -15,7 +15,7 @@ Pinned for the builder (the cases build to these):
 - Failure line for a crowded line: `<path>:<line>: list-lines: <n> items on one line, and this change adds one.
   Rule: claude-settings decision lists-one-line-per-item. Fix: python3 ~/.claude/lint/check_list_lines.py --fix <path>`.
   <line> is the 1-based line in the head; <n> is the items on that line in the head.
-- Shell arm: alternatives one per line, each but the last ending in `|\`. The last alternative ends in `)`, and the
+- Shell arm: alternatives one per line, each but the last ending in `|\\`. The last alternative ends in `)`, and the
   action starts on the next line. The spec's form with `)` alone on a line is a syntax error in bash and in sh, so
   the cases pin `zulu)`. Sort-cause failure text is not in the spec: the cases pin that it names "not sorted".
 - Keep marker: a comment `list-lines-ok: <reason>` on the line above the list (above the `case` line for a shell arm).
@@ -31,10 +31,21 @@ Pinned for the builder (the cases build to these):
 - Dark switch: `--list-lines` on actions/code-check/code_check.py main(), off by default. Its two cases live in
   actions/code-check/test_action.py, class CodeCheck: test_list_lines_switch_off_runs_no_judgment (a control) and
   test_list_lines_switch_on_refuses_crowded_shell_arm.
+- Judged per list: a new item is judged against its own list's base items only. An in-place edit that leaves the
+  item count where it was is not an add. A list that grows is judged.
+- Shell arrays (`NAME=(...)`) are read like a case arm: each element is one item, a quoted element with a space,
+  a paren or a `#` is one item, and a `#` or an apostrophe in a comment or a quoted string does not start a
+  comment or a quote. `NAME+=(x)` is judged against the same array on a crowded line: the one-line form only.
+  Left out: multi-line arrays, `NAME[n]=`, `declare -a`, appends from another file or scope, and --fix for arrays.
+- Binary: a file the diff marks binary prints `unknown: <path>` and never passes silently.
+- Untracked: a new file the diff does not hold prints `unknown: <path>`. The check's own docstring promises only
+  `unknown:` for a file it cannot read, so that is the one pinned; the diff reader's docstring says the file "stays
+  unchecked", which is the silent pass this case refuses.
 """
 import ast
 import contextlib
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -71,6 +82,8 @@ ORDER_9 = [
     "rho",
 ]
 ARM_SH = '#!/bin/sh\ncase "$1" in\n  %s) echo hit ;;\n  *) echo miss ;;\nesac\n'
+SH_ARR = "#!/bin/bash\nARR=(%s)\n"  # a bash array on line 2; %s holds its elements
+SEEN_SET = "SEEN = {\n%s}\n" % "".join('    "%s",\n' % v for v in ORDER_9)  # an unsorted set, one item per line
 
 
 def setUpModule():
@@ -103,8 +116,9 @@ def put(root, files):
             fh.write(text)
 
 
-def make_repo(name, base, head):
-    """A git repo in this run's folder: `base` committed, then `head` written in full on top. Returns (root, base sha)."""
+def make_repo(name, base, head, gone=(), untracked=None):
+    """A git repo in this run's folder: `base` committed, then the `gone` paths removed and `head` written in full on top,
+    committed. The `untracked` files are written last and never added. Returns (root, base sha)."""
     root = os.path.join(RUN, name)
     os.makedirs(root)
     git(root, "init", "-q", "-b", "main")
@@ -112,9 +126,12 @@ def make_repo(name, base, head):
     git(root, "add", "-A")
     git(root, "commit", "-qm", "base")
     base_sha = head_sha(root)
+    for gone_path in gone:
+        os.remove(os.path.join(root, gone_path))
     put(root, head)
     git(root, "add", "-A")
-    git(root, "commit", "-qm", "head")
+    git(root, "commit", "-q", "--allow-empty", "-m", "head")
+    put(root, untracked or {})
     return root, base_sha
 
 
@@ -145,6 +162,11 @@ def arm(items):
     return ARM_SH % "|".join(items)
 
 
+def pylist(letters):
+    """`NAMES = [...]` on one line, one double-quoted item per letter."""
+    return "NAMES = [%s]\n" % ", ".join('"%s"' % letter for letter in letters)
+
+
 def arm_items(lines, start):
     """(alternatives, the arm's last line index) read from the one-per-line form that starts after the `case` line."""
     items, i = [], start + 1
@@ -156,11 +178,11 @@ def arm_items(lines, start):
 
 
 class ListLinesCase(unittest.TestCase):
-    def repo(self, claim, base, head):
-        """(root, base sha) for a fixture. Asserts the check is built first: until it is, every case fails here, on its claim."""
+    def repo(self, claim, base, head, **fixture):
+        """(root, base sha) for a fixture. Fails first when the check file is missing, and names the claim."""
         if not os.path.isfile(CHECK):
-            self.fail("%s is not built: %s" % (CHECK_REL, claim))
-        return make_repo(self._testMethodName, base, head)
+            self.fail("%s is missing: %s" % (CHECK_REL, claim))
+        return make_repo(self._testMethodName, base, head, **fixture)
 
     def judge(self, claim, base, head, *extra, ci=False, ref=None):
         """Run the check on a fixture. `ref` names the base outright (a ref no clone holds, for the unknown cases)."""
@@ -245,6 +267,32 @@ class ListLinesCase(unittest.TestCase):
         self.assertNotEqual(rc, 0, "the arm below a lone apostrophe passed: exit 0, output %r" % out)
         self.assertIn(failure_line("scripts/arm.sh", 4, 20), out, "no failure line for the arm below the comment: %r" % out)
 
+    # Judged per list: a new item is judged against its own list only
+
+    def test_new_item_is_judged_against_its_own_lists_base_items(self):
+        base = {"scripts/names.py": pylist("abcdefgh") + 'OTHER = ["i", "z"]\n'}
+        head = {"scripts/names.py": pylist("abcdefghi") + 'OTHER = ["i", "z"]\n'}
+        _, out = self.judge("a new item is judged against its own list, not against another list's base items", base, head)
+        self.assertIn(failure_line("scripts/names.py", 1, 9), out, "the list that gained \"i\" was not refused: %r" % out)
+
+    def test_in_place_edit_of_one_item_in_a_nine_item_line_passes(self):
+        base = {"scripts/names.py": pylist("abcdefghi")}
+        head = {"scripts/names.py": pylist("abcdefghi").replace('"h"', '"hh"')}
+        rc, out = self.judge("an in-place edit that leaves a one-line list at nine items passes", base, head)
+        self.assertEqual(rc, 0, "an in-place edit of an item was judged as an add: exit %d, output %r" % (rc, out))
+
+    def test_in_place_edit_of_an_unsorted_set_item_passes(self):
+        base = {"scripts/seen.py": SEEN_SET}
+        head = {"scripts/seen.py": SEEN_SET.replace('"rho"', '"rhos"')}
+        rc, out = self.judge("an in-place edit of an unsorted set item, nine items in all, passes", base, head)
+        self.assertEqual(rc, 0, "an in-place edit of a set item was judged as an add: exit %d, output %r" % (rc, out))
+
+    def test_growth_from_nine_to_ten_on_one_line_still_fails(self):
+        base = {"scripts/names.py": pylist("abcdefghi")}
+        head = {"scripts/names.py": pylist("abcdefghij")}
+        _, out = self.judge("a one-line list that grows from nine to ten items is refused", base, head)
+        self.assertIn(failure_line("scripts/names.py", 1, 10), out, "the list that grew to ten was not refused: %r" % out)
+
     # Passes
 
     def test_three_item_tuple_with_added_item_passes(self):
@@ -278,6 +326,30 @@ class ListLinesCase(unittest.TestCase):
                              {"scripts/table.py": "TABLE = (%s)\n" % NAMES_9})
         self.assertEqual(rc, 0, "a removal was refused: exit %d, output %r" % (rc, out))
 
+    # Controls: a reflow, a move and a rename of a crowded list with no new item pass
+
+    def test_reflow_only_diff_passes(self):
+        base = {"scripts/names.py": pylist("abcdefghi")}
+        head = {"scripts/names.py": "NAMES = [\n%s]\n" % "".join('    "%s",\n' % letter for letter in "abcdefghi")}
+        rc, out = self.judge("a reflow that keeps the nine items passes", base, head)
+        self.assertEqual(rc, 0, "a reflow-only diff was refused: exit %d, output %r" % (rc, out))
+
+    def test_moved_list_passes(self):
+        base = {"scripts/names.py": pylist("abcdefghi") + "VERSION = 1\n"}
+        head = {"scripts/names.py": "VERSION = 1\n" + pylist("abcdefghi")}
+        rc, out = self.judge("a crowded list moved within its file, with the same items, passes", base, head)
+        self.assertEqual(rc, 0, "a moved list was refused: exit %d, output %r" % (rc, out))
+
+    def test_pure_rename_of_a_crowded_file_passes(self):
+        base = {"scripts/old.py": pylist("abcdefghi")}
+        root, sha = self.repo("a pure rename of a crowded file passes", base, {"scripts/new.py": pylist("abcdefghi")},
+                              gone=("scripts/old.py",))
+        renamed = subprocess.run(["git", "diff", "-M", "--name-status", sha], cwd=root, capture_output=True, text=True,
+                                 timeout=TIMEOUT).stdout
+        self.assertIn("R100\tscripts/old.py\tscripts/new.py", renamed, "scope: the move is not a pure rename: %r" % renamed)
+        rc, out = run_check(root, sha)
+        self.assertEqual(rc, 0, "a pure rename was refused: exit %d, output %r" % (rc, out))
+
     # Scanner traps: each must read the text as the language does (building-scanner-respects-strings)
 
     def test_pipe_and_hash_inside_quotes_in_shell_arm_are_not_separators(self):
@@ -303,6 +375,53 @@ class ListLinesCase(unittest.TestCase):
         rc, out = self.judge("a multi-line quoted string holding a case arm is not judged",
                              {"scripts/msg.sh": template % "|".join(ITEMS_19)}, {"scripts/msg.sh": template % "|".join(ITEMS_20)})
         self.assertEqual(rc, 0, "a multi-line quoted string was judged as a case arm: exit %d, output %r" % (rc, out))
+
+    # Shell arrays: each element is one item, and a quote or a comment marker in one does not change the reading
+
+    def test_shell_array_grown_to_nine_items_on_one_line_is_refused(self):
+        base = {"scripts/arr.sh": SH_ARR % "a b c d e f g h"}
+        head = {"scripts/arr.sh": SH_ARR % "a b c d e f g h i"}
+        _, out = self.judge("a shell array that grows to nine items on one line is refused", base, head)
+        self.assertIn(failure_line("scripts/arr.sh", 2, 9), out, "the shell array was not refused: %r" % out)
+
+    def test_shell_array_quoted_element_with_a_paren_is_one_item(self):
+        base = {"scripts/arr.sh": SH_ARR % '"x)" a b c d e f g'}
+        head = {"scripts/arr.sh": SH_ARR % '"x)" a b c d e f g h'}
+        _, out = self.judge("a quoted element holding a paren is one item: nine elements is refused", base, head)
+        self.assertIn(failure_line("scripts/arr.sh", 2, 9), out, "the paren element was not counted as one item: %r" % out)
+
+    def test_shell_array_quoted_element_with_a_space_is_one_item(self):
+        base = {"scripts/arr.sh": SH_ARR % "c d e f g h i"}
+        head = {"scripts/arr.sh": SH_ARR % '"a b" c d e f g h i'}
+        rc, out = self.judge("a quoted element holding a space is one item: eight elements passes", base, head)
+        self.assertEqual(rc, 0, "the space element was split into two items: exit %d, output %r" % (rc, out))
+
+    def test_hash_inside_quotes_in_a_shell_array_is_not_a_comment(self):
+        base = {"scripts/arr.sh": SH_ARR % '"#a" b c d e f g h'}
+        head = {"scripts/arr.sh": SH_ARR % '"#a" b c d e f g h i'}
+        _, out = self.judge("a # inside quotes in a shell array does not hide the array", base, head)
+        self.assertIn(failure_line("scripts/arr.sh", 2, 9), out, "the quoted # hid the array: %r" % out)
+
+    def test_lone_apostrophe_in_comment_above_shell_array_does_not_hide_it(self):
+        comment = "#!/bin/bash\n# don't edit this list by hand\n"
+        base = {"scripts/arr.sh": comment + "ARR=(a b c d e f g h)\n"}
+        head = {"scripts/arr.sh": comment + "ARR=(a b c d e f g h i)\n"}
+        _, out = self.judge("a lone apostrophe in a comment above a shell array does not hide the array", base, head)
+        self.assertIn(failure_line("scripts/arr.sh", 3, 9), out, "the apostrophe hid the array below it: %r" % out)
+
+    def test_array_text_inside_a_multi_line_quoted_string_is_not_judged(self):
+        template = "#!/bin/bash\nMSG='first line\nARR=(%s)'\necho \"$MSG\"\n"
+        base = {"scripts/msg.sh": template % "a b c d e f g h"}
+        head = {"scripts/msg.sh": template % "a b c d e f g h i"}
+        rc, out = self.judge("array text inside a multi-line quoted string is not an array", base, head)
+        self.assertEqual(rc, 0, "array text in a quoted string was judged as an array: exit %d, output %r" % (rc, out))
+
+    def test_array_append_on_a_crowded_line_is_judged_against_the_array(self):
+        base = {"scripts/arr.sh": SH_ARR % "a b c d e f g h i"}
+        head = {"scripts/arr.sh": SH_ARR % "a b c d e f g h i" + "ARR+=(j)\n"}
+        _, out = self.judge("an append to a crowded shell array is judged against that array", base, head)
+        self.assertRegex(out, r"scripts/arr\.sh:\d+: list-lines: .*" + re.escape(RULE),
+                         "the append was not judged against its crowded array: %r" % out)
 
     # Empty state
 
@@ -337,6 +456,27 @@ class ListLinesCase(unittest.TestCase):
                              {"scripts/arm.sh": arm(ITEMS_19)}, {"scripts/arm.sh": arm(ITEMS_20)}, ci=True, ref=MISSING_BASE)
         self.assertNotEqual(rc, 0, "an unknown base passed under CI: exit 0, output %r" % out)
         self.assertIn("unknown: base %s not in this clone" % MISSING_BASE, out, "no unknown line under CI: %r" % out)
+
+    # Files the diff holds as binary or not at all: each prints unknown, never a silent pass
+
+    def test_binary_file_with_a_py_name_prints_unknown(self):
+        base = {"scripts/blob.py": "ITEMS = (1, 2)\n"}
+        head = {"scripts/blob.py": "ITEMS = (1, 2, 3)\n\x00"}
+        root, sha = self.repo("a binary file with a .py name prints unknown, not a silent pass", base, head)
+        numstat = subprocess.run(["git", "diff", "--numstat", sha], cwd=root, capture_output=True, text=True,
+                                 timeout=TIMEOUT).stdout
+        self.assertEqual(numstat, "-\t-\tscripts/blob.py\n", "scope: the diff does not mark the file binary: %r" % numstat)
+        rc, out = run_check(root, sha)
+        self.assertRegex(out, r"unknown: .*scripts/blob\.py", "the binary file passed silently: exit %d, output %r" % (rc, out))
+
+    def test_untracked_new_file_prints_unknown(self):
+        root, sha = self.repo("a new file the diff does not hold prints unknown, not a silent pass", {"README.md": "# t\n"},
+                              {}, untracked={"scripts/new.py": pylist("abcdefghi")})
+        status = subprocess.run(["git", "status", "--porcelain", "--untracked-files=all"], cwd=root, capture_output=True,
+                                text=True, timeout=TIMEOUT).stdout
+        self.assertIn("?? scripts/new.py", status, "scope: the new file is not untracked: %r" % status)
+        rc, out = run_check(root, sha)
+        self.assertRegex(out, r"unknown: .*scripts/new\.py", "the untracked file passed silently: exit %d, output %r" % (rc, out))
 
     # --fix
 
