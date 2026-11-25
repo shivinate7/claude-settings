@@ -434,6 +434,71 @@ f() (
 '''
 SUBSHELL_UNITS = ["2-7 function f"]
 
+# A quoted YAML value is text: a hash, a double slash or a slash star in it starts no comment, and a lone apostrophe
+# in a plain value is text too.
+QUOTED_HASH = '''jobs:
+  lint:
+    steps:
+      - name: "build # 1"
+        run: echo one
+'''
+QUOTED_SLASH = '''jobs:
+  lint:
+    steps:
+      - name: "a // b /* c"
+        run: echo one
+'''
+APOSTROPHE = '''jobs:
+  lint:
+    steps:
+      - name: Don't stop
+        run: echo it's
+'''
+
+# Shell: a double-quoted string is text, so a hash, a brace or a slash opener in it is not code. A lone apostrophe in a
+# here-doc or after a comment's hash is text. A string spanning two lines holds a def line and a hash line as text.
+SHELL_HASH_IN_QUOTES = '''f() {
+  echo "# }"
+}
+g() {
+  echo two
+}
+'''
+SHELL_SLASH_IN_QUOTES = '''k() {
+  echo "/* {"
+  echo "// {"
+}
+m() {
+  echo x
+}
+'''
+SHELL_APOSTROPHE_IN_HEREDOC = '''#!/bin/sh
+cat <<EOF
+it's a lone quote
+g() {
+EOF
+h() {
+  echo ok
+}
+'''
+SHELL_MULTI_LINE_STRING = '''f() {
+  echo "first
+# not a comment
+g() {
+second"
+}
+h() {
+  echo ok
+}
+'''
+SHELL_APOSTROPHE_AFTER_HASH = '''build() { # it's the build
+  echo ok
+}
+deploy() {
+  echo go
+}
+'''
+
 
 def assert_outline(case, path, want):
     code, out, err = run_tool([path])
@@ -496,6 +561,15 @@ class YamlOutline(unittest.TestCase):
     def test_a_line_separator_inside_a_line_is_not_a_line_break(self):
         assert_outline(self, fixture("separator.yml", YAML_LINE_SEP), YAML_UNITS)
 
+    def test_a_hash_inside_quotes_in_a_yaml_value_is_text(self):
+        assert_outline(self, fixture("hash.yml", QUOTED_HASH), ["2-5 job jobs.lint", "4-5 step jobs.lint.build # 1"])
+
+    def test_a_double_slash_and_a_slash_star_inside_quotes_in_a_yaml_value_are_text(self):
+        assert_outline(self, fixture("slash.yml", QUOTED_SLASH), ["2-5 job jobs.lint", "4-5 step jobs.lint.a // b /* c"])
+
+    def test_a_lone_apostrophe_in_a_plain_yaml_value_is_text(self):
+        assert_outline(self, fixture("apostrophe.yml", APOSTROPHE), ["2-5 job jobs.lint", "4-5 step jobs.lint.Don't stop"])
+
 
 class ShellOutline(unittest.TestCase):
     def test_a_function_inside_a_here_doc_is_not_a_function(self):
@@ -509,6 +583,21 @@ class ShellOutline(unittest.TestCase):
 
     def test_a_subshell_body_with_a_case_pattern_ends_at_its_closing_paren(self):
         assert_outline(self, fixture("subshell.sh", SUBSHELL), SUBSHELL_UNITS)
+
+    def test_a_hash_inside_double_quotes_is_text(self):
+        assert_outline(self, fixture("hash.sh", SHELL_HASH_IN_QUOTES), ["1-3 function f", "4-6 function g"])
+
+    def test_a_slash_star_and_a_double_slash_inside_double_quotes_are_text(self):
+        assert_outline(self, fixture("slash.sh", SHELL_SLASH_IN_QUOTES), ["1-4 function k", "5-7 function m"])
+
+    def test_a_lone_apostrophe_in_a_here_doc_is_text(self):
+        assert_outline(self, fixture("heredoc.sh", SHELL_APOSTROPHE_IN_HEREDOC), ["6-8 function h"])
+
+    def test_a_string_spanning_two_lines_holds_a_def_line_and_a_hash_line_as_text(self):
+        assert_outline(self, fixture("multi.sh", SHELL_MULTI_LINE_STRING), ["1-6 function f", "7-9 function h"])
+
+    def test_a_lone_apostrophe_in_a_comment_after_a_function_header_is_text(self):
+        assert_outline(self, fixture("comment.sh", SHELL_APOSTROPHE_AFTER_HASH), ["1-3 function build", "4-6 function deploy"])
 
 
 class SymbolMode(unittest.TestCase):
