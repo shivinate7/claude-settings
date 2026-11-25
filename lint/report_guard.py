@@ -353,9 +353,6 @@ SESSION_PHRASES = (
     "send it again", "send the report", "post only", "never send", "add the line", "remedy:",
     "do not write it again", "keep the reply", "would reach the owner", "as the next thing you write",
     "send it now", "send the questions again",
-    # A past-ruling judge's order to take a pick or drop the question: a bandaid on the phrase list, since the
-    # unit rule misses an order joined by "and" (debt judge-dash-order-passes).
-    "take a pick", "take the pick", "drop the question", "drop this question",
 )
 # A unit that opens with one of these words (after a connector such as "so") is an order to the session. "Pick" is
 # left out on purpose: "Pick guard" is the check name of an owner line.
@@ -3340,11 +3337,49 @@ def prose_questions(text):
     return [body for _, body in prose_question_lines(text)]
 
 
-def relay_questions(text):
-    """`text` cut into one piece per prose question, each with its own Based on lines (question_form.split_questions)."""
+def input_needed_item_starts(text):
+    """Line numbers (from 0) where an Input Needed item starts, whether or not it holds a `?`: the text after the label,
+    the first line under it, a list item, a bold lead, and a line after a blank line. A Based on line never starts one,
+    and a line outside Input Needed starts none. A pick that asks with no `?` is a question of its own."""
     _hooks_on_path()
     import question_form
-    return question_form.split_questions(text, [n for n, _ in prose_question_lines(text)])
+    found, inside, first, blank = [], False, False, True
+    for number, line in enumerate(text.splitlines()):
+        inner = QUOTE_PREFIX.sub("", line, count=1)
+        body = inner.strip()
+        label = LABEL_RE.match(body)
+        name = label.group(1).strip().rstrip(":").strip() if label else None
+        if name in LABEL_ORDER:
+            inside, first, blank = name == "Input Needed", True, False
+            if inside and body[label.end():].strip(" :*_"):
+                found.append(number)
+                first = False
+            continue
+        if not body or not inside:
+            blank = not body
+            continue
+        starts = first or blank or bool(LIST_ITEM.match(inner)) or bool(label)
+        if starts and not question_form.is_based_line(inner):
+            found.append(number)
+        first = blank = False
+    return found
+
+
+def relay_questions(whole, asked):
+    """The questions of `whole` that the judge was given in `asked`, one piece each with its own Based on lines
+    (question_form.split_questions). With an Input Needed item the judge read the tail of `whole`, so that tail is cut;
+    else it read the prose question lines, so a question line that is not in `asked` is left out."""
+    _hooks_on_path()
+    import question_form
+    if has_input_needed(whole):
+        starts = [n for n, _ in prose_question_lines(asked)] + input_needed_item_starts(asked)
+        return question_form.split_questions(asked, starts)
+    pieces = question_form.split_questions(whole, [n for n, _ in prose_question_lines(whole)])
+
+    def seen(piece):  # asked_text puts an Unvetted marker that follows a question's sentence on a line of its own
+        first = QUOTE_PREFIX.sub("", (piece.splitlines() or [""])[0], count=1).strip()
+        return UNVETTED_AFTER_SENTENCE.sub(r"\1\n", first).split("\n")[0] in asked
+    return [p for p in pieces if seen(p)]
 
 
 def prose_question_lines(text):
@@ -3413,9 +3448,10 @@ def cannot_run(asked, why):
     return "" if question_form.has_unvetted(asked) else UNVETTED_REASON % why
 
 
-def past_ruling_problem(asked, cwd, whole=None):
+def past_ruling_problem(asked, cwd, whole=None, session=None):
     """The refusal text for asked text that a past ruling may decide, or that could not be checked, else ''.
-    `whole` is the full text the question sits in (its Based on lines need not end in `?`); `asked` when none."""
+    `whole` is the full text the question sits in (its Based on lines need not end in `?`); `asked` when none.
+    `session` is the hook's session id, which the guard.log line carries."""
     _hooks_on_path()
     import question_form
     candidates, unknown = question_form.past_rulings(asked, repo_root(cwd) or cwd or os.getcwd())
@@ -3443,8 +3479,8 @@ def past_ruling_problem(asked, cwd, whole=None):
     if question_form.ruling_cite(reason, ids, strict=True) != "cited":
         return cannot_run(asked, "the review cited a record that was not in the list")
     # A listed ruling named in a Based on (ruling) line of the reply passes by code, whatever the judge answered.
-    text = question_form.past_ruling_text(reason, ids, candidates, relay_questions(whole or asked),
-                                          verdict.get("question"))  # the number only names the refused question
+    text = question_form.past_ruling_text(reason, ids, candidates, relay_questions(whole or asked, asked),
+                                          verdict.get("question"))  # the number picks the one question judged
     if not text:
         return ""
     try:
@@ -3452,6 +3488,7 @@ def past_ruling_problem(asked, cwd, whole=None):
         # (lint/guard_log_report.py), which weighs the false alarms of rule past-ruling. A log that cannot be
         # written never turns the refusal into an Unvetted one.
         import guard_core
+        guard_core.set_log_session(session)
         guard_core.record("Stop", "deny", question_form.PAST_RULING_RULE, "")
     except Exception as exc:
         print("past-ruling log line not written: %s: %s" % (type(exc).__name__, exc), file=sys.stderr)
@@ -3497,7 +3534,7 @@ def question_keys_problem(after, text):
     return KEYS_REASON % clash if clash else ""
 
 
-def relay_reasons(after, text, cwd):
+def relay_reasons(after, text, cwd, session=None):
     """Refusals for the questions the reply relays to the owner, read from every assistant text since the last
     human message. An error in the option-key check allows, with one stderr line. An error in the past-ruling check
     is a check that could not run, so it refuses as Unvetted."""
@@ -3511,7 +3548,7 @@ def relay_reasons(after, text, cwd):
         asked = asked_text(whole)
         if asked:
             try:
-                reasons.append(past_ruling_problem(asked, cwd, whole))
+                reasons.append(past_ruling_problem(asked, cwd, whole, session))
             except Exception as exc:
                 print("past-ruling check failed: %s: %s" % (type(exc).__name__, exc), file=sys.stderr)
                 reasons.append(cannot_run(asked, "the check failed with " + type(exc).__name__))
@@ -3526,7 +3563,7 @@ def rewrite_relay(hook):
     try:
         path = hook.get("transcript_path")
         records = read_transcript(path) if path and os.path.exists(path) else []
-        return relay_reasons(records_after_last_human(records), last_reply(hook), hook.get("cwd"))
+        return relay_reasons(records_after_last_human(records), last_reply(hook), hook.get("cwd"), hook.get("session_id"))
     except Exception as exc:
         print("relay check on a rewrite failed open: %s: %s" % (type(exc).__name__, exc), file=sys.stderr)
         return []
@@ -3745,7 +3782,7 @@ def main():
     note = " ".join(filter(None, [note, hand_note, review_note]))
     relay = []
     if last_human_idx is not None:  # a transcript with no human message never ran the relay and answered checks
-        relay = relay_reasons(after, text, hook.get("cwd"))
+        relay = relay_reasons(after, text, hook.get("cwd"), hook.get("session_id"))
         try:
             relay.append(answered_problem(text))  # one block per turn, joined with any other reason, landed or not
         except Exception:

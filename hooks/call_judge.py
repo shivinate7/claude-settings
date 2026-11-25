@@ -447,14 +447,16 @@ def main():
         cite = question_form.ruling_cite(reason, ids) if units else ""
         if cite == "bogus":  # the answer cites a record the model was not shown: no usable verdict
             return unvetted(payload, tool, args, rule, "the review cited a record that was not in the list", units)
-        if cite and not FORM_ITEM_REASON.match(reason):
-            # A listed ruling named in a Based on (ruling) line passes by code, whatever the judge answered. A
-            # reason that opens with item 1 to 7 is a form miss that names an id, and keeps the judge's text.
-            matched = verdict.get("question")  # names the refused question in the text; never lets one pass
-            reason = question_form.past_ruling_text(reason, ids, candidates, [words for _, words in units], matched)
+        # A reason that opens with item 1 to 7 is a form refusal: it keeps its rule and its text, whatever ids it names.
+        past = bool(cite) and not FORM_ITEM_REASON.match(reason)
+        if past:
+            # A listed ruling named in a Based on (ruling) line passes by code, whatever the judge answered. The text
+            # holds none of the judge's words; its number only picks the question it judged.
+            reason = question_form.past_ruling_text(reason, ids, candidates, [words for _, words in units],
+                                                    verdict.get("question"))
             if not reason:
                 return 0
-        return refuse(payload, tool, args, question_form.PAST_RULING_RULE if cite else rule, reason)
+        return refuse(payload, tool, args, question_form.PAST_RULING_RULE if past else rule, reason)
     return 0
 
 
