@@ -307,7 +307,13 @@ from required_check import REQUIRED_CHECK  # noqa: E402  the one home of the req
 import ruled_store  # noqa: E402  the one reader of the ruling store (lint/ruled_store.py)
 import stale_cites  # noqa: E402  the one home of the rule dirs (lint/stale_cites.py); the lint dir is on sys.path from the records import above
 from pin_note import MARKER as PIN_NOTE_MARKER  # noqa: E402  the one home of the pin note's marker (hooks/pin_note.py)
-from guard_merge import LOCAL_ROLE_TIERS  # noqa: E402  glossary-ok: the guard's own name; the one home of the roles a local role file may name (hooks/guard_merge.py)
+try:
+    from guard_merge import LOCAL_ROLE_TIERS  # noqa: E402  glossary-ok: the guard's own name; the one home of the roles a local role file may name (hooks/guard_merge.py)
+except Exception as e:  # a missing or broken guard module: one line, no traceback when run; an ImportError when imported
+    _why = "merge: cannot load the merge guard's role list, module guard_merge (hooks/guard_merge.py): " + " ".join(f"{type(e).__name__}: {e}".split())
+    if __name__ == "__main__":
+        sys.exit(_why)
+    raise ImportError(_why) from e
 
 class Stop(Exception):
     """A refusal. The message is the whole report."""
@@ -7943,7 +7949,7 @@ STANDING_ROLE = "standing"  # ruling own-tiny-fixes-b: a coordinator, triage or 
 MERGE_ROLES = {"batch-runner", LANE_ROLE, STANDING_ROLE}  # the tiers that may run `merge <pr> --confirm` in a cloud session; the standing one only past standing_refusal, the lane one only on its own pull request
 LANE_MERGE_REPO = "shivinate7/claude-settings"  # the one repo whose pull requests a lane merges itself; the lane role covers it alone
 LOCAL_MERGE_ROLES = set(LOCAL_ROLE_TIERS)  # glossary-ok: the guard's own name; the roles a local session's role file may name; the lane role is a cloud role only
-LOCAL_STANDING_ROLE = "coordinator"  # the one local role that merges as a standing session: its record reads STANDING_ROLE, past the same checks and for the repo its file names
+LOCAL_STANDING_ROLE = next(role for role in LOCAL_ROLE_TIERS if role not in MERGE_ROLES)  # the one local role with no cloud tier of its own: it merges as a standing session, its record reads STANDING_ROLE, past the same checks and for the repo its file names
 
 
 def role_path():
@@ -7953,18 +7959,21 @@ def read_merge_record():
     """This session's recorded merge record, a dict with "role" (and "step" for a lane), or None: no session id (cloud, else the local CLAUDE_CODE_SESSION_ID with the launcher's file), no file, unreadable or malformed, another session's, a tier outside MERGE_ROLES (LOCAL_MERGE_ROLES for a local session), or a lane with no step.
     Every failure is None, so the check fails closed. An absent id never equals an absent record."""
     sid = os.environ.get("CLAUDE_CODE_REMOTE_SESSION_ID")
-    if not sid:
-        if os.environ.get("CLAUDE_CODE_REMOTE") == "true":  # a cloud session with no id has no role, whatever file is on disk
-            return None
-        # no cloud id: a local session reads the role the launcher recorded for its own id (hooks/session_role.py, the one reader)
+    cloud = os.environ.get("CLAUDE_CODE_REMOTE") == "true"
+    if cloud and not sid:  # a cloud session with no id has no role, whatever file is on disk
+        return None
+    if not cloud:
+        # a local session reads the role the launcher recorded for its own id (hooks/session_role.py, the one reader). A cloud remote id in its environment
+        # never lifts the checks of a coordinator's file, so that file is read before the id is: only the cloud's merge-role.json is read by id.
         try:
             import session_role
             role = session_role.own_role(os.environ.get("CLAUDE_CODE_SESSION_ID"))
         except Exception:
-            return None
+            role = None
         if role == LOCAL_STANDING_ROLE:
             return {"role": STANDING_ROLE}
-        return {"role": role} if role in LOCAL_MERGE_ROLES else None
+        if not sid:
+            return {"role": role} if role in LOCAL_MERGE_ROLES else None
     try:
         data = json.loads(role_path().read_text(encoding="utf-8"))
     except (OSError, ValueError):  # UnicodeDecodeError and JSONDecodeError are ValueErrors
