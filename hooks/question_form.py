@@ -10,6 +10,8 @@ question-form holds the ruling; rule `style-question-form` holds the text.
 page_item_hit, which filters the ArtifactData writes by collection and url and then calls item_hit; a write to another page gets only the check for an option keyed none. Nothing here writes a file. The only processes it starts are the git reads of past_rulings (the roadmap step notes, and the ruled store: one ls-tree, one cat-file, and one more when an entry names `lands_in`), for a caller that makes a model call anyway.
 
     past_rulings(text, repo_root) -> (candidates, unknown)   the decision, debt and step rulings the judge reads
+    named_rulings(text, ids)      -> ids named by a `Based on (ruling):` line: the code allow of item 8
+    past_ruling_text(reason, ids, candidates, named, questions) -> the refusal text of a past-ruling verdict, '' to pass
     key_overlap(reply, earlier)   -> clashing option keys     lint/report_guard.py rule question-keys
 
 THE FORM. A decision on the page (in `context`), or a chat question with 2+ options (in `question`):
@@ -2542,17 +2544,94 @@ def candidates_block(candidates, unknown) -> str:
     return text
 
 
+def _plain_records(text) -> str:
+    """`text` with `docs/decisions/<stem>.md` written as `decisions/<stem>`, the same record."""
+    return re.sub(r"(?<=[\w-])\.md\b", "", re.sub(r"(?<![\w/-])docs/(?=(?:decisions|debts)/)", "", text))
+
+
+def _names_id(text, name) -> bool:
+    """Whether `text` holds `name` as a whole token: not inside a longer word, path or slug."""
+    return bool(re.search(r"(?<![\w/-])%s(?![\w/-])" % re.escape(name), text))
+
+
+def cited_rulings(text, ids) -> list:
+    """The ids of `ids`, in order, that `text` names by the full id or by its slug (the part after the last "/")."""
+    text = _plain_records(text)
+    return [i for i in ids if _names_id(text, i) or ("/" in i and _names_id(text, i.rsplit("/", 1)[1]))]
+
+
+def named_rulings(text, ids) -> list:
+    """The ids of `ids`, in order and once, that a `Based on (ruling):` line of `text` names by id or slug. The one
+    code reader of the allow in PAST_RULING_ITEM; a Based on line of another kind and a mention elsewhere name none."""
+    lines = re.sub(r"^[ \t>]+", "", text, flags=re.M)  # a quoted reply keeps its Based on lines
+    body = "\n".join(m.group(2) for m in BASED_LINE.finditer(lines) if m.group(1).strip().lower() == "ruling")
+    return cited_rulings(body, ids)
+
+
+def ruling_time(candidates, ruling_id) -> str:
+    """The date of the listed ruling line of `ruling_id` (the newest stamp in it), else "time unknown"."""
+    for line in candidates:
+        if line.startswith(ruling_id + ": "):
+            stamps = DATE_STAMP.findall(line[len(ruling_id) + 2:])
+            return max(stamps) if stamps else TIME_UNKNOWN
+    return TIME_UNKNOWN
+
+
+TIME_UNKNOWN = "time unknown"
+_LEADING_DATE = re.compile(r"^\(?20\d\d-\d\d-\d\d[^)\s]*(?: \d\d:\d\d)?\)?")
+_LEADING_SETTLES = re.compile(r"^(?:already )?settles? (?:this|it)\b", re.I)
+_SETTLE_WORDS = (("settles", "decides"), ("settled", "decided"), ("settling", "deciding"), ("settle", "decide"))
+
+
+def _decides_sentence(reason, ruling_id, wording) -> str:
+    """What the ruling decides, from the judge's `reason`: its sentences with no order to the session (`wording`
+    finds one), the ruling's id and date left out, and the word "settles" turned to "decides"."""
+    kept = []
+    for sentence in SENTENCE_SPLIT.split(_plain_records(reason).strip()):
+        if not sentence.strip() or wording(sentence):
+            continue
+        for name in (ruling_id, ruling_id.rsplit("/", 1)[-1]):
+            sentence = re.sub(r"(?<![\w/-])%s(?![\w/-])" % re.escape(name), "", sentence)
+        sentence = sentence.strip(" \t:;,-")
+        for pattern in (_LEADING_DATE, _LEADING_SETTLES):
+            sentence = pattern.sub("", sentence).strip(" \t:;,-")
+        for old, new in _SETTLE_WORDS:
+            sentence = re.sub(r"\b%s\b" % old, new, sentence, flags=re.I)
+        if sentence:
+            kept.append(sentence if sentence[-1] in ".!?" else sentence + ".")
+    return " ".join(kept)
+
+
+def past_ruling_text(reason, ids, candidates, named, questions) -> str:
+    """The refusal text of a past-ruling verdict, or "" when the question passes. `reason` is the judge's answer, `ids`
+    the listed ids, `named` what named_rulings read, `questions` how many questions the text asks. The question passes
+    when every listed ruling the reason cites is named. The one home of the text, for both paths: the id, its time
+    from the listed line, one sentence of what it decides, and the remedy line to add. It holds no order to the
+    session (report_guard.session_wording finds one) and never the word "settles"."""
+    unnamed = [i for i in cited_rulings(reason, ids) if i not in named]
+    if not unnamed:
+        return ""
+    lint = install_path("lint")
+    if lint not in sys.path:
+        sys.path.append(lint)
+    from report_guard import session_wording  # the one detector of an order to the session
+    ruling_id = unnamed[0]
+    when = "%s (%s)" % (ruling_id, ruling_time(candidates, ruling_id))
+    text = "%s may decide %s; it may be stale." % (when, "one of the questions" if questions > 1 else "this question")
+    decides = _decides_sentence(reason, ruling_id, session_wording)
+    if decides:
+        text += " " + decides
+    return text + (" A question that names the ruling passes. Its line reads: Based on (ruling): %s, may be stale: "
+                   "<why it may be stale>" % when)
+
+
 def ruling_cite(reason, ids, strict=False) -> str:
     """Classify a refusal reason against the ids the model was shown. "bogus" when the reason opens with a
     `decisions/..` or `debts/..` record that was not shown. With `strict` (a call that judges item 8 alone), also
     "bogus" when it names such a record anywhere, or names no shown id. "cited" when it names a shown id and is not
     bogus. "" for any other refusal (a form item): without `strict`, an unshown id named mid-reason stays one."""
-    # `docs/decisions/<stem>.md` is the same record as `decisions/<stem>`.
-    reason = re.sub(r"(?<=[\w-])\.md\b", "", re.sub(r"(?<![\w/-])docs/(?=(?:decisions|debts)/)", "", reason))
-
-    def names(i):
-        return re.search(r"(?<![\w/-])%s(?![\w/-])" % re.escape(i), reason)
-    shown = [i for i in ids if names(i) or ("/" in i and names(i.split("/", 1)[1]))]
+    reason = _plain_records(reason)
+    shown = cited_rulings(reason, ids)
     opening = RECORD_REF.match(reason.lstrip(" \t\n*_`'\"([>"))
     if opening and opening.group(0) not in ids:
         return "bogus"
@@ -2576,13 +2655,14 @@ def _all_strings(value):
 
 def chat_units(tool_input) -> list:
     """(marker text, words text) for each question of a box with 2+ options: the question text that may carry the
-    Unvetted line, and every string of the question, for the word overlap."""
+    Unvetted line, and every string of the question, one per line (a `Based on` line starts its own line), for the
+    word overlap and the named-ruling read."""
     questions = tool_input.get("questions") if isinstance(tool_input, dict) else None
     units = []
     for q in questions if isinstance(questions, list) else []:
         options = q.get("options") if isinstance(q, dict) else None
         if isinstance(options, list) and len([o for o in options if isinstance(o, dict)]) >= 2:
-            units.append((str(q.get("question") or ""), " ".join(_all_strings(q))))
+            units.append((str(q.get("question") or ""), "\n".join(_all_strings(q))))
     return units
 
 
@@ -2595,7 +2675,7 @@ def page_units(judged) -> list:
         if "new_str" in write:
             units.append((write["new_str"], write["new_str"]))
         elif isinstance(data, dict):
-            units.append((str(data.get("context") or ""), " ".join(_all_strings(data))))
+            units.append((str(data.get("context") or ""), "\n".join(_all_strings(data))))
     return units
 
 

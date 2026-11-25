@@ -353,6 +353,9 @@ SESSION_PHRASES = (
     "send it again", "send the report", "post only", "never send", "add the line", "remedy:",
     "do not write it again", "keep the reply", "would reach the owner", "as the next thing you write",
     "send it now", "send the questions again",
+    # A past-ruling judge's order to take a pick or drop the question: a bandaid on the phrase list, since the
+    # unit rule misses an order joined by "and" (debt judge-dash-order-passes).
+    "take a pick", "take the pick", "drop the question", "drop this question",
 )
 # A unit that opens with one of these words (after a connector such as "so") is an order to the session. "Pick" is
 # left out on purpose: "Pick guard" is the check name of an owner line.
@@ -3311,7 +3314,8 @@ def write_marker(hook, idx):
 # A relayed question (spec past-rulings): a coordinator puts a lane's question in its reply, under Input Needed or as
 # a prose line that ends in `?`, so neither check in hooks/call_judge.py sees it. This Stop hook checks it, SYNC, with
 # the same candidates and the same item 8 as the question judge, and one more rule: option keys (question-keys).
-# Cost: one git process and one Sonnet call (60 s) on a Stop whose reply asks something; none on any other Stop.
+# Cost: one git process and one Sonnet call (60 s) on a Stop whose reply asks something; none on any other Stop. A
+# refusal adds one guard.log line.
 RELAY_RULE_REASON = owner_line("Past-ruling guard (rule past-ruling)", "%s")
 UNVETTED_REASON = owner_line(
     "Unvetted guard (rule past-ruling)",
@@ -3397,8 +3401,9 @@ def cannot_run(asked, why):
     return "" if question_form.has_unvetted(asked) else UNVETTED_REASON % why
 
 
-def past_ruling_problem(asked, cwd):
-    """The refusal text for asked text that a past ruling settles, or that could not be checked, else ''."""
+def past_ruling_problem(asked, cwd, whole=None):
+    """The refusal text for asked text that a past ruling may decide, or that could not be checked, else ''.
+    `whole` is the full text the question sits in (its Based on lines need not end in `?`); `asked` when none."""
     _hooks_on_path()
     import question_form
     candidates, unknown = question_form.past_rulings(asked, repo_root(cwd) or cwd or os.getcwd())
@@ -3421,14 +3426,24 @@ def past_ruling_problem(asked, cwd):
     if verdict.get("ok") is not False:
         return ""
     reason = verdict.get("reason")
-    reason = reason.strip() if isinstance(reason, str) and reason.strip() else "a past ruling settles this."
-    if question_form.ruling_cite(reason, question_form.candidate_ids(candidates), strict=True) != "cited":
+    reason = reason.strip() if isinstance(reason, str) and reason.strip() else ""
+    ids = question_form.candidate_ids(candidates)
+    if question_form.ruling_cite(reason, ids, strict=True) != "cited":
         return cannot_run(asked, "the review cited a record that was not in the list")
-    if session_wording(reason):
-        # The judge's reason holds an order to the session. The owner reads it in chat, so only the ruling id stays.
-        cited = [i for i in question_form.candidate_ids(candidates) if i in reason or i.split("/", 1)[-1] in reason]
-        reason = "a past ruling settles this (%s)." % ", ".join(cited[:3]) if cited else "a past ruling settles this."
-    return RELAY_RULE_REASON % reason
+    # A listed ruling named in a Based on (ruling) line of the reply passes by code, whatever the judge answered.
+    named = question_form.named_rulings(whole or asked, ids)
+    text = question_form.past_ruling_text(reason, ids, candidates, named, len(prose_questions(asked)))
+    if not text:
+        return ""
+    try:
+        # Cost: one appended guard.log line per refusal, no new file and no process. Reader: the guard cull
+        # (lint/guard_log_report.py), which weighs the false alarms of rule past-ruling. A log that cannot be
+        # written never turns the refusal into an Unvetted one.
+        import guard_core
+        guard_core.record("Stop", "deny", question_form.PAST_RULING_RULE, "")
+    except Exception as exc:
+        print("past-ruling log line not written: %s: %s" % (type(exc).__name__, exc), file=sys.stderr)
+    return RELAY_RULE_REASON % text
 
 
 def since_last_message(after):
@@ -3480,10 +3495,11 @@ def relay_reasons(after, text, cwd):
     except Exception as exc:
         print("question-keys check failed open: %s: %s" % (type(exc).__name__, exc), file=sys.stderr)
     try:
-        asked = asked_text("\n\n".join(earlier_replies(since_last_message(after), text) + [text]))
+        whole = "\n\n".join(earlier_replies(since_last_message(after), text) + [text])
+        asked = asked_text(whole)
         if asked:
             try:
-                reasons.append(past_ruling_problem(asked, cwd))
+                reasons.append(past_ruling_problem(asked, cwd, whole))
             except Exception as exc:
                 print("past-ruling check failed: %s: %s" % (type(exc).__name__, exc), file=sys.stderr)
                 reasons.append(cannot_run(asked, "the check failed with " + type(exc).__name__))

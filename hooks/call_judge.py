@@ -54,6 +54,7 @@ Cost: one more haiku call (low effort, OPUS_SCOPE_TIMEOUT s) for such an ask, no
 """
 import json
 import os
+import re
 import sys
 
 HERE = os.path.dirname(os.path.realpath(__file__))
@@ -369,16 +370,19 @@ def unvetted(payload, tool, args, rule, why, units):
     return refuse(payload, tool, args, rule, UNVETTED_REMEDY % why)
 
 
+FORM_ITEM_REASON = re.compile(r"\W*(?:item\s*)?[1-7]\b", re.I)
+
+
 def past_ruling_context(payload, units):
-    """(prompt tail, candidate ids, unreadable sources) for the questions in `units`. Prints the one stderr line for
-    the sources not searched. The only process of a judged call besides the model runs here."""
+    """(prompt tail, candidate ids, unreadable sources, candidates) for the questions in `units`. Prints the one stderr
+    line for the sources not searched. The only process of a judged call besides the model runs here."""
     import question_form
     cwd = payload.get("cwd") or ""
     candidates, unknown = question_form.past_rulings(" ".join(words for _, words in units),
                                                      question_form._git_root_of(cwd) or cwd or os.getcwd())
     print(question_form.unknown_line(unknown), file=sys.stderr)
     return (question_form.candidates_block(candidates, unknown), question_form.candidate_ids(candidates),
-            question_form.unreadable_sources(unknown))
+            question_form.unreadable_sources(unknown), candidates)
 
 
 def main():
@@ -415,9 +419,9 @@ def main():
             widening = any(sets_options(w) for w in judged)
         else:
             shown = json.dumps(args, ensure_ascii=False)
-        tail, ids = "", []
+        tail, ids, candidates = "", [], []
         if units:
-            tail, ids, unreadable = past_ruling_context(payload, units)
+            tail, ids, unreadable, candidates = past_ruling_context(payload, units)
             if unreadable:
                 return unvetted(payload, tool, args, rule, "; ".join(unreadable), units)
         full = prompt % shown
@@ -441,6 +445,13 @@ def main():
         cite = question_form.ruling_cite(reason, ids) if units else ""
         if cite == "bogus":  # the answer cites a record the model was not shown: no usable verdict
             return unvetted(payload, tool, args, rule, "the review cited a record that was not in the list", units)
+        if cite and not FORM_ITEM_REASON.match(reason):
+            # A listed ruling named in a Based on (ruling) line passes by code, whatever the judge answered. A
+            # reason that opens with item 1 to 7 is a form miss that names an id, and keeps the judge's text.
+            named = question_form.named_rulings("\n".join(words for _, words in units), ids)
+            reason = question_form.past_ruling_text(reason, ids, candidates, named, len(units))
+            if not reason:
+                return 0
         return refuse(payload, tool, args, question_form.PAST_RULING_RULE if cite else rule, reason)
     return 0
 
