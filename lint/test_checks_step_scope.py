@@ -318,6 +318,7 @@ PR_ONLY = [
     'Ruling kind check',
     'Silent undo check',
     'Comment narration check',
+    'Time-pinned new-finding check',
 ]
 
 # The checks job's step names. An unnamed step is its `uses:` reference.
@@ -433,6 +434,7 @@ MAIN_STEPS = [
     'Plan refuter fixture suite',
     'Copy finder fixture suite',
     'Time-pinned finder fixture suite',
+    'Time-pinned new-finding check',
     'Mod version fixture suite',
     'Hook catalog fixture suite',
     'Hook catalog check',

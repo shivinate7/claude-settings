@@ -1,8 +1,8 @@
 name: CI alarm
 description: >
-  Opens (or comments on) one issue when the newest completed run of any workflow on a branch is
-  red, judged per workflow and per event group (events.json: push and dispatch together, schedule
-  apart). A failed run with a red job is cleared across groups only by a newer green run of the other
+  Opens (or comments on) one issue when the shared judge (clear_rule.py `judge`, the one merge.py reads too)
+  finds main red. It judges the newest run of each workflow and event group (events.json: push and dispatch together,
+  schedule apart). A re-run in flight above an older run reads "unknown", never green or red. A failed run with a red job is cleared across groups only by a newer green run of the other
   group that is its group's newest and passed every job of the failed run (exact names), so a green nightly that ran
   other jobs never hides a red push. A job the failed run did not fail is left out of that need when its job-level `if:` has a
   top-level `&&` conjunct `github.event_name == 'X'` for another event than the green run's (`all-jobs-passed` and `ci-done` run on

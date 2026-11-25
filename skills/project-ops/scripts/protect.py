@@ -37,6 +37,8 @@ def run_gh(args, body=None):
     """-> (code, output) of `gh api`, with `body` as its JSON input."""
     p = _nowindow.run(["gh", "api", *args] + (["--input", "-"] if body is not None else []),
                        input=json.dumps(body) if body is not None else None, capture_output=True, text=True)
+    if p.returncode == 0:  # gh 2.105 prints a hint on stderr with exit 0: the caller parses JSON, so a success gives stdout alone
+        return 0, p.stdout.strip()
     return p.returncode, (p.stdout + p.stderr).strip()
 
 

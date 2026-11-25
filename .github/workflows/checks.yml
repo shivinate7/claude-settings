@@ -505,6 +505,13 @@ jobs:
         if: ${{ !cancelled() && (needs.scope.outputs.code == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_find_time_pinned.py
 
+      # Pull requests only, as the comment narration check: the range is base..HEAD. It reads every non-.md path, a superset of the test files this reads, so it shares that scope flag.
+      - name: Time-pinned new-finding check
+        if: ${{ !cancelled() && github.event_name == 'pull_request' && needs.scope.outputs.lint_comment_narration == 'true' }}
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: python3 lint/find_time_pinned.py . --check --base "origin/$BASE_REF"
+
       - name: Mod version fixture suite
         if: ${{ !cancelled() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_check_mod_versions.py
