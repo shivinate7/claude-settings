@@ -683,6 +683,7 @@ STRICT_UNMERGED_IDLE_SECONDS = 24 * 60 * 60
 
 def worktree_idle_seconds(path: str, now=None):
     """Seconds since the newest git activity in worktree PATH, or None when it cannot be read.
+    NOW is the clock in epoch seconds; None means the clock at the call.
     Activity is the newest mtime of the worktree's own admin files: index, HEAD, logs/HEAD under
     `.git/worktrees/<name>`. HEAD must exist; a missing index or log is skipped."""
     answer = git_reads._git(path, "rev-parse", "--absolute-git-dir")
@@ -3146,7 +3147,10 @@ def _oldest_idle_first(entries):
     A tree whose idle time cannot be read goes last; it is kept either way. Each entry keeps its
     read as "idle", and `decide_worktree` uses it: one idle read per tree per pass. The clock is
     read once, so every idle counts from the same instant; equal idles sort by path. The order
-    then depends on the trees alone, not on when each was read."""
+    then depends on the trees alone, not on when each was read. The clock is read before the
+    loop, so a tree's stored idle can be slightly lower than a read at its own turn; every
+    removal needs idle at or above a threshold, so this can only keep a tree a pass longer,
+    never remove one sooner."""
     idle = {}
     now = time.time()
     for e in entries:  # a read past the deadline never starts; that tree is "not judged"
