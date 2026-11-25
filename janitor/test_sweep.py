@@ -3920,6 +3920,17 @@ class SweepOrderTests(unittest.TestCase):
                          ("ctl-known", "ctl-not-a-repo"),
                          "the tree with no readable idle did not sort last")
 
+    def test_an_unreadable_idle_sorts_last_past_a_fresh_tree_with_a_smaller_path(self):
+        fresh = self._tree("ctl-fresh", 0)
+        plain = os.path.join(self.run, "a-not-a-repo")
+        os.makedirs(plain)
+        self._assert_idles([fresh], [0])
+        self.assertIsNone(sweep.worktree_idle_seconds(plain, now=self.FIXED),
+                          "scope: a folder that is not a repository reads an idle")
+        self.assertEqual(self._order([plain, fresh], _StepClock(self.FIXED, 0)),
+                         ("ctl-fresh", "a-not-a-repo"),
+                         "the tree with no readable idle sorted ahead of a fresh tree with a smaller path")
+
     def test_control_no_trees_gives_an_empty_order(self):
         self.assertEqual(list(sweep._oldest_idle_first([])), [],
                          "an empty input did not give an empty order")
