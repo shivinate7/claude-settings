@@ -2182,7 +2182,16 @@ class Host:
     def main_merge_of(self, base, head):
         """-> the oid of the merge commit on `base` whose second parent is `head` (this run's merge landed), False when `base` holds none, None when the read failed.
         A full window with no match is None too when main holds the head (or the read cannot tell): the head's merge may lie older than the window. A lost or refused merge reply with the pull request still OPEN may have landed (the Nov 25 2026 outage: HTTP 405 and 502, merge commit on main). The one home of that read.
-        Cost: one `git fetch` of `base`, then one `git rev-list` of its newest MAIN_MERGE_WINDOW (50) first-parent merges, plus two git reads when the window is full with no match, no gh call, once per call; never cached, since `base` moves. A failed fetch or read is None: unknown, never merged."""
+        A first read with no merge is read once more after one NET_PAUSE through self.pause: a merge in progress reaches main a moment after the reply, so a single read of main is no proof of a refusal.
+        Cost: one `git fetch` of `base`, then one `git rev-list` of its newest MAIN_MERGE_WINDOW (50) first-parent merges, plus two git reads when the window is full with no match; a read that finds no merge repeats once after the pause. No gh call, once per call; never cached, since `base` moves. A failed fetch or read is None: unknown, never merged."""
+        held = self._read_main_merge(base, head)
+        if held is not False:
+            return held
+        self.pause(NET_PAUSE)
+        return self._read_main_merge(base, head)
+
+    def _read_main_merge(self, base, head):
+        """One read of `base` for main_merge_of: the same three answers."""
         root = self.cwd or "."
         ref = f"refs/remotes/origin/{base}"
         c, out = git(root, "fetch", "-q", "origin", branch_refspec(base))
@@ -6131,6 +6140,11 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
             except (subprocess.TimeoutExpired, OSError):
                 c, names = 1, ""
             rule_files = [x for x in names.split("\0") if x.lower() in RULE_FILES or x.lower().startswith(RULE_PREFIX)] if c == 0 else None
+            try:  # the base tip before the merge call: a read of main after a lost reply, or ff_main's fetch, moves origin/<base> onto the merge and would empty the plan's range. Any failure leaves the base unknown and never holds the merge
+                tip_c, tip = git(wt, "rev-parse", "--verify", "-q", base_ref + "^{commit}")
+            except (subprocess.TimeoutExpired, OSError):
+                tip_c, tip = 1, ""
+            plan_base = tip.strip() if tip_c == 0 and tip.strip() else None
             host.commit_message = lift_message(lifts)
             merging = True
             with timed_phase("merge-call"):
@@ -6154,11 +6168,6 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
             say(f"merge: #{n} UNKNOWN: the changed paths could not be read, so whether {PAGE_FILE} changed is unknown. Republish each live page if it did.")
         elif PAGE_FILE in names.split("\0"):
             say(f'merge: #{n} changes {PAGE_FILE}: republish each live waiting page now (skill waiting-page, "Update a repo\'s pages"), and put "republished: <pages>" or a reason in the report.')
-        try:  # ff_main's fetch moves origin/<base> onto the merge, which would empty the plan's diff; any failure leaves the base unknown and never holds the merge
-            tip_c, tip = git(wt, "rev-parse", "--verify", "-q", base_ref + "^{commit}")
-        except (subprocess.TimeoutExpired, OSError):
-            tip_c, tip = 1, ""
-        plan_base = tip.strip() if tip_c == 0 and tip.strip() else None
         ok = True
         try:
             ff_main(root, base, commit)
