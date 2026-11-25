@@ -14,8 +14,9 @@ the hook prints one JSON object on stdout and exits 0:
   line for any other or missing type, and fewer than 20 lines in all. Each scope line is pinned in full.
   The two standing git lines are pinned in full, and they are the same for every type. One bans git stash, with no
   worktree condition. The other bans git reset with one of the discard flags in RESET_DISCARD_FLAGS (guard_shared_tree),
-  git checkout of a path and git restore, only outside the agent's own worktree (decision agent-worktree-discard-is-noted:
-  an agent may discard inside its own worktree). A plain, soft or mixed reset is not named.
+  git checkout of a path and git restore, only outside the agent's own worktree: a folder under .claude/worktrees
+  (guard.agent_owned_worktree). The guard allows those discarding acts only in such a worktree, and refuses them in the
+  main checkout and in a hand-made worktree (decision agent-worktree-discard-is-noted). A plain, soft or mixed reset is not named.
 - The push line, the commit-trailer line and the record-path line appear for builder,
   test-author, record-writer, designer and any other type; never for reviewer, Explore, Plan,
   claude-code-guide, design-reviewer or refuter, which only read.
@@ -85,10 +86,10 @@ GENERAL_LINE = ("- Scope: do only what your brief names. A builder never edits t
 
 def standing_git_lines(flags):
     """The two standing git lines for the discard flags `flags`. The stash ban holds for every type. The reset ban,
-    with a checkout of a path and a restore, holds only outside the agent's own worktree."""
+    with a checkout of a path and a restore, holds only outside the agent's own worktree, a folder under .claude/worktrees."""
     return [
         "- Never run git stash.",
-        "- Outside your own worktree, never run git reset with one of the flags %s, git checkout of a path, or git restore." % "/".join(flags),
+        "- Outside your own agent worktree (a folder under .claude/worktrees), never run git reset with one of the flags %s, git checkout of a path, or git restore." % "/".join(flags),
     ]
 
 
@@ -329,8 +330,8 @@ def dispatch(case):
 RULES = [
     ("rule: never git stash, with no worktree condition",
      ("Never run git stash.",)),
-    ("rule: outside the agent's own worktree, never git reset with a discard flag, git checkout of a path, or git restore",
-     ("Outside your own worktree, never run git reset with one of the flags",
+    ("rule: outside the agent's own worktree (a folder under .claude/worktrees), never git reset with a discard flag, git checkout of a path, or git restore",
+     ("Outside your own agent worktree (a folder under .claude/worktrees), never run git reset with one of the flags",
       "/".join(guard_shared_tree.RESET_DISCARD_FLAGS), "git checkout of a path", "git restore")),
     ("rule: push only with git push origin HEAD:<branch>",
      ("Push only with", "git push origin HEAD:<branch>")),
@@ -397,7 +398,7 @@ def git_line_check(want):
                 return problem
             lines = text.split("\n")
             if want not in lines:
-                held = [line[:90] for line in lines if "Never run" in line or "Outside your own worktree" in line]
+                held = [line[:90] for line in lines if "Never run" in line or "Outside your own agent worktree" in line]
                 return "agent type %r holds %r, want %r" % (agent_type, held, want)
         return None
     return check
@@ -426,7 +427,7 @@ add("rules: the stash ban has no worktree condition: no other line names git sta
 
 
 RESET_VERB = re.compile(r"\breset\b", re.IGNORECASE)  # every use of the verb, bare or with a flag
-RESET_SENTENCE = "- Outside your own worktree,"  # the one sentence that may hold the reset verb
+RESET_SENTENCE = "- Outside your own agent worktree (a folder under .claude/worktrees),"  # the one sentence that may hold the reset verb
 
 
 def discard_flag_after(line, pos):
@@ -667,6 +668,64 @@ def guard_core_control_check():
 
 add("control: with guard_core working, the refuter gets the six-line set through the same runner", "custom",
     fn=guard_core_control_check)
+
+# SHARED-TREE FAILS ON IMPORT: the hook imports guard_shared_tree in its own try block, so a failed import drops only
+# the reset line. A None entry in sys.modules makes the import raise ImportError, as a module that fails to load does.
+BROKEN_SHARED_TREE = "import sys\nsys.modules['guard_shared_tree'] = None\n"
+
+
+def shared_tree_fails_check():
+    """A guard_shared_tree that fails on import: the hook still prints the scope line and every other standing line,
+    the stash line included, and prints no reset line. Exit 0, one JSON object on stdout."""
+    if not os.path.exists(HOOK):
+        return "the hook file is missing: %s" % HOOK
+    result = run_hook_after(BROKEN_SHARED_TREE, payload("builder"))
+    if result.returncode != 0:
+        return "exit %d when guard_shared_tree fails on import, want 0: %s" % (result.returncode, last_stderr_line(result))
+    if not result.stdout.strip():
+        return "with guard_shared_tree failing on import, the hook prints no context: every standing line is dropped"
+    text, problem = context_of(result.stdout)
+    if problem:
+        return problem
+    scope = scope_check("builder")(text)
+    if scope:
+        return "with guard_shared_tree failing on import, %s" % scope
+    lines = text.split("\n")
+    for want in WRITER_RULES:
+        if want != RESET_LINE and want not in lines:
+            return "with guard_shared_tree failing on import, no line is %r" % want[:90]
+    for line in lines:
+        if RESET_VERB.search(line):
+            return "with guard_shared_tree failing on import, a line still names the reset verb: %r" % line[:90]
+    return None
+
+
+add("error: a guard_shared_tree that fails on import keeps the stash line and every other standing line, and no reset line",
+    "custom", fn=shared_tree_fails_check)
+
+
+def shared_tree_control_check():
+    """The control for the case above: with guard_shared_tree working, the same child runner gives the builder the
+    stash line and a reset line. Green here and red above means the broken import is the cause, not the runner.
+    The reset line is found by its verb: its wording is pinned by the rules cases, not here."""
+    if not os.path.exists(HOOK):
+        return "the hook file is missing: %s" % HOOK
+    result = run_hook_after("", payload("builder"))
+    if result.returncode != 0:
+        return "exit %d with guard_shared_tree working, want 0: %s" % (result.returncode, last_stderr_line(result))
+    text, problem = context_of(result.stdout)
+    if problem:
+        return problem
+    lines = text.split("\n")
+    if STASH_LINE not in lines:
+        return "with guard_shared_tree working, no line is %r" % STASH_LINE[:90]
+    if not any(RESET_VERB.search(line) for line in lines):
+        return "with guard_shared_tree working, no line names the reset verb"
+    return None
+
+
+add("control: with guard_shared_tree working, the builder gets the stash line and a reset line through the same runner",
+    "custom", fn=shared_tree_control_check)
 
 # SILENT: junk or empty stdin gives no stdout, exit 0, and at most one stderr line that starts
 # `agent_brief:`.
