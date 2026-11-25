@@ -133,6 +133,7 @@ with open(EXTRAS, "w", encoding="utf-8") as handle:
 with open(TRANSCRIPT, "w", encoding="utf-8") as handle:
     handle.write('{"type": "user", "message": {"role": "user", "content": "hello"}}\n')
 open(EMPTY_TRANSCRIPT, "w", encoding="utf-8").close()
+HOST_PATH = os.environ["PATH"]   # sweep_proof runs the sweep on it; the fuzz runs on NO_TOOLS
 os.environ["CLAUDE_CONFIG_DIR"] = CONFIG
 os.environ["PATH"] = NO_TOOLS
 os.environ[ROOT_ENV] = ROOT_PID
@@ -535,7 +536,14 @@ def sweep_proof():
         os.makedirs(folder)
     os.utime(old, (now - 2 * 24 * 60 * 60, now - 2 * 24 * 60 * 60))
     os.utime(new, (now, now))
-    _test_temp.sweep(temp_root, own, now=now)
+    # held() asks lsof, which is on the host PATH, whether a live process holds a folder. Under the empty PATH it reads
+    # "held" and keeps the old sibling, so only this sweep runs on the host PATH.
+    before = os.environ["PATH"]
+    os.environ["PATH"] = HOST_PATH
+    try:
+        _test_temp.sweep(temp_root, own, now=now)
+    finally:
+        os.environ["PATH"] = before
     ok = not os.path.exists(old) and os.path.exists(new) and os.path.exists(own)
     print("sweep: %s (an old sibling %s, a new sibling %s, the own folder %s)"
           % ("ok" if ok else "FAILED", "removed" if not os.path.exists(old) else "KEPT",
