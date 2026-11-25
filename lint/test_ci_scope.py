@@ -2639,10 +2639,11 @@ class PushDiffFromProvenBase(FlagAsserts, unittest.TestCase):
 @unittest.skipUnless(BASH, "bash not on PATH")
 class ToolPinsScope(unittest.TestCase):
     """The tool_pins output. A pull request's run judges the pins only when that pull request moves a pin or the checker
-    (decision tool-pins, the 11:05 CST Nov 25 ruling). A schedule and a dispatch judge them on every run. The all-on paths and
-    an unreadable diff keep it off, as they keep every other pull-request flag off or on by their own rule."""
+    (decision tool-pins, the 11:05 CST Nov 25 ruling). The checker is .tool-versions and lint/check_tool_pins.py: a change to the
+    checker's own suite is not a move of the checker. A schedule and a dispatch judge them on every run. An unreadable diff turns
+    every flag on, tool_pins too (ci-scope.sh header)."""
 
-    PIN_PATHS = [".tool-versions", "lint/check_tool_pins.py", "lint/test_check_tool_pins.py"]
+    PIN_PATHS = [".tool-versions", "lint/check_tool_pins.py"]
 
     def tool_pins(self, paths, **keys):
         got = run(paths, **keys)
@@ -2655,6 +2656,10 @@ class ToolPinsScope(unittest.TestCase):
                 self.assertEqual(self.tool_pins([p], event="pull_request"), "true",
                                  "a pull request that touches %s must turn tool_pins on" % p)
 
+    def test_a_pull_request_that_moves_only_the_checker_suite_keeps_it_off(self):
+        self.assertEqual(self.tool_pins(["lint/test_check_tool_pins.py"], event="pull_request"), "false",
+                         "a pull request that touches only lint/test_check_tool_pins.py moves neither a pin nor the checker, so tool_pins stays off")
+
     def test_a_schedule_and_a_dispatch_turn_it_on_for_a_docs_only_diff(self):
         for ev in ("schedule", "workflow_dispatch"):
             with self.subTest(event=ev):
@@ -2664,11 +2669,15 @@ class ToolPinsScope(unittest.TestCase):
     def test_the_all_on_paths_keep_it_off(self):
         for p in (".github/workflows/checks.yml", ".github/scripts/ci-scope.sh"):
             with self.subTest(path=p):
-                self.assertEqual(self.tool_pins([p]), "false", "a diff touching %s turns every flag on, not tool_pins" % p)
-        self.assertEqual(self.tool_pins(["README.md"], event="push", base=""), "false",
-                         "a push with no proven base turns every flag on, not tool_pins")
-        self.assertEqual(self.tool_pins(["README.md"], base="f" * 40), "false",
-                         "an unreadable diff turns every flag on, not tool_pins")
+                self.assertEqual(self.tool_pins([p]), "false", "a diff touching %s moves neither a pin nor the checker, so tool_pins stays off" % p)
+
+    def test_a_pull_request_with_an_unreadable_base_turns_it_on_like_every_other_flag(self):
+        self.assertEqual(self.tool_pins(["README.md"], base="f" * 40), "true",
+                         "an unreadable pull request diff must turn tool_pins on, as it turns every other flag on (ci-scope.sh header)")
+
+    def test_a_push_with_no_proven_base_turns_it_on_like_every_other_flag(self):
+        self.assertEqual(self.tool_pins(["README.md"], event="push", base=""), "true",
+                         "a push with no proven base must turn tool_pins on, as it turns every other flag on (ci-scope.sh header)")
 
     def test_an_unrelated_diff_keeps_it_off(self):
         for p in ("merge/merge.py", "README.md"):
