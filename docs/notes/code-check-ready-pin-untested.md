@@ -1,0 +1,1 @@
+- code-check-ready-pin-untested: lint/test_cheap_lints.py CodeCheckReady asserts only `ruff==` on the pipx call (lines 416, 426, 432), so a pin change from 0.17.3 to 0.0.1 would pass; the mutant run was not repeated. No case covers the comment, mypy or shellcheck layers. Seen: 2026-11-24 x1

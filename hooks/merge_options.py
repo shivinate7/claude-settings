@@ -11,5 +11,5 @@ MERGE_OPTIONS = (
     "--base-red-ok", "--session", "--config", "--idle-lanes", "--draft-idle", "--live", "--reviewed", "--json", "--ledger", "--out",
     "--verdicts", "--subsumed", "--review-tally", "--since", "--split", "--audit-prs", "--root", "--release-check",
     "--lint", "--review-record", "--head", "--kind", "--guard", "--round", "--fix-check", "--grant", "--accepted",
-    "--net-value", "--touches", "--run", "--case", "--file",
+    "--net-value", "--touches", "--run", "--main-run", "--case", "--file",
 )

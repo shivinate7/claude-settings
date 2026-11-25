@@ -45,7 +45,7 @@ jobs:
   # since a cancelled run reads UNKNOWN and blocks merges. A failed read, or another daily still going, says skip=false: unknown runs
   # everything. The job itself starts on every event and its steps run on a schedule only: a job-level `if` would leave it skipped,
   # and a skipped ancestor skips every job behind scope. Reads per daily: one schedule runs read, one push runs read per page of 100, up to 5 pages,
-  # one jobs read of the newest push run since the green daily, for the log only.
+  # no jobs read.
   nightly-skip:
     runs-on: ubuntu-latest
     # Cap 5 min, unmeasured: the job makes a handful of reads.
