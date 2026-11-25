@@ -1,0 +1,1 @@
+- workflow-var-brief-refused: a Workflow `agent()` call whose brief is a variable is judged with an empty brief (`spawn_inputs` in hooks/guard.py), so an Explore on Opus whose variable holds the `Audit:` marker is refused. A literal brief lifts it, and the refusal names that remedy. Decision: agent-model-cap. Seen: 2026-11-25 x1
