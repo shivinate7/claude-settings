@@ -1837,6 +1837,28 @@ for _name, _tool, _command, _runs, _kind in _FOLDER_ROWS:
         skip_case("rm-parent: " + _name, NO_POSIX_SPELLING if _kind == "posix" else NO_DRIVE_SPELLING)
 rm_parent("rm -r the working folder named through its parent", "rm -r ../nogit")
 
+# The pin: each spelling `_spellings` yields, on each host, has its Bash case here as a run or a SKIP row, so
+# a loop that drops one from both sides shows as a FAIL, not as a count that moved. It is a log check. A
+# section cannot append to LOG_CHECKS_EXTRA yet (section 21304 creates it), so it joins through SKIP_ROWS,
+# which the run appends to LOG_CHECKS with the other log checks.
+SPELLING_PIN_LABEL = "rm-parent: every spelling of the working folder and its parent is run or SKIPped on this host"
+
+
+def _spelling_pin():
+    names = {case["name"] for case in CASES} | {label for label, _ in SKIP_ROWS}
+    for nt in (False, True):
+        for label, folder in (("the working folder", _CWD), ("its parent", _PARENT)):
+            for kind, _ in _spellings(folder, nt=nt):
+                name = "rm-parent: Bash rm -r %s as %s" % (label, kind)
+                if name not in names:
+                    return False, "%s is neither run nor a SKIP row on this host" % name
+    return True, "every spelling of the two folders is run or SKIPped on this host"
+
+
+LOG_FAMILY[SPELLING_PIN_LABEL] = _family(SPELLING_PIN_LABEL)
+FIXTURELESS_CHECKS.add(_spelling_pin)
+SKIP_ROWS.append((SPELLING_PIN_LABEL, _spelling_pin))
+
 # ALLOWED: a named folder, a sibling that is not a parent, a folder whose name merely starts with a
 # dot or the working folder's name, a call that is not recursive, and a delete that follows a folder
 # change but names a folder.
