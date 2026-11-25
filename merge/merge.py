@@ -5965,11 +5965,19 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
         with timed_phase("head-checks"):
             say("merge: checking the head's checks and runs ...")  # before the read, which can block
             proof = info["head"] if (no_ci and not needs_proof) or not heal else proven_head(wt, info["head"], base, lambda: heal)  # only this tool's own page and base-merge commits carry the proof of the head under them; a resumed claim is not one: the claim commit's own checks are read, never the head under it
-            if proof != info["head"]:
-                say(f"merge: {info['head'][:9]} is only this tool's own page and base-merge commits on {proof[:9]}, so the checks of {proof[:9]} are the proof.")
-                host.pending_lifted = True  # the commits above the proof have no run of their own: GitHub reads a required check on them pending (BLOCKED), and that one cause goes on to the PUT, as for a lint PASS
             state = "green" if no_ci and not needs_proof else host.head_state(n, proof, **proof_kw(needs_proof))  # under none no run is read, whatever host answers
             not_green = head_not_green(state)
+            own = None  # the live head's own state, read once when this tool's commits sit on the proof
+            if proof != info["head"]:
+                own = host.head_state(n, info["head"], **proof_kw(needs_proof))
+                if head_not_green(own) is None and not state.startswith("unknown ("):  # a green run of the live head itself proves it, whatever the head under it reads (a draft's skipped or cancelled rollup is no failure of this head). A read of the proof that could not run still refuses, as before
+                    say(f"merge: the own run of {info['head'][:9]} is green, so it is the proof, not the checks of {proof[:9]} under it.")
+                    proof, state, not_green = info["head"], own, None
+                else:
+                    say(f"merge: {info['head'][:9]} is only this tool's own page and base-merge commits on {proof[:9]}, so the checks of {proof[:9]} are the proof.")
+                    host.pending_lifted = True  # the commits above the proof have no run of their own: GitHub reads a required check on them pending (BLOCKED), and that one cause goes on to the PUT, as for a lint PASS
+                    if not_green and state.startswith("pending: ") and head_check_red(own):  # a pending read under the head must not hide that the head's own run failed
+                        raise Stop(f"the own run of {info['head'][:9]} is red, so the pending checks of {proof[:9]} under it do not cover it, and nothing was claimed or pushed {GREEN_CITE}: {head_not_green(own)}.")
             if not_green and state.startswith("pending: ") and not getattr(host, "on_red_base", False) and lint_proof and lint_proof(info):  # a red base keeps its pending head waiting: the PASS rests on a green base
                 say(f"merge: the head's run is still pending ({state[len('pending: '):]}), and a lane-lint PASS names {info['head'][:9]}, so the run does not hold the merge "
                     f"(owner, 2026-11-15 18:21 CST: {base}'s run after the merge is the check, and a red {base} reverts it).")
@@ -5982,7 +5990,6 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
                 raise Stop(f"{checks_read_of(proof, info['head'])} are not green, so nothing was claimed or pushed {GREEN_CITE}: {not_green}."
                            + (FIRST_PROOF_REMEDY.format(n=n) if needs_proof and state.startswith("pending: ") else ""))
             if proof != info["head"] and not not_green:  # the carried proof covers a run that has not finished, never one that failed or that this tool could not read, a lane-lint PASS on the pending proof included (decision merge-needs-current-base)
-                own = host.head_state(n, info["head"], **proof_kw(needs_proof))  # one more read, the live head's own state
                 if head_check_red(own):
                     raise Stop(f"the own run of {info['head'][:9]} is red, so the green proof of {proof[:9]} under it does not cover it, and nothing was claimed or pushed {GREEN_CITE}: {head_not_green(own)}.")
                 if own.startswith("unknown ("):
