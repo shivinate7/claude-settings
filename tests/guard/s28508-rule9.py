@@ -58,7 +58,7 @@ for _tool in ("Agent",):
 # ---- Step-up (rule roles-third-round-steps-up, decision agent-model-cap). The brief's fixed form
 # "Round N of 3" steps a reviewer up: the second needs sonnet, the third sonnet or opus. The
 # builder's marker steps nothing up. The builder row pins sonnet, so its third round needs no step-up. The old
-# builder form "Try N of 3" still counts until note try-marker-sunset.
+# builder form "Try N of 3" is read by the scanner, and no step-up reads it.
 # A reviewer on the last step-up ("Round N of 3" with N = 3) passes the step-up on opus, and the Opus ceiling
 # below refuses it unless an owner override lifts it (item 127 pick a, Nov 1 17:25 CST). The middle step-up stays sonnet only.
 # A reviewer's round 1 runs on the role's table model. Prose that quotes a round without the
@@ -112,8 +112,9 @@ add("floor step-up: reviewer Round 3 of 3 on opus is denied (the grant is per sp
     model="claude-opus-5-5", subagent_type="reviewer")
 add("floor step-up: builder Try 2 of 3 on sonnet is allowed", "allow",
     tool="Agent", prompt="Try 2 of 3. Continue the fix.", model="sonnet", subagent_type="builder")
-# The builder marker is the `Round N of 3` line (plan o13 group 9: a review and its fix is a round).
-# The old `Try N of 3` line still counts until the try-marker-sunset note removes it.
+# The builder marker is the `Round N of 3` line (plan o13 group 9: a review and its fix is a round). A builder's old
+# `Try N of 3` line is read by the scanner, but no step-up reads a builder's line: these cases pin the builder row
+# (sonnet is allowed, Opus is refused under agent-model-cap), whichever line the brief carries.
 add("floor step-up: builder Round 3 of 3 on sonnet is allowed (its row is sonnet, item 893)", "allow",
     tool="Agent", prompt="Round 3 of 3. Finish the fix.", model="sonnet", subagent_type="builder")
 add("floor step-up: builder Round 3 of 3 with no model is allowed (the pin runs sonnet, item 893)", "allow",
