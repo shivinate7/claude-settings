@@ -8,6 +8,7 @@ Modes:
   reason, logged to guard.log. `override <n>[m|h]` and `override off` mean that only as the whole prompt.
   A plain typed ask that holds the word `override` may grant one too, after a model call
   (decision owner-override; hooks/override.py). It prints one more line.
+  When the session's folder is gone, it also prints a line that says so.
 - --agent: At SubagentStart, gives the agent the time in US Central as context.
 - --page-note: After an ArtifactData read of one waiting-page answer, saves the owner's note on it to the session's inbox, like a chat message (decision owner-feedback-inbox). It prints no time line.
 
@@ -424,10 +425,10 @@ def cwd_gone_line(raw):
     else:
         return
     try:
-        from guard import SESSION_HOME_REASON
+        from guard import SESSION_HOME_REASON  # the remedy has one home; this hook holds no copy
         print("Session folder gone: %s. %s" % (cwd, SESSION_HOME_REASON))
-    except Exception:  # the folder is known gone, so the plain line still goes out
-        print("Session folder gone: %s. Enter a new worktree (EnterWorktree, with a name and no path) before you write." % cwd)
+    except Exception:  # the folder is known gone, so the line still goes out, with no remedy words of its own
+        print("Session folder gone: %s." % cwd)
 
 
 OLD_FLAG_ENDS = "2026-11-09"
