@@ -2228,6 +2228,121 @@ def A17e_the_30_min_after_a_resume_counts_from_the_latest_resume():
     return problems
 
 
+def waited_then_resumed(folder, aid, tag, resume_ago, close):
+    """A background agent launched 50 min before the Stop, sent a waiting notice 48 min before it, and, when close,
+    a plain completed notice 45 min before it. It was then resumed under its id resume_ago seconds before the Stop.
+    Return (the transcript records, the agent's spec for transcript(agents=)). Its transcript is quiet for 400 s."""
+    launch, spec = background_agent(folder, aid, agent_step(tag), 400)
+    recs = stamped(launch, 3000) + stamped([waiting_notice(aid)], 2880)
+    if close:
+        recs += stamped([finished_notice(aid)], 2700)
+    return recs + stamped(resume_records(tag, aid), resume_ago), spec
+
+
+@case
+def A17f_agent_resumed_after_a_waiting_notice_and_a_plain_close_is_listed_quiet():
+    """A17f. a background agent launched 50 min before the Stop, sent a waiting notice 48 min before it, closed by a
+    plain completed notice 45 min before it, then resumed 10 min before it and quiet for 400 s: the Stop lists it as
+    quiet, since the resume is newer than the waiting notice and clears its waiting flag. Control: a second agent,
+    launched 15 min before, never waiting and quiet for 400 s, is listed once"""
+    aid, ctl_id = agent_id(310), agent_id(311)
+    folder = new_dir()
+    recs, spec = waited_then_resumed(folder, aid, "f", 600, close=True)
+    lc, ctl = background_agent(folder, ctl_id, agent_step("c1"), 400)
+    rc, out, err = run_stop(transcript(recs + stamped(lc, 900), agents=[spec, ctl], folder=folder))
+    problems = expect(rc == 0, f"exit {rc}, want 0: {err.strip()[:200]}")
+    msg = system_message(out, problems)
+    problems += expect(aid in msg,
+                       f"resumed agent {aid} is not listed as quiet: its resume came after its waiting notice, but "
+                       f"the waiting flag was not cleared: {out[:200]!r}")
+    problems += ["control: " + p for p in listed_once(msg, ctl_id, by_line=True)]
+    return problems
+
+
+@case
+def A17g_agent_resumed_with_no_close_after_a_waiting_notice_is_listed_quiet():
+    """A17g. a background agent launched 50 min before the Stop, sent a waiting notice 48 min before it, then resumed
+    10 min before it with no close between, and quiet for 400 s: the Stop lists it as quiet, since the resume is newer
+    than the waiting notice and clears its waiting flag. Control: a second agent, launched 15 min before, never waiting
+    and quiet for 400 s, is listed once"""
+    aid, ctl_id = agent_id(312), agent_id(313)
+    folder = new_dir()
+    recs, spec = waited_then_resumed(folder, aid, "g", 600, close=False)
+    lc, ctl = background_agent(folder, ctl_id, agent_step("c1"), 400)
+    rc, out, err = run_stop(transcript(recs + stamped(lc, 900), agents=[spec, ctl], folder=folder))
+    problems = expect(rc == 0, f"exit {rc}, want 0: {err.strip()[:200]}")
+    msg = system_message(out, problems)
+    problems += expect(aid in msg,
+                       f"resumed agent {aid} is not listed as quiet: its resume came after its waiting notice, but "
+                       f"the waiting flag was not cleared: {out[:200]!r}")
+    problems += ["control: " + p for p in listed_once(msg, ctl_id, by_line=True)]
+    return problems
+
+
+@case
+def A17h_agent_resumed_2000_s_ago_after_a_waiting_notice_is_not_said_to_be_waiting():
+    """A17h. a background agent launched 50 min before the Stop, sent a waiting notice 48 min before it, closed by a
+    plain completed notice 45 min before it, then resumed 2000 s before the Stop, quiet for 400 s, with no check-in:
+    the Stop blocks and names it, and the block does not say it is waiting on its own background work, since the
+    resume is newer than the waiting notice and clears its waiting flag"""
+    aid = agent_id(314)
+    folder = new_dir()
+    recs, spec = waited_then_resumed(folder, aid, "h", 2000, close=True)
+    rc, out, err = run_stop(transcript(recs, agents=[spec], folder=folder))
+    problems = expect(rc == 0, f"exit {rc}, want 0: {err.strip()[:200]}")
+    problems += expect(aid in block_text(out),
+                       f"resumed agent {aid} is not named in a block 2000 s after its resume: {out[:200]!r}")
+    problems += expect(WAITING not in block_text(out),
+                       f"the block of resumed agent {aid} says it is waiting on its own background work, though its "
+                       f"resume came after its waiting notice: {block_text(out)[:300]!r}")
+    return problems
+
+
+@case
+def A17i_waiting_notice_newer_than_the_latest_resume_keeps_the_agent_waiting():
+    """A17i. a background agent launched 50 min before the Stop, resumed 15 min before it, then sent a waiting notice
+    10 min before it, and quiet for 400 s: the waiting notice is newer than the resume, so the agent stays waiting and
+    gets no quiet row. Control: a second agent, launched 15 min before, never waiting and quiet for 400 s, is listed
+    once"""
+    aid, ctl_id = agent_id(315), agent_id(316)
+    folder = new_dir()
+    launch, spec = background_agent(folder, aid, agent_step("i"), 400)
+    lc, ctl = background_agent(folder, ctl_id, agent_step("c1"), 400)
+    recs = (stamped(launch, 3000) + stamped(resume_records("i", aid), 900)
+            + stamped([waiting_notice(aid)], 600) + stamped(lc, 900))
+    rc, out, err = run_stop(transcript(recs, agents=[spec, ctl], folder=folder))
+    problems = expect(rc == 0, f"exit {rc}, want 0: {err.strip()[:200]}")
+    msg = system_message(out, problems)
+    problems += expect(aid not in msg,
+                       f"waiting agent {aid} has a quiet row though its waiting notice is newer than its resume: "
+                       f"{out[:200]!r}")
+    problems += ["control: " + p for p in listed_once(msg, ctl_id, by_line=True)]
+    return problems
+
+
+@case
+def A17j_agent_never_resumed_with_a_waiting_notice_stays_waiting_and_its_block_says_so():
+    """A17j. a background agent launched 31 min before the Stop, sent a waiting notice 10 min before it, never resumed,
+    and quiet for 400 s: it gets no quiet row, and its 1800 s block names it and says it is waiting on its own
+    background work. Control: a second agent, launched 15 min before, never waiting and quiet for 400 s, is listed
+    once"""
+    aid, ctl_id = agent_id(317), agent_id(318)
+    folder = new_dir()
+    launch, spec = background_agent(folder, aid, agent_step("j"), 400)
+    lc, ctl = background_agent(folder, ctl_id, agent_step("c1"), 400)
+    recs = stamped(launch, 1860) + stamped([waiting_notice(aid)], 600) + stamped(lc, 900)
+    rc, out, err = run_stop(transcript(recs, agents=[spec, ctl], folder=folder))
+    problems = expect(rc == 0, f"exit {rc}, want 0: {err.strip()[:200]}")
+    problems += agent_block(out, aid)
+    problems += expect(WAITING in block_text(out),
+                       f"the block of the never-resumed waiting agent {aid} does not say it is waiting on its own "
+                       f"background work: {block_text(out)[:300]!r}")
+    msg = system_message(out, problems)
+    problems += expect(aid not in msg, f"waiting agent {aid} has a quiet row: {msg[:200]!r}")
+    problems += ["control: " + p for p in listed_once(msg, ctl_id, by_line=True)]
+    return problems
+
+
 # ---- The CI-wait check of this mode (decision ci-wait-reads-run-status, "The fallback") ----
 # A wait opens at the newest ready call and closes at a green or cancelled verdict, or a merge or close of its own
 # PR. A wait that a bare ready call opens (no PR number) closes at a merge or close of any PR. A red verdict keeps
