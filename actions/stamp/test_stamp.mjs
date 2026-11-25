@@ -3,6 +3,8 @@
 // test is a function that throws via `node:assert` on failure. Every test builds its own
 // throwaway directory under the OS temp dir and removes it when done, so tests never touch this
 // repository's own tree and never share state with each other.
+// Subject marker, read by bin/ci-job so a change to stamp.mjs reaches this suite:
+// ${SUBJECT_UNDER_TEST:-$REPO_ROOT/actions/stamp/stamp.mjs}
 
 import "../../lint/_test_git.mjs";  // test-run signing opt-out (lint/_test_git.mjs)
 import assert from "node:assert/strict";
