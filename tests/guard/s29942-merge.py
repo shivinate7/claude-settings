@@ -112,9 +112,9 @@ def lane_mcp_ready(name, expected, transcript, **tool_input):
         **tool_input)
 
 
-lane_mcp_ready("lane MCP update with draft false on its own pull request is refused", "deny", TX_LANE_CS, owner="o", repo="a", pullNumber=5,
+lane_mcp_ready("lane MCP update with draft false on its own pull request is refused", "deny", TX_LANE_CS, rule="merge-role-proof", owner="o", repo="a", pullNumber=5,
                draft=False)
-lane_mcp_ready("lane MCP update with draft false on another pull request is refused", "deny", TX_LANE_CS, owner="o", repo="a", pullNumber=9,
+lane_mcp_ready("lane MCP update with draft false on another pull request is refused", "deny", TX_LANE_CS, rule="merge-role-proof", owner="o", repo="a", pullNumber=9,
                draft=False)
 # A lane whose record names only another repo, or no repo, is not judged by the lane rule: its draft-false update is allowed, as on main.
 # Red on the current guard, which refuses every lane's draft-false update.

@@ -2941,11 +2941,250 @@ class CitedExcerptTests(unittest.TestCase):
         self.assertIsNone(shown, "a read cite with no backing path gives %r, want None" % (shown,))
 
     def test_a_cited_row_is_whole_when_no_row_limit_is_given(self):
-        # Control: a row limit is opt-in, so a caller that names none still gets each cited row whole. The judge's cut of one over-budget
-        # line passes its own limit (the packing pick, 04:00 CST Nov 24 2026) and changes no other caller.
+        # Control: a row limit is opt-in. A caller that sets none still gets each cited row whole.
         long_row = "a = " + "1" * 500
         shown = self.stale.cited_excerpt("read src/widget.py:1", long_row + "\n")
         self.assertEqual(shown, "1: " + long_row, "a cited row of %d characters is not whole with no row limit given" % len(long_row))
+
+    # A `read` cite that names a symbol and gives no line number starts at that symbol: its def, its class, or its module-level
+    # assignment. A file head shows none of a symbol that sits past the first 40 rows.
+    DEEP = "".join("x%d = %d\n" % (n, n) for n in range(60)) + "\n\ndef deep():\n    return 1\n"  # `def deep` sits past the first 40 rows
+    DEEP_LONG = DEEP + "".join("    v%d = 1\n" % n for n in range(80))  # the same def, with a body past the default limit
+
+    def test_a_read_cite_naming_a_function_starts_at_its_def(self):
+        shown = self.stale.cited_excerpt("read lint/widget.py deep", self.DEEP)
+        self.assertEqual(shown.split("\n")[0], "63: def deep():",
+                         "a read cite naming a function starts at %r, not at its def" % shown.split("\n")[0])
+
+    def test_a_read_path_colon_name_cite_starts_at_its_def(self):
+        shown = self.stale.cited_excerpt("read lint/widget.py::deep", self.DEEP)
+        self.assertEqual(shown.split("\n")[0], "63: def deep():",
+                         "a read path::name cite starts at %r, not at its def" % shown.split("\n")[0])
+
+    def test_a_read_cite_naming_a_module_constant_starts_at_its_assignment(self):
+        text = "".join("x%d = %d\n" % (n, n) for n in range(60)) + "\nOTHER_CHECKOUT_GIT_VERBS = (\n    'add',\n    'rm',\n)\n"  # line 62
+        shown = self.stale.cited_excerpt("read lint/widget.py OTHER_CHECKOUT_GIT_VERBS", text)
+        self.assertEqual(shown.split("\n")[0], "62: OTHER_CHECKOUT_GIT_VERBS = (",
+                         "a read cite naming a constant starts at %r, not at its assignment" % shown.split("\n")[0])
+
+    def test_a_read_cite_naming_a_class_starts_at_the_class(self):
+        text = "".join("y%d = 1\n" % n for n in range(50)) + "class Widget:\n    def render(self):\n        return 1\n"  # class at line 51
+        shown = self.stale.cited_excerpt("read lint/widget.py Widget", text)
+        self.assertEqual(shown.split("\n")[0], "51: class Widget:",
+                         "a read cite naming a class starts at %r, not at the class" % shown.split("\n")[0])
+
+    def test_a_read_cite_naming_a_method_starts_at_the_method(self):
+        text = "".join("y%d = 1\n" % n for n in range(50)) + "class Widget:\n    def render(self):\n        return 1\n"  # method at line 52
+        shown = self.stale.cited_excerpt("read lint/widget.py render", text)
+        self.assertEqual(shown.split("\n")[0], "52:     def render(self):",
+                         "a read cite naming a method starts at %r, not at the method" % shown.split("\n")[0])
+
+    def test_a_read_cite_naming_no_symbol_shows_the_file_head(self):
+        # Control: a name the file does not bind falls back to the top of the file.
+        shown = self.stale.cited_excerpt("read lint/widget.py missing_name", self.DEEP)
+        self.assertEqual(shown.split("\n")[0], "1: x0 = 0",
+                         "a read cite naming no symbol starts at %r, not at the file head" % shown.split("\n")[0])
+
+    def test_a_read_line_range_past_line_40_gives_those_lines(self):
+        # Control: a line number in the cite wins, so a symbol is never looked up for it.
+        shown = self.stale.cited_excerpt("read lint/widget.py:63-64", self.DEEP)
+        self.assertEqual(shown, "63: def deep():\n64:     return 1", "a read line range past line 40 does not give those two lines")
+
+    def test_a_test_cite_past_line_40_starts_at_its_def(self):
+        # Control: the test form starts at the def of its name, also when that def sits past the first 40 rows.
+        shown = self.stale.cited_excerpt("test lint/widget.py::deep", self.DEEP)
+        self.assertEqual(shown.split("\n")[0], "63: def deep():",
+                         "a test cite past line 40 starts at %r, not at its def" % shown.split("\n")[0])
+
+    def test_a_test_cite_to_a_def_at_line_11_shows_limit_rows_from_it(self):
+        # The window runs limit rows from the def, wherever the def sits. Here the def is near the top of the file.
+        text = "".join("x%d = %d\n" % (n, n) for n in range(10)) + "def near():\n" + "".join("    v%d = 1\n" % n for n in range(80))
+        rows = self.stale.cited_excerpt("test lint/widget.py::near", text).split("\n")
+        self.assertEqual(rows[0], "11: def near():", "a test cite to a def at line 11 starts at %r, not at its def" % rows[0])
+        self.assertEqual(rows[-1], "50:     v38 = 1",
+                         "a test cite to a def at line 11 ends at %r, want line 50 (40 rows from the def)" % rows[-1])
+
+    def test_a_test_cite_to_a_def_at_line_63_shows_limit_rows_from_it(self):
+        # The same claim for a def past the first 40 rows: the window still runs limit rows from the def.
+        text = "".join("x%d = %d\n" % (n, n) for n in range(62)) + "def deep():\n" + "".join("    v%d = 1\n" % n for n in range(137))
+        rows = self.stale.cited_excerpt("test lint/widget.py::deep", text).split("\n")
+        self.assertEqual(rows[0], "63: def deep():", "a test cite to a def at line 63 starts at %r, not at its def" % rows[0])
+        self.assertEqual(rows[-1], "102:     v38 = 1",
+                         "a test cite to a def at line 63 ends at %r, want line 102 (40 rows from the def)" % rows[-1])
+
+    def test_a_test_cite_to_a_def_five_lines_before_the_end_shows_those_five(self):
+        # The window stops at the file end, so a def near the end shows only the rows that exist.
+        text = "".join("x%d = %d\n" % (n, n) for n in range(195)) + "def tail():\n" + "".join("    v%d = 1\n" % n for n in range(3)) + "    return 1"
+        shown = self.stale.cited_excerpt("test lint/widget.py::tail", text)
+        self.assertEqual(shown.split("\n"), ["196: def tail():", "197:     v0 = 1", "198:     v1 = 1", "199:     v2 = 1", "200:     return 1"],
+                         "a test cite to a def five lines before the end shows %d rows, want the five from it" % len(shown.split("\n")))
+
+    def test_a_read_symbol_excerpt_is_capped_at_the_default_limit_from_its_def(self):
+        shown = self.stale.cited_excerpt("read lint/widget.py deep", self.DEEP_LONG)
+        self.assertEqual(shown.split("\n")[0], "63: def deep():",
+                         "a read cite naming a function starts at %r, not at its def" % shown.split("\n")[0])
+        self.assertEqual(len(shown.split("\n")), 40, "a read symbol excerpt is not the default limit of 40 rows")
+
+    def test_a_read_symbol_near_the_end_of_the_file_stops_at_the_end(self):
+        text = "".join("x%d = %d\n" % (n, n) for n in range(43)) + "def near():\n    return 1"  # no final newline: 45 lines
+        shown = self.stale.cited_excerpt("read lint/widget.py near", text)
+        self.assertEqual(shown, "44: def near():\n45:     return 1",
+                         "a read symbol near the end of the file gives %r, not its two rows" % shown)
+
+    def test_a_string_with_a_comment_opener_naming_the_def_is_not_the_start(self):
+        # A scanner that reads text finds the first `def deep` in the string. The ast finds the real def.
+        text = 'NOTE = "# def deep(): moved below"\n' + "".join("x%d = %d\n" % (n, n) for n in range(50)) + "\ndef deep():\n    return 1\n"
+        shown = self.stale.cited_excerpt("read lint/widget.py deep", text)
+        self.assertEqual(shown.split("\n")[0], "53: def deep():",
+                         "a read cite starts at %r, which is a string that names the def, not the def" % shown.split("\n")[0])
+
+    def test_a_multi_line_string_naming_the_def_is_not_the_start(self):
+        text = 'HELP = """\ndef deep():\n"""\n' + "".join("x%d = %d\n" % (n, n) for n in range(50)) + "\ndef deep():\n    return 1\n"
+        shown = self.stale.cited_excerpt("read lint/widget.py deep", text)
+        self.assertEqual(shown.split("\n")[0], "55: def deep():",
+                         "a read cite starts at %r, which is a multi-line string that names the def, not the def" % shown.split("\n")[0])
+
+    def test_a_lone_quote_in_a_comment_before_the_def_is_not_the_start(self):
+        text = "# don't move deep() below the filler\n" + "".join("x%d = %d\n" % (n, n) for n in range(50)) + "\ndef deep():\n    return 1\n"
+        shown = self.stale.cited_excerpt("read lint/widget.py deep", text)
+        self.assertEqual(shown.split("\n")[0], "53: def deep():",
+                         "a read cite starts at %r, not at the def after a lone quote in a comment" % shown.split("\n")[0])
+
+    def two_path_excerpt(self, cite, texts):
+        # A cite that names two paths takes a {path: text} mapping. A call that raises instead (the one-text shape) fails the
+        # case with a message that names the missing shape.
+        try:
+            return self.stale.cited_excerpt(cite, texts)
+        except (AttributeError, TypeError) as exc:
+            self.fail("cited_excerpt takes one file's text, so a cite naming two paths cannot show both: %s" % exc)
+
+    def test_a_cite_naming_two_paths_shows_each_symbol_under_its_own_path(self):
+        # cited_excerpt(cite, {path: text}) gives one block per path, each opened by a "== path" row, then that path's numbered
+        # rows, capped at the default limit of 40. A str text still means the one file the cite's first path names.
+        alpha = "".join("a%d = %d\n" % (n, n) for n in range(60)) + "\n\ndef alpha():\n" + "".join("    a%d = 1\n" % n for n in range(60))
+        beta = "".join("b%d = %d\n" % (n, n) for n in range(60)) + "\n\ndef beta():\n" + "".join("    b%d = 1\n" % n for n in range(60))
+        shown = self.two_path_excerpt("read lint/a.py alpha, lint/b.py beta", {"lint/a.py": alpha, "lint/b.py": beta})
+        self.assertIn("== lint/a.py", shown, "a cite naming two paths has no block for lint/a.py")
+        self.assertIn("== lint/b.py", shown, "a cite naming two paths has no block for lint/b.py")
+        self.assertIn("63: def alpha():", shown, "a cite naming two paths does not show alpha's def")
+        self.assertIn("63: def beta():", shown, "a cite naming two paths does not show beta's def")
+        self.assertLess(shown.index("== lint/a.py"), shown.index("63: def alpha():"), "alpha is not under its own path lint/a.py")
+        self.assertLess(shown.index("63: def alpha():"), shown.index("== lint/b.py"), "alpha is under the block of lint/b.py")
+        self.assertLess(shown.index("== lint/b.py"), shown.index("63: def beta():"), "beta is not under its own path lint/b.py")
+        block_a = shown[shown.index("== lint/a.py"):shown.index("== lint/b.py")].split("\n")[1:]
+        self.assertLessEqual(len([row for row in block_a if row.strip()]), 40, "the lint/a.py block is over the per-path cap of 40 rows")
+
+    # FILL_ROWS are rows 1 to 60, so a def placed after them sits past the first 40 rows. BODY_ROWS is 60 rows of a def body.
+    FILL_ROWS = "".join("x%d = %d\n" % (n, n) for n in range(60))
+    BODY_ROWS = "".join("    v%d = 1\n" % n for n in range(60))
+
+    def test_two_names_after_one_path_each_show_their_definition(self):
+        # One path and two names, the second def more than 40 rows below the first: the excerpt shows both defs.
+        text = self.FILL_ROWS + "\n\ndef alpha():\n" + self.BODY_ROWS + "\n\ndef beta():\n    return 2\n"
+        shown = self.stale.cited_excerpt("read lint/mod.py alpha, beta", text)
+        self.assertIn("63: def alpha():", shown, "a cite naming alpha and beta does not show alpha's def")
+        self.assertIn("126: def beta():", shown, "a cite naming alpha and beta does not show beta's def")
+
+    def test_a_line_range_after_a_second_path_does_not_move_the_first_paths_window(self):
+        # The cite's first path starts at its name. The line range after the second path belongs to that second path.
+        text = self.FILL_ROWS + "\n\ndef alpha():\n" + self.BODY_ROWS
+        shown = self.stale.cited_excerpt("read lint/a.py alpha, lint/b.py:3-4", text)
+        self.assertEqual(shown.split("\n")[0], "63: def alpha():",
+                         "a line range after a second path moved the first path's window to %r, not to alpha's def"
+                         % shown.split("\n")[0])
+
+    def test_a_dotted_name_starts_at_the_method_of_that_class(self):
+        # Guard.check names one method. Another class's check comes first in the file, and the file head is not the start.
+        text = ("class Other:\n    def check(self):\n        return 0\n\n\n" + self.FILL_ROWS
+                + "\n\nclass Guard:\n    def check(self):\n        return 1\n")
+        shown = self.stale.cited_excerpt("read lint/mod.py Guard.check", text)
+        self.assertEqual(shown.split("\n")[0], "69:     def check(self):",
+                         "a dotted name starts at %r, not at the method Guard.check" % shown.split("\n")[0])
+
+    def test_a_name_followed_by_prose_words_is_not_a_symbol(self):
+        # The rule: a name followed by more lower-case prose words is not a symbol, so the excerpt starts at the file head.
+        # The file defines read, and the cite's prose uses that word, so a scan that takes the word as a symbol starts at def read.
+        text = "import os\n\n\ndef read(path):\n    return open(path).read()\n"
+        shown = self.stale.cited_excerpt("read lint/widget.py read the refusal text", text)
+        self.assertEqual(shown.split("\n")[0], "1: import os",
+                         "a word followed by lower-case prose is read as a symbol: the excerpt starts at %r" % shown.split("\n")[0])
+
+    def test_a_non_python_read_cite_naming_a_heading_gives_the_file_head(self):
+        # Control: a file that is not Python has no def to find, so the cite gives the top of the file, with no error.
+        text = "intro line\n\nmore text\n\n# Heading\nrow\n"
+        shown = self.stale.cited_excerpt("read docs/notes.md Heading", text)
+        self.assertEqual(shown.split("\n")[0], "1: intro line",
+                         "a non-Python read cite starts at %r, not at the file head" % shown.split("\n")[0])
+
+    def test_a_name_defined_twice_shows_the_earliest_definition(self):
+        # Control: the same method name in two classes. The first def in the file is the one the excerpt starts at.
+        text = "class A:\n    def render(self):\n        return 1\n\n\nclass B:\n    def render(self):\n        return 2\n"
+        shown = self.stale.cited_excerpt("read lint/widget.py render", text)
+        self.assertEqual(shown.split("\n")[0], "2:     def render(self):",
+                         "a name defined twice starts at %r, not at the earliest def" % shown.split("\n")[0])
+
+    # The fixture for the cases below: one def or constant per name, with FILL_ROWS between two of them, so a window of
+    # 20 rows from one name never reaches another name's rows.
+    def apart(self, *blocks):
+        return "".join(block + self.FILL_ROWS for block in blocks)
+
+    def name_fixture(self):
+        return self.apart("def alpha():\n    return 1\n", "def beta():\n    return 2\n", "def read(path):\n    return path\n",
+                          "def test():\n    return 3\n", "def the():\n    return 4\n", "def Then():\n    return 5\n",
+                          "ALPHA = 6\n", "class Guard:\n    def check(self):\n        return 7\n")
+
+    def test_a_second_read_of_one_path_shows_its_name_and_not_the_verb(self):
+        # Two reads of one path. The second `read` is a verb, and beta is the name of the second cite.
+        shown = self.stale.cited_excerpt("read pkg/mod.py alpha; read pkg/mod.py beta", self.name_fixture())
+        self.assertIn("def alpha():", shown, "the first read of pkg/mod.py does not show alpha's def")
+        self.assertIn("def beta():", shown, "the second read of pkg/mod.py gives no rows: beta's def is not in the excerpt")
+        self.assertNotIn("def read(", shown, "the verb `read` of the second cite is taken as a name of pkg/mod.py: def read shows")
+
+    def test_a_read_verb_after_a_comma_is_not_a_name(self):
+        shown = self.stale.cited_excerpt("read pkg/mod.py alpha, read", self.name_fixture())
+        self.assertIn("def alpha():", shown, "alpha's def is not in the excerpt of `read pkg/mod.py alpha, read`")
+        self.assertNotIn("def read(", shown, "the verb `read` after a comma is taken as a name: def read shows")
+
+    def test_a_test_verb_after_a_comma_is_not_a_name(self):
+        shown = self.stale.cited_excerpt("read pkg/mod.py alpha, test", self.name_fixture())
+        self.assertIn("def alpha():", shown, "alpha's def is not in the excerpt of `read pkg/mod.py alpha, test`")
+        self.assertNotIn("def test(", shown, "the verb `test` after a comma is taken as a name: def test shows")
+
+    def test_a_capitalised_word_after_a_sentence_end_is_not_a_name(self):
+        # `Then...` ends the cite. The word after a name's sentence end is prose, so it is not a name.
+        shown = self.stale.cited_excerpt("read pkg/mod.py alpha. Then...", self.name_fixture())
+        self.assertIn("def alpha():", shown, "alpha's def is not in the excerpt of `read pkg/mod.py alpha. Then...`")
+        self.assertNotIn("def Then(", shown, "the word Then after a sentence end is taken as a name: def Then shows")
+
+    def test_a_word_after_a_comma_before_capitalised_prose_is_not_a_name(self):
+        # `the` is followed by a capitalised word, so the lower-case prose check does not stop it. It is still prose.
+        shown = self.stale.cited_excerpt("read pkg/mod.py alpha, the Bash route's denial", self.name_fixture())
+        self.assertIn("def alpha():", shown, "alpha's def is not in the excerpt of `read pkg/mod.py alpha, the Bash route's denial`")
+        self.assertNotIn("def the(", shown, "the word `the` before prose is taken as a name: def the shows")
+
+    def test_a_constant_then_a_name_both_show_control(self):
+        # Control: a capitalised constant is a name, and the name after it is a name too.
+        shown = self.stale.cited_excerpt("read pkg/mod.py ALPHA, beta", self.name_fixture())
+        self.assertIn("ALPHA = 6", shown, "the constant ALPHA is not in the excerpt of `read pkg/mod.py ALPHA, beta`")
+        self.assertIn("def beta():", shown, "beta, the name after ALPHA, is not in the excerpt")
+
+    def test_a_dotted_name_starts_at_its_method_control(self):
+        # Control: Guard.check starts at the method, not at the class line or the file head.
+        shown = self.stale.cited_excerpt("read pkg/mod.py Guard.check", self.name_fixture())
+        self.assertEqual(shown.split("\n")[0].split(": ", 1)[1], "    def check(self):",
+                         "Guard.check starts at %r, not at the method" % shown.split("\n")[0])
+
+    def test_a_lower_case_word_after_a_sentence_end_stays_prose_control(self):
+        # Control: the lower-case `the` after `Then` keeps Then out of the names.
+        shown = self.stale.cited_excerpt("read pkg/mod.py alpha. Then the guard runs", self.name_fixture())
+        self.assertIn("def alpha():", shown, "alpha's def is not in the excerpt of `read pkg/mod.py alpha. Then the guard runs`")
+        self.assertNotIn("def Then(", shown, "Then, followed by lower-case prose, is taken as a name: def Then shows")
+
+    def test_a_lower_case_word_after_a_comma_stays_prose_control(self):
+        # Control: `the` is followed by lower-case prose, so it is not a name.
+        shown = self.stale.cited_excerpt("read pkg/mod.py alpha, the second route's denial", self.name_fixture())
+        self.assertIn("def alpha():", shown, "alpha's def is not in the excerpt of `read pkg/mod.py alpha, the second route's denial`")
+        self.assertNotIn("def the(", shown, "`the`, followed by lower-case prose, is taken as a name: def the shows")
 
 
 CONFIG = "hooks/config.py"  # the Python file the value cites name
