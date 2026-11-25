@@ -52,7 +52,8 @@ DEFAULT_PARENT = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 
 def list_files(root):
     """Tracked files when root is a git tree, else every file outside SKIP_DIRS. The export manifest at the root is no file of the repo, so it is left out."""
-    return [rel for rel in _list_files(root) or [] if rel != tree_export.MANIFEST] if _list_files(root) is not None else None
+    files = _list_files(root)
+    return None if files is None else [rel for rel in files if rel != tree_export.MANIFEST]
 
 
 def _list_files(root):

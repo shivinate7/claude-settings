@@ -109,7 +109,10 @@ def main(argv, state):
             else:
                 shutil.copyfile(src, dest)
                 added = [op[1].replace(os.sep, "/")]
-            manifest_add(folder, added)  # the copy has no .git: its listing reads the manifest
+            try:
+                manifest_add(folder, added)  # the copy has no .git: its listing reads the manifest
+            except ValueError as exc:  # a path the manifest cannot hold
+                raise BadCall(str(exc))
         else:
             try:
                 apply_mutant(folder, op[2], op[3], files=[op[1]])
