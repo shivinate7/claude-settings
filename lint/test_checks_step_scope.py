@@ -575,9 +575,14 @@ TRANSITIVE_ALLOWED = {
     "hooks/test_mutate_ci.py": (["test_guard.py"], "strace, round 1 review: no open of skills/impeccable at run time"),
     "lint/check_unknown_reads_contract.py": (["test_guard.py"], "strace, round 1 review: no open of skills/impeccable at run time"),
 }
-# A shell or JS line that runs or reads something. A line without one (a case pattern, a comment) names no read. The `sh` after a dot
-# is a file extension (merge/install_from_main.sh), not the command.
-INVOKE = re.compile(r"\b(python3?|node|bash|source|cat|readFileSync|readFile|spawnSync|spawn|execFileSync|execFile|exec)\b|(?<!\.)\bsh\b")
+# A shell or JS line that runs or reads something: a command word, or a shell file in command position (COMMAND_PATH). The `sh` after
+# a dot is a file extension (merge/install_from_main.sh), not the command.
+INVOKE = re.compile(r"\b(python3?|node|bash|zsh|dash|source|cat|readFileSync|readFile|spawnSync|spawn|execFileSync|execFile|exec)\b|(?<!\.)\bsh\b")
+# A .sh or .py path run as a command: first on a line, after a separator, an open paren, a backtick, `{`, `!` or `$(`, optionally
+# after `.`, exec, then, do or else.
+COMMAND_PATH = re.compile(r"(?:^|[;&|(`{!]|\$\()\s*(?:(?:\.|exec|then|do|else)\s+)?[\w.\-/]*\.(?:py|sh|mjs)\b")
+# A case arm's pattern: the words before its `)`. Those words name no read; the arm's body after the `)` is looked at.
+CASE_PATTERN = re.compile(r"^\s*(?:[^\s()'\"$`;&|]+\|)*[^\s()'\"$`;&|]+\)")
 
 
 def read_repo(rel):
@@ -730,10 +735,23 @@ def read_strings(arg):
     return out
 
 
+def invoke_lines(text):
+    """The lines of a non-Python file that run or read something, each as the text a read is looked for in. A comment names
+    nothing. A case arm's pattern is cut off before its `)`, so a path that only names a file in a pattern is no read."""
+    names = []
+    for ln in text.splitlines():
+        if ln.lstrip().startswith(("#", "//")):
+            continue
+        body = CASE_PATTERN.sub("", ln, count=1)
+        if INVOKE.search(body) or COMMAND_PATH.search(body):
+            names.append(body)
+    return names
+
+
 def scan_file(rel, text, index):
     """(files reached, names read) for one file. A Python file is read with ast: its imports, and the strings and names
     of its read calls, so a comment or a docstring names nothing. Any other file, or a Python file that does not parse,
-    is read line by line: an INVOKE line, not a comment. A name ALLOWED for the file reaches no file either."""
+    is read line by line: an invoke line (invoke_lines), not a comment. A name ALLOWED for the file reaches no file either."""
     here = os.path.dirname(rel)
     allowed = TRANSITIVE_ALLOWED.get(rel, ([], ""))[0]
 
@@ -748,7 +766,7 @@ def scan_file(rel, text, index):
             tree = None
     reaches, names = set(), []
     if tree is None:
-        names = [ln for ln in text.splitlines() if INVOKE.search(ln) and not ln.lstrip().startswith(("#", "//"))]
+        names = invoke_lines(text)
     else:
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):
