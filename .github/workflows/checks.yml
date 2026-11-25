@@ -1053,6 +1053,10 @@ jobs:
         if: ${{ (needs.scope.outputs.code == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_start_check.py
 
+      - name: Lease file suite
+        if: ${{ (needs.scope.outputs.code == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
+        run: python3 hooks/test_lease.py
+
       - name: Session role file suite
         if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_session_role.py

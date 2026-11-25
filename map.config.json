@@ -9,6 +9,7 @@
     "hooks/prose_judge.py",
     "hooks/decision_watch.py",
     "hooks/guard.py",
+    "hooks/lease.py",
     "skills/plain-english-map/scripts/lib/lazy-typescript.mjs"
   ]
 }
