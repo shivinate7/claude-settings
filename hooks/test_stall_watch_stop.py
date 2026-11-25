@@ -36,6 +36,9 @@ stdin, scans the session transcript for background shells, and prints ONE JSON l
   its last assistant record holds a tool_use with no result (one long call is not a stall). A
   completed notice or a TaskStop result closes it, as for a shell. A missing transcript is listed
   as unknown, once.
+- A resume of a stopped agent is a SendMessage whose result's toolUseResult names the agent as resumedAgentId.
+  It reopens the agent: a TaskStop or a completed notice closes an agent only when it is newer than the agent's
+  latest launch or resume. The AGENT_LONG age of a resumed agent counts from its latest resume.
 - In the Stop check, a background agent that has run AGENT_LONG seconds (1800; STALL_WATCH_LONG overrides)
   blocks the Stop: quiet or busy, in an open call or not, with its transcript missing too. The block names
   the agent and asks for one send_later check-in that names its id. A check-in made after the crossing,
@@ -2096,6 +2099,132 @@ def A16_ready_pr_and_a_long_agent_give_one_block_naming_both():
     rc, out, err = run_stop(transcript([ready()], folder=folder))
     problems += expect(rc == 0, f"control: exit {rc}, want 0: {err.strip()[:200]}")
     problems += ["control: " + p for p in block_problems(out, pr=CI_PR)]
+    return problems
+
+
+def stop_records(tag, aid, command="review the diff"):
+    """A TaskStop call of agent aid, and its result, under the call id toolu_stop_<tag>."""
+    cid = "toolu_stop_" + tag
+    return [stop_call(cid, aid), stop_result(cid, aid, command=command)]
+
+
+def resume_records(tag, aid):
+    """A SendMessage that resumes the stopped agent aid, and its result, under the call id toolu_resume_<tag>. The
+    result has the shape a real resume writes: its text is a JSON reply, and its toolUseResult names the agent it
+    resumed (resumedAgentId). The check reads the resume from that field, not from the call's `to`, which may
+    hold a name."""
+    cid = "toolu_resume_" + tag
+    use = {"type": "assistant", "message": {"role": "assistant", "content": [
+        {"type": "tool_use", "id": cid, "name": "SendMessage",
+         "input": {"to": aid, "summary": "Continue the review", "message": "Continue and report again."}}]}}
+    body = {"success": True, "message": "Resuming agent %s" % aid[:7], "resumedAgentId": aid,
+            "pin": {"id": aid, "name": aid, "ref": "10a5fe"}}
+    result = {"type": "user", "message": {"role": "user", "content": [
+        {"type": "tool_result", "tool_use_id": cid, "content": [{"type": "text", "text": json.dumps(body)}]}]},
+        "toolUseResult": body}
+    return [use, result]
+
+
+@case
+def A17a_resumed_agent_after_task_stop_blocks_at_30_min_since_its_resume():
+    """A17a. a background agent launched 50 min before the Stop, stopped by TaskStop 48 min before it, then resumed
+    under the same id 31 min before it, still writing, with no check-in: the Stop blocks and names it, since a resume
+    reopens an agent that a TaskStop closed. Control: a second agent launched 50 min before, never stopped, still
+    writing, is named in the block"""
+    aid, ctl = agent_id(300), agent_id(301)
+    folder = new_dir()
+    launch, spec = background_agent(folder, aid, agent_step("r1"), 10)
+    lc, sc = background_agent(folder, ctl, agent_step("c1"), 10)
+    recs = (stamped(launch, 3000) + stamped(stop_records("a", aid), 2880)
+            + stamped(resume_records("a", aid), 1860) + stamped(lc, 3000))
+    rc, out, err = run_stop(transcript(recs, agents=[spec, sc], folder=folder))
+    problems = expect(rc == 0, f"exit {rc}, want 0: {err.strip()[:200]}")
+    problems += expect(aid in block_text(out),
+                       f"resumed agent {aid} is not named in a block: its TaskStop closed it and its resume did not "
+                       f"reopen it: {out[:200]!r}")
+    problems += ["control: " + p for p in agent_block(out, ctl)]
+    return problems
+
+
+@case
+def A17b_resumed_agent_after_its_completed_notice_blocks_at_30_min_since_its_resume():
+    """A17b. a background agent launched 50 min before the Stop, whose completed notice came 48 min before it, then
+    resumed under the same id 31 min before it, still writing, with no check-in: the Stop blocks and names it, since
+    a resume reopens an agent that a completed notice closed. Control: a second agent launched 50 min before, never
+    stopped, still writing, is named in the block"""
+    aid, ctl = agent_id(302), agent_id(303)
+    folder = new_dir()
+    launch, spec = background_agent(folder, aid, agent_step("r1"), 10)
+    lc, sc = background_agent(folder, ctl, agent_step("c1"), 10)
+    recs = (stamped(launch, 3000) + stamped([finished_notice(aid)], 2880)
+            + stamped(resume_records("b", aid), 1860) + stamped(lc, 3000))
+    rc, out, err = run_stop(transcript(recs, agents=[spec, sc], folder=folder))
+    problems = expect(rc == 0, f"exit {rc}, want 0: {err.strip()[:200]}")
+    problems += expect(aid in block_text(out),
+                       f"resumed agent {aid} is not named in a block: its completed notice closed it and its resume "
+                       f"did not reopen it: {out[:200]!r}")
+    problems += ["control: " + p for p in agent_block(out, ctl)]
+    return problems
+
+
+@case
+def A17c_agent_stopped_and_never_resumed_is_not_named_and_control_blocks():
+    """A17c. a background agent launched 50 min before the Stop, stopped by TaskStop 48 min before it and never
+    resumed, still writing: the Stop names it in no block. Control: a second agent launched 50 min before, never
+    stopped, still writing, is named in the block"""
+    aid, ctl = agent_id(304), agent_id(305)
+    folder = new_dir()
+    launch, spec = background_agent(folder, aid, agent_step("s1"), 10)
+    lc, sc = background_agent(folder, ctl, agent_step("c1"), 10)
+    recs = stamped(launch, 3000) + stamped(stop_records("c", aid), 2880) + stamped(lc, 3000)
+    rc, out, err = run_stop(transcript(recs, agents=[spec, sc], folder=folder))
+    problems = expect(rc == 0, f"exit {rc}, want 0: {err.strip()[:200]}")
+    problems += expect(aid not in out,
+                       f"stopped agent {aid} is named though no resume followed its TaskStop: {out[:200]!r}")
+    problems += ["control: " + p for p in agent_block(out, ctl)]
+    return problems
+
+
+@case
+def A17d_agent_stopped_again_after_a_resume_is_not_named():
+    """A17d. a background agent launched 50 min before the Stop, stopped 48 min before it, resumed 40 min before it,
+    and stopped again 32 min before it, still writing: the Stop names it in no block, since the second TaskStop is
+    newer than the resume. Control: a second agent launched 50 min before, never stopped, still writing, is named in
+    the block"""
+    aid, ctl = agent_id(306), agent_id(307)
+    folder = new_dir()
+    launch, spec = background_agent(folder, aid, agent_step("s1"), 10)
+    lc, sc = background_agent(folder, ctl, agent_step("c1"), 10)
+    recs = (stamped(launch, 3000) + stamped(stop_records("d1", aid), 2880)
+            + stamped(resume_records("d", aid), 2400) + stamped(stop_records("d2", aid), 1920) + stamped(lc, 3000))
+    rc, out, err = run_stop(transcript(recs, agents=[spec, sc], folder=folder))
+    problems = expect(rc == 0, f"exit {rc}, want 0: {err.strip()[:200]}")
+    problems += expect(aid not in out,
+                       f"agent {aid} was stopped again after its resume but is named: {out[:200]!r}")
+    problems += ["control: " + p for p in agent_block(out, ctl)]
+    return problems
+
+
+@case
+def A17e_the_30_min_after_a_resume_counts_from_the_latest_resume():
+    """A17e. the 1800 s of a resumed agent count from its latest resume, not from its launch or its first resume. A
+    background agent launched 50 min before the Stop is stopped 48 min before it, resumed 40 min before it, stopped
+    33 min before it, and resumed again 29 min before it, still writing, with no check-in: the Stop names it in no
+    block, since 29 min have passed since the latest resume. Control: a second agent launched 50 min before, never
+    stopped, still writing, is named in the block"""
+    aid, ctl = agent_id(308), agent_id(309)
+    folder = new_dir()
+    launch, spec = background_agent(folder, aid, agent_step("e1"), 10)
+    lc, sc = background_agent(folder, ctl, agent_step("c1"), 10)
+    recs = (stamped(launch, 3000) + stamped(stop_records("e1", aid), 2880)
+            + stamped(resume_records("e1", aid), 2400) + stamped(stop_records("e2", aid), 2000)
+            + stamped(resume_records("e2", aid), 1740) + stamped(lc, 3000))
+    rc, out, err = run_stop(transcript(recs, agents=[spec, sc], folder=folder))
+    problems = expect(rc == 0, f"exit {rc}, want 0: {err.strip()[:200]}")
+    problems += expect(aid not in block_text(out),
+                       f"agent {aid} is named in a block 29 min after its latest resume: the age counts from an "
+                       f"earlier point, not the latest resume: {block_text(out)[:200]!r}")
+    problems += ["control: " + p for p in agent_block(out, ctl)]
     return problems
 
 
