@@ -371,6 +371,7 @@ RED_CITE = "(rule git-red-main-reverts, a red main: its revert or fix is the top
 RED_TESTS_SHOWN = 12  # the failing tests the merge line on a red main names before it says "and N more"
 CANCELLED_NO_RED = "was cancelled with no red job"  # base_state words an unknown cancelled run with it; red_base reads it back to give the cancelled run its own headline
 RERUN_REMEDY = "gh run rerun"  # base_state names it for a cancelled run on the base's head; red_base reads it back to name the remedy in its way out
+RERUN_FAILED_ONLY = "--failed"  # the flag after `{RERUN_REMEDY} <id>` that re-runs a run's failed and cancelled jobs and keeps its passed ones (owner, 12:25 CST Nov 25, 2026); the one home of the form
 RERUN_IN_FLIGHT = "is a re-run still going"  # base_state words an unknown re-run with it; red_base reads it back to give the re-run its own headline
 BREAKING_MERGE = "breaking merge:"  # base_state words the first red run with a green parent, once its re-run is red again, with it
 MAIN_RUNS_READ = 50  # the runs of the base one read holds: base_state and main_run_verdict read one page, never every page
@@ -1937,11 +1938,11 @@ class Host:
         at a run's head read when the judgment asks (one read each; a failed read is unknown, with GitHub's own words), and the verdict's words. One page of runs, never every page: the
         base's history is long. A run that did not succeed costs one jobs read, and a clear candidate one more. A newest-first walk of the push group's green runs costs one jobs read each,
         down to the first that is not empty.
-        A cancelled run with no red job that nothing clears keeps its line, in the unknown detail and beside a red verdict. It is named with `gh run rerun <id> --failed` (the passed jobs stay) only when its
+        A cancelled run with no red job that nothing clears keeps its line, in the unknown detail and beside a red verdict. It is named with `gh run rerun <id> --failed` (the passed jobs stay), or with the plain `gh run rerun <id>` when no job of it failed or was cancelled, only when its
         `head_sha` is the head_sha of the newest run on the page read (any status, any event in BASE_EVENTS, from the unfiltered list): runs on the base start at its head, and a re-run tests the run's own commit. Never named for a run with a red job or a re-run in flight.
         A red verdict's detail also holds breaking_line's segment for each red run judged (one per file and group), the head group's first: the first red run with a green parent, as a re-run to try (a first red) or as the breaking merge (red again on its re-run).
         A red verdict also leaves `self.base_facts` for revert_proven, as data the prose cannot carry: `blamed` (the full head shas of the breaking merges), `red` (red runs judged),
-        `others` (red entries without a run, cancelled runs and re-runs in flight beside the red), `head` (the head sha of the newest run read) and `red_heads` (the head sha of each red run judged), `red_ids` (the id of each red run judged) and `red_jobs` (per red run, the names of its red jobs; empty for a run that ended red with no red job). Every other verdict leaves it None."""
+        `others` (red entries without a run, cancelled runs and re-runs in flight beside the red), `head` (the head sha of the newest run read) and `red_heads` (the head sha of each red run judged), `red_ids` (the id of each red run judged), `red_jobs` (per red run, the names of its red jobs; empty for a run that ended red with no red job) and `cancelled` (the segment of each cancelled run, with its re-run; red_base prints them on the merge line). Every other verdict leaves it None."""
         self.base_facts = None  # a red verdict sets it below; any other verdict, and any stop, leaves it None
         if waits_on_no_check(self.required):  # a repo with "none" runs no CI, so the base's runs are not read, whatever they hold (decision private-repos-no-ci); "first-proof" reads no run of the base either
             return "green", ""
@@ -1979,6 +1980,12 @@ class Host:
 
         def where(r):
             return f"run {r['id']} of {r['name']} at {str(r.get('head_sha'))[:9]} ({r.get('html_url')})"
+
+        def rerun_of(r):  # -> the sentence naming a cancelled run's re-run on the base's head: failed-only when a job of the run failed or was cancelled; else the plain re-run, because GitHub may refuse a failed-only one of a run with none
+            jobs = read.get(r["id"])
+            if jobs is not None and any(j.get("conclusion") in ("cancelled", "failure", "timed_out") for j in jobs):
+                return f". `{RERUN_REMEDY} {r['id']} {RERUN_FAILED_ONLY}` re-runs that run's failed and cancelled jobs on its own commit, which is the base's head"
+            return f". `{RERUN_REMEDY} {r['id']}` re-runs every job of that run on its own commit, which is the base's head (no job of it failed or was cancelled, so a failed-only re-run has nothing to start)"
         try:
             clear_rule = load_clear_rule()
             c, out = self.api("actions/runs", fields={"branch": base, "per_page": MAIN_RUNS_READ})
@@ -1991,14 +1998,13 @@ class Host:
                 raise Stop("a read of the base's jobs or workflow file failed, so the verdict is unknown (decision no-merge-onto-red-main)")
             red = [f"{where(e.run)}: " + "; ".join(e.lines) if e.lines else f"{where(e.run)} ended {e.run['conclusion']} with no red job" for e in judgment.red]
             unknown = [f"run {r['id']} of {r['name']} {RERUN_IN_FLIGHT} (attempt {r['run_attempt']}, {r['status']}) at {str(r.get('head_sha'))[:9]} ({r.get('html_url')})" for r in judgment.unknown]
-            cancelled = [f"{where(r)} {CANCELLED_NO_RED}{ran(r)}" + (f". `{RERUN_REMEDY} {r['id']} --failed` re-runs that run's failed and cancelled jobs on its own commit, which is the base's head"
-                                                             if r.get("head_sha") and r["head_sha"] == judgment.base_head else "") for r in judgment.cancelled]
+            cancelled = [f"{where(r)} {CANCELLED_NO_RED}{ran(r)}" + (rerun_of(r) if r.get("head_sha") and r["head_sha"] == judgment.base_head else "") for r in judgment.cancelled]
             blame = [s for s in (self.breaking_line(judgment.judged, r) for r in judgment.order) if s]
         except (Stop, ValueError, KeyError, TypeError, AttributeError, ImportError) as e:
             return "unknown", " ".join(str(e).split())
         if red:
             self.base_facts = {"blamed": judgment.blamed, "red": len(red), "others": len(cancelled) + len(unknown), "head": judgment.base_head,
-                               "red_heads": [e.run.get("head_sha") for e in judgment.red], "red_ids": [e.run["id"] for e in judgment.red], "red_jobs": [e.names for e in judgment.red]}
+                               "red_heads": [e.run.get("head_sha") for e in judgment.red], "red_ids": [e.run["id"] for e in judgment.red], "red_jobs": [e.names for e in judgment.red], "cancelled": cancelled}
             return "red", " | ".join(red + blame + cancelled)
         return ("unknown", " | ".join(unknown + cancelled)) if unknown or cancelled else ("green", "")
 
@@ -2023,7 +2029,7 @@ class Host:
         sha = str(first.get("head_sha"))[:9]
         if not clear_rule.blames(first):
             if (first.get("run_attempt") or 1) <= 1:
-                return (f"run {first['id']} is the first red run after a green one, at {sha}: `{RERUN_REMEDY} {first['id']} --failed` re-runs its failed jobs, "
+                return (f"run {first['id']} is the first red run after a green one, at {sha}: `{RERUN_REMEDY} {first['id']} {RERUN_FAILED_ONLY}` re-runs its failed jobs, "
                         + ("and as a schedule run it is never blamed on a commit, even if that re-run is red again" if first["event"] == "schedule"
                            else "and it is blamed on its pull request only if that re-run is red again"))
             return (f"run {first['id']} is a schedule run, red again on its re-run: it tested the base's head when it ran, so no commit or pull request is named for it")
@@ -5105,7 +5111,7 @@ def main_run_verdict(host, sha, base=MAIN_RUN_BASE):
         new_shown = ", ".join(new_tests[:RED_TESTS_SHOWN]) + (f" and {len(new_tests) - RED_TESTS_SHOWN} more" if len(new_tests) > RED_TESTS_SHOWN else "")
         fresh = f"new red checks {', '.join(new_names) or 'none named (the run ended red with no red job)'}; new failing tests {new_shown or 'none named'}{why}"
         if not clear_rule.blames(now):
-            return line(RUN_FIRST_RED, f"run {now['id']}: {fresh}. Nothing is blamed until it is red again on a re-run: `{RERUN_REMEDY} {now['id']} --failed` re-runs its failed jobs")
+            return line(RUN_FIRST_RED, f"run {now['id']}: {fresh}. Nothing is blamed until it is red again on a re-run: `{RERUN_REMEDY} {now['id']} {RERUN_FAILED_ONLY}` re-runs its failed jobs")
         number = pull_number_in_title(message.splitlines()[0] if message else "")
         return line(RUN_NEW_BREAK, f"run {now['id']}: {fresh}, red again on its re-run (attempt {attempt}). {BREAKING_MERGE} commit {sha9}, "
                     + (f"pull request #{number}" if number else "no pull request number in its message"))
@@ -5136,7 +5142,8 @@ def red_base(root, host, base, red_ok=""):
     if verdict == "red" and not beside:  # a known red needs no lift: a reason flag beside it is echoed and lifts nothing, so no Reason flag line reaches the merge commit
         if red_ok.strip():
             say(f"merge: {what}. {RED_FLAG}, reason: {red_ok.strip()}. A red {base} needs no lift (ruling Q5 v), so none is recorded.")
-        say(f"merge: {base} is RED. {red_line(host)}. This merge goes onto the red {base}; a new name in this list is a new break {RED_CITE}")
+        beside_red = (getattr(host, "base_facts", None) or {}).get("cancelled") or []  # the cancelled runs beside the red, each with its re-run: the preview prints them in its detail, this line must too
+        say(f"merge: {base} is RED. {red_line(host)}. " + (f"Cancelled beside it: {' | '.join(beside_red)}. " if beside_red else "") + f"This merge goes onto the red {base}; a new name in this list is a new break {RED_CITE}")
         return
     if red_ok.strip():
         say(f"merge: {what}. {RED_FLAG}, reason: {red_ok.strip()}")
