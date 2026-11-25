@@ -287,6 +287,28 @@ class Away(unittest.TestCase):
         self.assertTrue(True)
 '''
 
+# Two outer cases each run an inner case in-process, on a fresh result, as hooks/test_auto_mode_allow.py does. The inner
+# case is part of the outer case's time, so it keeps no row of its own; the outer rows hold the whole time.
+NESTED = '''import time
+import unittest
+
+
+class Inner(unittest.TestCase):
+    def test_inner_sleeps(self):
+        time.sleep(0.25)
+
+
+class Outer(unittest.TestCase):
+    def test_a_runs_inner(self):
+        result = unittest.TestResult()
+        Inner("test_inner_sleeps").run(result)
+        time.sleep(0.5)
+
+    def test_b_runs_inner(self):
+        result = unittest.TestResult()
+        Inner("test_inner_sleeps").run(result)
+'''
+
 
 def setUpModule():
     global RUN
@@ -586,6 +608,30 @@ class CwdChdir(unittest.TestCase):
         suites = sorted(set(row.get("suite") for row in rows))
         self.assertEqual(suites, ["fixture_away.py"],
                          "a test that chdired without restoring split its file's rows across suite names: %s" % suites)
+
+
+class NestedRuns(unittest.TestCase):
+    def test_inner_case_keeps_no_row_of_its_own(self):
+        folder = case_folder(self)
+        write(folder, "fixture_nested.py", NESTED)
+        unarmed = run_module(folder, "fixture_nested", armed=False, report=True)
+        self.assertEqual(result_line(unarmed), "RESULT ran=3 failures=0 errors=0 skipped=0",
+                         "the unarmed control run did not pass its three cases: %r" % unarmed.stderr[-300:])
+        armed = run_module(folder, "fixture_nested", report=True)
+        scope_ok(self, armed)
+        self.assertEqual(armed.returncode, 0, "the armed run exited %d, want 0: stderr tail: %s"
+                         % (armed.returncode, armed.stderr[-300:]))
+        self.assertEqual(result_line(armed), result_line(unarmed),
+                         "the armed run's outcome differs from the unarmed run's")
+        rows = rows_of(folder)
+        self.assertIsNotNone(rows, "the armed run wrote no case-times file")
+        inner = [row for row in rows if (row.get("case") or "").startswith("Inner.")]
+        self.assertEqual(len(inner), 1, "Inner.test_inner_sleeps has %d rows, want one: the suite's own run. The "
+                                        "runs inside Outer kept a row each: %s" % (len(inner), inner))
+        self.assertEqual(inner[0].get("s"), 0.25, "the suite's own Inner row has s %r, want 0.25" % inner[0].get("s"))
+        outer = {row.get("case"): row.get("s") for row in rows if (row.get("case") or "").startswith("Outer.")}
+        self.assertEqual(outer, {"Outer.test_a_runs_inner": 0.75, "Outer.test_b_runs_inner": 0.25},
+                         "the outer rows do not hold the time of the inner case they run: %s" % outer)
 
 
 class RowFails(unittest.TestCase):

@@ -96,25 +96,41 @@ def _tally(result):
     return len(result.failures) + len(result.errors) + len(result.unexpectedSuccesses), len(result.skipped)
 
 
+_OPEN = []  # a frame per case started and not yet stopped in this process, innermost last
+
+
+def _close(test):
+    """Pop the open frame of this test. None when no frame holds it."""
+    for index in range(len(_OPEN) - 1, -1, -1):
+        if _OPEN[index]["test"] is test:
+            return _OPEN.pop(index)
+    return None
+
+
 def patch_result(cls):
     """Wrap a unittest TestResult so each test method gets one row, from its start to its stop. The outcome
-    reads the result's own lists: a failure, an error or an unexpected success is fail, a skip is skip."""
+    reads the result's own lists: a failure, an error or an unexpected success is fail, a skip is skip.
+
+    A case that starts while another case is open in this process, on its own result or the same one, keeps no
+    row: its time is inside the outer case's row, which holds the whole span."""
     if getattr(cls, "_case_times_patched", False):
         return
     real_start, real_stop = cls.startTest, cls.stopTest
 
     def startTest(self, test):
-        self._case_times_base = _tally(self)
-        self._case_times_t0 = time.perf_counter()
-        return real_start(self, test)
+        frame = {"test": test, "result": self, "base": _tally(self), "t0": time.perf_counter()}
+        real_start(self, test)
+        _OPEN.append(frame)
 
     def stopTest(self, test):
+        frame = _close(test)
         try:
-            took = time.perf_counter() - getattr(self, "_case_times_t0", time.perf_counter())
-            failed, skipped = _tally(self)
-            base_failed, base_skipped = getattr(self, "_case_times_base", (failed, skipped))
-            outcome = "fail" if failed > base_failed else "skip" if skipped > base_skipped else "pass"
-            record(_suite_of(test), _suite_of(test), _case_of(test), took, 0.0, outcome)
+            if frame is not None and not _OPEN:  # nested inside an open case: the outer row holds this time
+                took = time.perf_counter() - frame["t0"]
+                failed, skipped = _tally(frame["result"])
+                base_failed, base_skipped = frame["base"]
+                outcome = "fail" if failed > base_failed else "skip" if skipped > base_skipped else "pass"
+                record(_suite_of(test), _suite_of(test), _case_of(test), took, 0.0, outcome)
         except Exception as error:  # a row that cannot be kept must never abort the run or the result
             sys.stderr.write("case_times: no row for %s: %s\n" % (test.id(), error))
         return real_stop(self, test)
