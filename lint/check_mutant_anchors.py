@@ -1,17 +1,19 @@
 #!/usr/bin/env python3
-"""Fails when a mutant of hooks/mutate_guard.py names an anchor that no longer sits exactly once where its table entry says.
+"""Fails when a mutant of hooks/mutate_guard.py or janitor/mutate_sweep.py names an anchor that no longer sits exactly once where its
+table entry says.
 
     python3 lint/check_mutant_anchors.py
 
 The mutant table is MUTATIONS in hooks/mutate_guard.py; this script imports it and keeps no copy. A "guard" or "audit" mutant is found
 by hooks/mutate_shared.py `find_anchor` across the guard modules: no match is stale, two or more is ambiguous. Any other target is
 read in its own file (TARGETS), and the anchor must occur once there. The mutation run reads the same table, but its own pre-check
-covers ambiguity only for guard and audit targets. A merge of main into a lane can move an anchor. This read covers every anchor in one pass,
-in about a second, and names each bad one.
+covers ambiguity only for guard and audit targets. A sweep row (MUTATIONS and SOURCES of janitor/mutate_sweep.py, read at call
+time) names its target in SOURCES; its anchor is matched in that one file by `find_anchor`. A merge of main into a lane can move an
+anchor. This read covers every anchor in one pass, in about a second, and names each bad one.
 
 Prints `PASS mutant anchor census: N mutants` and exits 0, or one `FAIL` line per bad mutant, naming its label, its target and the
 file or folder searched, and exits 1. It does not check the required-case name or the mutant file names: the mutation run does.
-Cost: one read of each target file and of the guard modules. No suite, no child process, no file written.
+Cost: one read of each target file and of the guard modules; the sweep module is imported once. No suite, no child process, no file written.
 """
 import os
 import sys
@@ -19,9 +21,13 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 HOOKS = os.path.join(os.path.dirname(HERE), "hooks")
 sys.path.insert(0, HOOKS)
+sys.path.insert(0, os.path.join(os.path.dirname(HERE), "janitor"))
 
 import mutate_guard  # noqa: E402
 import mutate_shared  # noqa: E402
+import mutate_sweep  # noqa: E402  imported by this name, so the table and file map are read from the one module object
+
+SWEEP_TABLE = "janitor/mutate_sweep.py"  # the file a sweep finding names: the table the row sits in
 
 # A mutant of these targets is anchored across the guard modules (mutate_guard.main), so no target file names it.
 GUARD_FAMILY = ("guard", "audit")
@@ -54,14 +60,36 @@ def findings(mutations=None, targets=None, hooks=HOOKS):
     return bad
 
 
+def sweep_findings(mutations=None, sources=None):
+    """-> a list of `FAIL ...` lines, one per sweep row whose anchor is stale, ambiguous or aimed at an unknown target. `mutations`
+    and `sources` default to MUTATIONS and SOURCES of janitor/mutate_sweep.py, read now so a caller's patch of either is seen."""
+    table = mutate_sweep.MUTATIONS if mutations is None else mutations
+    sources = mutate_sweep.SOURCES if sources is None else sources
+    bad = []
+    for entry in table:
+        label, target, old = entry[0], entry[1], entry[2]
+        if target not in sources:
+            bad.append("FAIL unknown mutation target %r in %s: %s" % (target, SWEEP_TABLE, label))
+            continue
+        folder, name = os.path.split(sources[target])
+        try:
+            mutate_shared.find_anchor(folder, old, [name])
+        except mutate_shared.StaleMutant:
+            bad.append("FAIL stale anchor, text not found in %s (sweep target %s, table %s): %s" % (sources[target], target, SWEEP_TABLE, label))
+        except mutate_shared.AmbiguousMutant as error:
+            bad.append("FAIL ambiguous anchor, %s in %s (sweep target %s, table %s): %s" % (error, sources[target], target, SWEEP_TABLE, label))
+    return bad
+
+
 def main() -> int:
-    bad = findings()
+    bad = findings() + sweep_findings()
+    total = len(mutate_guard.MUTATIONS) + len(mutate_sweep.MUTATIONS)
     for line in bad:
         print(line)
     if bad:
-        print("FAIL mutant anchor census: %d of %d mutants have a stale or ambiguous anchor" % (len(bad), len(mutate_guard.MUTATIONS)))
+        print("FAIL mutant anchor census: %d of %d mutants have a stale or ambiguous anchor" % (len(bad), total))
         return 1
-    print("PASS mutant anchor census: %d mutants" % len(mutate_guard.MUTATIONS))
+    print("PASS mutant anchor census: %d mutants" % total)
     return 0
 
 
