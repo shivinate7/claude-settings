@@ -1,0 +1,1 @@
+- duo-take-needs-both-names: Review finding F3. A duo take refuses when either Duo name is missing, so a missing `iPhone Duo 2` blocks slot 1 (`bin/sim-lease`, `resolve`). No test pins it. Seen: 2026-11-25 x1
