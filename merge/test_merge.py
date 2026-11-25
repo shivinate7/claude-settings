@@ -29883,6 +29883,19 @@ class StaleMergeTrees(unittest.TestCase):
         self.assertIn(os.path.realpath(live_wt), self.locked_trees(), "the live tree must stay registered")
         self.assertTrue(os.path.isdir(tmp), "add_worktree must return the tree it made")
 
+    @unittest.skipUnless(os.name == "nt", "the real process reader and pid_alive's kernel32 branch are Windows's: this case runs in the Windows CI job")
+    def test_a_real_exited_merge_pid_on_windows_has_its_tree_removed(self):
+        """No fake reader: a real child that ran and exited, named by a tree's lock reason, must not keep the tree on Windows. The hold
+        check reads the runner's live processes here, so an unreadable one under an ended ancestor could keep it."""
+        self.read_real_processes()
+        self.assertIs(sweep.processes_in, self.real_processes_in, "scope: the case must read real processes, or it proves nothing about the reader")
+        dead = reaped_child_pid()
+        stale_tmp, stale_wt = self.make_tree("stale", "merge tool, pid %d" % dead)
+        tmp, wt = merge.add_worktree(self.repo, self.head)
+        self.addCleanup(merge.drop_worktree, self.repo, tmp, wt)
+        self.assertFalse(os.path.exists(stale_tmp),
+                         "a merge-wt tree whose merge pid %d is a real exited process must be removed on Windows" % dead)
+
     def test_a_locked_tree_whose_reason_names_no_merge_pid_stays(self):
         dead = reaped_child_pid()
         stale_tmp, _ = self.make_tree("stale", "merge tool, pid %d" % dead)
