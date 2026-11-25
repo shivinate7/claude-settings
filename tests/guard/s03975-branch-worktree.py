@@ -114,6 +114,111 @@ def stale_record_forced_remove_quiet_case():
         return False, "a forced remove of a clean tree was noted as unconfirmed: %r" % text.strip()[:160]
     return True, "a forced remove of a clean tree is allowed with no unconfirmed note"
 
+
+# A LIVE PROCESS STANDING IN A TREE, UNDER A RECORD WHOSE FOLDER IS GONE. The session moved its folder, or the
+# alias to it was removed, so its record's cwd names a folder that is no longer there, yet the process still
+# stands in the tree. The janitor keeps such a tree (janitor/sweep.py `processes_in`). The guard reads only the
+# session records, so it must find the process too. Each case removes WTCLEAN, a clean, unlocked tree.
+
+def _record_config(name, records):
+    """A config folder under this run's ROOT with one session record per (pid, cwd, startedAt) in RECORDS."""
+    cfg = os.path.join(ROOT, name)
+    os.makedirs(os.path.join(cfg, "sessions"), exist_ok=True)
+    for pid, cwd, started_ms in records:
+        with open(os.path.join(cfg, "sessions", "%d.json" % pid), "w", encoding="utf-8") as handle:
+            json.dump({"pid": pid, "cwd": slash(cwd), "startedAt": started_ms}, handle)
+    return cfg
+
+
+def _remove_decision(cfg, target):
+    """(decision, reason) the guard prints for `git worktree remove <target>` run from WTMAIN under config CFG.
+    A guard exit other than 0 is returned as a decision of its own, so no case reads it as an allow."""
+    env = dict(os.environ)
+    env.pop("CLAUDE_CODE_REMOTE", None)
+    env.pop("CLAUDE_CODE_SESSION_ID", None)
+    env["CLAUDE_CONFIG_DIR"] = cfg
+    payload = {"tool_name": "Bash", "tool_input": {"command": VCS + " worktree remove " + slash(target)},
+               "cwd": WTMAIN}
+    result = subprocess.run([sys.executable, GUARD], input=json.dumps(payload), capture_output=True,
+                            text=True, env=env, timeout=60)
+    if result.returncode != 0:
+        return "guard exit %d" % result.returncode, result.stderr.strip()[-160:]
+    return read_decision(result.stdout)
+
+
+def stale_record_live_process_in_tree_case():
+    """A live process whose cwd is the clean tree, and a session record of that process whose cwd folder is gone.
+    The record stands in no tree, but the process does, so `git worktree remove` is refused for the live session
+    still standing in the tree. The guard reads only the records, so on the old code the remove is allowed."""
+    if os.name == "nt":
+        return SKIP, "a sleep child that stands in a folder is a POSIX check"
+    target = WTCLEAN
+    gone = _removed_folder("stale-proc-in-tree-gone")
+    proc = subprocess.Popen(["sleep", "300"], cwd=target)
+    try:
+        if proc.poll() is not None:
+            return False, "fixture: the sleep must still be running in the tree"
+        cfg = _record_config("stale-proc-in-tree-cfg", [(proc.pid, os.path.join(gone, "wt"), 1)])
+        decision, reason = _remove_decision(cfg, target)
+    finally:
+        proc.kill()
+        proc.wait()
+    if decision != "deny":
+        return False, ("a live process stands in the clean tree and its record's folder is gone: the remove "
+                       "reads %r, want deny: the guard reads the records, never the process" % decision)
+    if "a live session still stands in it" not in reason:
+        return False, "denied for another cause, not the live session: %r" % reason[:160]
+    return True, "a live process in a clean tree refuses the remove though its record's folder is gone"
+
+
+def stale_record_process_outside_tree_case():
+    """The control for the case above: the same live process, with its cwd outside the clean tree. Nothing stands
+    in the tree, and the record's folder is gone, so the remove is allowed."""
+    if os.name == "nt":
+        return SKIP, "a sleep child that stands in a folder is a POSIX check"
+    target = WTCLEAN
+    gone = _removed_folder("stale-proc-outside-gone")
+    proc = subprocess.Popen(["sleep", "300"], cwd=ROOT)
+    try:
+        if proc.poll() is not None:
+            return False, "fixture: the sleep must still be running outside the tree"
+        cfg = _record_config("stale-proc-outside-cfg", [(proc.pid, os.path.join(gone, "wt"), 1)])
+        decision, reason = _remove_decision(cfg, target)
+    finally:
+        proc.kill()
+        proc.wait()
+    if decision != "allow":
+        return False, ("nothing stands in the clean tree, its record's folder is gone: the remove reads %r with "
+                       "%r, want allow" % (decision, reason[:120]))
+    return True, "a live process outside the clean tree leaves the remove allowed"
+
+
+def stale_record_beside_live_record_case():
+    """A record whose folder is gone, and a second record of a live session whose cwd is the clean tree. The live
+    record still stands in the tree, so the remove is refused for the live session. The gone record must not hide it."""
+    target = WTCLEAN
+    gone = _removed_folder("stale-pair-gone")
+    proc = subprocess.Popen(["sleep", "300"], cwd=ROOT)
+    try:
+        if proc.poll() is not None:
+            return False, "fixture: the sleep must still be running for the gone record"
+        live_pid = os.getpid()
+        cfg = _record_config("stale-pair-cfg", [
+            (proc.pid, os.path.join(gone, "wt"), 1),
+            (live_pid, target, _real_process_start_ms(live_pid)),
+        ])
+        decision, reason = _remove_decision(cfg, target)
+    finally:
+        proc.kill()
+        proc.wait()
+    if decision != "deny":
+        return False, ("a live record stands in the clean tree beside a gone record: the remove reads %r, "
+                       "want deny" % decision)
+    if "a live session still stands in it" not in reason:
+        return False, "denied for another cause, not the live session: %r" % reason[:160]
+    return True, "a gone record beside a live record in the clean tree still refuses the remove"
+
+
 # BASE COPIES. Each case is a tree in the state built by _build_base_copies. Case 1 is the incident: its
 # staged files are the base copy, an ancestor of HEAD, and nothing else is wrong, so it passes. Cases 2 to 5
 # each break one condition, and cases 7 and 8 keep the locked and live reads on the incident tree. Each of

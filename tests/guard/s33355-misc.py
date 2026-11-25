@@ -71,6 +71,10 @@ LOG_CHECKS = (
      worktree_live_session_absent_target_case),
     ("liveness: worktree_live_session answers None for a removed record folder without the opt-in",
      worktree_live_session_removed_folder_default_case),
+    ("liveness: worktree_live_session answers None for a record whose parent folder is also absent, "
+     "with the opt-in", worktree_live_session_parent_absent_case),
+    ("liveness: worktree_live_session answers False for a record whose parent folder exists and whose "
+     "leaf is absent, with the opt-in", worktree_live_session_leaf_absent_case),
     ("liveness: session_is_live reads an implied backwards clock step as unreadable, not dead",
      session_is_live_backwards_clock_step_case),
     ("worktree-home: orchestrator, no-record, home, outside-home, edit, read, removed-home, "

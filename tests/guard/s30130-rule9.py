@@ -1238,6 +1238,51 @@ def worktree_live_session_removed_folder_default_case():
     return True, "without the opt-in a removed record folder still reads None"
 
 
+def worktree_live_session_parent_absent_case():
+    """With the opt-in, a record whose cwd is `<no-such-volume>/wt`, where the parent folder is absent too, reads
+    None (unknown), never False. `os.stat` reports a missing parent the same way whether the folder was removed
+    or a volume or mount is gone, so a missing parent does not confirm the record's folder gone. Keep is the safe
+    direction. Scope first: the parent is absent and the target a folder, so only the record can decide."""
+    guard = _load_guard_module()
+    parent = os.path.join(ROOT, "no-such-volume")
+    cwd = os.path.join(parent, "wt")
+    tree = _made_folder("no-such-volume-tree")
+    try:
+        if os.path.exists(parent) or not os.path.isdir(tree):
+            return False, "fixture: the record's parent must be absent and the target a folder"
+        sys.modules["git_reads"].session_records = lambda: [{"pid": 1, "startedAt": 1, "cwd": cwd}]
+        sys.modules["git_reads"].session_is_live = lambda record: True
+        got, accepted = _stale_answer(guard, tree)
+    finally:
+        shutil.rmtree(tree, ignore_errors=True)
+    if got is not None:
+        return False, ("a record whose parent folder is absent reads as %r, not None: the missing parent is "
+                       "read as a removed folder%s" % (got, _opt_in_note(accepted)))
+    return True, "a record whose parent folder is absent stays unknown (None) with the opt-in"
+
+
+def worktree_live_session_leaf_absent_case():
+    """The control for the parent-absent case: with the opt-in, a record whose cwd is an absent leaf under a folder
+    that exists reads not under the target, so the answer is False. Scope first: the parent and the target are
+    folders, and only the leaf is absent."""
+    guard = _load_guard_module()
+    parent = _made_folder("stale-leaf-parent")
+    cwd = os.path.join(parent, "wt")
+    tree = _made_folder("stale-leaf-tree")
+    try:
+        if os.path.exists(cwd) or not os.path.isdir(parent) or not os.path.isdir(tree):
+            return False, "fixture: the leaf must be absent, the parent and the target folders"
+        sys.modules["git_reads"].session_records = lambda: [{"pid": 1, "startedAt": 1, "cwd": cwd}]
+        sys.modules["git_reads"].session_is_live = lambda record: True
+        got, accepted = _stale_answer(guard, tree)
+    finally:
+        shutil.rmtree(tree, ignore_errors=True)
+    if got is not False:
+        return False, ("a record under an existing parent with an absent leaf reads as %r, not False: the "
+                       "absent leaf is not read as a removed folder%s" % (got, _opt_in_note(accepted)))
+    return True, "a record under an existing parent whose leaf is absent reads not under (False) with the opt-in"
+
+
 def session_is_live_backwards_clock_step_case():
     """A backwards clock step landing between the two ORIGINAL measurements (the kernel's own
     process-creation FILETIME, fixed forever once recorded, and the record's `startedAt`,
