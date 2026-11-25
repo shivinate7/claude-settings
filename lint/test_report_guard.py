@@ -6659,8 +6659,8 @@ class MistakeNamesGuardTests(unittest.TestCase):
 
 # The cost of one Stop (the past-ruling check, which reads the ruled store and the roadmap through git and makes one model
 # call). A reply that relays questions makes one past-ruling model call for all of them, and two git processes: the
-# ruled-store ls-tree and the roadmap cat-file. A reply with no question starts nothing. A refusal adds no file under
-# the config dir.
+# ruled-store ls-tree and the roadmap cat-file. A reply with no question starts nothing. A refusal appends one line to
+# guard.log under the config dir, and writes no other file.
 
 TWO_QUESTIONS = RELAY + "\n\n" + "Should the caps stay at 2x?"  # two different questions, not one repeated
 
@@ -6678,7 +6678,9 @@ class CostTests(unittest.TestCase):
         path = write_transcript([human("decide")] + [assistant_text(text) for text in texts], folder)
         hook = json.dumps({"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": False,
                            "cwd": repo})
-        return cost_probe.run_hook(REPORT_GUARD, hook, folder, answers)
+        run = cost_probe.run_hook(REPORT_GUARD, hook, folder, answers)
+        run["config"] = os.path.join(folder, "config")  # the config dir of this run, where guard.log is written
+        return run
 
     def test_a_reply_with_no_question_starts_nothing(self):
         run = self.stop(self.ci, DONE_ONLY, [[{"ok": True}, None]])
@@ -6698,11 +6700,17 @@ class CostTests(unittest.TestCase):
                          "two children, the ruled-store ls-tree and the roadmap cat-file; got %r" % run["children"])
         self.assertEqual(run["files"], [], "an allow writes no file")
 
-    def test_a_refused_relayed_question_blocks_once_and_writes_no_file(self):
+    def test_a_refused_relayed_question_blocks_once_and_appends_one_guard_log_line(self):
         run = self.stop(self.decided, RELAY, [[json.loads(REFUSE_APPS), None]])
         self.assertEqual(len(run["models"]), 1)
         self.assertEqual(json.loads(run["out"]).get("decision"), "block", "the ruling blocks the Stop once")
-        self.assertEqual(run["files"], [], "a past-ruling block writes no file under the config dir")
+        self.assertEqual(run["files"], ["guard.log"],
+                         "a past-ruling block writes one file under the config dir, guard.log; got %r" % run["files"])
+        with open(os.path.join(run["config"], "guard.log"), encoding="utf-8") as f:
+            lines = [line for line in f.read().splitlines() if line.strip()]
+        self.assertEqual(len(lines), 1, "the refusal appended %d guard.log lines, not one" % len(lines))
+        self.assertEqual(lines[0].split("\t")[2:4], ["deny", "past-ruling"],
+                         "the guard.log line is not a deny of past-ruling: %r" % lines[0])
 
     def test_a_question_in_an_earlier_reply_costs_one_model_call_and_two_git_reads(self):
         run = self.stop(self.ci, DONE_ONLY, [[{"ok": True}, None]], earlier=[RELAY])
