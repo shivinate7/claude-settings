@@ -125,6 +125,46 @@ RUN_CLASS_IN_A_LISTED_CASE = (
 )
 
 
+ASYNC_TESTCASE_BASE = (
+    "import unittest\n"
+    "\n"
+    "\n"
+    "class Cases(unittest.IsolatedAsyncioTestCase):\n"
+    "    async def test_one(self):\n"
+    "        self.assertTrue(True)\n"
+)
+NOT_EQUAL_MAIN_GUARD = SUITE_WITHOUT_MAIN + (
+    "\n"
+    "\n"
+    'if __name__ != "__main__":\n'
+    "    unittest.main()\n"
+)
+FROM_UNITTEST_IMPORT_MAIN = (
+    "from unittest import main\n"
+    "import unittest\n"
+    "\n"
+    "\n"
+    "class Cases(unittest.TestCase):\n"
+    "    def test_one(self):\n"
+    "        self.assertTrue(True)\n"
+    "\n"
+    "\n"
+    'if __name__ == "__main__":\n'
+    "    main()\n"
+)
+
+
+def tree(name, files):
+    """A fresh folder in the run folder holding the given test files, each at its relative path (posix form)."""
+    root = os.path.join(RUN, name)
+    for rel, text in files.items():
+        path = os.path.join(root, *rel.split("/"))
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(text)
+    return root
+
+
 def checker():
     """The checker module. It is loaded from lint/check_suites_have_main.py by path, as the other lint tests load tools."""
     spec = importlib.util.spec_from_file_location("check_suites_have_main", CHECKER)
@@ -194,6 +234,28 @@ class FixtureCases(unittest.TestCase):
     def test_run_class_in_a_case_run_cases_reaches_by_name_is_clean(self):
         found = checker().problems(fixture("run_class_in_listed_case", RUN_CLASS_IN_A_LISTED_CASE))
         self.assertEqual(found, [], "a TestCase run by run_class in a case function that run_cases reaches by name is reported: %r" % found)
+
+    def test_attribute_base_ending_in_testcase_is_a_testcase(self):
+        found = checker().problems(fixture("attribute_base_ends_in_testcase", ASYNC_TESTCASE_BASE))
+        self.assertEqual(len(found), 1, "a class whose attribute base ends in TestCase (IsolatedAsyncioTestCase) is not a TestCase: %r" % found)
+        self.assertTrue(found[0].endswith("test_one.py: " + SUFFIX), "problem text is %r" % found[0])
+
+    def test_not_equal_main_guard_is_not_the_main_guard(self):
+        found = checker().problems(fixture("not_equal_main_guard", NOT_EQUAL_MAIN_GUARD))
+        self.assertEqual(len(found), 1, "a unittest.main() under `if __name__ != \"__main__\":` counts as the main guard: %r" % found)
+        self.assertTrue(found[0].endswith("test_one.py: " + SUFFIX), "problem text is %r" % found[0])
+
+    def test_worktrees_under_claude_are_skipped(self):
+        found = checker().problems(tree("worktrees_skipped", {
+            ".claude/worktrees/wt/test_one.py": SUITE_WITHOUT_MAIN,
+            ".claude/hooks/test_two.py": SUITE_WITHOUT_MAIN,
+        }))
+        self.assertEqual(found, [".claude/hooks/test_two.py: " + SUFFIX],
+                         "the .claude/worktrees skip is not in force, or .claude/hooks is not scanned: %r" % found)
+
+    def test_unittest_main_imported_by_name_is_a_runner(self):
+        found = checker().problems(fixture("from_unittest_import_main", FROM_UNITTEST_IMPORT_MAIN))
+        self.assertEqual(found, [], "a `main` imported from unittest, called under the __main__ block, is reported: %r" % found)
 
 
 class RunClassCases(unittest.TestCase):
