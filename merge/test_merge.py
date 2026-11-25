@@ -5679,6 +5679,8 @@ class GhHalf(Env):
         self.assertNotEqual(rc, 0, out)  # an unknown read refuses
         self.assertNotIn("merge: #7 merged as ", out, "a failed read of main was read as a merge")
         self.assertNotIn("Traceback", out, "the run crashed rather than refused")
+        self.assertNotIn("reverted on", out, "an unknown read of main reverted the claim:\n" + out)
+        self.assertFalse(self.reverted(), "an unknown read of main reverted the claim on feat")
 
     def test_a_red_check_named_http_500_is_a_refusal_before_the_claim(self):
         # the head's one checks read is red; its name carries "HTTP 500". A red head is refused before any claim, so nothing is reverted
