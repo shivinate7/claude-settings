@@ -10,6 +10,7 @@ the exit codes, and the keep marker. The JS trap table that the scanner suite sh
 """
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -17,6 +18,7 @@ import tempfile
 import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 import _test_temp  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -2628,6 +2630,191 @@ class HelperFollowTest(FinderCase):
         self.assertEqual(self.rows(out), {sibling},
                          "a call to a local that shadows a helper's name is followed to the module helper")
         self.assertEqual(code, 1)
+
+
+# ---- check mode with --base: only a sleep or an elapsed-assert on a line the branch adds fails ------------
+
+GIT_ENV = dict(os.environ, GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_SYSTEM=os.devnull)
+OLD_SLEEP_FILE = src("import time", "", "def test_wait():", "    time.sleep(1)")
+BUDGET_BASE = src("import time", "", "def test_budget():", "    t0 = time.monotonic()", "    total = 1 + 1",
+                  "    assert total == 2")
+FINDING_ROW = re.compile(r"^(?P<path>[^\s:]+):(?P<line>[0-9]+): (?P<cat>[a-z-]+): ")
+OLD_COUNT = re.compile(r"\b([0-9]+) old\b")
+
+
+class BaseModeCase(FinderCase):
+    """Each case is a throwaway git repo. The commit `base` is the merge base, and the change under test is
+    committed on top of it. The new mode runs as `--check --base base`. Each case first runs today's `--check`
+    on the same tree (scope, test-practices P7), so the finding a case relies on is shown to exist before the
+    new mode judges it. The new mode's first assert is that it printed a listing at all: a flag the finder does
+    not take exits 2 with no stdout, and that cause names itself, rather than passing by accident."""
+
+    def setUp(self):
+        super().setUp()
+        self.git("init", "-q")
+
+    def git(self, *args):
+        proc = subprocess.run(["git", "-C", self.root, *args], capture_output=True, text=True, env=GIT_ENV)
+        self.assertEqual(proc.returncode, 0, "fixture git %s failed: %s" % (args[0], proc.stderr))
+        return proc.stdout
+
+    def commit(self, msg, files):
+        for rel, text in files.items():
+            self.put(rel, text)
+        self.git("add", "-A")
+        self.git("-c", "user.name=test", "-c", "user.email=test@example.com", "commit", "-q", "-m", msg)
+
+    def base(self, files):
+        self.commit("base", files)
+        self.git("branch", "base")
+
+    def change(self, files):
+        self.commit("change", files)
+
+    def plain(self):
+        proc = run(self.root, "--check")
+        return proc.returncode, proc.stdout
+
+    def new_mode(self, ref="base"):
+        proc = run(self.root, "--check", "--base", ref)
+        self.assertTrue(proc.stdout.strip(),
+                        "--check --base %s printed no listing (exit %d, stderr %r): the flag is not recognised"
+                        % (ref, proc.returncode, proc.stderr[-200:]))
+        return proc.returncode, proc.stdout
+
+    def rows(self, stdout):
+        found = set()
+        for line in stdout.splitlines():
+            m = FINDING_ROW.match(line)
+            if m:
+                found.add((m.group("path"), int(m.group("line")), m.group("cat")))
+        return found
+
+    def old_count(self, stdout):
+        found = OLD_COUNT.findall(stdout)
+        self.assertEqual(len(found), 1, "the output does not print one count of old findings: %r" % stdout[-300:])
+        return int(found[0])
+
+    def assert_remedy(self, stdout, path, line):
+        lines = stdout.splitlines()
+        at = [n for n, text in enumerate(lines) if text.startswith("%s:%d: " % (path, line))]
+        self.assertTrue(at, "no row names %s:%d" % (path, line))
+        self.assertTrue(any("remedy" in text for text in lines[at[0]:at[0] + 2]),
+                        "the new finding at %s:%d has no one-line remedy" % (path, line))
+
+    def test_old_sleep_the_branch_did_not_touch_passes_and_counts_as_old(self):
+        self.base({"tests/test_old.py": OLD_SLEEP_FILE})
+        self.change({"tests/test_plain.py": "def test_plain():\n    assert 1 == 1\n"})
+        _, plain_out = self.plain()
+        self.assertEqual(self.rows(plain_out), pinned("tests/test_old.py", OLD_SLEEP_FILE, ("time.sleep(1)", "sleep")),
+                         "scope: today's --check does not list the old sleep")
+        code, out = self.new_mode()
+        self.assertEqual(code, 0, "--check --base exits %d on an old sleep the branch did not touch, not 0" % code)
+        self.assertEqual(self.rows(out), set(), "--check --base lists an old sleep the branch did not touch")
+        self.assertEqual(self.old_count(out), 1, "--check --base does not count the one old sleep it let stand")
+
+    def test_new_sleep_added_to_a_file_with_an_old_one_fails_and_names_file_and_line(self):
+        self.base({"tests/test_old.py": OLD_SLEEP_FILE})
+        text = OLD_SLEEP_FILE + src("", "def test_new():", "    time.sleep(2)")
+        self.change({"tests/test_old.py": text})
+        new = ("tests/test_old.py", lineno(text, "time.sleep(2)"), "sleep")
+        _, plain_out = self.plain()
+        self.assertIn(new, self.rows(plain_out), "scope: today's --check does not list the new sleep")
+        code, out = self.new_mode()
+        self.assertEqual(code, 1, "--check --base exits %d on a new sleep, not 1" % code)
+        self.assertEqual(self.rows(out), {new}, "--check --base does not list exactly the new sleep at its file and line")
+        self.assert_remedy(out, new[0], new[1])
+        self.assertEqual(self.old_count(out), 1, "--check --base does not count the old sleep it let stand")
+
+    def test_new_elapsed_assert_fails_and_names_file_and_line(self):
+        self.base({"tests/test_budget.py": BUDGET_BASE})
+        text = BUDGET_BASE + "    assert time.monotonic() - t0 < 1\n"
+        self.change({"tests/test_budget.py": text})
+        new = ("tests/test_budget.py", lineno(text, "assert time.monotonic() - t0 < 1"), "elapsed-assert")
+        _, plain_out = self.plain()
+        self.assertIn(new, self.rows(plain_out), "scope: today's --check does not list the new elapsed-assert")
+        code, out = self.new_mode()
+        self.assertEqual(code, 1, "--check --base exits %d on a new elapsed-assert, not 1" % code)
+        self.assertEqual(self.rows(out), {new}, "--check --base does not list exactly the new elapsed-assert")
+        self.assert_remedy(out, new[0], new[1])
+        self.assertEqual(self.old_count(out), 0, "--check --base counts an old finding in a file the base had clean")
+
+    def test_old_sleep_pushed_down_by_lines_added_above_it_passes(self):
+        self.base({"tests/test_old.py": OLD_SLEEP_FILE})
+        text = src("import time", "import os", "import sys", "", "def test_wait():", "    time.sleep(1)")
+        self.change({"tests/test_old.py": text})
+        moved = ("tests/test_old.py", lineno(text, "time.sleep(1)"), "sleep")
+        self.assertNotEqual(moved[1], lineno(OLD_SLEEP_FILE, "time.sleep(1)"), "scope: the sleep did not move")
+        _, plain_out = self.plain()
+        self.assertIn(moved, self.rows(plain_out), "scope: today's --check does not list the moved sleep")
+        code, out = self.new_mode()
+        self.assertEqual(code, 0, "--check --base fails on a sleep that only moved (exit %d), not 0" % code)
+        self.assertEqual(self.rows(out), set(), "--check --base lists a sleep that only moved down the file")
+        self.assertEqual(self.old_count(out), 1, "--check --base does not count the moved sleep as an old finding")
+
+    def test_new_sleep_with_the_keep_marker_and_a_reason_passes(self):
+        self.base({"tests/test_wait.py": src("import time", "", "def test_wait():", "    pass")})
+        text = src("import time", "", "def test_wait():",
+                   "    time.sleep(1)  # time-pinned-ok: waits for the fake server to bind")
+        self.change({"tests/test_wait.py": text})
+        _, plain_out = self.plain()
+        self.assertIn("kept 1", plain_out, "scope: today's --check does not keep the marked sleep")
+        code, out = self.new_mode()
+        self.assertEqual(code, 0, "--check --base fails on a new sleep the keep marker holds (exit %d), not 0" % code)
+        self.assertEqual(self.rows(out), set(), "--check --base lists a new sleep that carries the keep marker")
+
+    def test_new_elapsed_assert_with_the_keep_marker_still_fails(self):
+        self.base({"tests/test_budget.py": BUDGET_BASE})
+        text = BUDGET_BASE + "    assert time.monotonic() - t0 < 1  # time-pinned-ok: budget checked by hand\n"
+        self.change({"tests/test_budget.py": text})
+        new = ("tests/test_budget.py", lineno(text, "assert time.monotonic() - t0 < 1"), "elapsed-assert")
+        _, plain_out = self.plain()
+        self.assertIn(new, self.rows(plain_out), "scope: today's --check does not list the marked elapsed-assert")
+        code, out = self.new_mode()
+        self.assertEqual(code, 1, "--check --base exits %d on a new elapsed-assert with the keep marker, not 1" % code)
+        self.assertEqual(self.rows(out), {new}, "the keep marker lets a new elapsed-assert through in --check --base")
+        self.assert_remedy(out, new[0], new[1])
+
+    def test_base_ref_that_does_not_exist_exits_2_with_an_unknown_line(self):
+        self.base({"tests/test_old.py": OLD_SLEEP_FILE})
+        self.change({"tests/test_plain.py": "def test_plain():\n    assert 1 == 1\n"})
+        code, out = self.new_mode("no-such-ref")
+        self.assertEqual(code, 2, "--check --base with a ref that does not exist exits %d, not 2" % code)
+        unknown = [line for line in out.splitlines() if line.startswith("unknown")]
+        self.assertTrue(unknown, "--check --base with a ref that does not exist prints no unknown line: %r" % out[-200:])
+        self.assertIn("no-such-ref", unknown[0], "the unknown line does not name the ref")
+
+    def test_plain_check_without_a_base_still_fails_on_an_old_sleep(self):
+        self.base({"tests/test_old.py": OLD_SLEEP_FILE})
+        code, out = self.plain()
+        self.assertEqual(code, 1, "plain --check exits %d on an old sleep, not 1 as today" % code)
+        self.assertEqual(self.rows(out), pinned("tests/test_old.py", OLD_SLEEP_FILE, ("time.sleep(1)", "sleep")),
+                         "plain --check does not list the old sleep as today")
+
+    def test_a_sleep_in_a_string_or_a_comment_on_an_added_line_is_not_a_finding(self):
+        self.base({"tests/test_doc.py": src("import time", "", "def test_doc():", "    pass")})
+        doc = src(
+            "import time",
+            "",
+            "def test_doc():",
+            '    """Do not call time.sleep(4) here: the docstring is text."""',
+            '    label = "time.sleep(5) inside a string"',
+            '    note = """',
+            "    time.sleep(6) inside a multi-line string",
+            '    """',
+            "    # time.sleep(7) inside a comment",
+            "    assert label and note",
+        )
+        real = src("import time", "", "def test_real():", "    time.sleep(1)")
+        self.change({"tests/test_doc.py": doc, "tests/test_real.py": real})
+        real_row = ("tests/test_real.py", lineno(real, "time.sleep(1)"), "sleep")
+        _, plain_out = self.plain()
+        self.assertEqual(self.rows(plain_out), {real_row},
+                         "scope: today's --check does not list exactly the real sleep")
+        code, out = self.new_mode()
+        self.assertEqual(code, 1, "--check --base exits %d on a real new sleep, not 1" % code)
+        self.assertEqual(self.rows(out), {real_row},
+                         "--check --base lists a sleep that sits in a string or a comment as a finding")
 
 
 if __name__ == "__main__":

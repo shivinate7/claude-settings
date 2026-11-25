@@ -1824,11 +1824,11 @@ class ModTestsRunsEveryCheck(unittest.TestCase):
 # lint runs only when a file it reads changed. The flags stay out of ALL, as DERIVED_FLAGS does, so the exact-set cases
 # above stay about the base flags.
 LINT_FLAGS = ("lint_red_run", "lint_plan_refuter", "lint_ruling_kind", "lint_comment_narration")
-LINT_STEPS = {  # flag -> the `name:` of the step it controls in checks.yml
-    "lint_red_run": "Red-run trailer",
-    "lint_plan_refuter": "Plan refuter line",
-    "lint_ruling_kind": "Ruling kind check",
-    "lint_comment_narration": "Comment narration check",
+LINT_STEPS = {  # flag -> the `name:` of each step it controls in checks.yml
+    "lint_red_run": ("Red-run trailer",),
+    "lint_plan_refuter": ("Plan refuter line",),
+    "lint_ruling_kind": ("Ruling kind check",),
+    "lint_comment_narration": ("Comment narration check", "Time-pinned new-finding check"),
 }
 
 
@@ -1953,11 +1953,12 @@ class LintStepWorkflow(unittest.TestCase):
         self.fail(f"the checks job has no step named {name!r}")
 
     def test_each_lint_step_names_its_flag_and_the_pull_request_condition(self):
-        for flag, name in LINT_STEPS.items():
-            with self.subTest(step=name):
-                raw = self.step_if(name)
-                self.assertEqual(conjuncts(raw), {f"needs.scope.outputs.{flag} == 'true'", "github.event_name == 'pull_request'"},
-                                 f"{name} must run on {flag} and on a pull request; its if: is {raw!r}")
+        for flag, names in LINT_STEPS.items():
+            for name in names:
+                with self.subTest(step=name):
+                    raw = self.step_if(name)
+                    self.assertEqual(conjuncts(raw), {f"needs.scope.outputs.{flag} == 'true'", "github.event_name == 'pull_request'"},
+                                     f"{name} must run on {flag} and on a pull request; its if: is {raw!r}")
 
     def test_the_scope_job_declares_each_lint_flag(self):
         self.assertIsNotNone(self.scope, "checks.yml has no scope job")
