@@ -16313,13 +16313,52 @@ class MainRunVerdict(Env):
 
     # A superseded run (the shared test in clear_rule): a push run cancelled before any job started, with a newer push run of main on the
     # page. Its commit has no verdict of its own, so its line reads `superseded`, which is neither green nor unknown.
-    LATER, LATER_SHA = 1003, "7d1c0a52" + "4" * 32  # the newer push run, in progress, that replaces NOW
+    LATER, LATER_SHA = 1003, "7d1c0a52" + "4" * 32  # the newer push run, the covering run that replaces NOW
 
-    def test_a_cancelled_push_run_with_no_job_that_a_newer_run_replaced_reads_superseded(self):
-        """Red on the old code: a cancelled run reads unknown, which refuses every merge. Superseded, it reads `superseded`, exit 0."""
+    def covered(self, runs, jobs, token, exit_code, **reads):
+        """Judge NEW_SHA, a push run that the newer run LATER replaced: the line holds `token` and the exit code is `exit_code`. -> (exit code, output, line)."""
+        rc, text, _word, line = self.verdict(self.NEW_SHA, runs, jobs, **reads)
+        self.assertEqual(rc, exit_code, f"exit code {rc} for a commit whose covering run reads {token!r}, not {exit_code}:\n{text}")
+        self.assertIn(token, text, f"the line does not name the state of the covering run, {token!r}:\n{text}")
+        return rc, text, line
+
+    def test_a_replaced_push_run_whose_covering_run_is_in_progress_exits_1_still_going(self):
+        """Ruling of 12:38 CST Nov 25 2026: a replaced push run is skipped, and the run that replaced it decides. While that run is still going
+        it has not decided: the commit has no verdict yet, so exit 1, and the line says the covering run is still in progress."""
         runs = [main_run(self.LATER, None, status="in_progress", sha=self.LATER_SHA), main_run(self.NOW, "cancelled", sha=self.NEW_SHA),
                 main_run(self.PREV, "success", sha=self.GREEN_SHA)]
-        jobs = {self.NOW: [], self.PREV: [main_job("scope", "success"), main_job("checks", "success", 20)]}
+        jobs = {self.LATER: [], self.NOW: [], self.PREV: [main_job("scope", "success"), main_job("checks", "success", 20)]}
+        _rc, text, _line = self.covered(runs, jobs, "is still in_progress", 1)
+        self.assertIn(f"run {self.LATER}", text, "the line does not name the covering run:\n" + text)
+
+    def test_a_replaced_push_run_whose_covering_run_is_queued_exits_1_still_going(self):
+        """A queued covering run has not decided either: exit 1, and the line says it is still queued."""
+        runs = [main_run(self.LATER, None, status="queued", sha=self.LATER_SHA), main_run(self.NOW, "cancelled", sha=self.NEW_SHA),
+                main_run(self.PREV, "success", sha=self.GREEN_SHA)]
+        jobs = {self.LATER: [], self.NOW: [], self.PREV: [main_job("scope", "success"), main_job("checks", "success", 20)]}
+        self.covered(runs, jobs, "is still queued", 1)
+
+    def test_a_replaced_push_run_whose_covering_run_cannot_be_read_is_unknown_and_refuses(self):
+        """The covering run's jobs cannot be read, so the commit has no verdict: exit 1, with the failed read's text in the line."""
+        runs = [main_run(self.LATER, "success", sha=self.LATER_SHA), main_run(self.NOW, "cancelled", sha=self.NEW_SHA),
+                main_run(self.PREV, "success", sha=self.GREEN_SHA)]
+        jobs = {self.LATER: [main_job("scope", "success"), main_job("checks", "success", 20)], self.NOW: [],
+                self.PREV: [main_job("scope", "success"), main_job("checks", "success", 20)]}
+        self.covered(runs, jobs, "HTTP 502 Bad Gateway", 1, jobs_fail_of={self.LATER: "HTTP 502 Bad Gateway"})
+
+    def test_a_replaced_push_run_whose_covering_run_is_red_reads_the_failing_test_of_that_run(self):
+        """The covering run is red with a failing test its own verdict names. The replaced commit reads that verdict, and exits as that verdict does (0 for a first red)."""
+        runs = [main_run(self.LATER, "failure", sha=self.LATER_SHA), main_run(self.NOW, "cancelled", sha=self.NEW_SHA),
+                main_run(self.PREV, "success", sha=self.GREEN_SHA)]
+        jobs = {self.LATER: [main_job("scope", "success"), self.red_job("checks", 9102)], self.NOW: [],
+                self.PREV: [main_job("scope", "success"), main_job("checks", "success", 20)]}
+        self.covered(runs, jobs, "test_new", 0, job_logs={9102: self.NEW_LOG})
+
+    def test_control_a_replaced_push_run_whose_covering_run_is_green_reads_superseded_with_exit_0(self):
+        runs = [main_run(self.LATER, "success", sha=self.LATER_SHA), main_run(self.NOW, "cancelled", sha=self.NEW_SHA),
+                main_run(self.PREV, "success", sha=self.GREEN_SHA)]
+        jobs = {self.LATER: [main_job("scope", "success"), main_job("checks", "success", 20)], self.NOW: [],
+                self.PREV: [main_job("scope", "success"), main_job("checks", "success", 20)]}
         self.judged("superseded", self.NEW_SHA, runs, jobs)
 
     def test_control_a_cancelled_push_run_with_no_newer_run_reads_unknown_beside_a_replaced_one(self):
