@@ -4,9 +4,12 @@
 Such a file runs its cases with the variable unset, so a case that reads the config folder reads the real ~/.claude. Only an import-time
 removal counts: a pop, a del, or os.environ.clear(). It reaches every case. A pop inside one test method, or inside patch.dict, is that
 case's own choice. The file is clean when a set follows its last removal at import time: a set at module level, or in a function the
-module calls at module level. A set in setUpModule() clears it too. A set under `if False:`, in one test method, or inside patch.dict
-does not. The checker reads the names the file binds: an alias of os.environ, a name imported from a module that holds the string, and a
-module-level tuple of names. A test file that does not parse is a problem too.
+module calls at module level. A set in setUpModule() clears it too. A set under `if False:`, under `if __name__ == "__main__":`, in one test method, or inside a
+with patch.dict block does not. A set is a subscript or annotated assignment, `os.environ |= {...}`, os.environ.update, setdefault or
+putenv of the name, a patch.dict(os.environ, ...).start(), a call to a module function that sets it, or enter_context(isolated_config(...)).
+The checker reads the names the file binds: an alias of os.environ, a name bound (also with an annotation) to the string or imported from
+a module that holds it, a module-level tuple of names, and a module-level dict that holds the name as a key. A module that other files
+import is parsed once per run. A test file that does not parse is a problem too.
 
     python3 lint/check_tests_set_config.py [--root DIR]     # DIR defaults to this script's repo
 """
@@ -30,36 +33,76 @@ def holds_var(node):
     return isinstance(node, (ast.Tuple, ast.List, ast.Set)) and any(is_var(element) for element in node.elts)
 
 
+_CONSTANTS = {}  # path -> {name: string constant}, or None when the file does not parse; one parse per module per run
+
+
+def module_constants(path):
+    """The constants the module at `path` binds at its top level (annotated or not), read with ast; None when it does not parse."""
+    path = os.path.abspath(path)
+    if path not in _CONSTANTS:
+        try:
+            with open(path, encoding="utf-8") as handle:
+                tree = ast.parse(handle.read(), filename=path)
+        except (OSError, SyntaxError, ValueError):
+            _CONSTANTS[path] = None
+        else:
+            found = {}
+            for node in tree.body:
+                if isinstance(node, ast.Assign):
+                    targets, value = node.targets, node.value
+                elif isinstance(node, ast.AnnAssign) and node.value is not None:
+                    targets, value = [node.target], node.value
+                else:
+                    continue
+                if isinstance(value, ast.Constant):
+                    for target in targets:
+                        if isinstance(target, ast.Name):
+                            found[target.id] = value.value
+            _CONSTANTS[path] = found
+    return _CONSTANTS[path]
+
+
 def imported_value(module, name, folders):
     """The string constant `name` holds in `<module>.py`, found in one of `folders` and read with ast (never copied), else None."""
     for folder in folders:
         path = os.path.join(folder, module + ".py")
         if not os.path.isfile(path):
             continue
-        try:
-            with open(path, encoding="utf-8") as handle:
-                tree = ast.parse(handle.read(), filename=path)
-        except (OSError, SyntaxError, ValueError):
+        constants = module_constants(path)
+        if constants is None:
             return None
-        for node in tree.body:
-            if isinstance(node, ast.Assign) and isinstance(node.value, ast.Constant) \
-                    and any(isinstance(target, ast.Name) and target.id == name for target in node.targets):
-                return node.value.value
+        if name in constants:
+            return constants[name]
     return None
+
+
+def is_main_guard(node):
+    """True for `if __name__ == "__main__":`, whose body the tests never run."""
+    test = node.test
+    return isinstance(test, ast.Compare) and isinstance(test.left, ast.Name) and test.left.id == "__name__" \
+        and len(test.ops) == 1 and isinstance(test.ops[0], ast.Eq) and len(test.comparators) == 1 \
+        and isinstance(test.comparators[0], ast.Constant) and test.comparators[0].value == "__main__"
+
+
+def is_patch_dict_call(node):
+    return isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "dict"
 
 
 class Names:
     """What the file's own module level binds, read before the walk: `environs` (names that alias os.environ), `var_names` (names that
-    hold VAR), `var_tuples` (names bound to a tuple that holds VAR), and `helpers` (module functions that set VAR)."""
+    hold VAR), `var_tuples` (names bound to a tuple that holds VAR), `var_dicts` (names bound to a dict that holds VAR as a key), and
+    `helpers` (module functions that set VAR, directly or through another helper, whatever the order of the defs)."""
 
     def __init__(self, tree, folder):
         self.environs = set()
         self.var_names = set()
         self.var_tuples = set()
+        self.var_dicts = set()
         self.helpers = set()
         for node in tree.body:
-            if isinstance(node, ast.Assign):
-                for target in node.targets:
+            if isinstance(node, (ast.Assign, ast.AnnAssign)) and node.value is not None:
+                targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+                for target in targets:
                     if not isinstance(target, ast.Name):
                         continue
                     if self.is_environ(node.value):
@@ -75,8 +118,18 @@ class Names:
                     elif imported_value(node.module, alias.name, (folder, HERE)) == VAR:
                         self.var_names.add(alias.asname or alias.name)
         for node in tree.body:
-            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name != "setUpModule" and self.sets_var(node, ()):
-                self.helpers.add(node.name)
+            if isinstance(node, (ast.Assign, ast.AnnAssign)) and node.value is not None and self.dict_has_var(node.value, ()):
+                for target in node.targets if isinstance(node, ast.Assign) else [node.target]:
+                    if isinstance(target, ast.Name):
+                        self.var_dicts.add(target.id)
+        functions = [node for node in tree.body if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name != "setUpModule"]
+        grown = True
+        while grown:  # a helper may call one defined after it, so read until no def joins
+            grown = False
+            for node in functions:
+                if node.name not in self.helpers and self.sets_var(node, ()):
+                    self.helpers.add(node.name)
+                    grown = True
 
     def is_environ(self, node):
         """True for `os.environ`, a bare `environ`, or a name bound to one."""
@@ -105,40 +158,68 @@ class Names:
                     return statement.lineno
         return None
 
+    def dict_has_var(self, node, loop_names):
+        """True when `node` is a dict display, a name bound to one, or a dict(...) call, that holds VAR as a key."""
+        if isinstance(node, ast.Dict):
+            return any(key is not None and self.names_var(key, loop_names) for key in node.keys) \
+                or any(key is None and self.dict_has_var(value, loop_names) for key, value in zip(node.keys, node.values))
+        if isinstance(node, ast.Name):
+            return node.id in self.var_dicts
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "dict":
+            return any(self.dict_has_var(arg, loop_names) for arg in node.args) or self.keywords_have_var(node.keywords, loop_names)
+        return False
+
+    def keywords_have_var(self, keywords, loop_names):
+        """True when a call's keywords name VAR, as `VAR=...` or inside `**{...}`."""
+        return any(keyword.arg == VAR or (keyword.arg is None and self.dict_has_var(keyword.value, loop_names)) for keyword in keywords)
+
+    def call_sets(self, call, loop_names):
+        """True when this one call sets VAR: os.environ.update or setdefault, os.putenv, patch.dict(os.environ, ...).start(),
+        enter_context(isolated_config(...)), or a call to a helper that sets it."""
+        func = call.func
+        if isinstance(func, ast.Name):
+            return func.id in self.helpers
+        if not isinstance(func, ast.Attribute):
+            return False
+        if func.attr in SETTERS and self.is_environ(func.value):
+            if func.attr == "setdefault" and call.args and self.names_var(call.args[0], loop_names):
+                return True
+            return any(self.dict_has_var(arg, loop_names) for arg in call.args) or self.keywords_have_var(call.keywords, loop_names)
+        if func.attr == "putenv":
+            return bool(call.args) and self.names_var(call.args[0], loop_names)
+        if func.attr == "start" and is_patch_dict_call(func.value) and func.value.args and self.is_environ(func.value.args[0]):
+            return any(self.dict_has_var(arg, loop_names) for arg in func.value.args[1:]) \
+                or self.keywords_have_var(func.value.keywords, loop_names)
+        if func.attr == "enter_context" and call.args and isinstance(call.args[0], ast.Call):
+            entered = call.args[0].func
+            return (isinstance(entered, ast.Name) and entered.id == "isolated_config") \
+                or (isinstance(entered, ast.Attribute) and entered.attr == "isolated_config")
+        return False
+
     def sets_var(self, node, loop_names):
-        """True when `node` is, or holds, a set of VAR in os.environ, or a call to a helper that sets it."""
+        """True when `node` is, or holds, a set of VAR in os.environ, or a call that sets it (see call_sets)."""
         for part in ast.walk(node):
             if isinstance(part, (ast.Assign, ast.AnnAssign)):
                 targets = part.targets if isinstance(part, ast.Assign) else [part.target] if part.value is not None else []
                 for target in targets:
                     if isinstance(target, ast.Subscript) and self.is_environ(target.value) and self.names_var(target.slice, loop_names):
                         return True
-            elif isinstance(part, ast.Call) and isinstance(part.func, ast.Attribute) and part.func.attr in SETTERS \
-                    and self.is_environ(part.func.value):
-                if any(keyword.arg == VAR for keyword in part.keywords):
+            elif isinstance(part, ast.AugAssign):
+                if isinstance(part.op, ast.BitOr) and self.is_environ(part.target) and self.dict_has_var(part.value, loop_names):
                     return True
-                if any(isinstance(arg, ast.Dict) and any(key is not None and self.names_var(key, loop_names) for key in arg.keys)
-                       for arg in part.args):
-                    return True
-                if part.func.attr == "setdefault" and part.args and self.names_var(part.args[0], loop_names):
-                    return True
-            elif isinstance(part, ast.Call) and isinstance(part.func, ast.Attribute) and part.func.attr == "putenv" \
-                    and part.args and self.names_var(part.args[0], loop_names):
-                return True
-            elif isinstance(part, ast.Call) and isinstance(part.func, ast.Name) and part.func.id in self.helpers:
+            elif isinstance(part, ast.Call) and self.call_sets(part, loop_names):
                 return True
         return False
 
 
 def is_patch_dict(item):
-    call = item.context_expr
-    return isinstance(call, ast.Call) and isinstance(call.func, ast.Attribute) and call.func.attr == "dict"
+    return is_patch_dict_call(item.context_expr)
 
 
 def import_time(body, names, loop_names=()):
     """Yield each statement that runs at import time, in source order: the module body, and what sits in its if, for, while, try, with
     and class blocks. A def is skipped, so is a with patch.dict block, whose changes the block undoes, and so is the branch of an
-    `if` on a constant that never runs. `loop_names` holds the loop variables that iterate over a tuple naming VAR."""
+    `if` on a constant that never runs, and so is the body of `if __name__ == "__main__":`. `loop_names` holds the loop variables that iterate over a tuple naming VAR."""
     for node in body:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             continue
@@ -150,6 +231,8 @@ def import_time(body, names, loop_names=()):
             inner = loop_names + (node.target.id,)
         if isinstance(node, ast.If) and isinstance(node.test, ast.Constant):
             blocks = [node.body if node.test.value else node.orelse]
+        elif isinstance(node, ast.If) and is_main_guard(node):
+            blocks = [node.orelse]
         else:
             blocks = [getattr(node, field, None) or [] for field in ("body", "orelse", "finalbody")]
         for block in blocks:
@@ -186,6 +269,7 @@ def file_problem(path, rel):
 def problems(root):
     """One string per test_*.py under `root` that removes VAR at import and does not set it after, each starting with `<path>:`."""
     found = []
+    _CONSTANTS.clear()
     for folder, dirs, files in os.walk(root):
         dirs[:] = sorted(name for name in dirs if not name.startswith(".") and name not in SKIP_DIRS)
         for name in sorted(files):
