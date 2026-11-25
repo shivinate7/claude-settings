@@ -2035,12 +2035,14 @@ class ReadyPassLine(unittest.TestCase):
         self.assertEqual(r.returncode, 0)
         self.assertEqual(len(lines), 1, "a PASS with no ready-pass line in its output prints more than its PASS line: %r" % r.stdout)
 
-    def test_fail_prints_no_ready_pass_line(self):  # control: a FAIL keeps today's excerpt, which does not carry the early ready-pass line
-        r = run(fifty_lines_with(self.READY) + "import sys\nprint('FAIL boom')\nsys.exit(1)\n")
+    def test_fail_with_no_ready_pass_line_prints_no_kept_line(self):  # control: a FAIL whose output holds no ready-pass line keeps its FAIL output as it is
+        kept = merge.READY_PASS_FMT.split("{")[0]  # the fixed prefix of the ready-pass line, read from its one home
+        r = run(fifty_lines_with() + "import sys\nprint('FAIL boom')\nsys.exit(1)\n")
         lines = r.stdout.splitlines()
         self.assertEqual(r.returncode, 1)
         self.assertTrue(lines and lines[0].startswith("FAIL "), "a failing run does not lead with its FAIL line: %r" % r.stdout)
-        self.assertNotIn(self.READY, lines, "a FAIL prints the ready-pass line, which only a PASS keeps: %r" % r.stdout)
+        self.assertEqual([l for l in lines if l.startswith(kept)], [], "a FAIL with no ready-pass line in its output prints a kept line: %r" % r.stdout)
+        self.assertEqual(lines[1:], ["FAIL boom"], "a FAIL with no ready-pass line in its output changed its FAIL output: %r" % r.stdout)
 
     def test_a_line_that_quotes_the_format_mid_line_is_not_kept(self):  # control: the format is kept at a line start only
         r = run(fifty_lines_with("note: " + self.READY))
