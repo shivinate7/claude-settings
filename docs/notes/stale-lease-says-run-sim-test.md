@@ -1,1 +1,0 @@
-- stale-lease-says-run-sim-test: Review finding F4. `hooks/guard.py` (near line 7071) tells a holder of a lease with no `udid` to run `sim-test`, which takes a second lease. It should say the lease predates the name-based change and must be taken again. Seen: 2026-11-25 x1
