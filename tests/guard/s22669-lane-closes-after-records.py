@@ -153,7 +153,8 @@ def _still_open(fd):
 def own_ccr_unreadable_case():
     """A check: own_session_ccr returns None, and does not raise, for each input it cannot read, and it leaves
     the descriptor an int path names open. The lane fixture must hold the own record first, or the non-string
-    id proves nothing."""
+    id proves nothing. The deep record's parse is faked to raise RecursionError, so the case reads the same on
+    every interpreter."""
     missing = os.path.join(ROLE_DIR, "no-such-transcript.jsonl")
     folder = role_path("unreadable")
     lane = role_path("archive-lane")
@@ -162,6 +163,14 @@ def own_ccr_unreadable_case():
         return False, "fixture: the missing path, the folder, the lane or the deep transcript is not as the case needs"
     try:
         module = _load_own_session()
+        parse = module._record_json  # the parse of a get_session result, which _scan calls by this module name
+        def record_json(body):
+            # The deep record's parse raises RecursionError here. Some interpreters parse that depth (3.15), so the
+            # raise is faked for this one input; every other body is parsed as the module parses it.
+            if "[" * 1000 in body:
+                raise RecursionError("maximum recursion depth exceeded while decoding a JSON array")
+            return parse(body)
+        module._record_json = record_json
         if module.own_session_ccr(lane, ROLE_OTHER) is None:
             return False, "fixture: the lane transcript holds no own record for a string id"
     except Exception as error:
