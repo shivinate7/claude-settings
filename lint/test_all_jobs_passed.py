@@ -22,7 +22,7 @@ import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-from test_windows_split import CHECKS, LINUX_GUARD_JOBS, MACOS_JOBS, all_jobs, eval_with, yaml_scalar  # noqa: E402  the one home of the checks.yml path and the guard shards
+from test_windows_split import CHECKS, LINUX_GUARD_JOBS, MACOS_JOBS, all_jobs, eval_if, eval_with, yaml_scalar  # noqa: E402  the one home of the checks.yml path and the guard shards
 from test_windows_split import ALL_JOBS_PASSED_JOB, PUSH_OFF_SHARDS, RECORDS_ONLY_CONDITION, SUITE_FLAG, unwrap  # noqa: E402  the one home of the rollup job name, the shard list, the records-only skip and the suite flags
 from all_jobs_passed_rules import (ALL_JOBS_PASSED_USES, COMMENT_DELTA_CLAUSE, DELTA_CLAUSES, all_problems,  # noqa: E402  the one home of the rules
                                    child_problems, ci_done_problems, needs_of, needs_problems, off_problems, scope_if_problems,
@@ -174,8 +174,8 @@ class AllJobsPassedJob(unittest.TestCase):
 # file that already has its change as it is, so the cases hold after it lands.
 MAC_JOBS = ("shell-macos", "checks-macos", "checks-macos-b")
 SCOPE_IF = "    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}\n"
-SKIPD_SCOPE_IF = ("    if: ${{ always() && (github.event_name != 'pull_request' || !github.event.pull_request.draft) "
-                  "&& needs.nightly-skip.outputs.skip != 'true' }}\n    needs: nightly-skip\n")
+SKIPD_SCOPE_IF = ("    if: ${{ always() && (github.event_name != 'pull_request' || !github.event.pull_request.draft) }}\n"
+                  "    needs: nightly-skip\n")  # scope waits on the skip job and runs on a skipped daily too (decision tool-pins)
 SKIP_JOB = """  nightly-skip:
     if: ${{ github.event_name == 'schedule' }}
     runs-on: ubuntu-latest
@@ -313,12 +313,15 @@ class MacOnceByBatchRollup(unittest.TestCase):
         self.assertTrue(rollup, "the rollup's needs were not read: an empty match would prove nothing")
         self.assertEqual([j for j in MAC_JOBS if j in rollup], [], "all-jobs-passed needs a macOS job")
 
-    def test_the_nightly_skip_is_no_rollup_member_and_scope_reads_its_skip(self):
-        # Named failure: the nightly-skip job is an off-rollup job that is not a shard, and scope's if reads its skip output.
+    def test_the_nightly_skip_is_no_rollup_member_and_scope_runs_on_a_skipped_daily(self):
+        # Named failure: the nightly-skip job is an off-rollup job that is not a shard, and scope's if skips a scheduled run when the
+        # skip job says skip, so no tool-pins step runs on a quiet day (decision tool-pins, owner 11:05 CST Nov 25).
         planned = planned_nightly_skip(self.text)
         self.assertEqual(off_problems(planned), [])
         self.assertEqual(needs_problems(planned), [])
         self.assertEqual(scope_if_problems(planned), [])
+        self.assertTrue(eval_if(yaml_scalar(all_jobs(planned)["scope"]["if"]), "schedule", "true", nightly_skip="true"),
+                        "on a skipped daily scope is skipped, so no tool-pins step runs")
 
     def test_a_macos_job_whose_if_runs_on_a_pull_request_is_flagged(self):
         # Control: an if that is true on a pull_request makes its macOS job needed, and all-jobs-passed does not name it, so the rules refuse it.

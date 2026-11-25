@@ -109,10 +109,11 @@ jobs:
   # Decides which jobs and suites a run needs (.github/scripts/ci-scope.sh). Every other job
   # needs it. An error in the script turns every flag on, never off. A job behind a scope flag always runs; its steps skip when the flag is off.
   # A draft PR skips this job, so every job that needs it skips too (decision draft-until-reviewed).
-  # It also skips on a daily run whose skip job said skip. The skip job runs on every event, and its steps run on a schedule only, so
+  # It also skips on a push the push skip proved. A daily run whose skip job said skip still runs it: ci-scope.sh reads NIGHTLY_SKIP and turns every
+  # suite off, and the Tool pins step still runs (decision tool-pins). The skip job runs on every event, and its steps run on a schedule only, so
   # off a schedule its skip output is empty. A failed skip job also has no skip output, which reads as not-skip, and !cancelled() keeps scope running.
   scope:
-    if: ${{ !cancelled() && (github.event_name != 'pull_request' || !github.event.pull_request.draft) && needs.nightly-skip.outputs.skip != 'true' && needs.push-skip.outputs.skip != 'true' }}
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || !github.event.pull_request.draft) && needs.push-skip.outputs.skip != 'true' }}
     needs:
       - nightly-skip
       - push-skip
@@ -138,6 +139,7 @@ jobs:
       sweep: ${{ steps.scope.outputs.sweep }}
       shoot: ${{ steps.scope.outputs.shoot }}
       mutation_report: ${{ steps.scope.outputs.mutation_report }}
+      tool_pins: ${{ steps.scope.outputs.tool_pins }}
       windows_guard: ${{ steps.scope.outputs.windows_guard }}
       records_only_skip: ${{ steps.scope.outputs.records_only_skip }}
       skip_comment_delta: ${{ steps.scope.outputs.skip_comment_delta }}
@@ -183,6 +185,7 @@ jobs:
           HEAD_REF: ${{ github.head_ref }}
           GREEN_HEAD: ${{ steps.green.outputs.sha }}
           PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          NIGHTLY_SKIP: ${{ needs.nightly-skip.outputs.skip }}
         run: bash .github/scripts/ci-scope.sh
 
       # A red job wakes the watching session at once; ci-done names any the step could not.
@@ -421,6 +424,11 @@ jobs:
         if: ${{ !cancelled() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_checks_step_scope.py
 
+      # Judges this runner's tools against .tool-versions (decision tool-pins): on the daily run and a dispatch, and on a pull request that moves a pin or the checker.
+      - name: Tool pins (this runner)
+        if: ${{ !cancelled() && needs.scope.outputs.tool_pins == 'true' }}
+        run: python3 lint/check_tool_pins.py
+
       - name: Guard inputs list fixture suite
         if: ${{ !cancelled() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_guard_inputs.py
@@ -504,6 +512,10 @@ jobs:
       - name: Cost line pin fixture suite
         if: ${{ !cancelled() && (needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_any == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_check_cost_pins.py
+
+      - name: Tool pin fixture suite
+        if: ${{ !cancelled() && needs.scope.outputs.records_only_skip != 'true' }}
+        run: python3 lint/test_check_tool_pins.py
 
       - name: Red-run trailer fixture suite
         if: ${{ !cancelled() && needs.scope.outputs.records_only_skip != 'true' }}
@@ -2025,167 +2037,167 @@ jobs:
         run: python3 janitor/mutate_sweep.py
 
       - name: Config watch fixture suite
-        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        if: ${{ ((needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled()) && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_config_watch.py
 
       - name: Config watch fast-exit suite
-        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        if: ${{ ((needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled()) && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_config_watch_fast_exit.py
 
       - name: Shared names suite
-        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        if: ${{ ((needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled()) && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_shared_names.py
 
       - name: Precompact handoff fixture suite
-        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        if: ${{ ((needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled()) && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_precompact_handoff.py
 
       - name: Claude Code compaction check fixture suite
-        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        if: ${{ ((needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled()) && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_cc_version_check.py
 
       - name: Handoff wave-2 fixture suite
-        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        if: ${{ ((needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled()) && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_handoff_wave2.py
 
       - name: Decision watch fixture suite
-        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        if: ${{ ((needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled()) && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_decision_watch.py
 
       - name: Reply judge fixture suite
-        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        if: ${{ ((needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled()) && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_reply_judge.py
 
       - name: Prose judge fixture suite
-        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        if: ${{ ((needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled()) && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_prose_judge.py
 
       - name: SendMessage state fixture suite
-        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        if: ${{ ((needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled()) && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_sendmessage_state.py
 
       - name: Refusal note fixture suite
-        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        if: ${{ ((needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled()) && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_refusal_note.py
 
       - name: Refusal note agent row suite
-        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        if: ${{ ((needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled()) && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_refusal_note_agent.py
 
       - name: Refusal note route row suite
-        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        if: ${{ ((needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled()) && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_refusal_note_route.py
 
       - name: Call judge fixture suite
-        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        if: ${{ ((needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled()) && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_call_judge.py
 
       - name: Question form fixture suite
-        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        if: ${{ ((needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled()) && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_question_form.py
 
       - name: Question form option-key gap suite
-        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        if: ${{ ((needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled()) && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_question_form_option_gap.py
 
       - name: Remove-prompt answer fixture suite
-        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        if: ${{ ((needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled()) && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_rm_prompt_answer.py
 
       - name: Agent brief fixture suite
-        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        if: ${{ ((needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled()) && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_agent_brief.py
 
       - name: Blind brief fixture suite
-        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        if: ${{ ((needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled()) && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_blind_brief.py
 
       - name: Local time line fixture suite
-        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        if: ${{ ((needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled()) && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_local_time.py
 
       - name: Guard probe helper fixture suite
-        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        if: ${{ ((needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled()) && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_probe.py
 
       - name: Simulator boot-record fixture suite
-        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        if: ${{ ((needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled()) && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_sim_boot_record.py
 
       - name: Guard wrappers fixture suite
-        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        if: ${{ ((needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled()) && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_wrappers.py
 
       - name: Session start notice suite
-        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        if: ${{ ((needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled()) && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_session_start.py
 
       - name: Start check suite
-        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        if: ${{ ((needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled()) && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_start_check.py
 
       - name: Refusal settle fixture suite
-        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        if: ${{ ((needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled()) && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_report_guard_refusal.py
 
       - name: Stop-hook guard fixture suite
-        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        if: ${{ ((needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled()) && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_report_guard.py
 
       - name: Stop-hook question route suite
-        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        if: ${{ ((needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled()) && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_report_guard_route.py
 
       - name: Stop-hook stamped copy suite
-        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        if: ${{ ((needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled()) && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_report_guard_stamped.py
 
       - name: Stop-hook route row falsifier suite
-        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        if: ${{ ((needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled()) && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_report_guard_falsifier.py
 
       - name: Stop-hook hand-off cite suite
-        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        if: ${{ ((needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled()) && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_report_guard_handoff.py
 
       - name: Clause parser suite
-        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        if: ${{ ((needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled()) && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_clause.py
 
       - name: Stop-hook cannot-claim suite
-        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        if: ${{ ((needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled()) && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_report_guard_cannot.py
 
       - name: Stop-hook landing fixture suite
-        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        if: ${{ ((needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled()) && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_report_guard_landing.py
 
       - name: Stop-hook owner-safe reason suite
-        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        if: ${{ ((needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled()) && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_report_guard_remedy.py
 
       - name: Ruling home fixture suite
-        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        if: ${{ ((needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled()) && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_ruling_home.py
 
       - name: Ruling census fixture suite
-        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        if: ${{ ((needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled()) && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_ruling_census.py
 
       - name: Verdict runner fixture suite
-        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        if: ${{ ((needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled()) && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_verdict.py
 
       - name: Wait-pid helper fixture suite
-        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        if: ${{ ((needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled()) && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_wait_pid.py
 
       - name: Wait-until helper fixture suite
-        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        if: ${{ ((needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled()) && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_wait_until.py
 
       - name: Now-central helper fixture suite
-        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        if: ${{ ((needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled()) && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_now_central.py
 
       - name: Unknown-read contract (guard + session_start)
@@ -2199,13 +2211,17 @@ jobs:
       # with every bounded call counted: 180 s cap + 30 s hard stop + 35 s longest blocking call + 10 s
       # kills + 2 s output drain = 257 s. The CI step's timeout-minutes (300 s) is the backstop.
       - name: Record stamp engine fixture suite
-        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        if: ${{ ((needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled()) && needs.scope.outputs.records_only_skip != 'true' }}
         timeout-minutes: 5
         run: node actions/stamp/test_stamp.mjs
 
       - name: Record stamp action fixture suite
-        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        if: ${{ ((needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled()) && needs.scope.outputs.records_only_skip != 'true' }}
         run: bash actions/stamp/test_action.sh
+
+      - name: Tool pins (this runner)
+        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() && needs.scope.outputs.tool_pins == 'true' }}
+        run: python3 lint/check_tool_pins.py
 
       - name: Mod and map-skill tests
         if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() && needs.scope.outputs.mods == 'true' }}
@@ -2248,32 +2264,32 @@ jobs:
           python-version: "3.15"
 
       - name: CI wake-up fixture suite
-        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        if: ${{ ((needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled()) && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_ci_wake.py
 
       - name: Feedback inbox fixture suite
-        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        if: ${{ ((needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled()) && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_feedback_inbox.py
 
       - name: Waiting export check suite
-        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        if: ${{ ((needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled()) && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_waiting_export.py
 
       - name: Page link check suite
-        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        if: ${{ ((needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled()) && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_page_link_check.py
 
       - name: Daily note fixture suite
-        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        if: ${{ ((needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled()) && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_daily_note.py
 
       # Windows is not covered: the stall watch is posix only (see the stall-watch decision).
       - name: Stall watch fixture suite
-        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        if: ${{ ((needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled()) && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_stall_watch.py
 
       - name: Proc env read suite
-        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        if: ${{ ((needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled()) && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_proc_env.py
 
       - name: Janitor triggers fixture suite (SessionEnd hook)
@@ -2308,7 +2324,8 @@ jobs:
   checks-windows:
     runs-on: windows-latest
     needs: scope
-    if: ${{ (github.event_name != 'push') && needs.scope.outputs.records_only_skip != 'true' }}
+    # A skipped daily (records_only_skip) still starts this job for its Tool pins step (decision tool-pins); its test steps read records_only_skip.
+    if: ${{ (github.event_name != 'push') && (needs.scope.outputs.records_only_skip != 'true' || needs.scope.outputs.tool_pins == 'true') }}
     # Cut F moved the guard suite out. Run time since the install.sh leg left is unmeasured; 10 min leaves room.
     timeout-minutes: 10
     permissions:
@@ -2392,11 +2409,11 @@ jobs:
       # Accepted risk: a Windows-only mutation regression is not caught. No mutant is marked windows-only.
 
       - name: Load reader against the OS tools
-        if: ${{ (needs.scope.outputs.checks_windows == 'true' || github.event_name != 'pull_request') && !cancelled() && needs.scope.outputs.code == 'true' }}
+        if: ${{ (needs.scope.outputs.checks_windows == 'true' || github.event_name != 'pull_request') && !cancelled() && needs.scope.outputs.code == 'true' && needs.scope.outputs.records_only_skip != 'true' }}
         run: python hooks/test_guard_load_os.py
 
       - name: install.sh stays off Windows suite
-        if: ${{ (needs.scope.outputs.checks_windows == 'true' || github.event_name != 'pull_request') && !cancelled() && needs.scope.outputs.code == 'true' }}
+        if: ${{ (needs.scope.outputs.checks_windows == 'true' || github.event_name != 'pull_request') && !cancelled() && needs.scope.outputs.code == 'true' && needs.scope.outputs.records_only_skip != 'true' }}
         shell: bash
         run: sh hooks/test_install_windows.sh
 
@@ -2404,10 +2421,14 @@ jobs:
       # fetch bound (the CLAUDE_SETTINGS_FETCH_TIMEOUT export in hooks/test_install_src.sh). A hang fails this CI step in 3 min,
       # by name, not the job's 10.
       - name: Session start freshness cases (caseF1, caseG1)
-        if: ${{ (needs.scope.outputs.checks_windows == 'true' || github.event_name != 'pull_request') && !cancelled() && needs.scope.outputs.code == 'true' }}
+        if: ${{ (needs.scope.outputs.checks_windows == 'true' || github.event_name != 'pull_request') && !cancelled() && needs.scope.outputs.code == 'true' && needs.scope.outputs.records_only_skip != 'true' }}
         shell: bash
         timeout-minutes: 3
         run: sh hooks/test_install_src.sh caseF1 caseG1
+
+      - name: Tool pins (this runner)
+        if: ${{ (needs.scope.outputs.checks_windows == 'true' || github.event_name != 'pull_request') && !cancelled() && needs.scope.outputs.tool_pins == 'true' }}
+        run: python lint/check_tool_pins.py
 
       - name: Mod and map-skill tests
         if: ${{ (needs.scope.outputs.checks_windows == 'true' || github.event_name != 'pull_request') && !cancelled() && needs.scope.outputs.mods == 'true' }}
