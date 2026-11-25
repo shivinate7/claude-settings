@@ -10,8 +10,11 @@ Each is distinctive, so a whole-word match in a tracked file is the old name com
 file, GLOSSARY.md, whose "Not" cells list them, and the generated docs/records.md are the exceptions. A HISTORY
 file may keep its name only on a line whose comment holds the opt-out marker. A retired word in plain
 prose ("the test will pass") is a reviewer's call, not this test's. The widened glossary check will replace this list.
+The whole-tree scan (RepoRetiredNamesTests) and the real GLOSSARY.md cases (RepoGlossaryTests) run here too, so the
+ready check runs what the glossary fixture suite used to run.
 """
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -20,6 +23,7 @@ import tokenize
 import unittest
 
 import _test_temp  # test-temp-standard: one run folder per run (the one home, lint/_test_temp.py)
+import check_glossary  # the check module: the real GLOSSARY.md cases read its rows() and words()
 from check_glossary import OPT_OUT  # the one home of the opt-out marker, a line that holds it is skipped
 
 RUN_FOLDER = _test_temp.run_folder()
@@ -187,6 +191,94 @@ class LineScope(unittest.TestCase):
         repo = make_repo({other: 'old = "Lane kind: blind"  # glossary-ok: quoted to be refused\n'})
         self.assertTrue(other in tracked(repo), "the fixture does not track %s" % other)
         self.assertEqual(hits(repo, self.OLD), [other])
+
+
+def plural_forms(word):
+    """The word with a plural `s`, `es` or `ies` taken off, so gaps, tries and claims reach gap, try and claim."""
+    out = {word, word[:-1] if word.endswith("s") else word}
+    if word.endswith("es"):
+        out.add(word[:-2])
+    if word.endswith("ies"):
+        out.add(word[:-3] + "y")
+    return out
+
+
+class RepoGlossaryTests(unittest.TestCase):
+    def test_repo_glossary_homes_resolve(self):
+        """The real GLOSSARY.md: every home resolves. A path list keeps git out of it."""
+        r = subprocess.run([sys.executable, check_glossary.__file__, "README.md"], cwd=ROOT,
+                           capture_output=True, encoding="utf-8")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
+    def test_real_not_names_use_this_sense_only_and_keep_gap_try_claim_plain(self):
+        """The real GLOSSARY.md, read through the check's own rows(): each tag is (this sense), and gap,
+        try and claim are everyday words, so no "not" name may be one of them."""
+        with open(os.path.join(ROOT, "GLOSSARY.md"), encoding="utf-8") as f:
+            table = check_glossary.rows(f.read())
+        self.assertTrue(table, "GLOSSARY.md has no rows under ## Terms")
+        problems = []
+        for term, _homes, names in table:
+            for name in names:
+                if "(" in name and not re.fullmatch(r"[^()]+ \(this sense\)", name):
+                    problems.append("row '%s': not name '%s' has a tag other than (this sense)" % (term, name))
+                for word in check_glossary.words(name.split(" (")[0]):
+                    if plural_forms(word) & {"gap", "try", "claim"}:
+                        problems.append("row '%s': not name '%s' holds '%s'; gap, try and claim are plain words"
+                                        % (term, name, word))
+        self.assertEqual(problems, [], "\n".join(problems))
+
+
+# o13 lane B retired these names (GLOSSARY.md rows agent, mutation test, red run, command). Claude
+# Code's own names stay: the hook events, `subagent_type`, the CLAUDE_CODE_* settings keys and the
+# `subagents/` transcript folder. Two old names stay readable until their end day, each in one file:
+# the `--subagent` flag of local_time.py and the `_subagentCapUntil` field of config_watch.py.
+RETIRED_PATTERN = (r"(?i)sub-?agent|harness[-_ ]scope|HARNESS_SCOPE|mutation harness|AUTHOR_HARNESS"
+                   r"|ask-steps-run-alone|\b(?:ask|count|harmless|background)_steps?\b|\b(?:ask|harmless|chained) steps?\b"
+                   r"|roles-one-role-per-worker|output-never-echo-worker-report|worker_transcript"
+                   r"|WORKER_FOLDED_KEYS|(?i:red[- ]proof)")
+PLATFORM = (r"SubagentStop|SubagentStart|subagent_type|(?:\\u0043|C)LAUDE_CODE_\w+"
+            r"|[\"'/`]subagents(?=[\"'/`])|subagents/|SUBAGENT_MODEL")
+STAYS = {  # path: the one old name it may still hold, and why
+    "hooks/local_time.py": "--subagent",            # read until OLD_FLAG_ENDS
+    "hooks/config_watch.py": "_subagentCapUntil",   # read until OLD_NAME_ENDS
+    "hooks/test_local_time.py": "--subagent",       # pins the old flag until then
+    "hooks/test_config_watch.py": "_subagentCapUntil",
+    "testing/skip-locally-fail-in-ci.test.mjs": "Red proof",  # header shared with copies in other repos
+    "lint/test_find_copies.py": "Red proof",        # the fixture copy of that header
+    "mods/plain-diff/docs/mockup.html": "red proof",  # sample diff text
+    # the writer-label alternation of OTHER_WRITER_ROW_RE: the harness writes "Subagent report:". Only this fragment
+    # stays, so a bare "subagent" elsewhere in the file still fails.
+    "lint/report_guard.py": "agent|subagent|",
+}
+SKIP = ("skills/impeccable/", "lint/test_check_glossary.py", "lint/test_retired_names.py", "GLOSSARY.md")
+# GLOSSARY names them as "Not"; the glossary suite quotes them as fixtures; this file holds the patterns
+
+
+class RepoRetiredNamesTests(unittest.TestCase):
+    def test_no_retired_name_in_tracked_files(self):
+        """Every tracked path and text file: no name o13 lane B retired, outside the platform's own."""
+        listed = subprocess.run(["git", "ls-files"], cwd=ROOT, capture_output=True, encoding="utf-8")
+        self.assertEqual(listed.returncode, 0, listed.stderr)
+        retired, platform = re.compile(RETIRED_PATTERN), re.compile(PLATFORM)
+        found = []
+        for rel in listed.stdout.splitlines():
+            if rel.startswith(SKIP):
+                continue
+            if retired.search(rel):
+                found.append("%s: the path" % rel)
+            try:
+                with open(os.path.join(ROOT, rel), encoding="utf-8") as f:
+                    text = f.read()
+            except (OSError, UnicodeDecodeError):
+                continue
+            text = platform.sub("", text)
+            if rel in STAYS:
+                text = text.replace(STAYS[rel], "")
+            for number, line in enumerate(text.splitlines(), 1):
+                hit = retired.search(line)
+                if hit:
+                    found.append("%s:%d: %s" % (rel, number, hit.group(0)))
+        self.assertEqual(found, [], "\n".join(found[:40]))
 
 
 def tearDownModule():
