@@ -46,6 +46,10 @@ LintListedSuites: merge.lintSuites in .github/stamp.json names checks.yml steps.
   when its flag is on for the change, --lint runs a picked or touched python suite and FAILs on its failure; any other such suite
   prints one `not run` line that names it and says it runs in CI (also in another job), and only a change to its own file or to the
   file it tests reads unknown. A flag that is off keeps its old read.
+LintPythonPin: --lint runs a lint step's python3 under the Python version the job pins (its actions/setup-python python-version). With
+  python<major>.<minor> of the pin on PATH, that interpreter runs the step. With none, and the local python3 at another version, one line
+  names both versions and says interpreter, once per run; the verdict and exit code keep their values. --plan prints that line too.
+  The interpreters are fake stubs (FAKE_INTERPRETER), never this machine's own Pythons.
 Run: python3 lint/test_ci_job.py
 """
 import functools
@@ -54,6 +58,7 @@ import importlib.util
 import json
 import os
 import re
+import shlex
 import shutil
 import signal
 import subprocess
@@ -151,8 +156,9 @@ class Job(unittest.TestCase):
         lines = [ln for ln in done.stdout.splitlines() if not ln.startswith("log=")]
         return done.returncode, lines, done.stdout + done.stderr
 
-    def stub_path(self, **tools):
-        """PATH with each named tool first, as a shell script that runs its body."""
+    def stub_path(self, after=None, **tools):
+        """PATH with each named tool first, as a shell script that runs its body. after: the folder list that follows the stubs in
+        place of this process's PATH, for a case that must see no other tool of that name."""
         bin_dir = os.path.join(self.root, "stubs")
         os.makedirs(bin_dir, exist_ok=True)
         for name, body in tools.items():
@@ -160,7 +166,8 @@ class Job(unittest.TestCase):
             with open(path, "w", encoding="utf-8", newline="\n") as f:
                 f.write("#!/bin/sh\n" + body + "\n")
             os.chmod(path, 0o755)
-        return {"PATH": os.pathsep.join([bin_dir, os.environ.get("PATH", "")])}
+        rest = os.environ.get("PATH", "") if after is None else after
+        return {"PATH": os.pathsep.join([bin_dir, rest])}
 
     VERDICT_EXITS_1 = "import sys\nsys.exit(1)\n"  # a verdict that prints nothing and exits 1
     VERDICT_EXITS_0 = "import sys\nsys.exit(0)\n"  # a verdict that prints nothing and exits 0
@@ -5355,6 +5362,208 @@ class LintListedSuites(Job):
         self.assert_code_on("a change to the node suite")
         rc, lines, out = self.lint(SuiteSteps.LINT_STEP, self.NODE_STEP)
         self.assert_unknown_names(rc, lines, "listed-node", "lint/test_listed.mjs", out)
+
+
+FAKE_INTERPRETER = """\
+import collections, json, sys
+name, version, record, args = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4:]
+with open(record, "a", encoding="utf-8") as f:
+    f.write(json.dumps({"name": name, "argv": args}) + "\\n")
+rest = list(args)
+while rest and rest[0] in ("-I", "-S", "-E", "-s", "-B", "-u", "-O", "-P"):
+    rest.pop(0)
+if rest[:1] in (["--version"], ["-V"], ["-VV"]):
+    print("Python " + version)
+elif rest[:1] == ["-c"]:
+    major, minor, micro = (int(p) for p in version.split(".")[:3])
+    info = collections.namedtuple("version_info", "major minor micro releaselevel serial")
+    sys.version_info = info(major, minor, micro, "final", 0)
+    sys.version = version + " (fake)"
+    exec(rest[1], {"__name__": "__main__"})
+else:
+    sys.exit(1 if any("fail" in a for a in rest) else 0)
+"""  # a fake python: records each run, answers the version probes, and exits 1 for a script whose name holds "fail"
+
+
+@unittest.skipIf(os.name == "nt", "the fake interpreters are sh stubs, and the PATH holds symlinks: POSIX only")
+class LintPythonPin(Job):
+    """--lint runs a lint step's python3 under the Python version its job pins (the python-version of its actions/setup-python step,
+    read from the workflow). With python<major>.<minor> of that pin on PATH, that interpreter runs the step. With none on PATH, and
+    the local python3 at another version, one line names both versions and the word interpreter, once per run, and the verdict and
+    exit code keep their values. A local python3 at the pin, a job with no pin, and a pin that only another job holds print no line.
+    --plan prints the line and starts no interpreter more than once. Each case's PATH holds the fake stubs, then a mirror of the real
+    PATH's tools with no python* name, so this machine's own interpreters are never on it."""
+
+    SETUP_ACTION = "actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c"  # the pin checks.yml's own setup-python steps use
+    mirror = None  # set by setUpClass
+
+    @classmethod
+    def setUpClass(cls):
+        cls.mirror = tempfile.mkdtemp(prefix="cijob_mirror_", dir=RUN_FOLDER)
+        cls.addClassCleanup(shutil.rmtree, cls.mirror, True)
+        seen = set()
+        for folder in os.environ.get("PATH", "").split(os.pathsep):
+            try:
+                names = sorted(os.listdir(folder)) if os.path.isdir(folder) else []
+            except OSError:
+                continue
+            for name in names:
+                full = os.path.join(folder, name)
+                if name in seen or name.startswith("python") or not (os.path.isfile(full) and os.access(full, os.X_OK)):
+                    continue
+                seen.add(name)
+                os.symlink(full, os.path.join(cls.mirror, name))
+
+    @staticmethod
+    def setup_step(pin=None):
+        """The job's setup-python step: python-version pinned to `pin`, or no python-version when pin is None."""
+        with_ = {"python-version": '"%s"' % pin} if pin is not None else {"cache": "pip"}
+        return step("Set up Python", uses=LintPythonPin.SETUP_ACTION, **{"with": with_})
+
+    @staticmethod
+    def lint_step(name, script):
+        return step(name, "python3 lint/%s" % script)
+
+    def record_path(self):
+        return os.path.join(self.root, "interpreter-record.jsonl")
+
+    def fake_path(self, versions):
+        """This case's PATH: a stub for each name in `versions` (name -> version), then the mirror. Each stub execs the fake script
+        with its own name, its version and the record file, so every run is recorded under the name it was started by."""
+        fake_dir = os.path.join(self.root, "fake-interpreter")
+        os.makedirs(fake_dir, exist_ok=True)
+        fake = os.path.join(fake_dir, "fake_interpreter.py")
+        with open(fake, "w", encoding="utf-8", newline="\n") as f:
+            f.write(FAKE_INTERPRETER)
+        bodies = {name: "exec %s -I %s %s %s %s \"$@\"" % tuple(shlex.quote(p) for p in (sys.executable, fake, name, version, self.record_path()))
+                  for name, version in versions.items()}
+        return self.stub_path(after=self.mirror, **bodies)["PATH"]
+
+    def calls(self, name=None):
+        """(name, argv) of each run a fake interpreter took, in order: all of them, or only those started as `name`."""
+        try:
+            with open(self.record_path(), encoding="utf-8") as f:
+                rows = [json.loads(ln) for ln in f if ln.strip()]
+        except OSError:
+            return []
+        return [(row["name"], row["argv"]) for row in rows if name is None or row["name"] == name]
+
+    def lint_runs(self, name):
+        """How many runs started as `name` were a lint step's script: one argument under lint/."""
+        return sum(any(a.startswith("lint/") for a in argv) for _, argv in self.calls(name))
+
+    def lint_with(self, path, *steps, args=("--lint",), other=None):
+        """One run of job lane over `steps` with PATH `path`. The rerun cache is off, so every step runs."""
+        return self.run_job(*steps, args=args, env={"PATH": path, "CI_JOB_NO_CACHE": "1"}, other=other)
+
+    @staticmethod
+    def interpreter_lines(out):
+        return [ln for ln in out.splitlines() if "interpreter" in ln.lower()]
+
+    @staticmethod
+    def both_versions(out, pinned, local):
+        """The lines of `out` that name both versions and the word interpreter. A version matches whole: 3.1 is not 3.11, and 3.15.0 names 3.15."""
+        def named(ln, version):
+            return re.search(r"(?<![\d.])%s(?!\d)" % re.escape(version), ln) is not None
+        return [ln for ln in out.splitlines() if "interpreter" in ln.lower() and named(ln, pinned) and named(ln, local)]
+
+    def test_a_pinned_python_on_path_runs_the_lint_step_in_place_of_python3(self):
+        """Red now: the job pins 3.11 and python3.11 is on PATH, but the lint step runs under python3 (3.15), not under python3.11."""
+        path = self.fake_path({"python3": "3.15.0", "python3.11": "3.11.9"})
+        self.assertIsNotNone(shutil.which("python3.11", path=path), "scope: this case's PATH holds no python3.11 stub")
+        rc, lines, out = self.lint_with(path, self.setup_step("3.11"), self.lint_step("Lint one", "check_one.py"))
+        self.assertTrue(self.calls(), "no fake interpreter ran the lint step\n" + out)
+        self.assertEqual(self.lint_runs("python3.11"), 1,
+                         "the lint step did not run under the pinned python3.11 (python3 ran it %d time(s))\n%s"
+                         % (self.lint_runs("python3"), out))
+        self.assertEqual(rc, 0, out)
+
+    def test_the_pin_is_read_from_the_job_so_a_3_13_pin_runs_python3_13(self):
+        """Red now: the job pins 3.13 and python3.13 is on PATH, but the lint step runs under python3, so the pin is not used."""
+        path = self.fake_path({"python3": "3.15.0", "python3.13": "3.13.2"})
+        self.assertIsNotNone(shutil.which("python3.13", path=path), "scope: this case's PATH holds no python3.13 stub")
+        rc, lines, out = self.lint_with(path, self.setup_step("3.13"), self.lint_step("Lint one", "check_one.py"))
+        self.assertTrue(self.calls(), "no fake interpreter ran the lint step\n" + out)
+        self.assertEqual(self.lint_runs("python3.13"), 1,
+                         "the lint step did not run under the pinned python3.13 (python3 ran it %d time(s))\n%s"
+                         % (self.lint_runs("python3"), out))
+        self.assertEqual(rc, 0, out)
+
+    def test_with_no_pinned_python_on_path_one_line_names_both_versions_once_per_run(self):
+        """Red now: the job pins 3.11, no python3.11 is on PATH, and the local python3 is 3.15. The two lint steps should share one line
+        that names both versions and says interpreter. No such line prints."""
+        path = self.fake_path({"python3": "3.15.0"})
+        self.assertIsNone(shutil.which("python3.11", path=path), "scope: a python3.11 is on this case's PATH")
+        rc, lines, out = self.lint_with(path, self.setup_step("3.11"), self.lint_step("Lint one", "check_one.py"),
+                                        self.lint_step("Lint two", "check_two.py"))
+        self.assertEqual(self.lint_runs("python3"), 2, "scope: the two lint steps did not both run under python3\n" + out)
+        named = self.both_versions(out, "3.11", "3.15")
+        self.assertEqual(len(named), 1, "expected one line naming 3.11 and 3.15 and the word interpreter, found %d\n%s" % (len(named), out))
+        self.assertEqual(rc, 0, out)
+
+    def test_plan_prints_the_line_and_starts_no_interpreter_more_than_once(self):
+        """Red now: --plan with the same setup prints no line, so it does not match the run's one line. The plan must also run no lint
+        script, and start the local python3 at most once to learn its version."""
+        path = self.fake_path({"python3": "3.15.0"})
+        self.assertIsNone(shutil.which("python3.11", path=path), "scope: a python3.11 is on this case's PATH")
+        rc, lines, out = self.lint_with(path, self.setup_step("3.11"), self.lint_step("Lint one", "check_one.py"),
+                                        self.lint_step("Lint two", "check_two.py"), args=("--lint", "--plan"))
+        self.assertEqual(len(self.both_versions(out, "3.11", "3.15")), 1,
+                         "--plan did not print one line naming 3.11 and 3.15 and the word interpreter\n" + out)
+        self.assertEqual(self.lint_runs("python3"), 0, "--plan ran a lint step's script\n" + out)
+        self.assertLessEqual(len(self.calls()), 1,
+                             "--plan started the local interpreter %d times, more than once to learn its version" % len(self.calls()))
+
+    def test_a_local_python_at_the_pin_prints_no_line(self):
+        """Control, green now: the local python3 is 3.11, the pin, so no line says interpreter. The run's lines are the setup step's
+        not-run line, the lint step's line and the summary."""
+        path = self.fake_path({"python3": "3.11.9"})
+        self.assertIsNone(shutil.which("python3.11", path=path), "scope: a python3.11 is on this case's PATH")
+        rc, lines, out = self.lint_with(path, self.setup_step("3.11"), self.lint_step("Lint one", "check_one.py"))
+        self.assertEqual(self.lint_runs("python3"), 1, "scope: the lint step did not run under python3\n" + out)
+        self.assertEqual(self.interpreter_lines(out), [], "a line says interpreter though the local python3 is the pin\n" + out)
+        self.assertEqual(len(lines), 3, "the run did not print one line per step and the summary\n" + out)
+        self.assertEqual(rc, 0, out)
+
+    def test_a_job_whose_setup_step_names_no_python_version_prints_no_line(self):
+        """Control, green now: the setup step has no python-version, so there is no pin to compare with, and no line."""
+        path = self.fake_path({"python3": "3.15.0"})
+        rc, lines, out = self.lint_with(path, self.setup_step(None), self.lint_step("Lint one", "check_one.py"))
+        self.assertEqual(self.lint_runs("python3"), 1, "scope: the lint step did not run under python3\n" + out)
+        self.assertEqual(self.interpreter_lines(out), [], "a line says interpreter though the job pins no Python version\n" + out)
+        self.assertEqual(len(lines), 3, "the run did not print one line per step and the summary\n" + out)
+        self.assertEqual(rc, 0, out)
+
+    def test_a_job_with_no_setup_python_step_prints_no_line(self):
+        """Control, green now: the workflow has no setup-python step, so no version is pinned and no line prints."""
+        path = self.fake_path({"python3": "3.15.0"})
+        rc, lines, out = self.lint_with(path, self.lint_step("Lint one", "check_one.py"))
+        self.assertEqual(self.lint_runs("python3"), 1, "scope: the lint step did not run under python3\n" + out)
+        self.assertEqual(self.interpreter_lines(out), [], "a line says interpreter though no step pins a Python version\n" + out)
+        self.assertEqual(len(lines), 2, "the run did not print one line per step and the summary\n" + out)
+        self.assertEqual(rc, 0, out)
+
+    def test_a_pin_that_only_another_job_holds_prints_no_line(self):
+        """Control, green now: the linted job pins nothing; the pin 3.11 sits in job other. The line is for the linted job's own pin."""
+        path = self.fake_path({"python3": "3.15.0"})
+        rc, lines, out = self.lint_with(path, self.lint_step("Lint one", "check_one.py"), other=[self.setup_step("3.11")])
+        self.assertEqual(self.lint_runs("python3"), 1, "scope: the lint step did not run under python3\n" + out)
+        self.assertEqual(self.interpreter_lines(out), [], "a line says interpreter for a pin that only another job holds\n" + out)
+        self.assertEqual(rc, 0, out)
+
+    def test_the_verdict_and_exit_code_match_with_and_without_the_line(self):
+        """Control, green now: the same steps read the same verdicts and exit code whether the local python3 is 3.15 (the line is due)
+        or 3.11 (the pin, no line). One step passes and one fails, so the exit code is a real one."""
+        steps = (self.setup_step("3.11"), self.lint_step("Lint pass", "check_pass.py"), self.lint_step("Lint fail", "check_fail.py"))
+        runs = {}
+        for local in ("3.15.0", "3.11.9"):
+            path = self.fake_path({"python3": local})
+            self.assertIsNone(shutil.which("python3.11", path=path), "scope: a python3.11 is on this case's PATH")
+            rc, lines, out = self.lint_with(path, *steps)
+            verdicts = {k: v for k, v in by_step(lines).items() if k.startswith("Lint")}
+            self.assertEqual(verdicts, {"Lint pass": "PASS", "Lint fail": "FAIL"}, "scope: the steps did not read PASS and FAIL\n" + out)
+            runs[local] = (rc, verdicts)
+        self.assertEqual(runs["3.15.0"], runs["3.11.9"], "the verdicts or the exit code change with the line")
 
 
 BIN_CI_JOB = os.path.join(HERE, "..", "bin", "ci-job")
