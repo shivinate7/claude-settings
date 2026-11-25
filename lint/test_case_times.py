@@ -965,9 +965,9 @@ class RowFails(unittest.TestCase):
 
 
 class OpenFrame(unittest.TestCase):
-    def assert_open_frame(self, module, folder, ran_line, cases, named):
+    def assert_open_frame(self, module, folder, ran_line, cases, named, line_start=None):
         """The unarmed control runs as ran_line says. The armed run keeps one row per (case, outcome) in cases, and
-        writes one stderr line that names the open frame."""
+        writes one stderr line that names the open frame, which starts with line_start when one is given."""
         unarmed = run_module(folder, module, armed=False, report=True)
         self.assertEqual(result_line(unarmed), ran_line,
                          "the unarmed control run is not %r: %r" % (ran_line, unarmed.stderr[-300:]))
@@ -989,6 +989,9 @@ class OpenFrame(unittest.TestCase):
         self.assertEqual(len(notes), 1, "the open frame at flush wrote %d case_times stderr lines, want one: %s"
                          % (len(notes), notes))
         self.assertIn(named, notes[0], "the stderr line does not name the open frame: %r" % notes[0])
+        if line_start is not None:
+            self.assertTrue(notes[0].startswith(line_start),
+                            "the stderr line is %r, want it to start %r" % (notes[0], line_start))
 
     def test_open_frame_at_flush_keeps_later_rows_and_names_it(self):
         folder = case_folder(self)
@@ -1016,7 +1019,8 @@ class OpenFrame(unittest.TestCase):
         folder = case_folder(self)
         write(folder, "fixture_leak_odd.py", LEAK_ODD)
         self.assert_open_frame("fixture_leak_odd", folder, "RESULT ran=3 failures=0 errors=0 skipped=0",
-                               [("Odd.test_b_plain", "pass"), ("Odd.test_c_plain", "pass")], "Anon")
+                               [("Odd.test_b_plain", "pass"), ("Odd.test_c_plain", "pass")], "Anon",
+                               line_start="case_times: left open and dropped, no row kept: Anon")
 
     def test_outcome_is_read_from_the_matching_result(self):
         folder = case_folder(self)
