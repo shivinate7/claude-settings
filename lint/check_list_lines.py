@@ -6,26 +6,31 @@
 
 Rule: decision lists-one-line-per-item. A list that holds more than 8 items is crowded. A crowded list that the change
 adds an item to holds one item per line. Where order cannot matter it is also sorted: Python import names, Python set
-literals and the alternatives of one shell `case` arm. An ordered list (a Python list or tuple, dict keys) is never
-sorted, by the check or by --fix. Only a list the diff against the merge base adds an item to is judged: some item of
-the head list starts on an added line and its text is in no list of the base file. An old crowded list the change
-does not touch never fails, and a diff that only removes or reflows items never fails.
+literals and the alternatives of one shell `case` arm. An ordered list (a Python list or tuple, dict keys, a shell
+array) is never sorted, by the check or by --fix. Only a list the diff against the merge base adds an item to is judged:
+some item of the head list starts on an added line, and the list holds more items than the base list it grew from (the
+base list that shares the most items with it). An edit of an item adds none. A shell `NAME+=(...)` on an added line adds
+to the last `NAME=(...)` before it. An old crowded list the change does not touch never fails, and a diff that only
+removes, edits or reflows items never fails.
 A keep marker is a comment on the line above the list (above the `case` line for a shell arm):
 `list-lines-ok: <reason>`. It opts the list out. A marker with no reason fails, and so does a marker on a list that is
 not crowded.
 
 Readers: Python is read by `ast` (comments by `tokenize`); shell by the scanner in lint/check_comment_narration.py
-(shell_scan), which skips quoted text, comments and here-doc bodies. Every other language row of
+(shell_scan), which skips quoted text, comments and here-doc bodies. A shell array `NAME=(...)`, `NAME+=(...)` or
+`declare -a NAME=(...)` holds one item per word: a quoted word, `$(...)` or `${...}` is one item, and a one-line or
+a multi-line array is read alike. An array with a subscript (`NAME[0]=(`) is not read. Every other language row of
 lint/code_check_standard.json that the diff adds a line to prints one `not read: <language>` line and passes.
 Python `import a, b` (no `from`) and f-string parts are not read.
 
 --fix reflows each crowded list of PATH that is not one item per line, in place: one item per line, a trailing comma,
 and the Python AST unchanged (sorted only for set literals and import names; it checks the AST before it writes). A list
 with a comment inside it is left alone and named. A shell arm comes out one alternative per line, sorted, each but the
-last ending in `|\\`, the last ending in `)`, and the action on the next line.
+last ending in `|\\`, the last ending in `)`, and the action on the next line. A shell array comes out one element per line, in its order.
 
 Exit 0 clean. Exit 1 on a failure, printed as `path:line: list-lines: ...`. A base or a file the check cannot read
-prints `unknown: ...` and exits 0, or 1 when env CI is set (decision ci-unknown-is-red).
+prints `unknown: ...` and exits 0, or 1 when env CI is set (decision ci-unknown-is-red). So does a Python or shell file
+the diff cannot show: a binary file, or an untracked file that git does not ignore (`git add -N` it to have it read).
 
 Cost: no hook, no log, no timer, no process left running. One git diff, one merge-base and one `git show` per changed
 Python or shell file that holds a crowded list on an added line; Python files are parsed once, shell files scanned once.
@@ -42,6 +47,7 @@ import subprocess
 import sys
 import tokenize
 import warnings
+from collections import Counter
 
 HERE = os.path.dirname(os.path.realpath(__file__))
 sys.path.insert(0, HERE)
@@ -69,6 +75,7 @@ class Lst:
     def __init__(self, first, items, sortable, marker_line, span, rebuild, why=""):
         self.first, self.items, self.sortable, self.marker_line = first, items, sortable, marker_line
         self.span, self.rebuild, self.why = span, rebuild, why
+        self.name, self.append = None, False  # a shell array's variable, and whether this is `NAME+=(...)`
 
     def texts(self):
         return [t for t, _ in self.items]
@@ -233,6 +240,7 @@ class ShSource:
         self.text = EOL.sub("\n", text)
         self.scan = narration.shell_scan(path, self.text)
         self.starts = [0] + [m.end() for m in re.finditer("\n", self.text)]
+        self.comment_at = [a for a, _ in self.scan]
         self.comments = {}
         for a, b in self.scan:
             line = self.line_of(a)
@@ -269,6 +277,37 @@ class ShSource:
 
             out.append(Lst(items[0][1], items, True, self.line_of(case_at) - 1, (start, line_end if rest.strip() else paren + 1 + len(rest)),
                            rebuild))
+        out += self.arrays(everything)
+        return sorted(out, key=lambda lst: lst.span)
+
+    def arrays(self, everything):
+        """The Lst of each `NAME=(...)` array: one item per word, a quoted word or an expansion being one. An `NAME+=(...)`
+        array of one word is kept (with `everything`) so the change can be judged against the array it grows."""
+        out = []
+        for open_at, close_at, starts in self.scan.arrays:
+            items = []
+            for n, a in enumerate(starts):
+                end = starts[n + 1] if n + 1 < len(starts) else close_at
+                at = bisect.bisect_left(self.comment_at, a)
+                cut = self.comment_at[at] if at < len(self.comment_at) and self.comment_at[at] < end else end
+                items.append((re.sub(r"\\\n", "", self.text[a:cut]).strip(), self.line_of(a)))
+            named = re.search(r"([A-Za-z_][A-Za-z0-9_]*)(\+?)=$", self.text[max(0, open_at - 200):open_at])
+            grows = bool(named and named.group(2))
+            marker_line = self.line_of(open_at) - 1
+            if len(items) < 2 and not (everything and grows and items):
+                continue
+            if len(items) > 1 and not (everything or crowded(len(items)) or MARKER.match(self.comments.get(marker_line, ""))):
+                continue
+            inside = bisect.bisect_right(self.comment_at, close_at) - bisect.bisect_right(self.comment_at, open_at)
+            why = "a comment inside the array" if inside else ""
+            indent = indent_of(self.text[self.starts[self.line_of(open_at) - 1]:open_at] + "x")
+
+            def rebuild(texts, indent=indent):
+                return "(\n" + "".join("%s  %s\n" % (indent, t) for t in texts) + indent + ")"
+
+            lst = Lst(items[0][1], items, False, marker_line, (open_at, close_at + 1), None if why else rebuild, why)
+            lst.name, lst.append = (named.group(1) if named else None), grows
+            out.append(lst)
         return out
 
     def marker(self, lst):
@@ -284,23 +323,46 @@ def failure(path, line, what):
     return "%s:%d: list-lines: %s Rule: %s. Fix: %s" % (path, line, what, RULE, FIX_CMD % path)
 
 
+def base_items_of(lst, base_lists):
+    """The item texts of the base list that `lst` grew from: the base list that shares the most items with it, provided
+    it shares at least half of the smaller of the two lists; else none (the list is new)."""
+    mine, best, best_key = Counter(lst.texts()), [], (0, 0)
+    for other in base_lists:
+        theirs = Counter(other.texts())
+        shared = sum((mine & theirs).values())
+        key = (shared, -abs(len(lst.items) - len(other.items)))
+        if shared and shared * 2 >= min(len(lst.items), len(other.items)) and key > best_key:
+            best, best_key = other.texts(), key
+    return best
+
+
 def judge(path, lang, head_text, base_text, added):
     """The failure lines for one changed file. `head_text` and `base_text` (None when the base holds no such file)
     are the file's text; `added` is the set of head line numbers the diff adds. Raises Unread on an unreadable head.
-    A pure function of its four arguments, so a fixture or a measure can feed it any pair of texts."""
+    A list is added to when an item of it starts on an added line and it holds more items than the base list it grew
+    from (an edit or a removal is no add). A shell `NAME+=(...)` that starts on an added line adds to the last
+    `NAME=(...)` before it. A pure function of its four arguments, so a fixture or a measure can feed it any pair of texts."""
     head = parse(lang, path, head_text)
-    cands = [lst for lst in head.lists() if any(line in added for _, line in lst.items)]
+    every = head.lists(True)
+    lists = [lst for lst in every if len(lst.items) > 1 and (crowded(len(lst.items)) or head.marker(lst) is not None)]
+    grown = set()
+    for tail in (every if lang == "shell" else ()):
+        if tail.append and any(line in added for _, line in tail.items):
+            plain = [t for t in every if t.name == tail.name and not t.append and t.span[0] < tail.span[0]]
+            if plain:
+                grown.add(id(plain[-1]))
+    cands = [lst for lst in lists if id(lst) in grown or any(line in added for _, line in lst.items)]
     if not cands:
         return []
-    known = set()
+    base_lists = []
     if base_text is not None:
         try:
-            known = {t for lst in parse(lang, path, base_text).lists(True) for t, _ in lst.items}
+            base_lists = parse(lang, path, base_text).lists(True)
         except Unread:
-            known = set()  # an unreadable base holds no known item: every item reads as new
+            base_lists = []  # an unreadable base holds no list: every item reads as new
     out = []
     for lst in cands:
-        if not any(line in added and text not in known for text, line in lst.items):
+        if id(lst) not in grown and len(lst.items) <= len(base_items_of(lst, base_lists)):
             continue
         is_crowded = crowded(len(lst.items))
         reason = head.marker(lst)
@@ -444,10 +506,13 @@ def main(argv=None):
         files = narration.added_lines(args.base, std, tuple(args.exclude), cwd=root,
                                       classify=lambda p: narration.language_of(p, std, tuple(std["languages"])))
         fork = narration.git("merge-base", args.base, "HEAD", cwd=root).strip()
+        exclude = tuple(args.exclude)
+        unseen = narration.unseen_files(args.base, lambda p: not p.startswith(exclude) and narration.language_of(p, std, READ) is not None,
+                                        cwd=root)
     except Unread as e:
         print("unknown: %s (base %s)" % (" ".join(str(e).split()), args.base))
         return unknown_exit
-    failures, unknown = [], []
+    failures, unknown = [], ["unknown: %s: %s" % row for row in unseen]
     for path, (lang, added) in sorted(files.items()):
         if lang not in READ or not added:
             continue
