@@ -2,7 +2,7 @@
 
 **What.** The remedy text for `merge <pr> --confirm` now sends a cloud lane into the merge role refusal. Both remedies also omit `--head` (read hooks/guard_merge.py MERGE_CHECK_REASON, BARE_MERGE_REASON). A batch runner is now refused without `--head` (read merge/merge.py BATCH_RUNNER_NEEDS_HEAD). A cloud session's merge role is read by `read_merge_role` (read merge/merge.py read_merge_role).
 
-**Where.** `hooks/guard_merge.py`, the remedies in `MERGE_CHECK_REASON` and `BARE_MERGE_REASON` (read hooks/guard_merge.py MERGE_CHECK_REASON). It breaks rule `git-remedy-never-names-target`, which says a refusal's printed remedy never names the forbidden target (read CLAUDE.md).
+**Where.** `hooks/guard_merge.py`, the remedies in `MERGE_CHECK_REASON` and `BARE_MERGE_REASON`, which each print `merge <pr> --confirm`. Rule `git-remedy-never-names-target` (CLAUDE.md): a refusal's printed remedy never names the forbidden target. Unchecked: that this command is the forbidden target for a cloud lane, so the remedy breaks the rule.
 
 **Decision.** `session-tiers`, session roles (read docs/decisions/session-tiers.md). `auto-mode-owner-acts`, which acts auto mode allows with no ask (read docs/decisions/auto-mode-owner-acts.md).
 

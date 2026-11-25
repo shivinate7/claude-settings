@@ -55,6 +55,7 @@ and the pagenotes file.
 import json
 import os
 import re
+import stat
 import sys
 from datetime import datetime, timedelta, timezone
 
@@ -407,7 +408,8 @@ def mail_lines(raw):
 
 def cwd_gone_line(raw):
     """Prints one line when the payload's cwd no longer exists: the session's worktree was removed under it.
-    One stat, no child, no file. Any other stat error (a refused search, a bad path) means the check cannot
+    A regular file is no folder a session stands in, so it counts as gone. A newline in the path shows as a
+    backslash n, so the path cannot split the line. One stat, no child, no file. Any other stat error (a refused search, a bad path) means the check cannot
     tell, so it prints nothing. The remedy text is guard.py's SESSION_HOME_REASON, imported only here so a turn
     with a present cwd loads no guard."""
     try:
@@ -417,13 +419,13 @@ def cwd_gone_line(raw):
     if not isinstance(cwd, str) or not cwd:
         return
     try:
-        os.stat(cwd)
+        if stat.S_ISDIR(os.stat(cwd).st_mode):
+            return
     except (FileNotFoundError, NotADirectoryError):
         pass
     except (OSError, ValueError):
         return
-    else:
-        return
+    cwd = cwd.replace("\n", "\\n")
     try:
         from guard import SESSION_HOME_REASON  # the remedy has one home; this hook holds no copy
         print("Session folder gone: %s. %s" % (cwd, SESSION_HOME_REASON))
@@ -457,7 +459,10 @@ def main(argv):
                 capture(raw, stamp[len("Local time: "):])
             except Exception as e:  # a capture error never stops the grant
                 print("local_time: capture: %s" % e, file=sys.stderr)
-            cwd_gone_line(raw)
+            try:
+                cwd_gone_line(raw)
+            except Exception as e:  # a print error here (a path stdout cannot encode) never skips the later lines
+                print("local_time: cwd gone: %s" % e, file=sys.stderr)
             grant_override(raw, now)
             mail_lines(raw)
     except Exception as e:  # advisory hook: fail open; one stderr line shows in --debug

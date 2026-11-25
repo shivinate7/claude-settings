@@ -78,6 +78,266 @@ sh("worktree remove: a session record for a pid that is no longer running does n
    VCS + " worktree remove " + slash(WTDEADSESSION), "allow", cwd=WTMAIN, config=WTDEADCFG)
 sh("worktree remove: a live pid whose recorded start time does not match does not deny",
    VCS + " worktree remove " + slash(WTSTALESTART), "allow", cwd=WTMAIN, config=WTSTALESTARTCFG)
+# A RECORD WHOSE FOLDER IS GONE. WTSTALECFG's one record names this runner's live pid, but its cwd was removed:
+# the record stands in no tree, so a clean, unlocked tree passes (owner, 20:53 CST 11-24, 2026). An unforced
+# remove of an unread subject is allowed silently on the old code too, so the decision alone cannot tell the
+# two apart. The forced form is the one that can: the old code notes it as unconfirmed, the new code does not.
+sh("worktree remove: a clean tree passes when a session record's folder is gone",
+   VCS + " worktree remove " + slash(WTCLEAN), "allow", cwd=WTMAIN, config=WTSTALECFG)
+
+
+def stale_record_forced_remove_quiet_case():
+    """A forced `git worktree remove` of a clean, unlocked tree, with a record whose folder is gone in the config
+    folder, is allowed silently and writes no `subject-unread` note. Its subject is read and empty, so nothing is
+    unconfirmed. On the old code the record reads as unreadable and the forced remove is noted as unconfirmed."""
+    log = os.path.join(WTSTALECFG, "guard.log")
+    if os.path.exists(log):
+        os.remove(log)
+    env = dict(os.environ)
+    env.pop("CLAUDE_CODE_REMOTE", None)
+    env.pop("CLAUDE_CODE_SESSION_ID", None)
+    env["CLAUDE_CONFIG_DIR"] = WTSTALECFG
+    payload = {"tool_name": "Bash", "tool_input": {"command": VCS + " worktree remove --force " + slash(WTCLEAN)},
+               "cwd": WTMAIN}
+    try:
+        result = subprocess.run([sys.executable, GUARD], input=json.dumps(payload), capture_output=True,
+                                text=True, env=env, timeout=60)
+        if result.returncode != 0:
+            return False, "guard exited %d" % result.returncode
+        if result.stdout.strip():
+            return False, "expected a silent allow, got %r" % result.stdout.strip()[:120]
+        text = open(log, encoding="utf-8").read() if os.path.exists(log) else ""
+    finally:
+        if os.path.exists(log):
+            os.remove(log)
+    if "subject-unread" in text:
+        return False, "a forced remove of a clean tree was noted as unconfirmed: %r" % text.strip()[:160]
+    return True, "a forced remove of a clean tree is allowed with no unconfirmed note"
+
+
+# A LIVE PROCESS STANDING IN A TREE, UNDER A RECORD WHOSE FOLDER IS GONE. The session moved its folder, or the
+# alias to it was removed, so its record's cwd names a folder that is no longer there, yet the process still
+# stands in the tree. The janitor keeps such a tree (janitor/sweep.py `processes_in`). The guard reads only the
+# session records, so it must find the process too. Each case removes WTCLEAN, a clean, unlocked tree.
+
+def _record_config(name, records):
+    """A config folder under this run's ROOT with one session record per (pid, cwd, startedAt) in RECORDS."""
+    cfg = os.path.join(ROOT, name)
+    os.makedirs(os.path.join(cfg, "sessions"), exist_ok=True)
+    for pid, cwd, started_ms in records:
+        with open(os.path.join(cfg, "sessions", "%d.json" % pid), "w", encoding="utf-8") as handle:
+            json.dump({"pid": pid, "cwd": slash(cwd), "startedAt": started_ms}, handle)
+    return cfg
+
+
+def _remove_decision(cfg, target, guard=None):
+    """(decision, reason) the guard prints for `git worktree remove <target>` run from WTMAIN under config CFG.
+    GUARD is the guard unless GUARD names a copy of it. A guard exit other than 0 is returned as a decision of its
+    own, so no case reads it as an allow."""
+    env = dict(os.environ)
+    env.pop("CLAUDE_CODE_REMOTE", None)
+    env.pop("CLAUDE_CODE_SESSION_ID", None)
+    env["CLAUDE_CONFIG_DIR"] = cfg
+    payload = {"tool_name": "Bash", "tool_input": {"command": VCS + " worktree remove " + slash(target)},
+               "cwd": WTMAIN}
+    result = subprocess.run([sys.executable, guard or GUARD], input=json.dumps(payload), capture_output=True,
+                            text=True, env=env, timeout=60)
+    if result.returncode != 0:
+        return "guard exit %d" % result.returncode, result.stderr.strip()[-160:]
+    return read_decision(result.stdout)
+
+
+def stale_record_parent_gone_forced_remove_noted_case():
+    """A forced `git worktree remove` of a clean, unlocked tree, with a record whose cwd sits under a folder that is
+    gone too. A missing parent may be a moved or unmounted folder, so the record reads unknown, not gone: the forced
+    remove is allowed silently, with a `subject-unread` note. Scope first: the parent must be absent."""
+    parent = _removed_folder("stale-parent-gone-parent")
+    if os.path.exists(parent):
+        return False, "fixture: the parent folder must be absent"
+    cfg = _record_config("stale-parent-gone-cfg", [(os.getpid(), os.path.join(parent, "wt"), 1)])
+    log = os.path.join(cfg, "guard.log")
+    if os.path.exists(log):
+        os.remove(log)
+    env = dict(os.environ)
+    env.pop("CLAUDE_CODE_REMOTE", None)
+    env.pop("CLAUDE_CODE_SESSION_ID", None)
+    env["CLAUDE_CONFIG_DIR"] = cfg
+    payload = {"tool_name": "Bash", "tool_input": {"command": VCS + " worktree remove --force " + slash(WTCLEAN)},
+               "cwd": WTMAIN}
+    result = subprocess.run([sys.executable, GUARD], input=json.dumps(payload), capture_output=True,
+                            text=True, env=env, timeout=60)
+    if result.returncode != 0:
+        return False, "guard exited %d" % result.returncode
+    if result.stdout.strip():
+        return False, "expected an allow, got %r" % result.stdout.strip()[:120]
+    text = open(log, encoding="utf-8").read() if os.path.exists(log) else ""
+    if "subject-unread" not in text:
+        return False, ("a record under an absent parent was read as a gone folder: the forced remove is not noted as "
+                       "unconfirmed, got %r" % text.strip()[:160])
+    return True, "a record under an absent parent reads unknown, so the forced remove is allowed with a subject-unread note"
+
+
+def stale_record_live_process_in_tree_case():
+    """A live process whose cwd is the clean tree, and a session record of that process whose cwd folder is gone.
+    The record stands in no tree, but the process does, so `git worktree remove` is refused for the live session
+    still standing in the tree. The guard reads only the records, so on the old code the remove is allowed."""
+    if os.name == "nt":
+        return SKIP, "a sleep child that stands in a folder is a POSIX check"
+    target = WTCLEAN
+    gone = _removed_folder("stale-proc-in-tree-gone")
+    proc = subprocess.Popen(["sleep", "300"], cwd=target)
+    try:
+        if proc.poll() is not None:
+            return False, "fixture: the sleep must still be running in the tree"
+        cfg = _record_config("stale-proc-in-tree-cfg", [(proc.pid, os.path.join(gone, "wt"), 1)])
+        decision, reason = _remove_decision(cfg, target)
+    finally:
+        proc.kill()
+        proc.wait()
+    if decision != "deny":
+        return False, ("a live process stands in the clean tree and its record's folder is gone: the remove "
+                       "reads %r, want deny: the guard reads the records, never the process" % decision)
+    if "a live session still stands in it" not in reason:
+        return False, "denied for another cause, not the live session: %r" % reason[:160]
+    return True, "a live process in a clean tree refuses the remove though its record's folder is gone"
+
+
+def stale_record_process_outside_tree_case():
+    """The control for the case above: the same live process, with its cwd outside the clean tree. Nothing stands
+    in the tree, and the record's folder is gone (its leaf absent under a folder that stays), so the remove is allowed."""
+    if os.name == "nt":
+        return SKIP, "a sleep child that stands in a folder is a POSIX check"
+    target = WTCLEAN
+    parent = _made_folder("stale-proc-outside-parent")
+    proc = subprocess.Popen(["sleep", "300"], cwd=ROOT)
+    try:
+        if proc.poll() is not None:
+            return False, "fixture: the sleep must still be running outside the tree"
+        cfg = _record_config("stale-proc-outside-cfg", [(proc.pid, os.path.join(parent, "wt"), 1)])
+        decision, reason = _remove_decision(cfg, target)
+    finally:
+        proc.kill()
+        proc.wait()
+    if decision != "allow":
+        return False, ("nothing stands in the clean tree, its record's folder is gone: the remove reads %r with "
+                       "%r, want allow" % (decision, reason[:120]))
+    return True, "a live process outside the clean tree leaves the remove allowed"
+
+
+def stale_record_beside_live_record_case():
+    """A record whose folder is gone, and a second record of a live session whose cwd is the clean tree. The live
+    record still stands in the tree, so the remove is refused for the live session. The gone record must not hide it."""
+    target = WTCLEAN
+    gone = _removed_folder("stale-pair-gone")
+    proc = subprocess.Popen(["sleep", "300"], cwd=ROOT)
+    try:
+        if proc.poll() is not None:
+            return False, "fixture: the sleep must still be running for the gone record"
+        live_pid = os.getpid()
+        cfg = _record_config("stale-pair-cfg", [
+            (proc.pid, os.path.join(gone, "wt"), 1),
+            (live_pid, target, _real_process_start_ms(live_pid)),
+        ])
+        decision, reason = _remove_decision(cfg, target)
+    finally:
+        proc.kill()
+        proc.wait()
+    if decision != "deny":
+        return False, ("a live record stands in the clean tree beside a gone record: the remove reads %r, "
+                       "want deny" % decision)
+    if "a live session still stands in it" not in reason:
+        return False, "denied for another cause, not the live session: %r" % reason[:160]
+    return True, "a gone record beside a live record in the clean tree still refuses the remove"
+
+
+# A PROCESS READ THAT CANNOT RUN. `_process_stands_in` reads the janitor's `processes_in` inside the guard's own
+# process. A read that raises is unknown, and an unknown read refuses (house rule guard-hooks-fail-closed). The guard
+# runs as a child, so the reader is faked in a copy: the guard family, and janitor/sweep.py with one more
+# `processes_in` appended. The appended def is the last one, so it is the read the guard calls.
+PROCESS_READ_RAISES = 'def processes_in(path):\n    raise OSError("the process table could not be read")\n'
+PROCESS_READ_EMPTY = "def processes_in(path):\n    return [], []\n"
+PROCESS_READ_PROBE = (
+    "import sys\n"
+    "sys.path.insert(0, sys.argv[1])\n"
+    "import sweep\n"
+    "try:\n"
+    "    sweep.processes_in(sys.argv[2])\n"
+    "except OSError:\n"
+    "    print('raised')\n"
+    "else:\n"
+    "    print('returned')\n")
+
+
+def _guard_copy_with_process_read(name, override):
+    """A copy of the guard in the folder NAME under this run's ROOT: the guard family (copy_guard_family), and the real
+    janitor/sweep.py with OVERRIDE appended. -> (the copy's guard.py, the copy's janitor folder)."""
+    folder = _made_folder(name)
+    hooks = os.path.join(folder, "hooks")
+    janitor = os.path.join(folder, "janitor")
+    os.makedirs(hooks, exist_ok=True)
+    os.makedirs(janitor, exist_ok=True)
+    copy_guard_family(hooks)
+    sweep_copy = os.path.join(janitor, "sweep.py")
+    shutil.copy(os.path.join(HERE, "..", "janitor", "sweep.py"), sweep_copy)
+    with open(sweep_copy, "a", encoding="utf-8") as handle:
+        handle.write("\n\n" + override)
+    return os.path.join(hooks, "guard.py"), janitor
+
+
+def _process_read_outcome(janitor, target):
+    """How the copy's `processes_in` answers for TARGET: "raised", "returned", or the probe's failure instead."""
+    result = subprocess.run([sys.executable, "-c", PROCESS_READ_PROBE, janitor, target], capture_output=True,
+                            text=True, timeout=60)
+    if result.returncode != 0 or not result.stdout.strip():
+        return "probe exit %d: %s" % (result.returncode, result.stderr.strip()[-160:])
+    return result.stdout.strip()
+
+
+def _gone_record_remove_under_read(name, override):
+    """`git worktree remove` of WTCLEAN, unforced, from WTMAIN, under a session record whose cwd folder is gone while
+    its parent stays, with the guard copy whose process read is OVERRIDE. -> (problem, the probe's answer, the
+    decision, the reason). PROBLEM is "" when the scope holds: the parent is there and the record's folder is not."""
+    parent = _made_folder(name + "-parent")
+    gone = os.path.join(parent, "wt")
+    if not os.path.isdir(parent) or os.path.exists(gone):
+        return "fixture: the record's parent must stand and its folder must be absent", None, None, None
+    guard, janitor = _guard_copy_with_process_read(name, override)
+    cfg = _record_config(name + "-cfg", [(os.getpid(), gone, _real_process_start_ms(os.getpid()))])
+    outcome = _process_read_outcome(janitor, WTCLEAN)
+    decision, reason = _remove_decision(cfg, WTCLEAN, guard=guard)
+    return "", outcome, decision, reason
+
+
+def stale_record_process_read_fails_refused_case():
+    """A process read that raises, with a session record whose cwd folder is gone (its parent stands), and a clean,
+    unlocked tree. The read cannot say whether a live process stands in the tree, so `git worktree remove` is refused
+    under the shared-tree rule. On the old code the unknown read reads as no process, and the remove is allowed."""
+    problem, outcome, decision, reason = _gone_record_remove_under_read("stale-read-raises", PROCESS_READ_RAISES)
+    if problem:
+        return False, problem
+    if outcome != "raised":
+        return False, "fixture: the copy's processes_in must raise, got %r" % outcome[:160]
+    if decision != "deny":
+        return False, ("a process read that raises leaves the remove %r with %r, want deny: a read that cannot run "
+                       "keeps the refusal" % (decision, reason[:120]))
+    if not reason.startswith("shared-tree:"):
+        return False, "denied for another cause, not the shared-tree rule: %r" % reason[:160]
+    return True, "a process read that raises refuses the remove when a record's folder is gone"
+
+
+def stale_record_process_read_empty_allowed_case():
+    """The control for the case above: the same record and clean tree, with a process read that works and finds
+    nothing. Nothing stands in the tree, so the remove is allowed, as it is today."""
+    problem, outcome, decision, reason = _gone_record_remove_under_read("stale-read-empty", PROCESS_READ_EMPTY)
+    if problem:
+        return False, problem
+    if outcome != "returned":
+        return False, "fixture: the copy's processes_in must return an empty read, got %r" % outcome[:160]
+    if decision != "allow":
+        return False, ("a process read that finds nothing leaves the remove %r with %r, want allow"
+                       % (decision, reason[:120]))
+    return True, "a process read that finds nothing allows the remove when a record's folder is gone"
+
 
 # BASE COPIES. Each case is a tree in the state built by _build_base_copies. Case 1 is the incident: its
 # staged files are the base copy, an ancestor of HEAD, and nothing else is wrong, so it passes. Cases 2 to 5

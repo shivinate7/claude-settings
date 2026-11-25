@@ -1,0 +1,1 @@
+- no-item-form-slip-reads-past: A form refusal with no `item` field and no numeric opener that names a listed id is read as past-ruling, and passes when the unit names the ruling; it needs two judge slips. Seen: 2026-11-25 x1
