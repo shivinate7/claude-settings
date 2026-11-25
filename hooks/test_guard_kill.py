@@ -15,6 +15,7 @@ import atexit
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 
@@ -135,4 +136,6 @@ def held_tag_lets_the_kill_through():
 
 
 if __name__ == "__main__":
-    sys.exit(run_cases(CASES))
+    code = run_cases(CASES)
+    shutil.rmtree(RUN_FOLDER, ignore_errors=True)   # test-temp-standard: teardown removes the run folder
+    sys.exit(code)
