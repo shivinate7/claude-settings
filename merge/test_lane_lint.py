@@ -4325,6 +4325,32 @@ class ReadyChecks(CiJobStub, tm.RecordsEnv):
         self.assertEqual(self.host.readies, [], "the draft went ready on a head stamp the running tool does not know: " + out)
         self.assertEqual(self.refs(), refs_before, "the ready run pushed a ref beside a head stamp the running tool does not know: " + out)
 
+    def test_pre_ready_stops_with_the_config_line_when_the_base_cannot_be_fetched(self):
+        self.pre_ready_lane()
+        head = self.own_writes({"own.txt": "lane 7\n"})
+        use_missing_base(self)
+        self.use_ci_job(steps_for(), 0)
+        refs_before = self.refs()
+        rc, out = self.pre_ready()
+        self.assertNotEqual(rc, 0, "the ready run passed on a PR whose base origin does not hold: " + out)
+        self.assertEqual(self.host.readies, [], "the draft went ready on a base it could not fetch: " + out)
+        self.assertEqual(self.refs(), refs_before, "the ready run pushed a ref on a base it could not fetch: " + out)
+        assert_unknown_config_line(self, out, head)
+
+    def test_pre_ready_stops_with_the_config_line_when_the_diff_against_the_base_cannot_be_read(self):
+        self.pre_ready_lane()
+        head = self.own_writes({"own.txt": "lane 7\n"})  # the head touches no stamp: the diff is still needed to say so
+        self.use_ci_job(steps_for(), 0)
+        refs_before = self.refs()
+        hits = []
+        with head_config_read_fails("diff", hits):
+            rc, out = self.pre_ready()
+        self.assertTrue(hits, "precondition: the refusal's diff read never ran, so the case probes nothing: " + out)
+        self.assertNotEqual(rc, 0, "the ready run passed although the diff that judges the config could not be read: " + out)
+        self.assertEqual(self.host.readies, [], "the draft went ready although the diff that judges the config could not be read: " + out)
+        self.assertEqual(self.refs(), refs_before, "the ready run pushed a ref although the diff that judges the config could not be read: " + out)
+        assert_unknown_config_line(self, out, head)
+
     def test_declared_steps_that_pass_run_ci_job_once_on_the_tree_pushed_and_mark_ready(self):
         names = ["check invariants", "records page"]  # two steps, one run
         self.declare(names)
@@ -9109,6 +9135,7 @@ UNKNOWN_REQUIRED = "second-proof"  # a requiredChecks value: not in merge.PINNED
 UNKNOWN_KEY = "mergeQueue"  # a merge-block key: not in merge.MERGE_FIELDS
 REFUSED_REQUIRED = "merge.requiredChecks is not valid: 'second-proof'"  # the parser's reason for UNKNOWN_REQUIRED
 REFUSED_KEY = "unknown field in the merge block: mergeQueue"  # the parser's reason for UNKNOWN_KEY
+NO_SUCH_BASE = "no-such-base"  # a base branch origin does not hold: the PR's base read names it, and no fetch of it can succeed
 
 
 def main_config_text(env):
@@ -9136,6 +9163,45 @@ def assert_refused_head_config(test, out, reason):
     test.assertRegex(line, r"(?i)\bfirst\b", "(c) the remedy does not say to land the tool change first: " + out)
     test.assertRegex(line, r"(?i)\buntil\b.*\bstable\b", "(c) the remedy does not wait until stable holds the tool change: " + out)
     test.assertRegex(line, r"(?i)\bsecond (PR|pull request)\b", "(c) the remedy does not put the stamp change in a second PR: " + out)
+
+
+@contextlib.contextmanager
+def head_config_read_fails(which, hits):
+    """Make the head stamp read of merge.head_config_refusal fail. While the real refusal runs, its git call whose first argument is `which`
+    ("diff" or "show") exits 128, and each such call is appended to `hits`. Nothing outside that refusal is faulted: the base fetch and the
+    cross measure make the same git calls before it, so a wider fault would stop the run for another reason."""
+    real_refusal, real_git = merge.head_config_refusal, merge.git
+
+    def faulted_git(cwd, *a, **kw):
+        if a[:1] == (which,):
+            hits.append(a)
+            return 128, "fatal: injected read failure"
+        return real_git(cwd, *a, **kw)
+
+    def refusal(*a, **kw):
+        with unittest.mock.patch.object(merge, "git", faulted_git):
+            return real_refusal(*a, **kw)
+
+    with unittest.mock.patch.object(merge, "head_config_refusal", refusal):
+        yield
+
+
+def use_missing_base(test):
+    """The PR's base is NO_SUCH_BASE, and origin holds no branch of that name, so the base cannot be fetched."""
+    listed = tm.sh(test.other, "git", "ls-remote", "origin", "refs/heads/" + NO_SUCH_BASE)
+    test.assertEqual(listed, "", "premise: origin holds %s, so the base can be fetched and the case probes nothing" % NO_SUCH_BASE)
+    test.host.base = NO_SUCH_BASE
+
+
+def assert_unknown_config_line(test, out, head):
+    """One line names the stamp at the PR head as unknown: the file, the head's short sha, that the config could not be read, that this makes
+    it unknown, and the fix (fetch the base). The line is picked by the file and the sha, so a line that names neither fails here by name."""
+    lines = [line for line in out.splitlines() if CONFIG_PATH in line and head[:9] in line]
+    test.assertTrue(lines, "no line names %s on the head %s, so the config at the PR head is not reported as unknown: %s" % (CONFIG_PATH, head[:9], out))
+    line = lines[0]
+    test.assertRegex(line, r"(?i)\bcould not be read\b|\bcannot be read\b", "the line does not say the config at the PR head could not be read: " + line)
+    test.assertRegex(line, r"(?i)\bunknown\b", "the line does not say the config at the PR head is unknown: " + line)
+    test.assertRegex(line, r"(?i)\bfetch\b", "the line does not say how to fix it (fetch the base): " + line)
 
 
 class ConfigAtPrHead(LaneFixture):
@@ -9205,6 +9271,107 @@ class ConfigAtPrHead(LaneFixture):
         self.assertEqual(rc, 0, "a PR that leaves the stamp alone was refused for the stamp its base held when it was cut: " + text)
         self.assertEqual(len(pass_lines(text)), 1, "the lint of a PR that leaves the stamp alone printed no single PASS line: " + text)
         self.assertNotIn(UNKNOWN_REQUIRED, text, "the lint named the inherited stamp's value, so the stamp was judged: " + text)
+
+    def delete_config_on_lane(self):
+        """The lane's head removes the stamp: one commit on origin/main that deletes it, so the diff against main names the file as deleted. -> the head."""
+        o = self.other
+        tm.sh(o, "git", "fetch", "-q", "origin")
+        tm.sh(o, "git", "checkout", "-q", "-B", "feat", "origin/main")
+        tm.sh(o, "git", "rm", "-q", CONFIG_PATH)
+        tm.sh(o, "git", "commit", "-q", "-m", "lane: drop " + CONFIG_PATH)
+        tm.sh(o, "git", "push", "-q", "-f", "origin", "feat")
+        return tm.sh(o, "git", "rev-parse", "HEAD")
+
+    def test_lane_lint_stops_with_the_config_line_when_the_base_cannot_be_fetched(self):
+        head = self.push_lane({"own.txt": "lane 7\n"}, from_main=True)
+        use_missing_base(self)
+        rc, out = self.run_lane("--lane-lint", "7")
+        self.assertNotEqual(rc, 0, "the lint passed on a PR whose base origin does not hold: " + out)
+        self.assertEqual(pass_lines(out), [], "the lint printed a PASS line on a base it could not fetch: " + out)
+        assert_unknown_config_line(self, out, head)
+
+    def test_lane_lint_stops_with_the_config_line_when_the_diff_against_the_base_cannot_be_read(self):
+        head = self.push_lane({"own.txt": "lane 7\n"}, from_main=True)  # the head touches no stamp: the diff is still needed to say so
+        hits = []
+        with head_config_read_fails("diff", hits):
+            rc, out = self.run_lane("--lane-lint", "7")
+        self.assertTrue(hits, "precondition: the refusal's diff read never ran, so the case probes nothing: " + out)
+        self.assertNotEqual(rc, 0, "the lint passed although the diff that judges the config could not be read: " + out)
+        self.assertEqual(pass_lines(out), [], "the lint printed a PASS line although the diff that judges the config could not be read: " + out)
+        assert_unknown_config_line(self, out, head)
+
+    def test_lane_lint_stops_with_the_config_line_when_the_head_config_cannot_be_shown(self):
+        head = self.head_with_config(config_on_main(self, readyChecks=["STE lint", "A new ready check"]))  # a stamp the tool takes, so only the read fails
+        self.assert_diff_touches_config(head)
+        hits = []
+        with head_config_read_fails("show", hits):
+            rc, out = self.run_lane("--lane-lint", "7")
+        self.assertTrue(hits, "precondition: the head stamp was never read, so the case probes nothing: " + out)
+        self.assertNotEqual(rc, 0, "the lint passed although the head stamp could not be read: " + out)
+        self.assertEqual(pass_lines(out), [], "the lint printed a PASS line although the head stamp could not be read: " + out)
+        assert_unknown_config_line(self, out, head)
+
+    def test_lane_lint_does_not_call_a_deleted_config_unknown(self):  # the control: passes on the old code too
+        head = self.delete_config_on_lane()
+        self.assert_diff_touches_config(head)
+        rc, out = self.run_lane("--lane-lint", "7")
+        self.assertEqual(rc, 0, "a PR that deletes the stamp was refused: " + out)
+        self.assertEqual(len(pass_lines(out)), 1, "the lint of a PR that deletes the stamp printed no single PASS line: " + out)
+        self.assertNotRegex(out, r"(?i)\bcould not be read\b|\bcannot be read\b", "a deleted stamp was read as unknown, but the base decides once the file is gone: " + out)
+
+    def refusal_line(self, out, reason):
+        """The one line of the run's output that quotes the parser's `reason` for the head stamp. Fails by name when none does."""
+        lines = [line for line in out.splitlines() if reason in line]
+        self.assertTrue(lines, "no line quotes the parser's reason %r: %s" % (reason, out))
+        return lines[0]
+
+    def test_lane_lint_refuses_a_deadlineMinutes_of_the_wrong_type_without_the_stable_clause(self):
+        head = self.head_with_config(config_on_main(self, deadlineMinutes="45"))  # a string where a whole number is due: no tool version takes it
+        self.assert_diff_touches_config(head)
+        rc, out = self.run_lane("--lane-lint", "7")
+        self.assertEqual(rc, 1, "the lint did not refuse a deadlineMinutes of the wrong type: " + out)
+        line = self.refusal_line(out, "merge.deadlineMinutes must be a whole number")
+        self.assertNotRegex(line, r"(?i)\bstable\b|not know|\bland\b|\bfirst\b|second (PR|pull request)",
+                            "the refusal of a value of the wrong type says the tool at stable may not know it, a cause that does not hold here: " + line)
+        self.assertRegex(line, r"(?i)\b(fix|correct)\b", "the refusal of a value of the wrong type gives no remedy to fix the value: " + line)
+
+    def test_lane_lint_refuses_an_ignoreChecks_that_is_not_a_list_without_the_stable_clause(self):
+        head = self.head_with_config(config_on_main(self, ignoreChecks="x"))  # a string where a list is due: no tool version takes it
+        self.assert_diff_touches_config(head)
+        rc, out = self.run_lane("--lane-lint", "7")
+        self.assertEqual(rc, 1, "the lint did not refuse an ignoreChecks that is not a list: " + out)
+        line = self.refusal_line(out, "merge.ignoreChecks must be a list")
+        self.assertNotRegex(line, r"(?i)\bstable\b|not know|\bland\b|\bfirst\b|second (PR|pull request)",
+                            "the refusal of a value of the wrong type says the tool at stable may not know it, a cause that does not hold here: " + line)
+        self.assertRegex(line, r"(?i)\b(fix|correct)\b", "the refusal of a value of the wrong type gives no remedy to fix the value: " + line)
+
+    def test_lane_lint_refuses_a_method_outside_the_known_set_with_both_causes_named(self):
+        # method is a known key with a value the running tool does not take. The parser's result cannot tell a value a newer tool takes
+        # from a typo, so the line names both: the stable clause, and the fix.
+        head = self.head_with_config(config_on_main(self, method="fast"))
+        self.assert_diff_touches_config(head)
+        rc, out = self.run_lane("--lane-lint", "7")
+        self.assertEqual(rc, 1, "the lint did not refuse a method outside the known set: " + out)
+        line = self.refusal_line(out, "merge.method is not valid")
+        self.assertRegex(line, r"(?i)\bstable\b", "the refusal does not name the tool at stable, the cause when a newer tool takes the value: " + line)
+        self.assertRegex(line, r"(?i)not know", "the refusal does not say stable does not know the value, the cause when a newer tool takes it: " + line)
+        self.assertRegex(line, r"(?i)\b(fix|correct)\b", "the refusal names only the stable cause: a value that is a typo has no remedy to fix it: " + line)
+
+    def test_lane_lint_refuses_a_head_config_that_parses_as_json_but_is_not_an_object_as_not_an_object(self):
+        for text in ("[]", "null", '{"merge": []}'):  # JSON that is not an object: a list, null, and a merge block that is a list
+            with self.subTest(text=text):
+                head = self.head_with_config(text)
+                self.assert_diff_touches_config(head)
+                rc, out = self.run_lane("--lane-lint", "7")
+                self.assertEqual(rc, 1, "the lint did not refuse a head stamp of %s: %s" % (text, out))
+                self.assertEqual(pass_lines(out), [], "a head stamp of %s still printed a PASS line: %s" % (text, out))
+                lines = [l for l in out.splitlines() if CONFIG_PATH in l and head[:9] in l]  # the refusal names the file and the head it judged
+                self.assertTrue(lines, "no line names %s on the head %s for a stamp of %s: %s" % (CONFIG_PATH, head[:9], text, out))
+                line = lines[0]
+                self.assertNotIn("not valid JSON", line, "the refusal says a stamp of %s, which parses as JSON, is not valid JSON: %s" % (text, line))
+                self.assertIn("is not an object", line, "the refusal does not say the stamp of %s is not an object: %s" % (text, line))
+                self.assertNotRegex(line, r"(?i)\bstable\b|not know|\bland\b|\bfirst\b|second (PR|pull request)",
+                                    "the refusal of a stamp of %s, which is not an object, gives the stable clause, a cause that does not hold here: %s" % (text, line))
 
     def test_lane_lint_refusal_remedy_never_names_the_claude_settings_ref_variable(self):
         head = self.head_with_config(config_on_main(self, requiredChecks=UNKNOWN_REQUIRED))
