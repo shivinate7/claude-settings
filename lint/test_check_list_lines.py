@@ -58,7 +58,18 @@ ITEMS_19 = ["item%02d" % n for n in range(1, 20)]
 ITEMS_20 = ["item%02d" % n for n in range(1, 21)]
 NAMES_9 = ", ".join('"n%d"' % n for n in range(1, 10))
 NAMES_10 = ", ".join('"n%d"' % n for n in range(1, 11))
-ORDER_9 = ["zeta", "alpha", "mu", "beta", "omega", "delta", "pi", "gamma", "rho"]  # unsorted: order matters
+# unsorted: order matters
+ORDER_9 = [
+    "zeta",
+    "alpha",
+    "mu",
+    "beta",
+    "omega",
+    "delta",
+    "pi",
+    "gamma",
+    "rho",
+]
 ARM_SH = '#!/bin/sh\ncase "$1" in\n  %s) echo hit ;;\n  *) echo miss ;;\nesac\n'
 
 
@@ -176,7 +187,18 @@ class ListLinesCase(unittest.TestCase):
         self.assertIn(RULE, out, "the failure does not name decision %s: %r" % (RULE, out))
 
     def test_unsorted_one_per_line_shell_arm_with_added_item_is_refused(self):
-        base_items = ["item05", "item02", "item09", "item01", "item07", "item03", "item10", "item08", "item04", "item06"]
+        base_items = [
+            "item05",
+            "item02",
+            "item09",
+            "item01",
+            "item07",
+            "item03",
+            "item10",
+            "item08",
+            "item04",
+            "item06",
+        ]
         head_items = base_items[:3] + ["item11"] + base_items[3:]
         rc, out = self.judge("an unsorted shell arm, already one per line, that gains an item is refused",
                              {"scripts/arm.sh": arm_per_line(base_items)}, {"scripts/arm.sh": arm_per_line(head_items)})
