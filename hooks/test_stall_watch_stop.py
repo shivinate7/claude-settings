@@ -1509,7 +1509,8 @@ def load_module(name="stall_watch_under_test"):
 
 
 def stop_in_process(transcript_path, spies=None):
-    """Run the Stop check in this process at NOW, with the default quiet age and no output base. Return
+    """Run the Stop check in this process at NOW, with the default quiet and long ages and no output base: every
+    STALL_WATCH_ variable the caller set is cleared for the run, as run_stop clears them from the subprocess. Return
     (rc, stdout, the paths os.stat was called with, the paths open was called with). The wrappers count
     every path the check stats or opens, so a case counts the calls that name one agent.
 
@@ -1538,16 +1539,16 @@ def stop_in_process(transcript_path, spies=None):
             raise PermissionError("write refused in this check")
         return real_os_open(path, flags, *args, **kwargs)
 
-    keys = ("STALL_WATCH_NOW", "STALL_WATCH_OUTPUT_BASE", "STALL_WATCH_QUIET")
-    saved = {k: os.environ.get(k) for k in keys}
+    seams = [k for k in os.environ if k.startswith("STALL_WATCH_")] + ["STALL_WATCH_NOW"]  # every seam, as run_stop strips them
+    saved = {k: os.environ.get(k) for k in seams}
     payload = {"session_id": "test-stall-watch-stop", "hook_event_name": "Stop", "cwd": SCRATCH,
                "transcript_path": transcript_path, "stop_hook_active": False}
     old_stdin = sys.stdin
     spied = []  # (owner, name, original) of each call the spies stand in for, restored in finally
     try:
+        for k in seams:
+            os.environ.pop(k, None)
         os.environ["STALL_WATCH_NOW"] = str(NOW)
-        os.environ.pop("STALL_WATCH_OUTPUT_BASE", None)
-        os.environ.pop("STALL_WATCH_QUIET", None)
         sys.stdin = io.StringIO(json.dumps(payload))
         os.stat, os.open, builtins.open, io.open = counted_stat, counted_os_open, counted_open, counted_open
         if spies is not None:
