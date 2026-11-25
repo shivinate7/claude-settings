@@ -2097,6 +2097,17 @@ class ReadyPassLine(unittest.TestCase):
         self.assertEqual(lines.count(self.READY), 1, "a FAIL drops the merge tool's ready-pass line, so the ready mark the stop names is "
                          "refused, though a bare run allows it: %r" % r.stdout)
 
+    def test_a_kept_line_the_fail_excerpt_also_holds_prints_once(self):
+        """A FAIL prints its kept ready-pass lines, then its excerpt. The excerpt holds the hot lines of the log tail (FAIL, Error, assert,
+        Traceback), so a kept line that is hot too prints twice unless bin/verdict drops it from the excerpt. The checks name holds the hot
+        word FAIL, which makes this kept line hot."""
+        hot = merge.READY_PASS_FMT.format(checks="lint, FAIL guard", sha="1234abcde")
+        r = run(fifty_lines_with(hot) + "import sys\nprint('FAIL boom')\nsys.exit(1)\n")
+        lines = r.stdout.splitlines()
+        self.assertEqual(r.returncode, 1)
+        self.assertEqual(lines.count(hot), 1, "a kept line that the FAIL excerpt also holds prints %d times, not once: %r"
+                         % (lines.count(hot), r.stdout))
+
     def test_kept_forms_are_fixed_prefixes_of_both_merge_formats(self):
         kept = getattr(load_verdict_module(), "READY_PASS_KEPT", None)
         self.assertIsNotNone(kept, "bin/verdict holds no READY_PASS_KEPT constant, so no ready-pass line is kept")
