@@ -13,12 +13,12 @@ GUARD_FAMILY=<name> runs only one family of cases (FAMILIES, at the top of this 
 name, or a filter that matches no case, fails the run. GUARD_TIMING=1 prints what each fixture
 block cost.
 
-GUARD_RULE_EXACT=report prints, for each case that names a rule, a rule-mismatch line when the reason does not
-lead with that rule (the text before its first ": "), a rule-unset line for each deny or ask case that names no
-rule, and a rule-total line. It fails no case: the PASS and FAIL lines are the same as without it. GUARD_RULE_EXACT=exact
-is the mode that will fail a case whose printed rule is another rule. It is accepted now and reports as report
-does, so the self-test that pins it (rule_exact_selftest_check, section 39497) fails until exact is built. Any
-other value stops the run before a case runs.
+Rule matching is exact. A deny or ask case passes only when the rule its reason prints (the text before the reason's
+first ": ") is the case's rule, and a deny or ask case that names no rule fails. GUARD_RULE_EXACT=report is the
+non-failing read: it fails no rule check, so a case whose rule does not match still passes or fails on its verdict
+alone. Both modes print a rule-mismatch line for each case whose printed rule is not its rule, a rule-unset line for each
+deny or ask case that names no rule, and a rule-total line. GUARD_RULE_EXACT=exact is the default; any other value
+stops the run before a case runs.
 
 GUARD_HEARTBEAT=<seconds> sets the quiet time after which the run prints a progress line to stderr,
 and appends it to STALL_WATCH_BEAT when that is set (default 60; a number above 0). A run that prints
@@ -218,11 +218,11 @@ GUARD_FAMILY = os.environ.get("GUARD_FAMILY", "")
 if GUARD_FAMILY and GUARD_FAMILY not in FAMILIES:
     sys.exit("GUARD_FAMILY=%r is not a family. Want one of: %s"
              % (GUARD_FAMILY, ", ".join(sorted(FAMILIES))))
-# GUARD_RULE_EXACT=report: the rule check in run_cases passes a case when its reason holds the rule anywhere. Report
-# mode prints the cases whose printed rule (the text before the first ": ") is not the wanted rule, and decides no verdict.
-# GUARD_RULE_EXACT=exact is accepted and reports as report does until it fails those cases (see the self-test, section 39497).
+# Unset or exact: a deny or ask case passes only when its printed rule (the text before the reason's first ": ") is its
+# rule, and a case with no rule fails. report: the same report lines print, and no rule check fails a case.
 RULE_EXACT_MODES = ("", "report", "exact")
 RULE_EXACT = os.environ.get("GUARD_RULE_EXACT", "")
+RULE_FAILS = RULE_EXACT != "report"
 
 
 # The progress beat (decision stall-watch: a quiet tool owes a line at least every 120 s). The quiet clock
@@ -925,16 +925,18 @@ def run_cases():
         beat("case %d of %d, before it runs" % (ran, len(cases)))
         got, reason = decide(case)
         beat("case %d of %d, after it ran" % (ran, len(cases)))
-        if RULE_EXACT:
-            rule_exact_report(case, got, reason)
+        rule_exact_report(case, got, reason)
         ok = got == case["expected"]
         note = ""
         if ok and case.get("silent") and reason:
             ok = False
             note = "  (an allow that must be silent printed: %s)" % reason[:90]
-        elif ok and case["rule"] and case["rule"] not in reason:
+        elif ok and RULE_FAILS and got != "allow" and not case["rule"]:
             ok = False
-            note = "  (the reason does not name rule %r: %s)" % (case["rule"], reason[:90])
+            note = "  (no rule is named for this %s: add rule= to the case)" % got
+        elif ok and RULE_FAILS and case["rule"] and printed_rule(reason) != case["rule"]:
+            ok = False
+            note = "  (the reason prints rule %r, not %r: %s)" % (printed_rule(reason), case["rule"], reason[:90])
         elif ok and case["carries"] and [f for f in case["carries"] if not carried(f, reason)]:
             ok = False
             note = "  (the reason does not carry %r: %s)" % (
@@ -952,10 +954,9 @@ def run_cases():
         failed += 0 if ok else 1
         say("%s  %-6s(want %-6s)  [%-11s] %s%s" % (
             "PASS" if ok else "FAIL", got, case["expected"], case["tool"], case["name"], note))
-    if RULE_EXACT:
-        say("rule-total\t%d mismatches in %d cases with a rule, %d of them on a verdict that was right; "
-            "%d deny or ask cases name no rule" % (RULE_EXACT_SEEN["mismatch"], RULE_EXACT_SEEN["rule"],
-                                                  RULE_EXACT_SEEN["mismatch_right"], RULE_EXACT_SEEN["unset"]))
+    say("rule-total\t%d mismatches in %d cases with a rule, %d of them on a verdict that was right; "
+        "%d deny or ask cases name no rule" % (RULE_EXACT_SEEN["mismatch"], RULE_EXACT_SEEN["rule"],
+                                              RULE_EXACT_SEEN["mismatch_right"], RULE_EXACT_SEEN["unset"]))
     if any((not only or only in label) and check not in FIXTURELESS_CHECKS for label, check in logs):
         materialize_all()  # a log check names its fixtures in its own code, not in a case's fields
     for label, checker in logs:
