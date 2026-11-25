@@ -406,7 +406,7 @@ jobs:
 
 # A form feed or a U+2028 inside a line is not a line break. Line numbers count newlines only, as sed does.
 MD_FORM_FEED = '# One\n\nfirst\fpart\n\n## Two\n\nbody\n'
-MD_LINE_SEP = MD_FORM_FEED.replace("\f", " ")
+MD_LINE_SEP = MD_FORM_FEED.replace("\f", "\u2028")
 MD_SPLIT_UNITS = ["1-7 heading One", "5-7 heading Two"]
 YAML_FORM_FEED = '''name: checks
 on: push
@@ -417,10 +417,10 @@ jobs:
       - name: Real
         run: echo hi
 '''
-YAML_LINE_SEP = YAML_FORM_FEED.replace("\f", " ")
+YAML_LINE_SEP = YAML_FORM_FEED.replace("\f", "\u2028")
 YAML_UNITS = ["4-8 job jobs.build", "7-8 step jobs.build.Real"]
 SHELL_FORM_FEED = '#!/bin/sh\n# a\fb\nbuild() {\n  echo hi\n}\n'
-SHELL_LINE_SEP = SHELL_FORM_FEED.replace("\f", " ")
+SHELL_LINE_SEP = SHELL_FORM_FEED.replace("\f", "\u2028")
 SHELL_SPLIT_UNITS = ["3-5 function build"]
 
 # A subshell body with a case pattern: the pattern's `)` is not the end of the body.
