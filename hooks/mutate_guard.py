@@ -261,9 +261,9 @@ MUTATIONS = [
      '    if False:\n        return False', "guard",
      'worktree remove: a locked tree denies even though it is clean'),
     ("worktree-remove: a live session no longer denies",
-     '    live = worktree_live_session(target)\n    if live is None:\n        return None\n'
+     '    live = worktree_live_session(target, absent_is_out=True)\n    if live is None:\n        return None\n'
      '    if live:\n        return False',
-     '    live = worktree_live_session(target)\n    if live is None:\n        return None\n'
+     '    live = worktree_live_session(target, absent_is_out=True)\n    if live is None:\n        return None\n'
      '    if False:\n        return False', "guard",
      'worktree remove: a live session standing in a clean tree still denies'),
     ("worktree-remove: any session record counts as live, recycled pid included",
