@@ -2098,12 +2098,19 @@ class SplitJobs(unittest.TestCase):
     def test_the_unknown_reads_check_runs_once_in_each_split(self):
         # Named failure: check_unknown_reads_contract.py runs twice, or not at all, in a split, and no case notices.
         # Rows: a copy in checks-macos-b, a drop from checks-macos, and a drop from checks (Linux).
-        mac_step = ("      - name: Unknown-read contract (guard + session_start)\n"
-                    "        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() && needs.scope.outputs.code == 'true' }}\n"
+        # The checks-macos step in its own condition, or in the records-only form that a skipped daily takes (decision tool-pins): the
+        # scope condition, then the records-only condition in parentheses after it (drop_condition reads that form).
+        mac_scope = "(needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() && needs.scope.outputs.code == 'true'"
+        mac_head = (f"      - name: Unknown-read contract (guard + session_start)\n"
+                    f"        if: ${{{{ {mac_scope} }}}}\n"
                     "        run: python3 lint/check_unknown_reads_contract.py\n")
+        mac_gated = (f"      - name: Unknown-read contract (guard + session_start)\n"
+                     f"        if: ${{{{ ({mac_scope}) && needs.scope.outputs.records_only_skip != 'true' }}}}\n"
+                     "        run: python3 lint/check_unknown_reads_contract.py\n")
         linux_step = ("      - name: Unknown-read contract (guard + session_start)\n"
                       "        if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}\n"
                       "        run: python3 lint/check_unknown_reads_contract.py\n")
+        mac_step = next((step for step in (mac_head, mac_gated) if step in self.text), mac_head)
         self.assertIn(mac_step, self.text)  # the fixture: checks-macos runs the check
         self.assertIn(linux_step, self.text)  # the fixture: checks runs the check
         self.assertIn("  checks-macos-b:\n", self.text)
@@ -2315,14 +2322,17 @@ def push_guard_jobs(text):
 
 def macos_daily_ok(name, expr):
     """True when `expr` is macOS job `name`'s job-level if: false on a push, false on a pull_request whatever its flags and draft
-    state, true on a schedule and a workflow_dispatch. A step-level skip still starts the macOS runner, so the job-level if keeps it off."""
+    state, true on a schedule and a workflow_dispatch. A step-level skip still starts the macOS runner, so the job-level if keeps it off.
+    tool_pins reads true on a schedule and a dispatch, as ci-scope.sh sets it on every such run (decision tool-pins), so a job-level
+    tool-pins clause admits those runs."""
     if name not in MACOS_JOBS or not expr:
         return False
     flags = sorted(set(re.findall(r"needs\.scope\.outputs\.(\w+)", expr)))
     try:
         for values in itertools.product(("true", "false"), repeat=len(flags)):
             vals = dict(zip(flags, values))
-            if eval_with(expr, "push", vals) or not eval_with(expr, "schedule", vals) or not eval_with(expr, "workflow_dispatch", vals):
+            daily = {**vals, "tool_pins": "true"}
+            if eval_with(expr, "push", vals) or not eval_with(expr, "schedule", daily) or not eval_with(expr, "workflow_dispatch", daily):
                 return False
             if any(eval_with(expr, "pull_request", vals, draft=draft) for draft in (False, True)):
                 return False
@@ -2835,14 +2845,17 @@ class ReadyPullShards(unittest.TestCase):
             self.text = f.read()
 
     def test_the_scope_job_runs_on_a_ready_pull_request_and_waits_on_both_skip_outputs(self):
-        # Named failure: scope skips a ready PR, or runs a push or a scheduled run that its skip output says to skip.
+        # Named failure: scope skips a ready PR, or runs a push that push-skip says to skip. A scheduled run with the nightly skip
+        # set runs scope too: its flags stay off and its tool pins are judged there (owner ruling fb-1105-1, 11:05 CST Nov 25 2026;
+        # decision tool-pins).
         jobs = all_jobs(self.text)
         self.assertIn("scope", jobs, "no scope job")
         expr = jobs["scope"]["if"]
         self.assertIsNotNone(expr, "scope has no if")
         self.assertTrue(eval_if(expr, "pull_request", "true"), f"scope does not run on a ready pull_request: {expr}")
         self.assertFalse(eval_if(expr, "push", "true", push_skip="true"), f"scope runs when push-skip says skip: {expr}")
-        self.assertFalse(eval_if(expr, "schedule", "true", nightly_skip="true"), f"scope runs when nightly-skip says skip: {expr}")
+        self.assertTrue(eval_if(expr, "schedule", "true", nightly_skip="true"),
+                        f"scope skips a skipped daily, so its tool pins are never judged there: {expr}")
         self.assertTrue(eval_if(expr, "push", "true", push_skip=""), f"scope skips a push that push-skip leaves unset: {expr}")
 
     def test_a_shard_job_steps_carry_their_base_jobs_condition_text(self):

@@ -142,8 +142,9 @@ def guard_read_files():
 
 def run(paths, event="pull_request", base="auto", existing=(), landed=None, head_ref="", green=None,
         green_sibling=False, green_head=None, contents=None, green_contents=None, facts=None, merged=None, moves=None,
-        guard_inputs=REAL_GUARD_INPUTS, scope_files=None, proven=False, modes=()):
-    """-> {name: 'true'|'false'} the script wrote. `paths` are committed on top of one base commit. `scope_files` (a list of paths), when
+        guard_inputs=REAL_GUARD_INPUTS, scope_files=None, proven=False, modes=(), nightly_skip=None):
+    """-> {name: 'true'|'false'} the script wrote. `nightly_skip` is NIGHTLY_SKIP, the nightly-skip job's answer (`"true"` on a skipped
+    daily); None leaves it unset, so no NIGHTLY_SKIP of the caller's environment reaches the script. `paths` are committed on top of one base commit. `scope_files` (a list of paths), when
     given, is SCOPE_FILES: the script reads those paths in place of the diff, with the same BASE_SHA range as the other cases. `head_ref` is HEAD_REF,
     empty when not given, so no HEAD_REF of the caller's environment reaches the script. `base` is BASE_SHA: "auto" is the base
     commit (the pull request's base), and "head" (HEAD itself), "green" (the `green` commit) and "sibling" (a commit off the base
@@ -253,6 +254,9 @@ def run(paths, event="pull_request", base="auto", existing=(), landed=None, head
         env.pop("PR_HEAD", None)  # a caller's value never reaches the script; only `merged` sets it
         if merged is not None:
             env["PR_HEAD"] = head_sha
+        env.pop("NIGHTLY_SKIP", None)  # a caller's value never reaches the script; only `nightly_skip` sets it
+        if nightly_skip is not None:
+            env["NIGHTLY_SKIP"] = nightly_skip
         env.pop("SCOPE_FILES", None)  # a caller's value never reaches the script; only `scope_files` sets it
         if scope_files is not None:
             env["SCOPE_FILES"] = "\n".join(scope_files)
@@ -1905,6 +1909,81 @@ class RecordsOnlyEveryJob(unittest.TestCase):
                                         f"{job} does not start on a docs/decisions-only {event} run, so its decision steps do not run; its job-level if is {expr}")
 
 
+
+
+@unittest.skipUnless(BASH, "bash not on PATH")
+class SkippedDaily(unittest.TestCase):
+    """A skipped daily (EVENT=schedule, NIGHTLY_SKIP=true). ci-scope.sh turns every flag off, sets records_only_skip and
+    skip_comment_delta, and keeps tool_pins on (decision tool-pins; owner ruling fb-1105-1, 11:05 CST Nov 25 2026). On that run
+    each pin job starts for its Tool pins step, and no job runs a test step. Each job's and step's if: is read on the script's own
+    outputs by RecordsOnlyEveryJob's reader. The plain daily is the control: its test steps and Tool pins steps run."""
+
+    DECISION_JOBS = ("scope", "nightly-skip", "push-skip")  # they decide the skip and read it, so they run on every event
+    PIN_JOBS = ("checks", "checks-windows", "checks-macos")  # the jobs with a Tool pins step (decision tool-pins)
+    TOOL_PINS = "Tool pins (this runner)"
+    # A command line that runs a test file, a mod runner or a mutation test. runs_suite reads the suite files only, so these are named here.
+    TEST_RUN = re.compile(r"\btest_|\.test\.|mod-tests\.sh|mutate_|--test\b")
+    KEPT_ON = ("records_only_skip", "skip_comment_delta", "tool_pins")  # the outputs a skipped daily sets to true
+
+    def workflow(self):
+        return RecordsOnlyEveryJob.workflow(self)  # the one reader of checks.yml in this file
+
+    def skipped_daily(self):
+        """The outputs of a skipped daily. The scope outputs are asserted first, so each if: is read on a run that set them."""
+        outs = run([], event="schedule", nightly_skip="true")
+        for name in self.KEPT_ON:
+            self.assertEqual(outs.get(name), "true", f"a skipped daily does not set {name} to true: {outs}")
+        on = sorted(n for n, v in outs.items() if n not in self.KEPT_ON and v != "false")
+        self.assertEqual(on, [], f"a skipped daily leaves these scope flags on: {on}")
+        return outs
+
+    def running(self, text, job, outs, event="schedule"):
+        """The steps of `job` that run on this run, or [] when the job does not start."""
+        if not job_runs(job_if(text, job), outs, event):
+            return []
+        return [st for st in step_blocks(job_block(text, job)) if step_runs(step_key(st, "if"), outs, event)]
+
+    def runs_test(self, st):
+        """True when a step runs a test: a suite file (runs_suite), or a command line that TEST_RUN matches. A comment is no command."""
+        lines = [line for line in (run_body(st) or "").split("\n") if line.strip() and not line.lstrip().startswith("#")]
+        return runs_suite(st) or any(self.TEST_RUN.search(line) for line in lines)
+
+    # Named failure: a job runs a test step on a skipped daily, so the suites the green daily proved run again. One subtest per job.
+    def test_no_job_runs_a_test_step_on_a_skipped_daily(self):
+        text = self.workflow()
+        outs = self.skipped_daily()
+        for job in job_names(text):
+            if job in self.DECISION_JOBS:
+                continue
+            with self.subTest(job=job):
+                tests = [step_key(st, "name") or " ".join((run_body(st) or "").split())[:50]
+                         for st in self.running(text, job, outs) if self.runs_test(st)]
+                self.assertFalse(tests, f"{job} runs {len(tests)} test steps on a skipped daily, the first {tests[:3]}")
+
+    # Named failure: a pin job does not start on a skipped daily, or starts without its Tool pins step. One subtest per pin job.
+    def test_each_pin_job_starts_and_runs_its_tool_pins_step_on_a_skipped_daily(self):
+        text = self.workflow()
+        outs = self.skipped_daily()
+        for job in self.PIN_JOBS:
+            with self.subTest(job=job):
+                expr = job_if(text, job)
+                self.assertTrue(job_runs(expr, outs, "schedule"),
+                                f"{job} does not start on a skipped daily, so its Tool pins step does not run; its job-level if is {expr}")
+                names = [step_key(st, "name") for st in self.running(text, job, outs)]
+                self.assertIn(self.TOOL_PINS, names, f"{job} starts on a skipped daily but its Tool pins step does not run: {names}")
+
+    # Control: the plain daily starts each pin job with its Tool pins step, and checks-macos runs test steps, so the two cases above
+    # read steps that do run.
+    def test_a_plain_daily_runs_the_tool_pins_step_and_the_test_steps_in_checks_macos(self):
+        text = self.workflow()
+        outs = run([], event="schedule")
+        for job in self.PIN_JOBS:
+            with self.subTest(job=job):
+                names = [step_key(st, "name") for st in self.running(text, job, outs)]
+                self.assertIn(self.TOOL_PINS, names, f"{job} does not run its Tool pins step on a plain daily: {names}")
+        with self.subTest(job="checks-macos"):
+            tests = [st for st in self.running(text, "checks-macos", outs) if self.runs_test(st)]
+            self.assertTrue(tests, "checks-macos runs no test step on a plain daily, so the no-test case has no step to see")
 
 
 # The mod phase must run each mods check script (mods/**/check.mjs), not only *.test.mjs. The script cds to its own
