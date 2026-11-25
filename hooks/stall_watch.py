@@ -760,7 +760,9 @@ STOPPED = re.compile(r"\s*Successfully stopped task: (\S+)")
 RESTART_TASK = re.compile(r"\(task (\w+)\)")  # how a restart notice names each task it stopped
 RESTART_REMINDER = "are now stopped"  # the text before the list of tasks a container restart stopped
 TERMINAL = ("completed", "failed", "killed", "stopped")
-NOTICE_SUMMARY = re.compile(r"<summary>(.*?)</summary>", re.S)
+SUMMARY_OPEN, SUMMARY_CLOSE = "<summary>", "</summary>"
+# What follows a notice's own closing summary tag: the note, the result, or the end of the notice.
+SUMMARY_FOLLOWERS = ("<note>", "<result>") + (("</" + TASK_NOTIFICATION_TAG[1:],) if TASK_NOTIFICATION_TAG else ())
 
 
 def text_of(content):
@@ -906,15 +908,36 @@ def scan_jobs(transcript, keep_waiting=False):
              for k, v in jobs.items() if k not in done or (k in resumed and done[k] < resumed[k][0])}, prev_stop)
 
 
+def notice_summary(note):
+    """The notice's summary text, or None. It runs from the first <summary> to the first </summary> that is followed,
+    after white space, by a note, a result or the end of the notice, so a description that holds a literal summary or
+    result tag not followed so stays inside it, and a tag quoted later in the result cannot move the end. A description
+    that holds a closing tag followed by a note tag, a result tag or the notice end ends the summary early (known miss).
+    One find pass: a pattern that backtracks is quadratic on many unclosed openers."""
+    start = note.find(SUMMARY_OPEN)
+    if start < 0:
+        return None
+    start += len(SUMMARY_OPEN)
+    at = note.find(SUMMARY_CLOSE, start)
+    while at >= 0:
+        after = at + len(SUMMARY_CLOSE)
+        while after < len(note) and note[after].isspace():
+            after += 1
+        if after == len(note) or note.startswith(SUMMARY_FOLLOWERS, after):
+            return note[start:at]
+        at = note.find(SUMMARY_CLOSE, at + len(SUMMARY_CLOSE))
+    return None
+
+
 def says_waiting(note):
     """True when the notice's own summary ends with the waiting text (AGENT_WAITING_TEXT). The result body after it
-    may quote the phrase or hold a <summary> string of its own, so only the first summary before the result counts; the
+    may quote the phrase or hold a <summary> string of its own, so only the summary (see notice_summary) counts; the
     phrase must end it, since a description the summary carries may hold the phrase mid-line. The substring test
     comes first because the scan runs on every tool call."""
     if not AGENT_WAITING_TEXT or AGENT_WAITING_TEXT not in note:
         return False
-    head = NOTICE_SUMMARY.search(note.split("<result>", 1)[0])
-    return bool(head) and head.group(1).rstrip().endswith(AGENT_WAITING_TEXT)
+    summary = notice_summary(note)
+    return summary is not None and summary.rstrip().endswith(AGENT_WAITING_TEXT)
 
 
 def closed_by_notice(text, keep_waiting=False):

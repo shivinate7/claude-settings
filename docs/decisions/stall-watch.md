@@ -200,15 +200,19 @@ In `stop()`, a background agent whose age (from its launch, or its latest resume
 call or not, with its transcript found or not. The launch time is set from the launch record (`scan_jobs`). A resume record (`toolUseResult.resumedAgentId`) reopens an agent that a notice or TaskStop closed, and the 1800 s limit counts from its latest resume. The same reopen reaches the guard: `scan_jobs` reopens the resumed agent, and `background_work_running` (`hooks/guard_stream.py`, :1483) reads that open job, so rule `fg-bash-while-bg` refuses a long foreground call while the agent runs.
 An agent with no readable launch time does not block, and its row says so (`launch time unread`). The block names each such agent,
 `Agent "<description>" (<id>) has run <N> min and has not finished.`, and adds `; it is waiting on its own background work`
-when its notice carried the waiting text. It then gives `AGENT_CHECKIN_REMEDY`: set one one-time check-in, at most 30 minutes
+when its summary ends with the waiting text. It then gives `AGENT_CHECKIN_REMEDY`: set one one-time check-in, at most 30 minutes
 ahead, whose text names the id, then stop. A check-in clears the agent when it fires at or after the crossing (its age's start, the launch or the latest resume, plus
 `AGENT_LONG`), its text names the id as a whole token (`checked_in`), its result was not an error, and it is set at most `AGENT_CHECKIN_AHEAD` (30 minutes, the remedy's limit) ahead of its call (A13c to A13f). Its fire time is its call time plus that lead, so a check-in set before the crossing counts when it fires after it, and one that fires before it does not. This fire-time rule is a consultant's pick (05:50 CST Nov 25, 2026), undoable by the owner's one-letter reverse. `delay_minutes`, `delaySeconds` (divided by 60) and `at` each set how far ahead, read on any check-in tool (`checkin_minutes_ahead`); the largest reading counts. A value that does not read is no reading: an unreadable `at` keeps the other readings, so a `delay_minutes` of 180 with an unreadable `at` does not count (A18h). `delaySeconds` 3600 does not count, and 1500 counts (A18i, A18j). A check-in with none of these counts, and a CronCreate check-in with no delay field counts whatever its cron schedule (A18g, A18k). Any check-in tool in
 `CI_CHECKIN_TOOLS` counts; the remedy names `send_later`. An error result voids the check-in it answers. The block is set at
 each Stop until a check-in clears the agent. But `stop()` returns at once when `stop_hook_active` is true, and the run after
 a block carries that flag. So one block is not repeated within the same run of Stops. The next Stop that is not such a run checks again.
 
-Waiting agents. In the Stop check only (`scan_jobs` with `keep_waiting`), a terminal notice that holds the waiting text
-(`AGENT_WAITING_TEXT`, one home in `hooks/shared_names.py`) does not close its agent in `closed_by_notice`. A waiting agent is
+Waiting agents. In the Stop check only (`scan_jobs` with `keep_waiting`), a terminal notice whose summary ends with the waiting text
+(`AGENT_WAITING_TEXT`, one home in `hooks/shared_names.py`) does not close its agent in `closed_by_notice`.
+The summary is the first `<summary>` element before the notice's `<result>`.
+`says_waiting` (the one test of that summary) needs the phrase at its end, and `waiting_ids` (the reader of the block's waiting flag) uses the same test.
+A phrase in the result, or mid-line in the summary, does not keep the agent open.
+A waiting agent is
 never quiet-listed, since its silence is by design. It stays under the age rule. Other callers keep the old close:
 `guard_stream` (`scan_jobs` with no `keep_waiting`) and `lint/report_guard` (`closed_by_notice` with no `keep_waiting`).
 If the harness rewords the waiting text, the agent closes as before: a missed alarm, not a false one.
@@ -217,14 +221,25 @@ Cost (rule `outcomes-mechanize-rules`, each check states its cost): no process, 
 running agent, and one read of the transcript's end for each quiet agent not yet listed and not waiting, pinned by
 `A8_cost_one_stat_per_running_agent_and_a_read_only_when_quiet` in `hooks/test_stall_watch_stop.py`. The age rule and the
 waiting rule add no stat and no read. They use the record pass that `scan_jobs` already makes. Their extra work: `keep_waiting` adds about 1.4 ms per MB of transcript at a Stop (median 0.4 ms, p95 19 ms, max 232 ms on a 110 MB transcript; 73 transcripts of this repo's sessions, top level only, 350 MB; measured 2026-11-25, best of 3). `ci_events` costs 0.10 ms per line holding a check-in or error key, JSON parse included (2187 such lines, measured 2026-11-25); no test pins these figures. The `checked_in` parse, one JSON parse per check-in each time an agent is checked for it, is unmeasured.
-Each healthy agent past `AGENT_LONG` costs one blocked Stop and one check-in (its false alarms). Unmeasured: the count of such agents, and so the false-alarm cost, rested on the P1 counts of runs past 30 min, which do not split healthy runs from stalled ones.
+The summary test (`notice_summary`) is one find loop over the notice's closing summary tags, with no split and no regex, for each notice that holds the waiting text, and none for the rest (unmeasured; no test pins it).
+Each healthy agent past `AGENT_LONG` costs one blocked Stop and one check-in (its false alarm).
+P1 counts runs past 30 min, which do not split healthy runs from stalled ones, so the count of healthy agents is unmeasured.
+P2 shows that the one block of 1.5 days named only finished agents.
+The one-week count in the owner ruling measures the healthy agents; it is not built.
 
 - P1 [measured] Launch to final finish of a background agent. Measured 2026-11-25 on this machine over every project transcript, launches Nov 18-24: 4346 launches, 4337 finished; 394 (9.1% of finished) ran over 30 min, 191 over 45 min; median 5.0 min, p95 42.2 min. Method: each agent's `async_launched` record is paired with its last terminal notice, and a waiting notice does not close an agent. Source: the 2026-11-25 audit; its scripts are not in the repo. Checked 2026-11-25.
+- P2 [measured] The guard's one block in 1.5 days named 5 agents.
+  All 5 had finished.
+  Their end notices quoted the waiting phrase in the result text, and the code tested the phrase over the whole notice.
+  No agent was shown to hang.
+  Source: the 2026-11-25 audit, an agent's read of this session's transcript and guard.log, reported and not a test.
+  Checked 2026-11-25.
 
 Limits: a session that is idle with no Stop sees nothing until its next Stop. The age rule runs only at a Stop, and a
-foreground agent is never checked. A TaskStop, or a terminal notice without the waiting text, closes an agent id. A resume newer than that close reopens the agent: it is listed when quiet and blocked at the age, with the 1800 s counted from the latest resume. A resume newer than a waiting notice clears the waiting flag. `hooks/test_guard.py` has no case for a resumed agent under `fg-bash-while-bg`: its only mention of that rule is the catalog line (:206). An agent stuck inside one tool call is not quiet-listed. The age rule catches it only at
+foreground agent is never checked. A TaskStop, or a terminal notice whose summary does not end with the waiting text, closes an agent id. A resume newer than that close reopens the agent: it is listed when quiet and blocked at the age, with the 1800 s counted from the latest resume. A resume newer than a waiting notice clears the waiting flag. `hooks/test_guard.py` has no case for a resumed agent under `fg-bash-while-bg`: its only mention of that rule is the catalog line (:206). An agent stuck inside one tool call is not quiet-listed. The age rule catches it only at
 `AGENT_LONG`, so a shorter stall is missed. A model turn longer than the quiet age would list a busy agent. Measured on 5
 local agent transcripts (559 records, 2026-11-07): the longest gap between records was 206 s, under the 300 s quiet age.
+An agent label that itself ends with the waiting phrase still reads as waiting. A task description that holds a summary closing tag followed by a note tag or a result tag ends the summary early (`notice_summary`), so a waiting agent with such a description reads as finished.
 
 The `--hook` path exits 0 and never refuses. The `--stop` path refuses a Stop for the age rule above, and for the CI wait
 (decision `ci-wait-reads-run-status`). A crash never refuses a call or a Stop, as advisory hooks stay fail-open
@@ -236,11 +251,30 @@ The `--hook` path exits 0 and never refuses. The `--stop` path refuses a Stop fo
 - Long age: `AGENT_LONG`, 1800 seconds, a consultant's pick (undoable). `STALL_WATCH_LONG` sets another number of seconds.
 - A job counts as finished when the transcript holds a completion notice with status completed, failed,
   killed or stopped (as a user record, or as an attachment record of type queued_command), or a
-  "Successfully stopped task: <ID>" result of a TaskStop call. In the Stop check, a terminal notice that holds the
+  "Successfully stopped task: <ID>" result of a TaskStop call. In the Stop check, a terminal notice whose summary ends with the
   waiting text does not count for an agent (see Waiting agents above).
 
 Reason: the PreToolUse path runs only at a tool call, and on Windows it does nothing. No process id
 exists for the job, so the age of its output file is the signal.
+
+## Long-agent guard: owner ruling, Nov 25, 2026
+
+At 10:57 CST the owner wrote, on whether to keep the long-agent check-in guard: "we should have the guard looked at first?"
+An audit measured the guard (P2 above).
+At 11:05 CST the owner answered the restated question's option a with one word: "approved".
+
+Option a, as the ruling's content:
+
+- Fix the false alarm: the waiting phrase counts only at the end of a notice's summary.
+- Keep the guard.
+- For one week, count the agents that pass 30 minutes and never send an end notice.
+- Then decide whether the guard stays.
+
+Status: the fix is built on branch `stall-watch-summary-only` and is not merged yet.
+The one-week count is not built, so the guard's false alarms after the fix are unmeasured.
+Its form when built: an on-demand reader over transcripts already written, with no new log, timer or process (rule `outcomes-mechanize-rules`).
+Its named reader is the consultant, who runs it once, on Dec 2, 2026.
+Its todo line is `stall-watch-week-count` in docs/todo.md.
 
 Kind: process
 Home: hooks/stall_watch.py
