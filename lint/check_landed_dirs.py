@@ -86,7 +86,23 @@ def find_guard_tuple(text, name):
     node = None
     for stmt in tree.body:
         if isinstance(stmt, ast.Assign) and any(isinstance(t, ast.Name) and t.id == name for t in stmt.targets):
+            if node is not None:
+                fail("hooks/guard*.py: %s is assigned more than once at module level; the reader cannot tell which one "
+                     "the guard uses" % name)
             node = stmt
+    for stmt in ast.walk(tree):
+        changes_it = (
+            isinstance(stmt, ast.AugAssign) and isinstance(stmt.target, ast.Name) and stmt.target.id == name
+        ) or (
+            isinstance(stmt, ast.Call)
+            and isinstance(stmt.func, ast.Attribute)
+            and stmt.func.attr in ("append", "extend")
+            and isinstance(stmt.func.value, ast.Name)
+            and stmt.func.value.id == name
+        )
+        if changes_it:
+            fail("hooks/guard*.py: %s is changed after its literal (line %s); the reader reads only the literal"
+                 % (name, stmt.lineno))
     if node is None:
         fail("hooks/guard*.py: could not find a %s = (...) literal to parse" % name)
     if not isinstance(node.value, ast.Tuple):
@@ -104,7 +120,8 @@ def find_guard_tuple(text, name):
         if not ok:
             fail("hooks/guard*.py: %s has an entry that is not os.path.normcase(\"...\"): %s" % (name, ast.unparse(elt)))
         entries.append(elt.args[0].value)
-    lines = text.splitlines(keepends=True)
+    # ast counts lines at \n, \r and \r\n only; str.splitlines also splits at form feed and U+2028.
+    lines = re.findall(r"[^\r\n]*(?:\r\n|\r|\n)|[^\r\n]+", text)
     start = sum(len(line) for line in lines[: node.lineno - 1])
     body = "".join(lines[node.lineno - 1 : node.end_lineno])
     return entries, body, start
