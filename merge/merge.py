@@ -314,6 +314,13 @@ class Stop(Exception):
 class Liftable(Stop):
     """A refusal that a reason flag lifts. Its message names the flag, so main() does not add the no-override line."""
 
+class ConfigValueStop(Stop):
+    """parse_config refused a value in a stamp. `cause` says who could take it: "newer" (a newer tool may know it), "either" (a newer tool may, or it is a typo),
+    "wrong" (no tool version takes it: a wrong type). head_config_refusal words its remedy by it."""
+    def __init__(self, message, cause="wrong"):
+        super().__init__(message)
+        self.cause = cause
+
 class UnknownStop(Stop):
     """A refusal that reads UNKNOWN: the run could not tell pass from fail. no flag lifts it. It exits 1 like every refusal: exit 2 is argparse's usage code."""
 
@@ -2890,7 +2897,7 @@ def load_config(root, base, path, cite="", head=None, branch=None):
     CI off merges under the setup it makes, and a PR never loosens its own gate (decision private-repos-no-ci)."""
     c, out = git(root, "fetch", "-q", "origin", f"+refs/heads/{base}:refs/remotes/origin/{base}")
     if c:
-        raise Stop(f"git fetch origin {base} failed: {out}{cite}")
+        raise Stop(f"git fetch origin {base} failed: {out}{unjudged_config(head, base, path) if head else ''}{cite}")
     setup = head_none_stamp(root, head, path, branch, base)
     if setup is not None:
         parse_config(root, setup, head, f"the head {head[:9]}", path, cite + " " + HEAD_STAMP_CITE, fill=False)
@@ -2926,12 +2933,12 @@ def parse_config(root, cfg, ref, where, path, cite, fill=True):
     m = cfg.setdefault("merge", {})
     unknown = sorted(set(m) - MERGE_FIELDS)
     if unknown:
-        raise Stop(f"{path} on {where} has an unknown field in the merge block: {', '.join(unknown)}{cite}")
+        raise ConfigValueStop(f"{path} on {where} has an unknown field in the merge block: {', '.join(unknown)}{cite}", "newer")
     if not isinstance(m.get("ignoreChecks", []), list):
-        raise Stop(f"{path} on {where}: merge.ignoreChecks must be a list, not {m['ignoreChecks']!r}.{cite}")
+        raise ConfigValueStop(f"{path} on {where}: merge.ignoreChecks must be a list, not {m['ignoreChecks']!r}.{cite}")
     dm = m.get("deadlineMinutes", MERGE_DEFAULTS["deadlineMinutes"])
     if not isinstance(dm, int) or isinstance(dm, bool) or not 1 <= dm <= 360:  # 360: GitHub's longest job run
-        raise Stop(f"{path} on {where}: merge.deadlineMinutes must be a whole number from 1 to 360, not {dm!r}.{cite}")
+        raise ConfigValueStop(f"{path} on {where}: merge.deadlineMinutes must be a whole number from 1 to 360, not {dm!r}.{cite}")
     caps = base_job_caps(root, ref)
     floor = min(max(caps.values(), default=0) + 5, 360)  # clamped: 360 is the most a deadline may be
     if caps and dm < floor:  # the wait must outlast the slowest job's cap, or a job still within its cap reads as a deadline miss
@@ -2954,9 +2961,9 @@ def parse_config(root, cfg, ref, where, path, cite, fill=True):
                   (isinstance(m.get("keepBranches", []), list) and all(map(plain_name, m.get("keepBranches", []))), "keepBranches"),
                   (rc == "protection" or rc in PINNED_STRINGS or isinstance(rc, list) and rc and all(map(ne, rc)), "requiredChecks")):
         if not ok:
-            raise Stop(f"{path} on {where}: merge.{k} is not valid: {m[k]!r}.{cite}")
+            raise ConfigValueStop(f"{path} on {where}: merge.{k} is not valid: {m[k]!r}.{cite}", {"requiredChecks": "newer", "method": "either"}.get(k, "wrong"))
     if "defaultBranch" in cfg and not ne(cfg["defaultBranch"]):
-        raise Stop(f"{path} on {where}: defaultBranch must be a non-empty string, not {cfg['defaultBranch']!r}.{cite}")
+        raise ConfigValueStop(f"{path} on {where}: defaultBranch must be a non-empty string, not {cfg['defaultBranch']!r}.{cite}")
     ignore_checks(cfg)  # refuse a bad entry before the defaults notice, so the refusal is the only line
     if not fill:
         return cfg
@@ -2972,28 +2979,46 @@ def parse_config(root, cfg, ref, where, path, cite, fill=True):
 
 def head_config_refusal(root, head, base, path=DEFAULT_CONFIG):
     """-> the one refusal line for a PR head whose `path` this running tool's parse_config refuses, else None. Only a PR whose diff against origin/`base` touches `path` is
-    judged, so a head that inherits a stamp from an older main is left alone. A deleted file, an unreadable diff or file read as None: the base's stamp decides then
-    (the same reading head_none_stamp takes). The check protects only a run of the older tool (the launcher's `stable`); a run from the PR's own tree passes by construction.
-    Cost: one `git diff --name-only`, and for a touched file one `git show` and one parse_config (the workflow-cap read at the head, git only)."""
-    c, names = git(root, "diff", "--name-only", f"origin/{base}...{head}")
-    if c or path not in names.split("\n"):
+    judged, so a head that inherits a stamp from an older main is left alone. A file the PR deletes reads as None: the base's stamp decides then (the same reading head_none_stamp takes).
+    A read that could not run (the diff, the file, the workflow caps at the head) raises UnknownStop: the config is unknown, never clear (rule verification-report-unknown-reads).
+    The remedy follows the cause (ConfigValueStop.cause): the stable clause only for a value a newer tool may take; a wrong type has none.
+    The check protects only a run of the older tool (the launcher's `stable`); a run from the PR's own tree passes by construction.
+    Cost: one `git diff --name-status`, and for a touched file one `git show` and one parse_config (the workflow-cap read at the head, git only)."""
+    where = f"{path} on the head {head[:9]}"
+
+    def unknown(why):
+        return UnknownStop(f"{where} could not be read ({' '.join(why.split())[:200]}), so what the merge tool at stable makes of it is unknown, not clear. "
+                           f"Fetch origin/{base} and run again. Nothing was claimed or pushed. {UNKNOWN_CITE}")
+
+    c, changed = git(root, "diff", "--name-status", "--no-renames", f"origin/{base}...{head}", "--", path)
+    if c:
+        raise unknown(changed)
+    if not changed.strip() or changed.split()[0] == "D":
         return None
     c, text = git(root, "show", f"{head}:{path}")
     if c:
-        return None
-    where = f"{path} on the head {head[:9]}"
+        raise unknown(text)
     try:
         cfg = json.loads(text)
-        if not isinstance(cfg, dict) or not isinstance(cfg.get("merge", {}), dict):
-            raise ValueError("not an object")
     except ValueError as e:
         return f"{where} is not valid JSON ({e}). Every merge in the repo reads this file from the default branch, so fix it before the PR goes on."
+    if not isinstance(cfg, dict):
+        return f"{where} is not an object: the whole file must be one JSON object. Every merge in the repo reads this file from the default branch, so fix it before the PR goes on."
+    if not isinstance(cfg.get("merge", {}), dict):
+        return f"{where} is not an object in its merge block: merge must be a JSON object. Every merge in the repo reads this file from the default branch, so fix it before the PR goes on."
     try:
         with contextlib.redirect_stdout(io.StringIO()):  # parse_config says its defaults and floors; only its refusal is read here
             parse_config(root, cfg, head, f"the head {head[:9]}", path, "", fill=False)
-    except Stop as e:
-        return (f"{e} The merge tool at stable does not know this value or key yet, so every merge in the repo would be refused once this lands. "
-                f"Land the tool change first, wait until stable holds it, then change {path} in a second PR.")
+    except ConfigValueStop as e:
+        land = f"land the tool change first, wait until stable holds it, then change {path} in a second PR"
+        if e.cause == "newer":
+            return f"{e} The merge tool at stable does not know this value or key yet, so every merge in the repo would be refused once this lands. {land[0].upper() + land[1:]}."
+        if e.cause == "either":
+            return (f"{e} Either the merge tool at stable does not know this value yet, so every merge in the repo would be refused once this lands: then {land}. "
+                    f"Or the value is a typo: then fix it in {path} and push.")
+        return f"{e} No version of the merge tool takes this value, so fix it in {path} and push."
+    except Stop as e:  # not a verdict on the value: parse_config could not read the workflows at the head
+        raise unknown(str(e))
     return None
 
 def refuse_bad_pr(info):
@@ -3001,6 +3026,11 @@ def refuse_bad_pr(info):
         raise Stop(f"the pull request is {info['state']}")
     if info["mergeable"] == "CONFLICTING" or info["merge_state"] == "DIRTY":
         raise Stop("the pull request is CONFLICTING. Merge the base into the branch and run again. Nothing was claimed. " + BASE_CITE)
+
+def unjudged_config(head, base, path=DEFAULT_CONFIG):
+    """The sentence a stop for an unfetched base adds: head_config_refusal diffs the head against origin/<base>, so without it the head's stamp is unknown, not clear.
+    The one home of that sentence; a stop that names a head and a base ends with it."""
+    return f" {path} on the head {head[:9]} could not be read without {base}, so it is unknown, not clear. Fetch {base} and run again."
 
 def fetch_branch(root, branch, cite=""):
     """Fetch origin's `branch` into refs/remotes/origin/. -> its sha. The one home of that fetch. `cite` ends the stop's text: the batch calls pass their own."""
@@ -3016,7 +3046,7 @@ def fetch_pr_head(root, info, base, host=None, n=None):
     for ref in (base, info["branch"]):
         c, out = git(root, "fetch", "-q", "origin", f"+refs/heads/{ref}:refs/remotes/origin/{ref}")
         if c:
-            raise Stop(f"git fetch origin {ref} failed: {out} {UNKNOWN_CITE}")
+            raise Stop(f"git fetch origin {ref} failed: {out}{unjudged_config(info['head'], base) if ref == base else ''} {UNKNOWN_CITE}")
     got = git(root, "rev-parse", f"refs/remotes/origin/{info['branch']}")[1]
     if got != info["head"] and host is not None:
         stale = info["head"]
@@ -5980,7 +6010,10 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
                 raise Stop(no_express + f". Nothing was claimed or pushed. {EXPRESS_CITE}")
         branch = info["branch"]
         if wt is None:
-            tmp, wt = open_worktree(root, info, base)
+            tmp, wt = open_worktree(root, info, base)  # the fetch that makes the head readable below
+        refused = head_config_refusal(root, info["head"], base)  # a head stamp the running tool cannot read must stop before any claim or push, as on the ready path
+        if refused:
+            raise Stop(f"{refused} #{n} was not claimed or merged.")
         lane_head = head_under_claims(wt, cfgrel, base, info["head"]) if base == cfg["defaultBranch"] else info["head"]  # the head a cited run and the relayed yes name
         extend_lock(lock, UNDO_CHECK_LOCK_SECONDS)
         record_lift(lifts, UNDO_FLAG, undo_check(wt, base_ref, unknown_ok, info.get("body", ""), lambda url: host.cited_run(url), lane_head))
