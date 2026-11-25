@@ -21,7 +21,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(BIN), "hooks"))
 sys.path.insert(0, os.path.join(os.path.dirname(BIN), "lint"))
 import _nowindow  # noqa: E402  the one home of a no-window child start and of the stop of a process tree (hooks/_nowindow.py)
 from mutate_shared import AmbiguousMutant, CLASSIFIERS, StaleMutant, apply_mutant  # noqa: E402  the one home of the run's class and the literal replace
-from tree_export import export_tree  # noqa: E402  the one home of the export of a commit's tree (hooks/tree_export.py)
+from tree_export import export_tree, manifest_add  # noqa: E402  the one home of the export of a commit's tree (hooks/tree_export.py)
 import _test_temp  # noqa: E402  the one home of the run folder and its sweep (lint/_test_temp.py)
 
 USAGE = "usage: red-run <commit> [--add <path>]... [--replace <path> <old> <new>]... -- <test cmd>"
@@ -104,8 +104,12 @@ def main(argv, state):
             os.makedirs(os.path.dirname(dest), exist_ok=True)
             if os.path.isdir(src):
                 shutil.copytree(src, dest, dirs_exist_ok=True)
+                added = [os.path.relpath(os.path.join(root, name), folder).replace(os.sep, "/")
+                         for root, _, names in os.walk(dest) for name in names]
             else:
                 shutil.copyfile(src, dest)
+                added = [op[1].replace(os.sep, "/")]
+            manifest_add(folder, added)  # the copy has no .git: its listing reads the manifest
         else:
             try:
                 apply_mutant(folder, op[2], op[3], files=[op[1]])
