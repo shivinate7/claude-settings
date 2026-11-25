@@ -60,10 +60,12 @@ suite = unittest.defaultTestLoader.loadTestsFromName(sys.argv[1])
 quiet = open(os.devnull, "w")
 if "count" in sys.argv[2:]:
     with cost_probe.children() as log:
-        unittest.TextTestRunner(stream=quiet, verbosity=0).run(suite)
+        result = unittest.TextTestRunner(stream=quiet, verbosity=0).run(suite)
     print("CHILDREN", len(log.argvs))
 else:
-    unittest.TextTestRunner(stream=quiet, verbosity=0).run(suite)
+    result = unittest.TextTestRunner(stream=quiet, verbosity=0).run(suite)
+if "report" in sys.argv[2:]:
+    print("RESULT ran=%d failures=%d errors=%d skipped=%d" % (result.testsRun, len(result.failures), len(result.errors), len(result.skipped)))
 '''
 
 RECORDS = '''import os
@@ -221,6 +223,48 @@ print("CHILDREN", len(starts))
 '''
 
 
+# The first case removes its own cwd. Each case must still run and record, as an unarmed run does.
+CWD_GONE = '''import os
+import unittest
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+
+
+class Gone(unittest.TestCase):
+    def test_a_removes_its_cwd(self):
+        here = os.path.join(HERE, "gone")
+        os.makedirs(here, exist_ok=True)
+        os.chdir(here)
+        os.rmdir(here)
+
+    def test_b_plain(self):
+        self.assertTrue(True)
+
+    def test_c_plain(self):
+        self.assertTrue(True)
+'''
+
+# A test chdirs and does not restore the cwd. Its file's rows must still share one suite name.
+CHDIR_AWAY = '''import os
+import unittest
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+
+
+class Away(unittest.TestCase):
+    def test_a_plain(self):
+        self.assertTrue(True)
+
+    def test_b_chdir_no_restore(self):
+        elsewhere = os.path.join(HERE, "elsewhere")
+        os.makedirs(elsewhere, exist_ok=True)
+        os.chdir(elsewhere)
+
+    def test_c_plain(self):
+        self.assertTrue(True)
+'''
+
+
 def setUpModule():
     global RUN
     RUN = _test_temp.run_folder()
@@ -261,9 +305,17 @@ def run_py(folder, argv, armed=True, pythonpath=HOME, extra=None):
                           capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=RUN_TIMEOUT)
 
 
-def run_module(folder, module, armed=True, count=False, extra=None, pythonpath=HOME):
-    argv = [os.path.join(RUN, "runner.py"), module] + (["count"] if count else [])
+def run_module(folder, module, armed=True, count=False, extra=None, pythonpath=HOME, report=False):
+    options = (["count"] if count else []) + (["report"] if report else [])
+    argv = [os.path.join(RUN, "runner.py"), module] + options
     return run_py(folder, argv, armed=armed, pythonpath=pythonpath, extra=extra)
+
+
+def result_line(result):
+    for line in result.stdout.splitlines():
+        if line.startswith("RESULT "):
+            return line
+    return None
 
 
 def site_file(result):
@@ -477,6 +529,40 @@ class GuardRows(unittest.TestCase):
         self.assertIsNotNone(rows, "a process that imports unittest.mock then records wrote no row")
         latch = [r for r in rows if r.get("case") == "Guard.test_latch"]
         self.assertEqual(len(latch), 1, "Guard.test_latch has %d rows, want one" % len(latch))
+
+
+class CwdGone(unittest.TestCase):
+    def test_removed_cwd_runs_every_case_as_unarmed_does(self):
+        folder = case_folder(self)
+        write(folder, "fixture_gone.py", CWD_GONE)
+        unarmed = run_module(folder, "fixture_gone", armed=False, report=True)
+        self.assertEqual(result_line(unarmed), "RESULT ran=3 failures=0 errors=0 skipped=0",
+                         "the unarmed control run did not pass its three cases: %r" % unarmed.stderr[-300:])
+        armed = run_module(folder, "fixture_gone", report=True)
+        scope_ok(self, armed)
+        self.assertEqual(armed.returncode, 0,
+                         "the armed run exited %d, want 0 as the unarmed run does: a case that removed its cwd "
+                         "aborted the run; stderr tail: %s" % (armed.returncode, armed.stderr[-300:]))
+        self.assertEqual(result_line(armed), result_line(unarmed),
+                         "the armed run's outcome differs from the unarmed run's")
+        rows = rows_of(folder)
+        self.assertIsNotNone(rows, "the armed run wrote no case-times file")
+        cases = sorted(row.get("case") for row in rows if (row.get("case") or "").startswith("Gone."))
+        self.assertEqual(cases, ["Gone.test_a_removes_its_cwd", "Gone.test_b_plain", "Gone.test_c_plain"],
+                         "the armed run did not record one row per case: %s" % cases)
+
+
+class CwdChdir(unittest.TestCase):
+    def test_chdir_without_restore_keeps_one_suite_name(self):
+        folder = case_folder(self)
+        write(folder, "fixture_away.py", CHDIR_AWAY)
+        result = run_module(folder, "fixture_away")
+        scope_ok(self, result)
+        rows = rows_of(folder)
+        self.assertIsNotNone(rows, "the armed run wrote no case-times file")
+        suites = sorted(set(row.get("suite") for row in rows))
+        self.assertEqual(suites, ["fixture_away.py"],
+                         "a test that chdired without restoring split its file's rows across suite names: %s" % suites)
 
 
 if __name__ == "__main__":
