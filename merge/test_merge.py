@@ -2530,6 +2530,7 @@ class Guards(Env):
 
 SCOPE_SCRIPT = os.path.join(HERE, "..", ".github", "scripts", "ci-scope.sh")  # the real script: the one home of which jobs read which paths
 GUARD_INPUTS = os.path.join(HERE, "..", ".github", "guard-inputs.txt")  # the real list ci-scope.sh reads for windows_guard; an empty or missing list turns it on
+GUARD_SET = os.path.join(HERE, "..", "hooks", "guard-set.txt")  # the real list ci-scope.sh's guard arm reads; an empty or missing list turns every flag on
 def scope_line(name):
     """The words of ci-scope.sh's `NAME="..."` line (JOBS, LINTS, ALL). A fixture that fakes the script's flags takes its names here, so it cannot drift from the script."""
     with open(SCOPE_SCRIPT, encoding="utf-8") as f:
@@ -2578,6 +2579,9 @@ class ScopedRepo:
                 put_lf(os.path.join(o, ".github/guard-inputs.txt"), f.read())
         put(os.path.join(o, ".github/workflows", name), workflow)
         put(os.path.join(o, "landed-dirs.txt"), "hooks\n")
+        if os.path.isfile(GUARD_SET):  # the list ci-scope.sh's guard arm reads; without it every flag is on
+            with open(GUARD_SET, encoding="utf-8") as f:
+                put_lf(os.path.join(o, "hooks/guard-set.txt"), f.read())
         put(os.path.join(o, "lint/check_slugs.py"), SLUG_LINT)
         put(os.path.join(o, "hooks/test_reads_guide.py"), DOC_SUITE)
         put(os.path.join(o, "hooks/x.py"), "X = 1\n")

@@ -4419,7 +4419,12 @@ class SuiteCarry(unittest.TestCase):
             scope = f.read()
         with open(os.path.join(HERE, "..", "landed-dirs.txt"), encoding="utf-8", newline="") as f:
             landed = f.read()
-        self.write({".github/scripts/ci-scope.sh": scope, "landed-dirs.txt": landed, "docs/records.md": "records\n"})
+        files = {".github/scripts/ci-scope.sh": scope, "landed-dirs.txt": landed, "docs/records.md": "records\n"}
+        guard_set = os.path.join(HERE, "..", "hooks", "guard-set.txt")  # the list ci-scope.sh's guard arm reads; without it every flag is on
+        if os.path.isfile(guard_set):
+            with open(guard_set, encoding="utf-8", newline="") as f:
+                files["hooks/guard-set.txt"] = f.read()
+        self.write(files)
         self.commit("base")
         subprocess.run(["git", "branch", "side"], cwd=self.root, check=True, env=ENV)
         self.lane_commit({"hooks/s.py": "V = 1\n", self.SUITE: self.SOURCE}, "lane A")
