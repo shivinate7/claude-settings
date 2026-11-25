@@ -606,6 +606,20 @@ class RedMainJudge(unittest.TestCase):
         self.assertEqual(self.judge_fixed([page_run(4, None, status="in_progress"), page_run(3, "cancelled"), page_run(1, "success")], jobs), ("unknown", []),
                          "a cancelled run whose job has a runner is passed over as replaced")
 
+    def test_fixed_a_cancelled_schedule_run_with_a_newer_schedule_run_above_it_is_not_replaced(self):
+        """A schedule run keeps its own group, so a newer schedule run does not replace it: a cancel with no job started is a real cancel, unknown."""
+        jobs = {2: [], 1: [job_row("scope", "success"), job_row("checks", "success")]}
+        page = [page_run(3, None, event="schedule", status="in_progress"), page_run(2, "cancelled", event="schedule"), page_run(1, "success", event="schedule")]
+        self.assertEqual(self.judge_fixed(page, jobs), ("unknown", []), "a cancelled schedule run is passed over for a newer schedule run above it")
+
+    def test_fixed_a_cancelled_dispatch_run_with_a_newer_push_run_above_it_is_not_replaced(self):
+        """A dispatch run and a push run share a group in events.json, so only the event rule keeps a dispatch run from being replaced. The scope comes first."""
+        self.assertEqual(clear_rule.base_events()["workflow_dispatch"], clear_rule.base_events()["push"],
+                         "the dispatch run and the push run must share a group, or the case proves nothing")
+        jobs = {2: [], 1: [job_row("scope", "success"), job_row("checks", "success")]}
+        page = [page_run(3, None, event="push", status="in_progress"), page_run(2, "cancelled", event="workflow_dispatch"), page_run(1, "success", event="push")]
+        self.assertEqual(self.judge_fixed(page, jobs), ("unknown", []), "a cancelled dispatch run is passed over for a newer push run above it")
+
     def test_control_the_scripted_host_reads_a_red_job_red_through_base_state(self):
         """Control, green on the old code: the cases above compare with base_state, so base_state must show a red job red on this host."""
         verdict, red = base_judgment([page_run(2, "failure")], {2: [job_row("checks", "failure")]})
