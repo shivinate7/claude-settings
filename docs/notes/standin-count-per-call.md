@@ -1,0 +1,1 @@
+- standin-count-per-call: the not-judged count is per call, not per stand-in. `patch.multiple` with two names counts 1. Decision: standins-accept-callers-keywords. Seen: 2026-11-24 x1

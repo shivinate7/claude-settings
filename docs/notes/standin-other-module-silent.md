@@ -1,0 +1,1 @@
+- standin-other-module-silent: a replacement of another module's function is outside the test's paired product module, so it is silent. Example: `sys.modules["git_reads"]._process_start_ms = ...` in `janitor/test_sweep.py` at line 1500 (`_git` is replaced the same way). Decision: standins-accept-callers-keywords. Seen: 2026-11-24 x1
