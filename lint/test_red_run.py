@@ -325,17 +325,15 @@ class RedRunTrackedCopyCases(RedRunFixture):
     """A run_in_copy-shaped case runs to a verdict in a copy of a commit. Its copy has no .git, so tracked_tree must list it
     by the manifest the export wrote (testing/tracked_tree.py, ManifestCases in lint/test_tracked_tree.py)."""
 
-    # The probe runs in the copy. It lists the copy's probe/ folder with the helper and fails on an assert if the list is wrong.
+    # The probe runs in the copy. It lists the copy's probe/ folder with the helper and writes the list to the report path it is given.
     PROBE = (
-        "import os, sys\n"
+        "import json, os, sys\n"
         "ROOT = os.path.dirname(os.path.abspath(__file__))\n"
         "sys.path.insert(0, os.path.join(ROOT, 'testing'))\n"
         "import tracked_tree\n"
         "got = tracked_tree.tracked('probe')\n"
-        "want = ['data.txt', 'mod.py']\n"
-        "if got != want:\n"
-        "    print('FAIL: the copy lists probe/ as %s, want %s' % (got, want))\n"
-        "    sys.exit(1)\n"
+        "with open(sys.argv[1], 'w', encoding='utf-8') as handle:\n"
+        "    json.dump({'cwd': os.getcwd(), 'got': got}, handle)\n"
         "print('probe lists %s' % got)\n"
     )
 
@@ -352,13 +350,24 @@ class RedRunTrackedCopyCases(RedRunFixture):
         }, "probe: the helper and a folder to list")
         return git(self.repo, self.env, "rev-parse", "HEAD").strip()
 
+    def probe_listing(self, sha, *add):
+        """Run the probe in a copy of SHA, with the --add paths. The verdict must be pass; the copy's listing of probe/ is returned."""
+        _, out = self.red_run(sha, *add, "--", sys.executable, "run_probe.py", os.path.join(self.outs, "listing.json"))
+        self.assertVerdict(out, "pass", "the probe in the copy of the commit")
+        return self.scoped_report("listing.json")["got"]
+
     def test_a_run_in_copy_shaped_probe_runs_to_a_verdict_in_a_copy_of_the_commit(self):
         sha = self.helper_commit()
-        _, out = self.red_run(sha, "--", sys.executable, "run_probe.py")
-        classes = verdict_classes(out)
-        self.assertEqual(len(classes), 1, "the run printed %d verdict lines, want 1: %s" % (len(classes), out.strip()[-200:]))
-        self.assertIn(classes[0], ("pass", "assert"),
-                      "the probe ended as %s in its copy: %s" % (classes[0], " | ".join(out.strip().splitlines()[-3:])))
+        got = self.probe_listing(sha)
+        self.assertEqual(got, ["data.txt", "mod.py"],
+                         "the copy lists probe/ as %s, want the two files the commit tracks" % (got,))
+
+    def test_add_puts_the_added_file_in_the_copys_listing(self):
+        sha = self.helper_commit()
+        write(os.path.join(self.repo, "probe", "zz_new.py"), "y = 2\n")
+        got = self.probe_listing(sha, "--add", "probe/zz_new.py")
+        self.assertEqual(got, ["data.txt", "mod.py", "zz_new.py"],
+                         "--add left probe/zz_new.py out of the copy's listing of probe/: it lists %s" % (got,))
 
 
 if __name__ == "__main__":
