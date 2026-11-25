@@ -61,14 +61,16 @@ RULE_IDS = ("output-start-with-point", "style-cut-narration", "output-never-past
             "style-limits-kept-silently")
 BACKGROUND_WORDS = ("background", "unfinished", "never")
 REPLY_SESSION = "reply-judge-cases"
-# The two rules the every-reply judge adds. Log only: a finding for either writes one guard.log line and no note.
-NEW_FINDING_RULE = "roles-finding-has-a-home"  # a finding the reply names with no home and no agent started for it
-NEW_WAIT_RULE = "parallelism-wait-names-its-event"  # a wait or hold that names nothing it waits for
+# The two rules the every-reply judge adds. Log only: each finding on either is one guard.log line and no note.
+# The model reports them in its own list, `new_rules`, one {"rule", "reason"} entry per finding. The ids are the
+# root CLAUDE.md anchors, so the judge gives no second name to a rule the file already anchors.
+NEW_FINDING_RULE = "roles-findings-are-debts-or-notes"  # a finding the reply names with no home (a rule anchor)
+NEW_WAIT_RULE = "parallelism-keep-going"  # a wait or hold that names nothing it waits for (a rule anchor)
 NEW_RULES = (NEW_FINDING_RULE, NEW_WAIT_RULE)
-NEW_FINDING_ANSWER = json.dumps({"ok": False, "reason": NEW_FINDING_RULE + ": the finding has no home; file it "
-                                 "as a debt or a note, or start an agent for it."})
-NEW_WAIT_ANSWER = json.dumps({"ok": False, "reason": NEW_WAIT_RULE + ": the wait names no event; name what it "
-                              "waits for."})
+NEW_FINDING_ANSWER = json.dumps({"ok": True, "new_rules": [{"rule": NEW_FINDING_RULE,
+                                 "reason": "the finding has no home; file it as a debt or a note."}]})
+NEW_WAIT_ANSWER = json.dumps({"ok": True, "new_rules": [{"rule": NEW_WAIT_RULE,
+                             "reason": "the wait names no event; name what it waits for."}]})
 
 STUB_SOURCE = '''
 import json
@@ -786,6 +788,124 @@ def case_new_rules_prompt_names_the_exemptions():
           has_pin(sentences, ("reviewer", "auditor"), ("own report",), never), sentences)
     check("new rules, exemption: a wait on named agents is not a wait that names nothing",
           has_pin(sentences, ("agent",), ("named",), never), sentences)
+
+
+# --------------------------------------------------------------------------- every-reply: two fields
+# The answer has two fields. `ok` and `reason` judge the older rules, as today. `new_rules` is a list of
+# {"rule": <id>, "reason": <text>}, one entry per finding on a newer rule. The note prints only the older
+# `reason`. Each entry appends its own guard.log line, and nothing from the list is ever printed.
+
+OLDER_ID = "output-never-paste-passing-output"  # the older rule the stub's reason names
+NEW_ENTRY_TEXT = "NEW-ENTRY-9b2d, file the finding as a debt or a note"  # a marker: the note never carries it
+BAD_ENTRY = "BAD-ENTRY-5a7c"  # a marker inside a malformed entry: it never prints and never logs
+# Two stable phrases the full prompt must hold, the ones that ask for the two fields: the list's key, and what
+# each entry holds. The new-only prompt asks for the list too, so it must hold both.
+FIELD_PHRASES = ("new_rules", "a rule id and a short reason")
+
+
+def new_entry(rule, reason):
+    return {"rule": rule, "reason": reason}
+
+
+def two_field_answer(ok, reason, new_rules):
+    body = {"ok": ok, "new_rules": new_rules}
+    if reason is not None:
+        body["reason"] = reason
+    return json.dumps(body)
+
+
+def note_of(run):
+    got = parse_stdout(run)
+    specific = got.get("hookSpecificOutput") if got else None
+    return specific.get("additionalContext") if isinstance(specific, dict) else None
+
+
+def guard_rules(config):
+    """The rule of each guard.log line (the fourth tab field), in order. Empty when there is no log."""
+    return [line.split("\t")[3] for line in guard_lines(config) if len(line.split("\t")) == 6]
+
+
+def case_f1_note_holds_the_older_reason_and_no_new_entry_text():
+    config = sample_config("f1-note")
+    answer = two_field_answer(False, BLOCK_REASON, [new_entry(NEW_FINDING_RULE, NEW_ENTRY_TEXT)])
+    run = run_hook(MARK, answer=answer, config=config, session=SESSION_ALPHA)  # Stop 1: the full prompt
+    note = note_of(run)
+    check("F1: exit 0", run.code == 0, run.code)
+    check("F1: the note holds the older reason", isinstance(note, str) and OLDER_ID in note, run.out)
+    check("F1: the note holds no word of the new entry",
+          isinstance(note, str) and NEW_ENTRY_TEXT not in note and NEW_FINDING_RULE not in note, run.out)
+    rules = guard_rules(config)
+    check("F1: one guard.log line carries the new rule id", rules.count(NEW_FINDING_RULE) == 1, rules)
+    check("F1: the older finding keeps its own guard.log line", rules.count(OLDER_ID) == 1, rules)
+
+
+def case_f2_full_prompt_both_fields_arrive():
+    config = sample_config("f2-both")
+    answer = two_field_answer(False, BLOCK_REASON, [new_entry(NEW_FINDING_RULE, NEW_ENTRY_TEXT)])
+    run = run_hook(MARK, answer=answer, config=config, session=SESSION_ALPHA)  # Stop 1: the full prompt
+    note = note_of(run)
+    check("F2: the note holds the older reason", isinstance(note, str) and OLDER_ID in note, run.out)
+    rules = guard_rules(config)
+    check("F2: the new entry arrives as its own guard.log line", rules.count(NEW_FINDING_RULE) == 1, rules)
+
+
+def case_f2_prompts_ask_for_two_fields():
+    config = sample_config("f2-prompt")
+    full = run_hook(MARK, answer=OK_ANSWER, config=config, session=SESSION_ALPHA)  # Stop 1: the full prompt
+    only = run_hook(MARK, answer=OK_ANSWER, config=config, session=SESSION_ALPHA)  # Stop 2: the new rules only
+    for label, run in (("full prompt", full), ("new-only prompt", only)):
+        head = prompt_head(run.prompt())
+        for phrase in FIELD_PHRASES:
+            check("F2 prompt: the %s asks for the two fields, phrase %r" % (label, phrase), phrase in head, head[:200])
+
+
+def case_two_new_entries_and_no_older_reason_log_two_lines_and_print_nothing():
+    config = sample_config("f3-two")
+    answer = two_field_answer(True, None, [new_entry(NEW_FINDING_RULE, "FIND-A-3f1c"),
+                                           new_entry(NEW_WAIT_RULE, "WAIT-B-8d2e")])
+    run = run_hook(MARK, answer=answer, config=config, session=SESSION_ALPHA)  # Stop 1
+    check("two entries: exit 0", run.code == 0, run.code)
+    check("two entries: nothing printed on Stop 1", run.out.strip() == "", run.out)
+    check("two entries: one guard.log line per entry, in order",
+          guard_rules(config) == [NEW_FINDING_RULE, NEW_WAIT_RULE], guard_rules(config))
+    later = run_hook(MARK, answer=answer, config=config, session=SESSION_ALPHA)  # Stop 2: the new rules only
+    check("two entries, Stop 2: nothing printed", later.out.strip() == "", later.out)
+    check("two entries, Stop 2: two more lines, in order",
+          guard_rules(config) == [NEW_FINDING_RULE, NEW_WAIT_RULE] * 2, guard_rules(config))
+
+
+def case_malformed_new_field_prints_nothing_and_logs_nothing_for_it():
+    # Control on the head: the head ignores `new_rules`, so these halves pin the malformed handling as it stands.
+    shapes = (
+        ("not a list", two_field_answer(False, BLOCK_REASON, NEW_FINDING_RULE + ": " + BAD_ENTRY)),
+        ("unknown id and no rule key", two_field_answer(False, BLOCK_REASON, [new_entry("not-a-rule-anchor", BAD_ENTRY),
+                                                                             {"reason": BAD_ENTRY}])),
+    )
+    for label, answer in shapes:
+        config = sample_config("f4-" + label.replace(" ", "-"))
+        run = run_hook(MARK, answer=answer, config=config, session=SESSION_ALPHA)  # Stop 1
+        note = note_of(run)
+        check("malformed, %s: exit 0" % label, run.code == 0, run.code)
+        check("malformed, %s: the older reason still prints" % label, isinstance(note, str) and OLDER_ID in note, run.out)
+        check("malformed, %s: nothing from the bad field prints" % label,
+              BAD_ENTRY not in run.out and BAD_ENTRY not in run.err, run.out)
+        check("malformed, %s: the bad field logs no line, so only the older finding's line" % label,
+              guard_rules(config) == [OLDER_ID], guard_rules(config))
+    config = sample_config("f4-ok-reply")
+    run = run_hook(MARK, answer=two_field_answer(True, None, [new_entry("not-a-rule-anchor", BAD_ENTRY)]),
+                   config=config, session=SESSION_ALPHA)  # Stop 1: an ok reply with a bad entry
+    check("malformed, ok reply: exit 0 and nothing printed", run.code == 0 and run.out.strip() == "", run.out)
+    check("malformed, ok reply: no guard.log line for the bad entry", guard_rules(config) == [], guard_rules(config))
+
+
+def case_new_rule_ids_are_the_claude_md_anchors():
+    with open(os.path.join(REPO_ROOT, "CLAUDE.md"), encoding="utf-8") as f:
+        text = f.read()
+    rules = judged_rules()
+    for rule in NEW_RULES:
+        check("anchors: %s is a rule anchor in the root CLAUDE.md" % rule, "<!-- rule:%s -->" % rule in text, rule)
+        check("anchors: %s is a judged rule" % rule, rule in rules, rules)
+    check("anchors: JUDGED_RULES holds thirteen rules", len(rules) == 13, rules)
 
 
 # --------------------------------------------------------------------------- cases 8-13
@@ -2709,6 +2829,12 @@ CASES = (
     case_failed_new_rules_call_prints_nothing_and_exits_zero,
     case_new_rules_are_judged_rules_and_counted,
     case_new_rules_prompt_names_the_exemptions,
+    case_f1_note_holds_the_older_reason_and_no_new_entry_text,
+    case_f2_full_prompt_both_fields_arrive,
+    case_f2_prompts_ask_for_two_fields,
+    case_two_new_entries_and_no_older_reason_log_two_lines_and_print_nothing,
+    case_malformed_new_field_prints_nothing_and_logs_nothing_for_it,
+    case_new_rule_ids_are_the_claude_md_anchors,
     case_ignored_stop_imports_no_guard_family_module,
     case_sampling_skipped_stop_imports_no_guard_family_module,
     case_model_ok_is_silent,
@@ -2906,13 +3032,12 @@ class CostTests(unittest.TestCase):
 
     def test_a_new_rule_finding_appends_one_guard_line_and_prints_nothing(self):
         folder = self.folder()
-        run = self.stop(folder, stop_hook(), [[{"ok": False, "reason": NEW_FINDING_RULE + ": no home."}, None]])
+        answer = {"ok": True, "new_rules": [{"rule": NEW_FINDING_RULE, "reason": "no home."}]}
+        run = self.stop(folder, stop_hook(), [[answer, None]])
         self.assertEqual(len(run["models"]), 1, "Stop 1 makes one model call")
         self.assertEqual(run["out"], "", "a new-rule finding prints no note")
         self.assertEqual(run["children"], [], "the finding starts no process of its own")
-        log = os.path.join(folder, "config", "guard.log")
-        with open(log, encoding="utf-8") as f:
-            lines = [line for line in f.read().split("\n") if line]
+        lines = guard_lines(os.path.join(folder, "config"))
         self.assertEqual(len(lines), 1, "one finding, one guard.log append; got %r" % lines)
         self.assertEqual(lines[0].split("\t")[3], NEW_FINDING_RULE, lines)
 
