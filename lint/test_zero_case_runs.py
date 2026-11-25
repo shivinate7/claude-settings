@@ -294,5 +294,28 @@ class VariantRewriteCases(unittest.TestCase):
                             "a dynamic import of a relative path in code was not made absolute")
 
 
+# A runner that reads a filter from the environment and runs only the cases it names. A filter that names no
+# case must fail the run, as an emptied case list does (hooks/case_runner_test.py no_cases_exit).
+FILTERED_RUNNERS = (("hooks/test_config_watch.py", "MUTATE_ONLY"),)
+NO_CASE_NAMED = "no case name holds this value 7c1e9a"
+
+
+class FilterMatchingNoCase(unittest.TestCase):
+    def test_each_filtered_runner_exits_nonzero_when_its_filter_matches_no_case(self):
+        for path, variable in FILTERED_RUNNERS:
+            with self.subTest(runner=path):
+                env = dict(os.environ)
+                env[variable] = NO_CASE_NAMED
+                proc = subprocess.run([sys.executable, path], cwd=REPO, env=env, capture_output=True,
+                                      text=True, timeout=TIMEOUT)
+                text = proc.stdout + proc.stderr
+                last = text.strip().splitlines()[-1:] or ["<no output>"]
+                self.assertNotIn("Traceback", proc.stderr, "%s crashed with %s matching no case" % (path, variable))
+                self.assertNotEqual(proc.returncode, 0,
+                                    "%s exits 0 with %s matching no case, so it runs zero cases: its last line is %r"
+                                    % (path, variable, last[0]))
+                self.assertIn("no cases ran", text, "%s does not say that no cases ran" % path)
+
+
 if __name__ == "__main__":
     unittest.main()
