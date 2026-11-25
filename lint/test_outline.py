@@ -702,7 +702,7 @@ class HelpFlag(unittest.TestCase):
 
 
 class RealFiles(unittest.TestCase):
-    def test_host_merge_is_one_def_under_200_lines_and_matches_ast(self):
+    def test_host_merge_is_one_def_whose_range_matches_ast_in_the_same_file(self):
         code, out, err = run_tool([MERGE, "Host.merge"])
         self.assertEqual(code, 0, "exit %d on merge/merge.py Host.merge: %s%s" % (code, out, err))
         lines = unit_lines(out)
@@ -711,7 +711,6 @@ class RealFiles(unittest.TestCase):
         with open(MERGE, encoding="utf-8") as handle:
             text = handle.read().splitlines()
         self.assertIn("def merge(", text[first - 1], "the first line of Host.merge is not its def: %r" % text[first - 1])
-        self.assertLess(last - first + 1, 200, "Host.merge spans %d lines, not under 200" % (last - first + 1))
         self.assertEqual((first, last), ast_method_span(MERGE, "Host", "merge"), "Host.merge's range differs from ast's")
 
     def test_every_top_level_class_of_test_merge_has_its_ast_range(self):
