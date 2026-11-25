@@ -29839,6 +29839,25 @@ class StaleMergeTrees(unittest.TestCase):
         restore.start()
         self.addCleanup(restore.stop)
 
+    def read_own_processes(self, own):
+        """Put the real process reader back, reporting only the pids in OWN. The runner's other pids are no part of the case: an
+        unreadable one under an ended ancestor would keep a tree for a reason the case does not test. -> the list of what the real
+        reader answered, one entry per read, so a case can see that it read a process table."""
+        reads = []
+        real = self.real_processes_in
+
+        def scoped(path):
+            inside, unreadable = real(path)
+            reads.append(inside)
+            if inside is None:  # the enumeration failed: pass that through, so the case sees it
+                return inside, unreadable
+            return [p for p in inside if p in own], [p for p in unreadable if p in own]
+
+        patch = unittest.mock.patch.object(sweep, "processes_in", side_effect=scoped)
+        patch.start()
+        self.addCleanup(patch.stop)
+        return reads
+
     def make_tree(self, name, reason, root=None, prefix="merge-wt-"):
         """A <prefix><name> folder with a locked worktree in it, as the merge tool makes one (prefix merge-wt- or merge-fresh-),
         under ROOT (default the temp folder). -> (folder, worktree)."""
@@ -29886,13 +29905,14 @@ class StaleMergeTrees(unittest.TestCase):
     @unittest.skipUnless(os.name == "nt", "the real process reader and pid_alive's kernel32 branch are Windows's: this case runs in the Windows CI job")
     def test_a_real_exited_merge_pid_on_windows_has_its_tree_removed(self):
         """No fake reader: a real child that ran and exited, named by a tree's lock reason, must not keep the tree on Windows. The hold
-        check reads the runner's live processes here, so an unreadable one under an ended ancestor could keep it."""
-        self.read_real_processes()
-        self.assertIs(sweep.processes_in, self.real_processes_in, "scope: the case must read real processes, or it proves nothing about the reader")
+        check reads the runner's live processes here, scoped to this case's own pid, so an unrelated unreadable pid on the runner
+        cannot keep the tree."""
         dead = reaped_child_pid()
+        reads = self.read_own_processes({dead})
         stale_tmp, stale_wt = self.make_tree("stale", "merge tool, pid %d" % dead)
         tmp, wt = merge.add_worktree(self.repo, self.head)
         self.addCleanup(merge.drop_worktree, self.repo, tmp, wt)
+        self.assertTrue(reads and reads[0] is not None, "scope: the hold check must read the real process table, or the case proves nothing about the reader")
         self.assertFalse(os.path.exists(stale_tmp),
                          "a merge-wt tree whose merge pid %d is a real exited process must be removed on Windows" % dead)
 
