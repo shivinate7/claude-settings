@@ -22,7 +22,7 @@ Owner, 14:27 CST Nov 25 2026, in the consultant's chat, on option "(b) Stay on s
 - Not yet landed: the guard and the merge tool refuse a stamp value they cannot read. Branch `guard-refuses-unknown-pin-string` carries it.
 - The recovery switch `CLAUDE_SETTINGS_REF=main` stays. It makes installers read main, not `stable`.
 
-Incident: PR #3863 (branch `confirm-needs-proof`) and PR #3871 (branch `lint-runs-listed-suites`) each put a stamp value on main together with its reader. Stable refused main's stamp until stable moved. Debt `old-merge-tool-refuses-stamp`: an old merge tool refuses main's `stamp.json`.
+Incident: PR #3863 (branch `confirm-needs-proof`) and PR #3871 (branch `lint-runs-listed-suites`) each put a stamp value on main together with its reader. Stable refused main's stamp until stable moved. Debt `old-merge-tool-refuses-stamp`: an old merge tool refuses main's `stamp.json`. <!-- glossary-ok: the debt's real id, as docs/records.md lists it -->
 
 Cost per PR run, as measured: 2.8 s, or 7.8 s with the page proof (n=1 each). Four python starts, one more with the page proof.
 
