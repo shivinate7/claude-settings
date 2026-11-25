@@ -2115,18 +2115,33 @@ class RewriteAfterMissingReportTests(unittest.TestCase):
         out = self.run_hook(records, True)
         self.assertIsNone(out, out and out["reason"])
 
+    def owner_cut_records(self, correction):
+        """The turn's test-author haiku spawn and its report, then the owner's next message, then `correction`. The
+        message cuts the window, so no spawn lies in it; the haiku spawn sits in the transcript before the cut."""
+        return [human("do the task"), tool_use_msg("Agent", self.TEST_AUTHOR), tool_result_msg(),
+                tool_use_msg("Bash", {"command": "git commit -m x"}), tool_result_msg(),
+                assistant_text(self.HAIKU_NAMED), human("the owner's next message"), assistant_text(correction)]
+
     def test_rw_after_refusal_owner_message_still_cuts_passes(self):
-        # Control: an owner message after a report still cuts the window, so no spawn lies in it and the correction
-        # naming sonnet passes. The haiku spawn is in the turn, before the cut.
+        # Control: an owner message after a report cuts the window. The correction names haiku, which the transcript
+        # ran, so it passes. The twin below names sonnet, which the transcript never ran, and is refused.
         self.missing_report_block()
-        records = [human("do the task"), tool_use_msg("Agent", self.TEST_AUTHOR), tool_result_msg(),
-                   tool_use_msg("Bash", {"command": "git commit -m x"}), tool_result_msg(),
-                   assistant_text(self.HAIKU_NAMED), human("the owner's next message"),
-                   assistant_text(self.SONNET_NAMED)]
+        records = self.owner_cut_records(self.HAIKU_NAMED)
         self.assertEqual(self.models_of(records), {"test-author": ["haiku"]}, "the turn holds no haiku test-author spawn")
-        self.assertEqual(self.window_of(records, self.SONNET_NAMED), {}, "a spawn sits after the owner's message")
+        self.assertEqual(self.window_of(records, self.HAIKU_NAMED), {}, "a spawn sits after the owner's message")
         out = self.run_hook(records, True)
         self.assertIsNone(out, out and out["reason"])
+
+    def test_rw_after_refusal_owner_message_never_run_model_is_refused(self):
+        # Red twin of the case above: the same cut, with the correction naming sonnet. No test-author spawn in the
+        # transcript ran sonnet, so the model-name check refuses it although the window is empty.
+        self.missing_report_block()
+        records = self.owner_cut_records(self.SONNET_NAMED)
+        self.assertEqual(self.window_of(records, self.SONNET_NAMED), {}, "a spawn sits after the owner's message")
+        out = self.run_hook(records, True)
+        self.assertIsNotNone(out, "the correction named test-author sonnet, which no test-author spawn in the transcript "
+                                  "ran, and passed")
+        self.assertIn(self.WRONG_NAME, out["reason"])
 
     def test_rw_after_refusal_records_between_summary_and_feedback_still_refused(self):
         # The data-flow, attachment and queue records the harness writes sit between the refused report's summary and
