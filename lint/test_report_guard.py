@@ -5495,7 +5495,9 @@ class PastRulingRelay(SameTurnWriter, unittest.TestCase):
                          "the question that names no ruling passed beside a question that names it: %r" % out)
 
     def test_refusal_names_the_question_beside_a_named_one(self):
-        out, _ = self.stop(self.decided, self.NAMED_BESIDE_UNNAMED, answer=self.judged(self.NO_DATE_REASON), to_writer=True)
+        # The judge lists Q2, the question that names no ruling: the naming reads that label.
+        out, _ = self.stop(self.decided, self.NAMED_BESIDE_UNNAMED, answer=self.judged(self.NO_DATE_REASON, labels=["Q2"]),
+                           to_writer=True)
         reason = self.reason(out)
         low = reason.lower()
         self.assertTrue(self.RENOVATE_WORDS in reason or "second question" in low or "question 2" in low,
@@ -5580,8 +5582,9 @@ class PastRulingRelay(SameTurnWriter, unittest.TestCase):
 
     def test_judged_question_one_naming_the_ruling_does_not_pass_its_unnamed_neighbour(self):
         # F8: the retired number form named question 1, which names the ruling. Question 2 names none, so it is refused.
-        out, _ = self.stop(self.decided, self.JUDGED_FIRST, answer=self.judged(self.NO_DATE_REASON, question=1),
-                           to_writer=True)
+        # The judge lists Q2, so the refusal names it by its label.
+        out, _ = self.stop(self.decided, self.JUDGED_FIRST,
+                           answer=self.judged(self.NO_DATE_REASON, question=1, labels=["Q2"]), to_writer=True)
         self.assertEqual(out.get("decision"), "block",
                          "the question that names no ruling passed beside the question that names it: %r" % out)
         self.assertIn(self.RENOVATE_WORDS, self.reason(out), "the refusal does not name the unnamed question: %r" % out)

@@ -1892,9 +1892,11 @@ def names_second_question(reason):
 
 
 def case_past_ruling_unnamed_question_beside_a_named_one_is_refused():
+    # The judge lists Q2, the question that names no ruling. The naming reads that label; with no list the text says
+    # one of the questions.
     first = good_box(goal=APPS_GOAL, problem=APPS_PROBLEM, based=APPS_CITED, options=APPS_OPTIONS)
     second = good_box(goal=RENOVATE_GOAL, problem=RENOVATE_PROBLEM, based=APPS_BASED, options=CAPS_OPTIONS)
-    r = judge_refusal_run(APPS_REASON, box={"questions": first["questions"] + second["questions"]})
+    r = judge_refusal_run(APPS_REASON, box={"questions": first["questions"] + second["questions"]}, labels=["Q2"])
     check("past ruling named beside unnamed: the second question, which names no ruling, is refused though the first names it",
           (r.deny() or {}).get("permissionDecision") == "deny", detail(r))
     check("past ruling named beside unnamed: the refusal names the second question by its first words or its number",
@@ -1945,7 +1947,8 @@ def case_past_ruling_retired_number_does_not_pass_the_unnamed_neighbour():
     # code no longer reads the number, so question 2 is refused and the refusal names it.
     first = good_box(goal=APPS_GOAL, problem=APPS_PROBLEM, based=APPS_CITED, options=APPS_OPTIONS)
     second = good_box(goal=RENOVATE_GOAL, problem=RENOVATE_PROBLEM, based=APPS_BASED, options=CAPS_OPTIONS)
-    r = judge_refusal_run(APPS_REASON, box={"questions": first["questions"] + second["questions"]}, question=1)
+    r = judge_refusal_run(APPS_REASON, box={"questions": first["questions"] + second["questions"]}, question=1,
+                          labels=["Q2"])
     check("past ruling F8: the old number 1, on a box whose question 2 names no ruling, still refuses question 2",
           (r.deny() or {}).get("permissionDecision") == "deny", detail(r))
     check("past ruling F8: the refusal names question 2 by its first words",
