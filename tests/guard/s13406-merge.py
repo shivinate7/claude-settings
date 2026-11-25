@@ -543,13 +543,13 @@ add("merge-checks: the merge tool of the host allows a failed head when required
     env_path=GHRED + os.pathsep + PY_PATH)
 # Under "first-proof" CI is live on the base (decision merge-needs-current-base), so the guard needs the proof a local confirm needs:
 # a green all-jobs-passed rollup. It reads the rollup by name, so a head with no check, or a failed one, is denied with the rollup named.
-add("merge-checks: the merge tool of the host denies a head with no check and no run when requiredChecks is first-proof", "deny",
+add("merge-checks: the merge tool of the host denies a head with no check and no run when requiredChecks is first-proof", "deny", "merge-checks",
     tool="mcp__github__merge_pull_request", cwd=FIRST_PROOF_REPO, pullNumber=12, repo="x", owner="y",
     env_path=GHEMPTY + os.pathsep + PY_PATH)
-add("merge-checks: the merge tool of the host denies a green head with no all-jobs-passed rollup when requiredChecks is first-proof", "deny",
+add("merge-checks: the merge tool of the host denies a green head with no all-jobs-passed rollup when requiredChecks is first-proof", "deny", "merge-checks",
     tool="mcp__github__merge_pull_request", cwd=FIRST_PROOF_REPO, pullNumber=12, repo="x", owner="y",
     env_path=GHPASSCHK + os.pathsep + PY_PATH)
-add("merge-checks: the merge tool of the host denies a failed head when requiredChecks is first-proof", "deny",
+add("merge-checks: the merge tool of the host denies a failed head when requiredChecks is first-proof", "deny", "merge-checks",
     carries=("checks: fail",), tool="mcp__github__merge_pull_request", cwd=FIRST_PROOF_REPO, pullNumber=12, repo="x", owner="y",
     env_path=GHRED + os.pathsep + PY_PATH)
 add("merge-checks: the merge tool of the host allows a head whose all-jobs-passed rollup is green when requiredChecks is first-proof", "allow",
