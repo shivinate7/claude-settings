@@ -30067,6 +30067,109 @@ class StaleMergeTrees(unittest.TestCase):
             with self.subTest(kind=kind, part="held"):
                 self.assertTrue(os.path.isdir(held[kind]), "a %s folder whose pid %d is dead must stay while a live child runs in it" % (kind, dead))
 
+    # A read-only folder stops a removal on POSIX only, and root removes it anyway: the cases that need one run as a POSIX user.
+    BLOCKABLE = os.name != "nt" and not (hasattr(os, "geteuid") and os.geteuid() == 0)
+    BLOCKABLE_WHY = "a read-only folder stops a removal on POSIX only, and root removes it anyway"
+
+    def blocked_tree(self, name, where="tree"):
+        """A locked merge-wt tree from make_tree, with a read-only folder that git cannot empty: `stuck` in the worktree (where "tree") or in
+        the merge-wt folder beside it (where "folder"). -> (tmp, wt, stuck)."""
+        tmp, wt = self.make_tree(name, "merge tool, pid %d" % os.getpid())
+        stuck = os.path.join(wt if where == "tree" else tmp, "stuck")
+        os.makedirs(stuck)
+        with open(os.path.join(stuck, "held.txt"), "w", encoding="utf-8") as handle:
+            handle.write("held\n")
+        os.chmod(stuck, 0o500)
+        self.addCleanup(os.chmod, stuck, 0o700)  # registered after make_tree's drop, so it runs first: the drop can empty the folder
+        return tmp, wt, stuck
+
+    def drop_printed(self, tmp, wt):
+        """drop_worktree of one tree, with what it prints on either stream. -> (its return value, the non-blank lines it printed)."""
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(out):
+            ret = merge.drop_worktree(self.repo, tmp, wt)
+        return ret, [line for line in out.getvalue().splitlines() if line.strip()]
+
+    def refused_removal(self, name):
+        """A blocked tree, and a twin in the same state. The twin's removal runs through git alone, so the expected exit code and first
+        stderr line come from git, with the twin's tree path swapped for the blocked tree's. -> (tmp, wt, the twin's exit code, that line)."""
+        tmp, wt, _ = self.blocked_tree(name)
+        twin_tmp, twin_wt, _ = self.blocked_tree(name + "-twin")
+        merge.git(self.repo, "worktree", "unlock", twin_wt)
+        code, out = merge.git(self.repo, "worktree", "remove", "--force", twin_wt)
+        first = out.splitlines()[0] if out.strip() else ""
+        return tmp, wt, code, first.replace(twin_wt, wt)
+
+    @unittest.skipUnless(BLOCKABLE, BLOCKABLE_WHY)
+    def test_a_refused_worktree_removal_prints_one_line(self):
+        """`git worktree remove` exits non-zero on a tree it cannot empty: drop_worktree prints one line for that tree, and no more."""
+        tmp, wt, stuck = self.blocked_tree("refused")
+        self.assertFalse(os.access(stuck, os.W_OK), "scope: the blocked folder must be read-only, or the removal is not refused")
+        _, printed = self.drop_printed(tmp, wt)
+        self.assertEqual(len(printed), 1, "a removal git refuses prints one line for the tree; printed %r" % (printed,))
+
+    @unittest.skipUnless(BLOCKABLE, BLOCKABLE_WHY)
+    def test_the_line_for_a_refused_removal_names_the_tree(self):
+        tmp, wt, stuck = self.blocked_tree("refused")
+        self.assertFalse(os.access(stuck, os.W_OK), "scope: the blocked folder must be read-only, or the removal is not refused")
+        _, printed = self.drop_printed(tmp, wt)
+        self.assertTrue(any(os.path.basename(tmp) in line for line in printed),
+                        "the line for a refused removal names the merge-wt folder %s; printed %r" % (os.path.basename(tmp), printed))
+
+    @unittest.skipUnless(BLOCKABLE, BLOCKABLE_WHY)
+    def test_the_line_for_a_refused_removal_carries_the_exit_code(self):
+        tmp, wt, code, first = self.refused_removal("refused")
+        self.assertNotEqual(code, 0, "scope: the twin's removal must be refused by git, or the case proves nothing")
+        _, printed = self.drop_printed(tmp, wt)
+        # the path and git's own text hold digits: strip them, so only the tool's exit code can match
+        rest = [line.replace(first, "").replace(wt, "").replace(tmp, "") for line in printed]
+        self.assertTrue(any(re.search(r"\b%d\b" % code, line) for line in rest),
+                        "the line for a refused removal carries git's exit code %d; printed %r" % (code, printed))
+
+    @unittest.skipUnless(BLOCKABLE, BLOCKABLE_WHY)
+    def test_the_line_for_a_refused_removal_carries_the_first_stderr_line(self):
+        tmp, wt, code, first = self.refused_removal("refused")
+        self.assertNotEqual(code, 0, "scope: the twin's removal must be refused by git, or the case proves nothing")
+        self.assertTrue(first, "scope: git must print a stderr line for the refused twin, or the case proves nothing")
+        _, printed = self.drop_printed(tmp, wt)
+        self.assertTrue(any(first in line for line in printed),
+                        "the line for a refused removal carries git's first stderr line %r; printed %r" % (first, printed))
+
+    @unittest.skipUnless(BLOCKABLE, BLOCKABLE_WHY)
+    def test_a_refused_worktree_removal_returns_false(self):
+        tmp, wt, stuck = self.blocked_tree("refused")
+        self.assertFalse(os.access(stuck, os.W_OK), "scope: the blocked folder must be read-only, or the removal is not refused")
+        ret, _ = self.drop_printed(tmp, wt)
+        self.assertIs(ret, False, "drop_worktree returns False for a tree it did not remove, so the caller reads it as kept; returned %r" % (ret,))
+
+    @unittest.skipUnless(BLOCKABLE, BLOCKABLE_WHY)
+    def test_a_folder_left_after_a_removal_prints_one_line(self):
+        """The tree is removed, but the merge-wt folder beside it cannot be emptied: the folder stays, and drop_worktree says so once."""
+        tmp, wt, stuck = self.blocked_tree("left", where="folder")
+        self.assertFalse(os.access(stuck, os.W_OK), "scope: the folder beside the tree must be read-only, or the folder does not stay")
+        _, printed = self.drop_printed(tmp, wt)
+        self.assertEqual(len(printed), 1, "a merge-wt folder that stays after the removal prints one line for the tree; printed %r" % (printed,))
+
+    @unittest.skipUnless(BLOCKABLE, BLOCKABLE_WHY)
+    def test_a_folder_left_after_a_removal_returns_false(self):
+        tmp, wt, stuck = self.blocked_tree("left", where="folder")
+        self.assertFalse(os.access(stuck, os.W_OK), "scope: the folder beside the tree must be read-only, or the folder does not stay")
+        ret, _ = self.drop_printed(tmp, wt)
+        self.assertIs(ret, False, "drop_worktree returns False when the merge-wt folder stays, so the caller reads the tree as kept; returned %r" % (ret,))
+
+    def test_a_removal_that_succeeds_prints_no_line(self):
+        """Control: a tree git removes and the folder empties, so there is nothing to report."""
+        tmp, wt = self.make_tree("clean", "merge tool, pid %d" % os.getpid())
+        self.assertTrue(os.path.isdir(tmp), "scope: the tree must exist before the drop, or the case proves nothing")
+        _, printed = self.drop_printed(tmp, wt)
+        self.assertEqual(printed, [], "a removal that succeeds prints no line; printed %r" % (printed,))
+
+    def test_a_removal_that_succeeds_returns_true(self):
+        tmp, wt = self.make_tree("clean", "merge tool, pid %d" % os.getpid())
+        self.assertTrue(os.path.isdir(tmp), "scope: the tree must exist before the drop, or the case proves nothing")
+        ret, _ = self.drop_printed(tmp, wt)
+        self.assertIs(ret, True, "drop_worktree returns True for a tree it removed; returned %r" % (ret,))
+
 
 class ProducerFolderNames(unittest.TestCase):
     """A run folder that a real producer makes carries the run's pid in its name, so the merge tool's sweep can find it once the
