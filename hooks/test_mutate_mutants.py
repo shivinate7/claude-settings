@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Cases for the mutant folder: hooks/mutants/<rule-slug>.py holds one file of rows per rule (decision section-number-clash-ready).
+"""Cases for the mutant folder: hooks/mutants/<rule-slug>.py holds one file of rows per rule (decision mutants-one-file-per-rule).
 
     python3 hooks/test_mutate_mutants.py
 

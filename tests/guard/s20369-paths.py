@@ -416,7 +416,7 @@ add("test-author: Edit of janitor/mutate_sweep.py is allowed", "allow", tool="Ed
     file_path="janitor/mutate_sweep.py", **A)
 add("test-author: Edit of HOOKS/mutate_guard.py is allowed (case folds)", "allow", tool="Edit",
     file_path="HOOKS/mutate_guard.py", **A)
-# ---- the mutant folder: hooks/mutants/<rule-slug>.py holds one file of rows per rule (decision section-number-clash-ready).
+# ---- the mutant folder: hooks/mutants/<rule-slug>.py holds one file of rows per rule (decision mutants-one-file-per-rule).
 # Each such .py file is a mutation test, so a test-author writes it and a builder never does. The name prefix
 # `hooks/mutants_x.py` is a near miss, and stays product code.
 MUTANT_FILE = "hooks/mutants/aa-first.py"
