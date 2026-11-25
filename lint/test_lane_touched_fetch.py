@@ -16,6 +16,9 @@ writer (.github/scripts/touched-tests.py, write_outputs) as the fixture. No case
 The run job's whole `if:`, each job's and step's `continue-on-error`, and the Windows `*.test.ps1)` arm are pinned too. Each of
 those cases also runs its check on an in-memory mutant of the workflow text, so the check is shown to catch its defect.
 
+The macOS leg's runs-on reads vars.MAC_RUNS_ON: the cases read its value with ExpressionReader, not a text match, and no
+other line of any workflow may name the variable or a self-hosted runner, except that one runs-on line.
+
     python3 lint/test_lane_touched_fetch.py
 """
 import importlib.util
@@ -363,6 +366,264 @@ def run_body_lines(text, name):
     return None if body is None else body_lines(body)
 
 
+# The macOS leg's runs-on is read by a reader of the GitHub expression subset it uses: `&&`, `||`, `==`, `!=`, `!`,
+# parentheses, single-quoted strings and the context names in context_for. A case reads the value the runner would get,
+# so a text match decides nothing. A name the reader does not know, or text it cannot parse, is a problem with its own cause.
+EXPR_TOKEN = re.compile(r"\s*(\|\||&&|==|!=|[()!]|'(?:[^']|'')*'|[\w.-]+)")
+REPO = "owner/repo"  # a fixture repository: the name a same-repository pull request's head carries
+FORK = "someone/repo"  # the head repository of a fork's pull request
+LABEL = "claude-settings-mac"  # a fixture runner label, in the shape the owner's runner carries
+MAC_OS = "macos-latest"
+WIN_OS = "windows-latest"
+LINUX_OS = "ubuntu-latest"
+# The values vars.MAC_RUNS_ON can hold: unset, empty, a label, and two others that must never reach a fork's run.
+VARIABLE_VALUES = (None, "", LABEL, "self-hosted", MAC_OS, "any-other-value")
+NAMED_BY_NO_OTHER_LINE = ("MAC_RUNS_ON", "self-hosted")
+LANE_FILE = "lane-touched-tests.yml"  # the one workflow whose run job may name the variable, in its runs-on line only
+# A candidate runs-on for the run job. The controls read it: a check that rejects a design that meets the claim is a false alarm.
+DESIGN_RUNS_ON = ("${{ matrix.os == 'macos-latest' && (github.event.pull_request.head.repo.full_name == github.repository && "
+                  "vars.MAC_RUNS_ON || 'macos-latest') || matrix.os }}")
+
+
+def expr_truthy(value):
+    """GitHub's truth: null, false, 0 and the empty string are false, every other value is true."""
+    return value not in (None, False, "", 0)
+
+
+def expr_equal(a, b):
+    """GitHub compares two strings without regard to case."""
+    if isinstance(a, str) and isinstance(b, str):
+        return a.lower() == b.lower()
+    return a == b
+
+
+def expr_tokens(text):
+    out, pos = [], 0
+    while text[pos:].strip():
+        m = EXPR_TOKEN.match(text, pos)
+        if m is None:
+            raise ValueError("the reader cannot read %r" % text[pos:].strip())
+        out.append(m.group(1))
+        pos = m.end()
+    return out
+
+
+class ExpressionReader:
+    """One expression over `context`, read as GitHub reads it: `&&` and `||` give one of their operands, not a boolean.
+    `names` lists each context name the expression reads, in order."""
+
+    def __init__(self, text, context):
+        self.tokens = expr_tokens(text)
+        self.pos = 0
+        self.context = context
+        self.names = []
+
+    def peek(self):
+        return self.tokens[self.pos] if self.pos < len(self.tokens) else None
+
+    def take(self):
+        tok = self.peek()
+        if tok is None:
+            raise ValueError("the expression ends before its value is complete")
+        self.pos += 1
+        return tok
+
+    def evaluate(self):
+        value = self.or_expr()
+        if self.peek() is not None:
+            raise ValueError("the expression has text after its value: %r" % self.peek())
+        return value
+
+    def or_expr(self):
+        value = self.and_expr()
+        while self.peek() == "||":
+            self.take()
+            right = self.and_expr()
+            value = value if expr_truthy(value) else right
+        return value
+
+    def and_expr(self):
+        value = self.eq_expr()
+        while self.peek() == "&&":
+            self.take()
+            right = self.eq_expr()
+            value = right if expr_truthy(value) else value
+        return value
+
+    def eq_expr(self):
+        value = self.unary()
+        while self.peek() in ("==", "!="):
+            op = self.take()
+            same = expr_equal(value, self.unary())
+            value = same if op == "==" else not same
+        return value
+
+    def unary(self):
+        if self.peek() == "!":
+            self.take()
+            return not expr_truthy(self.unary())
+        return self.primary()
+
+    def primary(self):
+        tok = self.take()
+        if tok == "(":
+            value = self.or_expr()
+            if self.take() != ")":
+                raise ValueError("a ( has no matching )")
+            return value
+        if tok.startswith("'"):
+            return tok[1:-1].replace("''", "'")
+        if tok.lower() in ("true", "false"):
+            return tok.lower() == "true"
+        if tok.lower() == "null":
+            return None
+        if tok in self.context:
+            self.names.append(tok)
+            return self.context[tok]
+        raise ValueError("the reader has no value for %r" % tok)
+
+
+def context_for(full_name, variable, os_name):
+    """The contexts the run job's runs-on reads: a pull request from `full_name`, the variable's value, and the matrix entry's os."""
+    return {"github.event.pull_request.head.repo.full_name": full_name, "github.repository": REPO,
+            "vars.MAC_RUNS_ON": variable, "matrix.os": os_name}
+
+
+def run_job_runs_on_line(text):
+    """The run job's `runs-on:` line, or None when the job has none."""
+    m = re.search(r"^    runs-on:.*$", job_block(text, "run") or "", re.M)
+    return m.group(0) if m else None
+
+
+def read_runs_on(text, full_name, variable, os_name):
+    """(value, names): the runs-on the run job gives a leg in these contexts, and the context names its expression reads.
+    A plain label reads as itself. Raises ValueError when the text cannot be read."""
+    line = run_job_runs_on_line(text)
+    if line is None:
+        raise ValueError("the run job has no runs-on")
+    value = drop_comment(line[len("    runs-on:"):]).strip()
+    m = re.fullmatch(r"\$\{\{(.*)\}\}", value, re.S)
+    if m is None:
+        return value, []
+    reader = ExpressionReader(m.group(1), context_for(full_name, variable, os_name))
+    return reader.evaluate(), reader.names
+
+
+def with_runs_on(text, value):
+    """`text` with the run job's runs-on value replaced. In memory: the workflow file is read, never written."""
+    return mutate_block(text, job_block(text, "run"), run_job_runs_on_line(text), "    runs-on: " + value)
+
+
+def names_variable_problem(text):
+    """None when the macOS leg's runs-on reads vars.MAC_RUNS_ON, else the one cause."""
+    try:
+        _, names = read_runs_on(text, REPO, LABEL, MAC_OS)
+    except ValueError as err:
+        return "the macOS leg's runs-on cannot be read: %s" % err
+    if "vars.MAC_RUNS_ON" not in names:
+        return "the macOS leg's runs-on never reads vars.MAC_RUNS_ON, so the variable cannot turn the Mac on"
+    return None
+
+
+def label_problem(text):
+    """None when the same repository's macOS leg runs on the label while vars.MAC_RUNS_ON holds it, else the one cause."""
+    try:
+        value, _ = read_runs_on(text, REPO, LABEL, MAC_OS)
+    except ValueError as err:
+        return "the macOS leg's runs-on cannot be read: %s" % err
+    if value != LABEL:
+        return "with vars.MAC_RUNS_ON set to the label on this repository, the macOS leg runs on %r, not the label" % (value,)
+    return None
+
+
+def fallback_problem(text):
+    """None when the macOS leg runs on macos-latest while vars.MAC_RUNS_ON is unset or empty, else the one cause."""
+    for variable, state in ((None, "unset"), ("", "empty")):
+        try:
+            value, _ = read_runs_on(text, REPO, variable, MAC_OS)
+        except ValueError as err:
+            return "the macOS leg's runs-on cannot be read: %s" % err
+        if value != MAC_OS:
+            return "with vars.MAC_RUNS_ON %s, the macOS leg runs on %r, not macos-latest" % (state, value)
+    return None
+
+
+def fork_problem(text):
+    """None when a fork's pull request runs its macOS leg on macos-latest whatever vars.MAC_RUNS_ON holds, else the one cause."""
+    for variable in VARIABLE_VALUES:
+        try:
+            value, _ = read_runs_on(text, FORK, variable, MAC_OS)
+        except ValueError as err:
+            return "the macOS leg's runs-on cannot be read: %s" % err
+        if value != MAC_OS:
+            return "a fork's pull request reaches the variable: with vars.MAC_RUNS_ON %r, its macOS leg runs on %r" % (variable, value)
+    return None
+
+
+def windows_problem(text):
+    """None when the Windows leg runs on windows-latest in every repository and variable state, else the one cause."""
+    for full_name in (REPO, FORK):
+        for variable in VARIABLE_VALUES:
+            try:
+                value, _ = read_runs_on(text, full_name, variable, WIN_OS)
+            except ValueError as err:
+                return "the Windows leg's runs-on cannot be read: %s" % err
+            if value != WIN_OS:
+                return "the Windows leg runs on %r, not windows-latest, with vars.MAC_RUNS_ON %r from %s" % (value, variable, full_name)
+    return None
+
+
+def linux_problem(text):
+    """None when the touched job, the Linux job, runs on ubuntu-latest, else the one cause."""
+    m = re.search(r"^    runs-on:[ \t]*(.*?)[ \t]*$", job_block(text, "touched") or "", re.M)
+    got = drop_comment(m.group(1)) if m else None
+    if got != LINUX_OS:
+        return "the touched job runs on %r, not ubuntu-latest" % (got,)
+    return None
+
+
+def naming_lines(text, exempt_job=None):
+    """(line number, job, line) of each live line that names vars.MAC_RUNS_ON or a self-hosted runner. A comment-only line
+    names nothing, since no runner or shell reads one. `exempt_job` is the one job whose runs-on line is left out: the macOS
+    leg's, the only line that reads the variable."""
+    job, found = "(top level)", []
+    for number, line in enumerate(text.split("\n"), 1):
+        head = re.match(r"^  ([\w-]+):\s*$", line)
+        if head:
+            job = head.group(1)
+        if line.lstrip().startswith("#"):
+            continue
+        if job == exempt_job and re.match(r"^    runs-on:", line):
+            continue
+        if any(name in line for name in NAMED_BY_NO_OTHER_LINE):
+            found.append((number, job, line.strip()))
+    return found
+
+
+def other_jobs_problem(text, exempt_job=None):
+    """None when no live line of the workflow names vars.MAC_RUNS_ON or a self-hosted runner, else the first such line."""
+    found = naming_lines(text, exempt_job)
+    if found:
+        number, job, line = found[0]
+        return "line %d of job %r names the variable or a self-hosted runner: %s" % (number, job, line)
+    return None
+
+
+def workflow_problems():
+    """One line per workflow under .github/workflows that names the variable or a self-hosted runner outside the macOS leg."""
+    problems = []
+    folder = os.path.join(ROOT, ".github", "workflows")
+    for name in sorted(os.listdir(folder)):
+        if not name.endswith((".yml", ".yaml")):
+            continue
+        with open(os.path.join(folder, name), encoding="utf-8") as f:
+            text = f.read()
+        problem = other_jobs_problem(text, "run" if name == LANE_FILE else None)
+        if problem:
+            problems.append("%s: %s" % (name, problem))
+    return problems
+
+
 class LaneCheckoutDepth(unittest.TestCase):
     def test_every_checkout_in_the_lane_workflow_fetches_a_small_depth(self):
         with open(LANE, encoding="utf-8") as f:
@@ -674,6 +935,137 @@ class IfCompareCaseInsensitive(unittest.TestCase):
                 edited = mutate_block(text, step, line, "        if: ${{ %s }}" % value)
                 self.assertIsNotNone(if_problem(named_run_step(edited, MACOS_STEP), IF_VALUES[MACOS_STEP]),
                                      f"the check passed the negation {value!r}")
+
+
+class MacLegRunsOn(unittest.TestCase):
+    """The macOS leg's runs-on: vars.MAC_RUNS_ON turns the Mac on for the same repository, a fork's pull request always gets
+    macos-latest, and an unset or empty variable falls back to macos-latest."""
+
+    def test_the_macos_leg_runs_on_names_the_variable(self):
+        text = read_lane()
+        problem = names_variable_problem(text)
+        self.assertIsNone(problem, problem)
+        bare = with_runs_on(text, MAC_OS)
+        self.assertIsNotNone(names_variable_problem(bare), "the check passed a macOS leg whose runs-on is the plain label macos-latest")
+
+    def test_the_same_repository_runs_the_mac_on_the_label_the_variable_holds(self):
+        text = read_lane()
+        problem = label_problem(text)
+        self.assertIsNone(problem, problem)
+        ignored = with_runs_on(text, "${{ matrix.os }}")
+        self.assertIsNotNone(label_problem(ignored), "the check passed a macOS leg that ignores vars.MAC_RUNS_ON")
+
+    def test_an_unset_or_empty_variable_falls_back_to_macos_latest(self):
+        text = read_lane()
+        problem = fallback_problem(text)
+        self.assertIsNone(problem, problem)
+        wrong = with_runs_on(text, "${{ vars.MAC_RUNS_ON || 'self-hosted' }}")
+        self.assertIsNotNone(fallback_problem(wrong), "the check passed a macOS leg that falls back to self-hosted, not macos-latest")
+
+    def test_a_fork_pull_request_never_reaches_the_variable(self):
+        text = read_lane()
+        names = names_variable_problem(text)
+        self.assertIsNone(names, "the fork check holds nothing until the variable is read: " + str(names))
+        problem = fork_problem(text)
+        self.assertIsNone(problem, problem)
+        reachable = with_runs_on(text, "${{ matrix.os == 'macos-latest' && (vars.MAC_RUNS_ON || 'macos-latest') || matrix.os }}")
+        self.assertIsNotNone(fork_problem(reachable), "the check passed a macOS leg that a fork's pull request can turn on with the variable")
+
+
+class OtherLegsUnchanged(unittest.TestCase):
+    """Control: the Windows leg and the Linux job keep their runners in every repository and variable state. Each check also
+    runs on a mutant that the brief's plain form would give, so the check is shown to catch it."""
+
+    def test_the_windows_leg_runs_on_windows_latest_in_every_state(self):
+        text = read_lane()
+        problem = windows_problem(text)
+        self.assertIsNone(problem, problem)
+        plain = with_runs_on(text, "${{ (github.event.pull_request.head.repo.full_name == github.repository && "
+                                   "vars.MAC_RUNS_ON) || 'macos-latest' }}")
+        self.assertIsNotNone(windows_problem(plain), "the check passed a run job whose Windows leg gets macos-latest")
+
+    def test_the_touched_job_stays_on_ubuntu_latest(self):
+        text = read_lane()
+        problem = linux_problem(text)
+        self.assertIsNone(problem, problem)
+        moved = mutate_block(text, job_block(text, "touched"), "    runs-on: ubuntu-latest\n", "    runs-on: self-hosted\n")
+        self.assertIsNotNone(linux_problem(moved), "the check passed a touched job that runs on self-hosted")
+
+
+class OtherJobsNameNoMacVariable(unittest.TestCase):
+    """Control: no line of any workflow names vars.MAC_RUNS_ON or a self-hosted runner, except the macOS leg's runs-on. A
+    job that names them could run its work on the owner's Mac."""
+
+    def test_no_other_line_of_any_workflow_names_the_variable_or_a_self_hosted_runner(self):
+        self.assertEqual(workflow_problems(), [], "a workflow names the variable or a self-hosted runner outside the macOS leg")
+
+    def test_the_macos_legs_own_runs_on_is_the_one_allowed_line(self):
+        text = read_lane()
+        own = with_runs_on(text, "${{ vars.MAC_RUNS_ON || 'macos-latest' }}")
+        self.assertIsNone(other_jobs_problem(own, "run"), "the scan flags the macOS leg's own runs-on line")
+
+    def test_a_name_in_another_job_is_caught(self):
+        text = read_lane()
+        touched = mutate_block(text, job_block(text, "touched"), "    timeout-minutes: 5\n",
+                               "    timeout-minutes: 5\n    env:\n      MAC: self-hosted\n")
+        self.assertIsNotNone(other_jobs_problem(touched, "run"), "the scan passed a self-hosted runner name in the touched job")
+        run_env = mutate_block(text, job_block(text, "run"), "    strategy:\n", "    env:\n      MAC: ${{ vars.MAC_RUNS_ON }}\n    strategy:\n")
+        self.assertIsNotNone(other_jobs_problem(run_env, "run"), "the scan passed the variable read in the macOS leg's env, not its runs-on")
+
+
+class NamingScan(unittest.TestCase):
+    """Control for the scan: a comment opener inside quotes, a name in a multi-line run body, and a lone quote in text each
+    count as text. A comment-only line counts as no name."""
+
+    def test_the_scan_reads_each_fixture_as_the_shell_and_yaml_do(self):
+        cases = (
+            ('  other:\n    steps:\n      - run: echo "# self-hosted"\n', True, "a comment opener inside quotes hides the name"),
+            ('  other:\n    steps:\n      - run: |\n          echo start\n          echo vars.MAC_RUNS_ON\n', True,
+             "a name in a multi-line run body is missed"),
+            ("  other:\n    steps:\n      - run: echo don't; echo self-hosted\n", True, "a lone quote in text hides the name"),
+            ("  other:\n    # vars.MAC_RUNS_ON picks the runner\n    steps: []\n", False, "a comment-only line counts as a name"),
+        )
+        for text, named, cause in cases:
+            with self.subTest(cause=cause):
+                self.assertEqual(bool(naming_lines(text)), named, cause)
+
+    def test_the_exempt_job_leaves_out_only_its_runs_on_line(self):
+        text = "  run:\n    runs-on: ${{ vars.MAC_RUNS_ON }}\n    env:\n      M: vars.MAC_RUNS_ON\n"
+        self.assertEqual([n for n, _, _ in naming_lines(text, "run")], [4], "the exempt job left out a line other than its runs-on")
+        self.assertEqual([n for n, _, _ in naming_lines(text)], [2, 4], "the scan without an exempt job missed a line")
+
+
+class ExpressionReaderControls(unittest.TestCase):
+    """Control for the reader: `&&`, `||`, `==`, `!` and quoted strings read as GitHub reads them, and an unknown name is an
+    error, never a value."""
+
+    def read(self, expr):
+        return ExpressionReader(expr, context_for(FORK, LABEL, MAC_OS)).evaluate()
+
+    def test_or_and_and_give_an_operand_and_equality_ignores_case(self):
+        self.assertEqual(self.read("'' || 'x'"), "x")
+        self.assertEqual(self.read("'a' && 'b'"), "b")
+        self.assertIs(self.read("false && 'x'"), False)
+        self.assertIs(self.read("'A' == 'a'"), True)
+        self.assertIs(self.read("!''"), True)
+        self.assertEqual(self.read("(vars.MAC_RUNS_ON || 'macos-latest')"), LABEL)
+
+    def test_a_name_the_reader_does_not_know_is_an_error_not_a_value(self):
+        with self.assertRaises(ValueError):
+            self.read("github.head_ref")
+
+
+class DesignShape(unittest.TestCase):
+    """Control: the design's own runs-on passes every check of the macOS leg, the Windows leg and the Linux job. A check that
+    rejects a design that meets the claim is a false alarm."""
+
+    def test_the_design_expression_passes_each_check(self):
+        text = with_runs_on(read_lane(), DESIGN_RUNS_ON)
+        for check in (names_variable_problem, label_problem, fallback_problem, fork_problem, windows_problem, linux_problem):
+            with self.subTest(check=check.__name__):
+                problem = check(text)
+                self.assertIsNone(problem, problem)
+        self.assertIsNone(other_jobs_problem(text, "run"), "the design expression trips the scan of other lines")
 
 
 if __name__ == "__main__":
