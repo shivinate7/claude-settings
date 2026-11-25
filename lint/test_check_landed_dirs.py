@@ -36,6 +36,22 @@ def tearDownModule():
     shutil.rmtree(RUN_FOLDER, ignore_errors=True)  # test-temp-standard: teardown removes the run folder
 
 
+FROZEN_LITERAL = re.compile(r"CONFIG_FROZEN_DIRS\s*=\s*\(.*?\n\)\n", re.DOTALL)  # the literal, its comments included
+
+
+def edit_frozen_literal(make):
+    """An edit that rewrites the CONFIG_FROZEN_DIRS literal in hooks/guard_frozen.py: `make(literal)` gives its new text."""
+    def edit(tree):
+        path = os.path.join(tree, "hooks", "guard_frozen.py")
+        with open(path, encoding="utf-8") as f:
+            text = f.read()
+        m = FROZEN_LITERAL.search(text)
+        assert m, "the defect's anchor moved: no CONFIG_FROZEN_DIRS literal in hooks/guard_frozen.py"
+        with open(path, "w", encoding="utf-8", newline="") as f:
+            f.write(text[:m.start()] + make(m.group(0)) + text[m.end():])
+    return edit
+
+
 def move_frozen_dirs_to_sibling(tree):
     """Cut the CONFIG_FROZEN_DIRS literal (its comments included) out of whichever hooks/guard*.py
     holds it, and write it to a new sibling module. The check must still find it there: a moved
@@ -44,7 +60,7 @@ def move_frozen_dirs_to_sibling(tree):
     for path in sorted(glob.glob(os.path.join(tree, "hooks", "guard*.py"))):
         with open(path, encoding="utf-8") as f:
             text = f.read()
-        m = re.search(r"CONFIG_FROZEN_DIRS\s*=\s*\(.*?\n\)\n", text, re.DOTALL)
+        m = FROZEN_LITERAL.search(text)
         if m:
             break
     else:
@@ -219,6 +235,31 @@ class CheckLandedDirsTests(unittest.TestCase):
                                        'CONFIG_FROZEN_DIRS = (\n    # os.path.normcase("newdir"),\n'))
         self.assertEqual(result.returncode, 0,
                          "a commented-out entry was counted as a frozen dir: %s" % result.stderr)
+
+    def test_an_unparseable_guard_source_is_refused_with_its_message(self):
+        # Why: a guard file the reader cannot parse must stop the check, not pass with the literal unread.
+        result = run_in_copy(add_file("hooks/guard_broken.py", "def (\n"))
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("could not parse the guard source", result.stderr)
+
+    def test_a_missing_frozen_dirs_literal_is_refused_with_its_message(self):
+        # Why: with no literal there is nothing to compare the manifest against, so the check must refuse.
+        result = run_in_copy(edit_file("hooks/guard_frozen.py", "CONFIG_FROZEN_DIRS = (\n",
+                                       "CONFIG_FROZEN_DIRS_RENAMED = (\n"))
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("could not find a CONFIG_FROZEN_DIRS = (...) literal to parse", result.stderr)
+
+    def test_a_frozen_dirs_value_that_is_not_a_tuple_is_refused_with_its_message(self):
+        # Why: the reader reads the entries of a tuple literal; a list has no tuple to read, so the check must refuse.
+        result = run_in_copy(edit_frozen_literal(lambda literal: 'CONFIG_FROZEN_DIRS = ["hooks"]\n'))
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("CONFIG_FROZEN_DIRS is not a tuple literal", result.stderr)
+
+    def test_a_frozen_dirs_entry_that_is_not_normcase_is_refused_with_its_message(self):
+        # Why: a bare string entry is not the normcase form the guard matches on, so the reader must refuse it.
+        result = run_in_copy(edit_file("hooks/guard_frozen.py", 'os.path.normcase("lint"),', '"lint",'))
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("has an entry that is not os.path.normcase", result.stderr)
 
 
 
