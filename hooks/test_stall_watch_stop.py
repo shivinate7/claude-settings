@@ -4508,21 +4508,48 @@ def CI110_two_refused_ready_calls_in_one_message_restore_the_earlier_wait():
 
 
 # ---- The cancel line (decision ci-wait-reads-run-status): a merge or close of the waited PR, or its return to
-# draft, that closes a CI wait while a check-in this session set has not fired, prints one systemMessage line. The
-# line names the PR, the id the check-in's tool returned (not the call's own tool_use id), and the tool. A
-# ScheduleWakeup returns no id, so its line says it cannot be deleted by id. The line blocks nothing. A check-in
-# whose nextFireAt (epoch ms) is at or before NOW has fired; a deleted one (CronDelete with its id) is gone.
+# draft, that closes a CI wait while a check-in this session set has not fired, prints one notice line at the Stop
+# of the merge's own turn. The notice is the Stop output's hookSpecificOutput.additionalContext with hookEventName
+# "Stop", the form that reaches the model; a top-level systemMessage may sit beside it, never in its place. The line
+# names the PR, the id the check-in's tool returned (not the call's own tool_use id), and the tool. A ScheduleWakeup
+# returns no id, so its line says it cannot be deleted by id. The line blocks nothing. A check-in whose nextFireAt
+# (epoch ms) is at or before NOW has fired; a deleted one (CronDelete with its id) is gone. Only a merge or close
+# that succeeded counts: a bin/merge without --confirm, or a gh pr merge that errored, closes nothing.
+
+
+def stop_notice(out, problems):
+    """The text of the one notice line the Stop check prints for the cancel line: hookSpecificOutput.additionalContext
+    of a JSON object whose hookSpecificOutput names hookEventName "Stop". A problem is added when the output is not
+    one such JSON line. A top-level systemMessage is not read here: a case may allow it, never require it. '' when
+    the output is empty or not such a line."""
+    if out.strip() == "":
+        return ""
+    if len(out.strip().splitlines()) != 1:
+        problems.append(f"the Stop output is not one line: {out[:200]!r}")
+    try:
+        body = json.loads(out)
+    except ValueError:
+        problems.append(f"the Stop output is not JSON: {out[:200]!r}")
+        return ""
+    spec = body.get("hookSpecificOutput") if isinstance(body, dict) else None
+    if not isinstance(spec, dict) or spec.get("hookEventName") != "Stop" \
+            or not isinstance(spec.get("additionalContext"), str):
+        problems.append("the Stop output has no hookSpecificOutput with hookEventName \"Stop\" and an "
+                        f"additionalContext string, the form that reaches the model: {out[:200]!r}")
+        return ""
+    return spec["additionalContext"]
 
 
 def cancel_problems(out, pr, ids=(), tool="", not_named=(), says=()):
-    """The problems with out as the cancel line of pr: one systemMessage line that is no block, names pr as a whole
-    token, names each id in ids and tool, has each phrase in says (case-blind), and names no token of not_named."""
+    """The problems with out as the cancel line of pr: one Stop notice in hookSpecificOutput.additionalContext that
+    is no block, names pr as a whole token, names each id in ids and tool, has each phrase in says (case-blind), and
+    names no token of not_named."""
     if out.strip() == "":
         return ["no cancel line printed, but the merge closed a CI wait with an unfired check-in"]
     problems = []
     if '"decision"' in out:
         problems.append(f"the cancel line blocks the Stop, want a notice only: {out[:200]!r}")
-    msg = system_message(out, problems)
+    msg = stop_notice(out, problems)
     if msg == "":
         return problems
     problems += expect(re.search(r"\b%s\b" % pr, msg) is not None, f"cancel line does not name PR {pr}: {msg!r}")
@@ -4567,8 +4594,8 @@ def gh_merge(number=CI_PR):
 
 @case
 def CI111_gh_pr_merge_names_the_pr_and_the_id_the_tool_returned():
-    """CI111. a gh pr merge that closes a CI wait with an unfired CronCreate check-in prints one systemMessage line
-    that names the PR, the id the tool returned (and not the call's own tool_use id), and CronCreate, and says to
+    """CI111. a gh pr merge that closes a CI wait with an unfired CronCreate check-in prints one notice line in
+    hookSpecificOutput.additionalContext that names the PR, the id the tool returned (and not the call's own tool_use id), and CronCreate, and says to
     delete it. Control: the same session without the merge prints nothing, so the merge is what prints the line"""
     recs, call_id = cron_set(RET_A)
     base = [ready()] + recs
@@ -4692,6 +4719,47 @@ def CI121_cancel_line_reads_only_the_transcript():
     path = transcript([ready()] + recs + [gh_merge()], folder=folder)
     return cost_problems(path, folder, lambda out: cancel_problems(out, CI_PR, ids=[RET_A], tool="CronCreate",
                                                                    says=["delete"]))
+
+
+@case
+def CI122_merge_in_an_earlier_turn_prints_no_line():
+    """CI122. a merge that closed a CI wait with an unfired check-in prints no line at the Stop of a later turn: the
+    line belongs to the Stop of the merge's own turn, and a later user prompt opens a turn after the merge. Control:
+    the same merge with no later prompt is still in its own turn, and prints the line"""
+    recs, call_id = cron_set(RET_A)
+    own = [prompt("merge when green"), ready()] + recs + [gh_merge()]
+    problems = ["later turn: " + p for p in expect_silent(own + [prompt("next request")])]
+    return problems + ["control, own turn: " + p
+                       for p in cancel_line(own, CI_PR, ids=[RET_A], tool="CronCreate", not_named=[call_id],
+                                            says=["delete"])]
+
+
+@case
+def CI123_errored_gh_pr_merge_prints_no_line():
+    """CI123. a gh pr merge whose result is an error (not a PreToolUse refusal) did not merge, so it prints no line:
+    the check-in is still needed. Control: the same merge with a successful result prints the line"""
+    recs, call_id = cron_set(RET_A)
+    merge = gh_merge()
+    merge_id = merge["message"]["content"][0]["id"]
+    errored = [merge, tool_result(merge_id, "Exit code 1\nmerge failed: not mergeable", is_error=True)]
+    problems = ["errored merge: " + p for p in expect_silent([ready()] + recs + errored)]
+    succeeded = [merge, bash_result(merge_id, "Merged pull request")]
+    return problems + ["control, merge succeeded: " + p
+                       for p in cancel_line([ready()] + recs + succeeded, CI_PR, ids=[RET_A], tool="CronCreate",
+                                            not_named=[call_id], says=["delete"])]
+
+
+@case
+def CI124_merge_tool_without_confirm_prints_no_line():
+    """CI124. bin/merge N without --confirm is a dry run, and nothing merged, so it prints no line. Control: the same
+    call with --confirm merged, and prints the line"""
+    recs, call_id = cron_set(RET_A)
+    dry = merge_bin(CI_PR, confirm=False)
+    problems = ["dry run: " + p for p in expect_silent([ready()] + recs + answered(dry, "dry run, nothing merged"))]
+    confirmed = merge_bin(CI_PR)
+    return problems + ["control, with --confirm: " + p
+                       for p in cancel_line([ready()] + recs + answered(confirmed, "merged as %s" % CI_SHA), CI_PR,
+                                            ids=[RET_A], tool="CronCreate", not_named=[call_id], says=["delete"])]
 
 
 def paused_job(job_id, command):
