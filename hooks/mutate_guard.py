@@ -3047,7 +3047,7 @@ MUTATIONS = [
     ("hand-made-worktree: the early exit is dropped, so every segment re-resolves its variables",
      '    if "worktree" not in segments[number]:\n        return ""',
      '    if False:\n        return ""',
-     "guard", "rm-var: 4000 bindings and 4000 flagged deletes scale linearly in CPU"),
+     "guard", "rm-var: 50 and 100 bindings with flagged deletes do linear work, counted"),
     ("hand-made-worktree: the help flag no longer ends the read",
      '        elif arg in ("-h", "--help"):\n            return None\n',
      '        elif arg in ("-hh",):\n            return None\n',
