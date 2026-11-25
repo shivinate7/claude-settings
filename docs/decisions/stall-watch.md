@@ -197,12 +197,12 @@ read is listed.
 Age rule (`AGENT_LONG`, 1800 s, a consultant's pick, undoable). It rests on the owner's ruling of 20:27 CST Nov 24, 2026
 (question QQ, option c: one check-in per long agent, no whole-suite run guard). `STALL_WATCH_LONG` sets another age.
 In `stop()`, a background agent whose age (from its launch, or its latest resume) is at least that old blocks the Stop, whether busy or quiet, inside an open
-call or not, with its transcript found or not. The launch time is set from the launch record (`scan_jobs`). A resume record (`toolUseResult.resumedAgentId`) reopens an agent that a notice or TaskStop closed, and the 1800 s limit counts from its latest resume.
+call or not, with its transcript found or not. The launch time is set from the launch record (`scan_jobs`). A resume record (`toolUseResult.resumedAgentId`) reopens an agent that a notice or TaskStop closed, and the 1800 s limit counts from its latest resume. The same reopen reaches the guard: `scan_jobs` reopens the resumed agent, and `background_work_running` (`hooks/guard_stream.py`, :1483) reads that open job, so rule `fg-bash-while-bg` refuses a long foreground call while the agent runs.
 An agent with no readable launch time does not block, and its row says so (`launch time unread`). The block names each such agent,
 `Agent "<description>" (<id>) has run <N> min and has not finished.`, and adds `; it is waiting on its own background work`
 when its notice carried the waiting text. It then gives `AGENT_CHECKIN_REMEDY`: set one one-time check-in, at most 30 minutes
 ahead, whose text names the id, then stop. A check-in clears the agent when it was made at or after the crossing (its age's start, the launch or the latest resume, plus
-`AGENT_LONG`), its text names the id as a whole token (`checked_in`), its result was not an error, and it is set at most `AGENT_CHECKIN_AHEAD` (30 minutes, the remedy's limit) ahead. `delay_minutes` or `at` sets how far ahead; the larger counts when both are given. A check-in with neither, or with a value that does not read, counts. Any check-in tool in
+`AGENT_LONG`), its text names the id as a whole token (`checked_in`), its result was not an error, and it is set at most `AGENT_CHECKIN_AHEAD` (30 minutes, the remedy's limit) ahead. `delay_minutes`, `delaySeconds` (divided by 60) and `at` each set how far ahead, read on any check-in tool (`checkin_minutes_ahead`); the largest reading counts. A value that does not read is no reading: an unreadable `at` keeps the other readings, so a `delay_minutes` of 180 with an unreadable `at` does not count (A18h). `delaySeconds` 3600 does not count, and 1500 counts (A18i, A18j). A check-in with none of these counts, and a CronCreate check-in with no delay field counts whatever its cron schedule (A18g, A18k). Any check-in tool in
 `CI_CHECKIN_TOOLS` counts; the remedy names `send_later`. An error result voids the check-in it answers. The block is set at
 each Stop until a check-in clears the agent. But `stop()` returns at once when `stop_hook_active` is true, and the run after
 a block carries that flag. So one block is not repeated within the same run of Stops. The next Stop that is not such a run checks again.
@@ -225,7 +225,7 @@ blocked Stop and one check-in (its false alarms).
   plan (agent report, Nov 24, 2026); the command behind it is not on record. Checked never.
 
 Limits: a session that is idle with no Stop sees nothing until its next Stop. The age rule runs only at a Stop, and a
-foreground agent is never checked. A TaskStop, or a terminal notice without the waiting text, closes an agent id. A resume newer than that close reopens the agent: it is listed when quiet and blocked at the age, with the 1800 s counted from the latest resume. A resume newer than a waiting notice clears the waiting flag. An agent stuck inside one tool call is not quiet-listed. The age rule catches it only at
+foreground agent is never checked. A TaskStop, or a terminal notice without the waiting text, closes an agent id. A resume newer than that close reopens the agent: it is listed when quiet and blocked at the age, with the 1800 s counted from the latest resume. A resume newer than a waiting notice clears the waiting flag. `hooks/test_guard.py` has no case for a resumed agent under `fg-bash-while-bg`: its only mention of that rule is the catalog line (:206). An agent stuck inside one tool call is not quiet-listed. The age rule catches it only at
 `AGENT_LONG`, so a shorter stall is missed. A model turn longer than the quiet age would list a busy agent. Measured on 5
 local agent transcripts (559 records, 2026-11-07): the longest gap between records was 206 s, under the 300 s quiet age.
 

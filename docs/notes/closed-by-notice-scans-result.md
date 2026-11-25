@@ -1,0 +1,1 @@
+- closed-by-notice-scans-result: `hooks/stall_watch.py`: `closed_by_notice` and `waiting_ids` split the notice text on the tag and search each piece whole, `<result>` included (:920-928, :937-939). So in the Stop check, a completed notice whose result quotes the waiting text never closes its agent, and marks it waiting. Decision: stall-watch. Seen: 2026-11-25 x1
