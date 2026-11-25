@@ -64,6 +64,28 @@ GUARD_INPUTS_REL = ".github/guard-inputs.txt"  # the one list of guard inputs (c
 REAL_GUARD_INPUTS = "real"  # run()'s guard_inputs default: the repo's own list is copied into the base when the repo has one
 
 
+# hooks/mutate_guard.py names the files the guard suite reads beside its hooks folder (GUARD_READ_FILES). The case that checks
+# them reads that list from the module with ast, never a copy: importing the module loads the guard family.
+MUTATE_GUARD = os.path.join(HERE, "..", "hooks", "mutate_guard.py")
+
+
+def guard_read_files():
+    """-> the paths GUARD_READ_FILES names in hooks/mutate_guard.py, as git names them ('/' between parts). Each entry must be
+    os.path.join of string literals; any other shape is a failure that names it."""
+    with open(MUTATE_GUARD, encoding="utf-8") as f:
+        tree = ast.parse(f.read(), filename=MUTATE_GUARD)
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "GUARD_READ_FILES" for t in node.targets):
+            paths = []
+            for elt in node.value.elts:
+                parts = [a.value for a in getattr(elt, "args", []) if isinstance(a, ast.Constant) and isinstance(a.value, str)]
+                if not (isinstance(elt, ast.Call) and parts and len(parts) == len(elt.args)):
+                    raise AssertionError(f"GUARD_READ_FILES entry is not os.path.join of string literals: {ast.dump(elt)}")
+                paths.append("/".join(parts))
+            return paths
+    return []
+
+
 def run(paths, event="pull_request", base="auto", existing=(), landed=None, head_ref="", green=None,
         green_sibling=False, green_head=None, contents=None, green_contents=None, facts=None, merged=None, moves=None,
         guard_inputs=REAL_GUARD_INPUTS, scope_files=None, proven=False, modes=()):
@@ -307,6 +329,19 @@ class Scope(FlagAsserts, unittest.TestCase):
         for p in ("hooks/test_guard.py", "hooks/mutate_guard.py"):
             with self.subTest(path=p):
                 self.assertFlags(run([p]), want_true=["guard"])
+
+    # Every file the guard suite reads beside its hooks folder (GUARD_READ_FILES, hooks/mutate_guard.py) turns `guard` on, so an
+    # edit to it runs the guard suite. Each path is an edit (`existing`): a new file under a landed dir sets `guard` through
+    # the landed-dirs rule, which would pass for the wrong reason. Named failure: a listed path sets no `guard`, so the suite
+    # that reads it skips the change.
+    def test_every_guard_read_file_turns_on_the_guard_suite(self):
+        paths = guard_read_files()
+        self.assertTrue(paths, "GUARD_READ_FILES: no path read from hooks/mutate_guard.py")
+        for p in paths:
+            self.assertTrue(os.path.isfile(os.path.join(HERE, "..", p)), f"GUARD_READ_FILES names {p}, which is not a file")
+        for p in paths:
+            with self.subTest(path=p):
+                self.assertFlags(run([p], existing=[p]), want_true=["guard"])
 
     def test_a_merge_change_leaves_a_job_that_never_runs_merge_suites_off(self):
         got = run(["merge/merge.py"])
@@ -593,11 +628,18 @@ class Scope(FlagAsserts, unittest.TestCase):
                 self.assertEqual(self.true_set(run([p], existing=[p])), {"shell_macos", "code"})
 
     # bin/sim-test and its suite run in the shell-macos job only, like bin/ios-ship. The suite runs the real bin/sim-lease
-    # beside the script, so an edit to bin/sim-lease turns the same job on.
+    # beside the script, so an edit to bin/sim-lease turns the same job on. bin/sim-lease is also a guard input, pinned apart
+    # below, so these two keep the exact set.
     def test_sim_test_edit_turns_on_only_the_macos_shell_job(self):
-        for p in ("bin/sim-test", "lint/test_sim_test.sh", "bin/sim-lease"):
+        for p in ("bin/sim-test", "lint/test_sim_test.sh"):
             with self.subTest(path=p):
                 self.assertEqual(self.true_set(run([p], existing=[p])), {"shell_macos", "code"})
+
+    # bin/sim-lease is in GUARD_READ_FILES, so the guard suite reads it and an edit also sets `guard`. Otherwise the flags
+    # of the two paths above. Named failure: without the guard arm the set lacks `guard`, and the guard suite skips a change
+    # to the lease it reads.
+    def test_sim_lease_edit_turns_on_the_macos_shell_job_and_guard(self):
+        self.assertEqual(self.true_set(run(["bin/sim-lease"], existing=["bin/sim-lease"])), {"shell_macos", "code", "guard"})
 
     # bin/duo-fold and its suite run in the shell-macos job only, like bin/sim-test (bash 3.2 on macOS).
     # Named failure: without the arm, bin/duo-fold turns every flag on, and the suite turns on `code` alone.
