@@ -710,16 +710,18 @@ class Scope(FlagAsserts, unittest.TestCase):
             with self.subTest(path=p):
                 self.assertEqual(self.true_set(run([p], existing=[p])), {"shell_macos", "code"})
 
-    # bin/sim-test and its suite run in the shell-macos job only, like bin/ios-ship. The suite runs the real bin/sim-lease
-    # beside the script, so an edit to bin/sim-lease turns the same job on. bin/sim-lease is also a guard input, pinned apart
-    # below, so these two keep the exact set.
-    def test_sim_test_edit_turns_on_only_the_macos_shell_job(self):
-        for p in ("bin/sim-test", "lint/test_sim_test.sh"):
-            with self.subTest(path=p):
-                self.assertEqual(self.true_set(run([p], existing=[p])), {"shell_macos", "code"})
+    # bin/sim-test is in GUARD_READ_FILES, so the guard suite reads it and an edit also sets `guard`. Named failure:
+    # without the guard arm the set lacks `guard`, and the guard suite skips a change to the script it reads.
+    def test_sim_test_edit_turns_on_the_macos_shell_job_and_guard(self):
+        self.assertEqual(self.true_set(run(["bin/sim-test"], existing=["bin/sim-test"])), {"shell_macos", "code", "guard"})
+
+    # The suite runs in the shell-macos job only, like bin/ios-ship. It is not a guard input, so its edit sets no `guard`.
+    # It runs the real bin/sim-lease beside the script, so an edit to bin/sim-lease turns the same job on.
+    def test_sim_test_suite_edit_turns_on_only_the_macos_shell_job(self):
+        self.assertEqual(self.true_set(run(["lint/test_sim_test.sh"], existing=["lint/test_sim_test.sh"])), {"shell_macos", "code"})
 
     # bin/sim-lease is in GUARD_READ_FILES, so the guard suite reads it and an edit also sets `guard`. Otherwise the flags
-    # of the two paths above. Named failure: without the guard arm the set lacks `guard`, and the guard suite skips a change
+    # of bin/sim-test above. Named failure: without the guard arm the set lacks `guard`, and the guard suite skips a change
     # to the lease it reads.
     def test_sim_lease_edit_turns_on_the_macos_shell_job_and_guard(self):
         self.assertEqual(self.true_set(run(["bin/sim-lease"], existing=["bin/sim-lease"])), {"shell_macos", "code", "guard"})
