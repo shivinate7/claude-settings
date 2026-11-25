@@ -382,9 +382,12 @@ sh("silent-write read bypass: commit --trailer takes -h as its value, so the com
 
 # (d) A Git Bash /tmp path names the temp folder, so a silenced write there is a throwaway. Windows
 # only: on POSIX, /tmp is a real folder, and the fixture temp folder is not /tmp.
+NO_GITBASH_TMP = "a Git Bash /tmp path names the temp folder only on Windows, so this case does not run here"
 if os.name == "nt":
     sh("silent-write false alarm: git -C /tmp under the Windows temp folder is a throwaway",
        VCS + " -C /tmp/throwaway commit -m x >/dev/null", "allow", cwd=GITMAIN)
+else:
+    skip_case("silent-write false alarm: git -C /tmp under the Windows temp folder is a throwaway", NO_GITBASH_TMP)
 
 # (e) The remedy names the program that refused and the loud form. It never reduces to the bare verb,
 # which a re-run would turn into a different write, and it never names the forbidden target.
@@ -512,6 +515,9 @@ if os.name == "nt":
     sh("silent-write: a --git-dir under the temp folder does not hide a discarded merge in a real checkout, denies",
        VCS + " --git-dir=/tmp/x/.git merge foo >/dev/null", "deny", "silent-write",
        carries="a redirect silences", cwd=GITMAIN)
+else:
+    skip_case("silent-write: a --git-dir under the temp folder does not hide a discarded merge in a real checkout, denies",
+              NO_GITBASH_TMP)
 
 # A here-string opener mid-word must not hide the discarded commit after it.
 sh("silent-write: a PowerShell here-string opener mid-word, then a silenced commit, denies",

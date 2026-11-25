@@ -1605,6 +1605,11 @@ if os.name != "nt":
     LOG_CHECKS_EXTRA.append(("builder-refuse: a builder's exec-bit change on a conflicted test file in a merge in "
                              "progress reaches the merge check",
                              lambda: _reaches_merge_check_case(_bd_m_conf_mode, TEST_A, False)))
+else:
+    skip_case("builder-refuse: a builder's mode-only change in a merge in progress "
+              "reaches the merge check", NO_EXEC_BIT)
+    skip_case("builder-refuse: a builder's exec-bit change on a conflicted test file in a merge in "
+              "progress reaches the merge check", NO_EXEC_BIT)
 
 
 # The git reader a guard call goes through: `_git`, which guard_core imports from git_reads. The guard calls it as
