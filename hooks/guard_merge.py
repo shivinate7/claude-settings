@@ -494,30 +494,30 @@ READY_PAGE_UNKNOWN_REASON = (
 
 READY_PAGE_BEHIND_REASON = (
     "Rule (Git, guard-hooks-fail-closed): the records page on the head of this pull request could not be read, so it is "
-    "unknown whether it is stale: %s. The merge tool the guard loaded is behind origin/main, and a tool that old can "
+    "unknown whether it is stale: %s. The merge tool the guard loaded is behind %s, and a tool that old can "
     "fail this read. A read that cannot run refuses the ready mark. "
     "Remedy: from the claude-settings clone, run merge/install_from_main.sh (the reinstall from main), then retry. "
     "(decision guard-hooks-fail-closed, a guard that cannot run its read refuses)"
 )
 
 
-def merge_tool_behind_main() -> bool:
-    """True when the checkout that holds the loaded merge tool is behind the ref its install follows (its HEAD is an
-    ancestor of that ref's local tip and not equal to it). The ref is stale_install.followed_ref's: the install record's
-    ref, else the pin's own. Any read that fails is False: the plain unknown reason then stands."""
+def merge_tool_behind_followed_ref() -> str:
+    """The name of the ref (stale_install.followed_ref's) when the checkout that holds the loaded merge tool is behind it
+    (its HEAD is an ancestor of that ref's local tip and not equal to it), else "". The ref is the install record's ref,
+    else the pin's own. Any read that fails is "": the plain unknown reason then stands."""
     module = merge_module()
     path = getattr(module, "__file__", None)
     if not path:
-        return False
+        return ""
     root = os.path.dirname(os.path.dirname(os.path.realpath(path)))
     try:
         import stale_install  # the one home of "the ref the installed copy follows"; imported here, so a call with no unknown read loads nothing
         record, _ = stale_install.load_record()
-        _, _, tip = stale_install.followed_ref({"source": root, "ref": record["ref"] if record else stale_install.PIN_REF})
+        _, name, tip = stale_install.followed_ref({"source": root, "ref": record["ref"] if record else stale_install.PIN_REF})
         head = stale_install.local_sha(root, "HEAD")
-        return bool(tip and head and head != tip and stale_install.covered(root, head, tip))
+        return name if tip and head and head != tip and stale_install.covered(root, head, tip) else ""
     except Exception:  # an unreadable ref is the plain unknown reason
-        return False
+        return ""
 
 
 def ready_page_calls(tool: str, tool_input: dict, command: str):
@@ -569,8 +569,10 @@ def ready_page_hit(tool: str, tool_input: dict, command: str, where: str):
             remedy = merge_module().stale_page_remedy(int(detail))
             return READY_PAGE_STALE_REASON % (detail, remedy), "ready on a stale page #" + detail
         if state == "unknown":
-            reason = READY_PAGE_BEHIND_REASON if merge_tool_behind_main() else READY_PAGE_UNKNOWN_REASON
-            return reason % cap_safe(detail, 200), "ready, page read unknown"
+            behind = merge_tool_behind_followed_ref()
+            cause = cap_safe(detail, 200)
+            reason = READY_PAGE_BEHIND_REASON % (cause, behind) if behind else READY_PAGE_UNKNOWN_REASON % cause
+            return reason, "ready, page read unknown"
     return None
 
 
