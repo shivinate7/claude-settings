@@ -1129,10 +1129,18 @@ def guard_problems(text):
     if g != len(homes) or any(h not in (GUARD_JOB, MACOS_SLICE_JOB) for h in homes):
         problems.append(f"GUARD_TESTS appears {g} times in checks.yml, in {homes}: want one slice step's env per slice, "
                         f"in {GUARD_JOB} or {MACOS_SLICE_JOB}")
-    # CI runs the whole guard suite. A GUARD_FAMILY here would make CI run one family and call it green.
+    # The opt-in fixtureless family is the one family a job may set, and only in a step that runs the guard runner with that value.
+    # A family in any other step would make CI run one family and call it green. Every mention must sit in such a step's env.
     f = text.count("GUARD_FAMILY")
-    if f:
-        problems.append(f"GUARD_FAMILY appears {f} times in checks.yml, want 0 (CI runs every case)")
+    homes = [(n, st) for n, j in all_jobs(text).items() for st in j["steps"] if "GUARD_FAMILY" in (st.get("env") or {})]
+    if f != len(homes):
+        problems.append(f"GUARD_FAMILY appears {f} times in checks.yml, in {len(homes)} step envs: want each mention in a step's env")
+    for n, st in homes:
+        value = yaml_scalar(str(st["env"]["GUARD_FAMILY"]))
+        if value != "fixtureless" or st.get("run") != "python3 hooks/test_guard.py":
+            problems.append(f"{n}: GUARD_FAMILY={value} with run {st.get('run')}, want fixtureless with python3 hooks/test_guard.py")
+    if len(homes) > 1:
+        problems.append(f"GUARD_FAMILY is set in {len(homes)} steps, want one: {[n for n, _ in homes]}")
     return problems
 
 
@@ -1839,12 +1847,22 @@ class WindowsSplit(unittest.TestCase):
                     self.assertEqual(rest, unwrap(IF_PIN[GUARD_CMD]),
                                      f"{name}: the full guard step's condition is not the pinned text (it lacks windows_guard)")
 
-    def test_checks_sets_no_guard_family(self):
+    def test_checks_sets_fixtureless_family_only(self):
+        # Re-pointed: the old claim (no job sets a family) is stale, since the opt-in fixtureless family now runs in one job. The new
+        # claim: exactly one job sets GUARD_FAMILY, to fixtureless, and no job sets another family. Named failure: the fixtureless
+        # family runs in no job, so its fresh check never runs in CI.
         self.assertEqual([p for p in guard_problems(self.text) if "GUARD_FAMILY" in p], [])
-        # The red run: the checker flags a
-        # guard family set in checks. Named failure: a guard family runs in checks and CI goes green.
+        homes = sorted(n for n, j in all_jobs(self.text).items() for st in j["steps"] if "GUARD_FAMILY" in (st.get("env") or {}))
+        self.assertEqual(len(homes), 1, f"want exactly one job to set GUARD_FAMILY, found {homes}")
+        # The red runs: a family other than fixtureless, a second job that sets one, and a mention outside a step's env. Each is flagged.
+        self.assertIn("GUARD_FAMILY: fixtureless", self.text)
+        other = self.text.replace("GUARD_FAMILY: fixtureless", "GUARD_FAMILY: shared-tree", 1)
+        self.assertTrue([p for p in guard_problems(other) if "GUARD_FAMILY" in p], "a family other than fixtureless is not flagged")
+        second = self.text + ("\n  extra-family:\n    runs-on: ubuntu-latest\n    steps:\n      - name: Extra\n        env:\n"
+                              "          GUARD_FAMILY: fixtureless\n        run: python3 hooks/test_guard.py\n")
+        self.assertTrue([p for p in guard_problems(second) if "GUARD_FAMILY" in p], "a second job that sets a family is not flagged")
         bad = [p for p in guard_problems(self.text + "\n# GUARD_FAMILY=shared-tree\n") if "GUARD_FAMILY" in p]
-        self.assertTrue(bad)
+        self.assertTrue(bad, "a mention outside a step's env is not flagged")
 
     def test_checker_sees_the_guard_slice_and_mutate_defects(self):
         scope_condition = DRAFT_GUARD  # R62: the draft guard is the scope condition; the code condition rides in the full step
