@@ -205,6 +205,7 @@ FAMILIES = {
     "sections": "the section files: a set the loader refuses (no section file, two files with one number, a name whose number disagrees with its header, a log check appended after the LOG_CHECKS_EXTRA join) stops a run before any case",
     "fg-bash-while-bg": "a foreground Bash call that can run long (a test, lint, merge, build or install, or a time limit over 60000 ms) is refused while this session's background command or agent runs; the run_in_background form, a quick read and a call with no background work pass",
     "review-log": "a PR comment whose first line is the review marker: refused when merge/merge.py parse_review refuses its body (review-log-form), and when a 40-hex sha on its Head or Fix check line does not resolve in the call's checkout (review-log-sha); the add and update comment tools, a body with no marker, and a check that cannot run pass",
+    "fixtureless": "the fixtureless set, checked fresh: each member gives the result it gives with every lazy fixture built, in a fresh process with only its named fixtures built",
     "misc": "anything outside a tagged section",
 }
 GUARD_FAMILY = os.environ.get("GUARD_FAMILY", "")
@@ -314,7 +315,19 @@ class _TaggedLogs(list):
 SKIP_ROWS = []
 # A log check in this set builds its own folders and reads none of the lazy fixtures, so a run that
 # selects only such checks (GUARD_FAMILY=load-brake) skips the fixture build, which takes minutes.
-FIXTURELESS_CHECKS = set()
+class _OrderedSet(dict):
+    """A set that keeps insertion order. A fresh child process names a member by its position, which is the
+    same in every process that loads the same sections."""
+
+    def add(self, item):
+        self[item] = None
+
+    def update(self, items):
+        for item in items:
+            self[item] = None
+
+
+FIXTURELESS_CHECKS = _OrderedSet()
 NO_PS = "Windows has no ps, so ownership reads unknown and this case does not run here"
 NO_STAND_IN = "a POSIX stand-in git does not reach CreateProcess, so this case does not run here"
 NO_ORPHAN = "needs a PPID-1 orphan from ps, which this host does not give"
