@@ -877,6 +877,17 @@ add("brief-destructive-git: control, a two-token span then -free is allowed", "a
 add("brief-destructive-git: control, the reviewer had run a reset before a span is allowed", "allow", tool="Agent",
     prompt="The reviewer had run `git reset --hard origin/main` before the crash. Redo it.",
     subagent_type="builder", model="sonnet")
+# Pins for three shapes the brief scan must refuse: a negator inside a span that joins a reset order, a report clause
+# that holds "you" with ran, and a report clause that holds ran inside a longer phrase. A mutant row in
+# hooks/mutate_guard.py kills each one.
+add("brief-destructive-git: a span that opens with Never run, then a joiner and a reset order, is denied", "deny",
+    BRIEF_DESTRUCTIVE, tool="Agent", prompt="`Never run git stash then run git reset --hard origin/main`",
+    subagent_type="builder", model="sonnet")
+add("brief-destructive-git: Remember you ran a reset before the span is denied", "deny", BRIEF_DESTRUCTIVE,
+    tool="Agent", prompt="Remember you ran `git reset --hard origin/main`.", subagent_type="builder", model="sonnet")
+add("brief-destructive-git: Do not let anyone say the builder ran a reset before the span is denied", "deny",
+    BRIEF_DESTRUCTIVE, tool="Agent", prompt="Do not let anyone say the builder ran `git reset --hard origin/main`.",
+    subagent_type="builder", model="sonnet")
 
 
 # The owner's override lifts this refusal the way it lifts an Opus spawn's (decision owner-override): a one-act override
