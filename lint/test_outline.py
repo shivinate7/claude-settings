@@ -437,6 +437,18 @@ class Refusals(unittest.TestCase):
         self.assertEqual(code, 2, "a .txt file exited %d, not 2: %s%s" % (code, out, err))
         self.assertEqual(len(nonblank(out + err)), 1, "a .txt file did not print exactly one line: %r" % (out + err))
 
+    # Pins: the head already exits 2 with one line in each case below. The commit's Red-run trailers name a mutant of
+    # the refusal each one reaches, so each goes red if that refusal stops exiting 2.
+    def test_a_missing_file_exits_2_with_one_line(self):
+        code, out, err = run_tool([os.path.join(tempfile.mkdtemp(dir=RUN), "gone.py")])
+        self.assertEqual(code, 2, "a missing file exited %d, not 2: %s%s" % (code, out, err))
+        self.assertEqual(len(nonblank(out + err)), 1, "a missing file did not print exactly one line: %r" % (out + err))
+
+    def test_a_python_file_with_a_syntax_error_exits_2_with_one_line(self):
+        code, out, err = run_tool([fixture("broken.py", "def broken(:\n")])
+        self.assertEqual(code, 2, "a Python file with a syntax error exited %d, not 2: %s%s" % (code, out, err))
+        self.assertEqual(len(nonblank(out + err)), 1, "a Python syntax error did not print exactly one line: %r" % (out + err))
+
 
 class RealFiles(unittest.TestCase):
     def test_host_merge_is_one_def_under_200_lines_and_matches_ast(self):
