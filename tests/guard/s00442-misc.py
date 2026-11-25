@@ -2540,11 +2540,11 @@ def _build_worktrees():
         }),
     )
 
-    # A RECORD WHOSE FOLDER IS GONE: this runner's own live pid, with a cwd that was made and then removed.
-    # Such a record stands in no tree (owner, 20:53 CST 11-24, 2026), so WTCLEAN passes past it.
+    # A RECORD WHOSE FOLDER IS GONE: this runner's own live pid, with a cwd whose leaf is absent under a folder that
+    # stays. A missing parent reads unknown, not gone (`_folder_is_gone`). Such a record stands in no tree
+    # (owner, 20:53 CST 11-24, 2026), so WTCLEAN passes past it.
     stale_gone = os.path.join(ROOT, "wtstale-gone")
-    os.makedirs(stale_gone)
-    shutil.rmtree(stale_gone)
+    os.makedirs(stale_gone, exist_ok=True)
     os.makedirs(os.path.join(WTSTALECFG, "sessions"), exist_ok=True)
     write(
         os.path.join(WTSTALECFG, "sessions", "%d.json" % self_pid),

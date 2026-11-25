@@ -173,16 +173,16 @@ def stale_record_live_process_in_tree_case():
 
 def stale_record_process_outside_tree_case():
     """The control for the case above: the same live process, with its cwd outside the clean tree. Nothing stands
-    in the tree, and the record's folder is gone, so the remove is allowed."""
+    in the tree, and the record's folder is gone (its leaf absent under a folder that stays), so the remove is allowed."""
     if os.name == "nt":
         return SKIP, "a sleep child that stands in a folder is a POSIX check"
     target = WTCLEAN
-    gone = _removed_folder("stale-proc-outside-gone")
+    parent = _made_folder("stale-proc-outside-parent")
     proc = subprocess.Popen(["sleep", "300"], cwd=ROOT)
     try:
         if proc.poll() is not None:
             return False, "fixture: the sleep must still be running outside the tree"
-        cfg = _record_config("stale-proc-outside-cfg", [(proc.pid, os.path.join(gone, "wt"), 1)])
+        cfg = _record_config("stale-proc-outside-cfg", [(proc.pid, os.path.join(parent, "wt"), 1)])
         decision, reason = _remove_decision(cfg, target)
     finally:
         proc.kill()

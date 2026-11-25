@@ -1358,11 +1358,10 @@ class StaleCwdRecordTests(unittest.TestCase):
         give_remote(cls.root)
         cls.removable = os.path.join(cls.base, "wt-stale-removable")
         run_vcs(cls.root, "worktree", "add", "-q", cls.removable, "-b", "lane-stale-removable")
-        # The record's cwd: a folder made and then removed, so the session's folder is gone.
+        # The record's cwd: its leaf is removed under a folder that stays, so the session's folder is gone.
         cls.gone = os.path.join(cls.base, "gone-session", "wt")
         os.makedirs(cls.gone)
         os.rmdir(cls.gone)
-        os.rmdir(os.path.dirname(cls.gone))
         # A LIVE record: this test process's own pid and its real start time. Only its folder is gone.
         write(os.path.join(cls.cfg, "sessions", "stale-cwd-record.json"),
               json.dumps({"pid": os.getpid(), "startedAt": this_process_start_ms(), "cwd": cls.gone}))
