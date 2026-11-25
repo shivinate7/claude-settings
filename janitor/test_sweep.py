@@ -1490,19 +1490,20 @@ class StaleCwdRecordTests(unittest.TestCase):
         """A bare repo at REMOTE that holds one commit on main, pushed from a source repo in this case's folder."""
         source = os.path.join(self.base, "src-" + name)
         make_repo(source, {"f.txt": "base\n"})
-        self.assertEqual(run_vcs(self.base, "init", "-q", "--bare", "-b", "main", remote).returncode, 0,
-                         "scope: the bare remote must be made")
-        self.assertEqual(run_vcs(source, "remote", "add", "origin", remote).returncode, 0,
-                         "scope: the source must name the remote")
-        self.assertEqual(run_vcs(source, "push", "-q", "origin", "main").returncode, 0,
-                         "scope: the source must push main to the remote")
+        init = run_vcs(self.base, "init", "-q", "--bare", "-b", "main", remote)
+        self.assertEqual(init.returncode, 0, "scope: the bare remote must be made: %s" % init.stderr.strip())
+        add = run_vcs(source, "remote", "add", "origin", remote)
+        self.assertEqual(add.returncode, 0, "scope: the source must name the remote: %s" % add.stderr.strip())
+        push = run_vcs(source, "push", "-q", "origin", "main")
+        self.assertEqual(push.returncode, 0,
+                         "scope: the source must push main to the remote: %s" % push.stderr.strip())
         return remote
 
     def clone_from_remote(self, dest, name):
         """A clone at DEST of a bare remote beside this case's base, which holds one commit on main."""
         remote = self.bare_remote_with_main(os.path.join(self.base, "remote-" + name + ".git"), name)
-        self.assertEqual(run_vcs(self.base, "clone", "-q", remote, dest).returncode, 0,
-                         "scope: the clone must be made")
+        clone = run_vcs(self.base, "clone", "-q", remote, dest)
+        self.assertEqual(clone.returncode, 0, "scope: the clone must be made: %s" % clone.stderr.strip())
         return dest
 
     def decide_orphan(self, checkout, processes=([], [])):
@@ -1734,7 +1735,11 @@ class StaleCwdRecordTests(unittest.TestCase):
         self.assert_record_stands_nowhere()
         wt = self.new_worktree("trash-bare-dir")
         trash = self.trash_from_build(wt)
-        bare = self.bare_remote_with_main(os.path.join(trash, "checkouts", "dep.git"), "bare-dir")
+        # Built beside the case's base and moved in, so the setup push never runs inside the trash folder.
+        built = self.bare_remote_with_main(os.path.join(self.base, "dep-bare-dir.git"), "bare-dir")
+        bare = os.path.join(trash, "checkouts", "dep.git")
+        os.makedirs(os.path.dirname(bare))
+        shutil.move(built, bare)
         self.assertTrue(os.path.isfile(os.path.join(bare, "HEAD")), "scope: the bare repo must hold a HEAD file")
         self.assertTrue(os.path.isdir(os.path.join(bare, "objects")), "scope: the bare repo must hold an objects folder")
         self.assertFalse(os.path.exists(os.path.join(bare, ".git")), "scope: the bare repo must hold no .git entry")
