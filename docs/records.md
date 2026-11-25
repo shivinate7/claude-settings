@@ -431,6 +431,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `comment-narration-limits` | The check has no suppression marker. | [`docs/debts/comment-narration-limits.md`](../docs/debts/comment-narration-limits.md) |
 | `comment-only-judge-whitespace` | `lint/comment_only.py` drops whitespace inside a line, so a whitespace-only edit reads as comment-only. | [`docs/debts/comment-only-judge-whitespace.md`](../docs/debts/comment-only-judge-whitespace.md) |
 | `confirm-red-between-read-and-put` | `confirm` reads the head's checks, then sends `PUT pulls/<n>/merge` with the head sha as its guard. | [`docs/debts/confirm-red-between-read-and-put.md`](../docs/debts/confirm-red-between-read-and-put.md) |
+| `consult-text-two-homes-left` | Two homes tell a session to take its own pick and say it in the reply, with no consult step first. | [`docs/debts/consult-text-two-homes-left.md`](../docs/debts/consult-text-two-homes-left.md) |
 | `cost-pins-line-range-suffix` | `LINE_SUFFIX` drops only a trailing `:digits`. | [`docs/debts/cost-pins-line-range-suffix.md`](../docs/debts/cost-pins-line-range-suffix.md) |
 | `cost-pins-time-noun-missing` | `COST_NOUN` has `times` but not `time`, so a count before the singular noun passes unflagged. | [`docs/debts/cost-pins-time-noun-missing.md`](../docs/debts/cost-pins-time-noun-missing.md) |
 | `cost-pins-verb-past-tense` | `WORK_VERB` has no past tense, so a count after a past verb passes unflagged. | [`docs/debts/cost-pins-verb-past-tense.md`](../docs/debts/cost-pins-verb-past-tense.md) |
