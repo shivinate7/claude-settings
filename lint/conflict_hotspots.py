@@ -4,11 +4,15 @@
     python3 lint/conflict_hotspots.py --since YYYY-MM-DD [--base REF] [--top 20] [--repo .] [--exposure]
                                       [--into-branches] [--list]
 
---since takes YYYY-MM-DD only, a real calendar date; --top takes 1 or more. Any other value exits 1 with one line.
+--since takes YYYY-MM-DD only, a real calendar date, and cuts at the local midnight of that day; --top takes a whole
+number of 1 or more. Any other value exits 1 with one line. The date is read here, not by git: git reads a year such as
+1960 or 2100 as the current year, and a day at the clock time of the run.
 --base defaults to origin/main when refs/remotes/origin/main exists, else main: a clone's local main can lag the remote.
 
-Finds each merge commit of two parents since DATE (committer date) that touches --base: the merge is on the base's
-history, or one parent is. That covers a merge of main into a branch and a PR merge into main. Replays each with
+Finds each merge commit of two parents since the local midnight of DATE (committer date) that touches --base: the merge
+is on the base's history, or its second parent is. That covers a merge of main into a branch and a PR merge into main.
+A merge only its first parent reaches the base through, such as the commit `git stash` makes, is not replayed: it counts
+under `merges not replayed`. Replays each with
 `git merge-tree --write-tree --name-only <parent1> <parent2>` and counts, per file, the merges that conflict on it.
 The replay is what git finds today, not what the author saw: a resolution by hand, rerere or a merge option can differ.
 
@@ -27,15 +31,17 @@ Three opt-in flags. Without them the output is unchanged.
                       only through a PR merge, and a merge with no base parent are dropped and appear in no line,
                       `merges not replayed` included.
     --list            after the file rows, one line per conflicted merge: `merge <sha9> <paths>`, the merge commit and the
-                      files git names for it, joined by single spaces. A clean or unknown merge has no line.
+                      files git names for it, joined by single spaces. A clean merge has no line. After those, one line per unknown merge: `unknown <sha9>`.
 
 Output (summary lines start with a letter, file rows with a digit):
 
     base: <name> <sha9>      the base read and its commit, the first 9 hex digits
+    since: <cutoff>          the cut: local midnight of DATE, `YYYY-MM-DD 00:00 <offset>`
     merges replayed: N       every replay, an unknown one too
     merges conflicted: M
     merges unknown: U        a replay whose read failed (git exit other than 0 or 1): never counted as clean
-    conflict rate: R%        M / N, one decimal; 0.0% when N is 0
+    conflict rate: R%        M / N, one decimal; 0.0% when N is 0. With U above 0 it reads
+                             `conflict rate: R% (a lower bound: U merge(s) unknown)`
     merges not replayed: K   not read at all: octopus merges (more than two parents), merges that miss the base
     <count> <path>           per conflicted file, count descending then path ascending, the first --top
     cost: merge-trees N, wall S s
@@ -46,14 +52,14 @@ Not seen: a squash or rebase merge leaves no merge commit, so it is absent from 
 under the name git prints for the conflict. A shallow clone is not read: the history is cut, so every count would be a
 lower bound. The run prints `history is cut at depth ...; counts are a lower bound` and no report, and exits 3 (unknown).
 
-Cost, per run: one start each of git --version, rev-parse (the date, the object folder, the base, whether the clone is
+Cost, per run: one start each of git --version, rev-parse (the object folder, the base, whether the clone is
 shallow, whether origin/main exists), rev-list of the base, log of all refs, and one git merge-tree per replay. No process stays running. Added by --exposure: three git starts
 per replayed merge (one merge-base, two diffs), so a run of N merges starts about 3N more git processes and its wall
 time grows by about that share. Added by --into-branches: one rev-list --first-parent of the base. The cost line counts
 merge-trees only. It writes nothing into the repo and
 creates no ref: git writes the replay's new objects to a fresh folder under TMPDIR, which is removed before exit,
-also on Ctrl-C. Exit 0 for a report (zero merges included), 2 for a git older than 2.38, 3 for a history cut at depth, 1 for any
-other failure, a bad --since or --top included.
+also on Ctrl-C. Exit 0 for a report (zero merges included), 2 for a git older than 2.38, 3 for a history cut at depth or for a report
+with a merge unknown (the report prints in full), 1 for any other failure, a bad --since or --top included.
 """
 import argparse
 import datetime
@@ -114,14 +120,10 @@ def check_version():
                       % (MIN_GIT + (p.stdout.strip() or "none",)))
 
 
-def merges_since(repo, since, base, into_branches=False):
-    """([(merge, parent1, parent2)] of each two-parent merge on the base since the date, octopus count, off-base count).
-    With into_branches, a merge that is not a merge of the base into a branch is dropped first and counted nowhere."""
-    cutoff = read_git(repo, ["rev-parse", "--since=" + since]).strip()
-    m = re.fullmatch(r"--max-age=(\d+)", cutoff)
-    if not m:
-        raise Failure("cannot read the date %r" % since)
-    cutoff = int(m.group(1))
+def merges_since(repo, cutoff, base, into_branches=False):
+    """([(merge, parent1, parent2)] of each two-parent merge on the base since the epoch `cutoff`, octopus count,
+    off-base count). With into_branches, a merge that is not a merge of the base into a branch is dropped first and
+    counted nowhere."""
     on_base = set(read_git(repo, ["rev-list", base, "--"]).split())
     trunk = set(read_git(repo, ["rev-list", "--first-parent", base, "--"]).split()) if into_branches else set()
     found, octopus, off_base = [], 0, 0
@@ -135,7 +137,8 @@ def merges_since(repo, since, base, into_branches=False):
             continue
         if len(parents) != 2:
             octopus += 1
-        elif commit in on_base or parents[0] in on_base or parents[1] in on_base:
+        elif commit in on_base or parents[1] in on_base:
+            # The first parent of a merge into a branch is the branch; a stash commit's first parent is HEAD, on the base.
             found.append((commit, parents[0], parents[1]))
         else:
             off_base += 1
@@ -172,13 +175,22 @@ def both_sides(repo, parents):
     return sides[0] & sides[1]
 
 
-def check_args(since, top):
-    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", since):
+def local_midnight(since):
+    """The local-midnight datetime (with its offset) of the --since day. Read here because git's own date reading takes
+    1960 or 2100 as the current year and a day as the clock time of the run."""
+    if not re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", since):
         raise Failure("--since must be YYYY-MM-DD, got %r" % since)
     try:
-        datetime.date.fromisoformat(since)
+        day = datetime.date.fromisoformat(since)
     except ValueError:
         raise Failure("--since %s is not a real calendar date" % since)
+    try:
+        return datetime.datetime(day.year, day.month, day.day).astimezone()
+    except (OverflowError, OSError, ValueError):
+        raise Failure("--since %s is outside the dates this machine can read" % since)
+
+
+def check_top(top):
     if top < 1:
         raise Failure("--top must be 1 or more, got %d" % top)
 
@@ -205,14 +217,15 @@ def default_base(repo):
 
 def report(repo, since, base, top, exposure=False, into_branches=False, list_merges=False):
     started = time.monotonic()
-    check_args(since, top)
+    cut = local_midnight(since)
+    check_top(top)
     check_version()
     check_whole_history(repo)
     base = base or default_base(repo)
     base_sha = read_git(repo, ["rev-parse", "--verify", base + "^{commit}"]).strip()
-    found, octopus, off_base = merges_since(repo, since, base, into_branches)
+    found, octopus, off_base = merges_since(repo, int(cut.timestamp()), base, into_branches)
     objects = os.path.abspath(read_git(repo, ["rev-parse", "--path-format=absolute", "--git-path", "objects"]).strip())
-    counts, exposed, conflicted, unknown, starts, listed = {}, {}, 0, 0, 0, []
+    counts, exposed, conflicted, unknown, starts, listed, unread = {}, {}, 0, 0, 0, [], []
     scratch = tempfile.mkdtemp(prefix="conflict-hotspots-")
     try:
         env = git_env(scratch, objects)
@@ -229,26 +242,37 @@ def report(repo, since, base, top, exposure=False, into_branches=False, list_mer
                     counts[path] = counts.get(path, 0) + 1
             elif verdict == "unknown":
                 unknown += 1
+                unread.append("unknown %s" % commit[:9])
     finally:
         shutil.rmtree(scratch, ignore_errors=True)
     replayed = len(found)
     rate = 100.0 * conflicted / replayed if replayed else 0.0
-    lines = ["base: %s %s" % (base, base_sha[:9]), "merges replayed: %d" % replayed, "merges conflicted: %d" % conflicted, "merges unknown: %d" % unknown,
-             "conflict rate: %.1f%%" % rate,
+    bound = " (a lower bound: %d merge(s) unknown)" % unknown if unknown else ""
+    lines = ["base: %s %s" % (base, base_sha[:9]), "since: %s" % cut.strftime("%Y-%m-%d %H:%M %z"),
+             "merges replayed: %d" % replayed, "merges conflicted: %d" % conflicted, "merges unknown: %d" % unknown,
+             "conflict rate: %.1f%%%s" % (rate, bound),
              "merges not replayed: %d (octopus %d, off base %d)" % (octopus + off_base, octopus, off_base)]
     for path, count in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))[:top]:
         lines.append("%d/%d %s" % (count, exposed.get(path, 0), path) if exposure else "%d %s" % (count, path))
     if list_merges:
-        lines.extend(listed)
+        lines.extend(listed + unread)
     lines.append("cost: merge-trees %d, wall %.1f s" % (starts, time.monotonic() - started))
     lines.append("caveat: a replay is what git finds now, not what the author resolved by hand, rerere or a merge option")
     lines.append("caveat: squash and rebase merges leave no merge commit, so they are absent")
     lines.append("caveat: refs walked: all")
-    return lines
+    return lines, unknown
+
+
+class OneLineParser(argparse.ArgumentParser):
+    """A bad argument is one line and exit 1, as for any other failure, not argparse's usage and exit 2."""
+
+    def error(self, message):
+        print("error: " + message)
+        sys.exit(Failure.code)
 
 
 def main(argv):
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap = OneLineParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--since", required=True, help="count merges committed on or after this date, YYYY-MM-DD only")
     ap.add_argument("--base", default=None,
                     help="the ref whose history a merge must touch (default origin/main when it exists, else main)")
@@ -263,7 +287,7 @@ def main(argv):
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
     try:
-        lines = report(args.repo, args.since, args.base, args.top, args.exposure, args.into_branches, args.list)
+        lines, unknown = report(args.repo, args.since, args.base, args.top, args.exposure, args.into_branches, args.list)
     except Failure as e:
         print(e)
         return e.code
@@ -271,7 +295,7 @@ def main(argv):
         print("interrupted")
         return 130
     print("\n".join(lines))
-    return 0
+    return HistoryCut.code if unknown else 0
 
 
 if __name__ == "__main__":
