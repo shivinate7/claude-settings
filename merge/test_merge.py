@@ -8030,6 +8030,28 @@ class ConfigFile(Env):
                 rc, out = self.run_merge("7")
                 self.assertEqual(rc, 0, out)
 
+    def test_lint_suites_is_a_merge_field(self):  # decision: merge.lintSuites names the CI steps that lane lint runs when a change reaches them
+        self.assertIn("lintSuites", merge.MERGE_FIELDS)
+
+    def test_lint_suites_has_no_default(self):  # the control: a repo that declares nothing keeps today's merge block
+        self.assertNotIn("lintSuites", merge.MERGE_DEFAULTS)
+
+    def test_a_bad_lintSuites_is_refused_at_preview_naming_it(self):
+        """A list of non-blank step names; the empty list is allowed. Each bad value stops at preview with one line that names
+        merge.lintSuites, before any lock, claim or merge."""
+        for value in ("checks", [7], None, [""]):
+            with self.subTest(value=value):
+                self.setUp()
+                self.refused_at_preview(self.config_text({"lintSuites": value}), "merge.lintSuites")
+
+    def test_a_valid_lintSuites_list_is_accepted_at_preview(self):
+        for names in ([], ["Listed scanner suite"], ["checks:Record stamp engine fixture suite", "Scanner trap lint"]):  # empty, bare, qualified
+            with self.subTest(names=names):
+                self.setUp()
+                put_base_config(self, self.config_text({"lintSuites": names}))
+                rc, out = self.run_merge("7")
+                self.assertEqual(rc, 0, out)
+
     def test_an_unknown_merge_field_stops_with_one_line_naming_it(self):
         put_base_config(self, json.dumps({"merge": {"methd": "squash"}}))
         rc, out = self.run_merge("7")
