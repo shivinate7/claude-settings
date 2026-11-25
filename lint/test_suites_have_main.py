@@ -226,6 +226,32 @@ RUN_CASES_RETURNED = (
 )
 
 
+BARE_ATTRIBUTE_RUN_CASES = (
+    "import case_runner_test as m\n"
+    "\n"
+    "\n"
+    "def case_one():\n"
+    "    return None\n"
+    "\n"
+    "\n"
+    'if __name__ == "__main__":\n'
+    "    m.run_cases([case_one])\n"
+)
+ASSIGNED_ATTRIBUTE_RUN_CASES = (
+    "import sys\n"
+    "import case_runner_test as m\n"
+    "\n"
+    "\n"
+    "def case_one():\n"
+    "    return None\n"
+    "\n"
+    "\n"
+    'if __name__ == "__main__":\n'
+    "    code = m.run_cases([case_one])\n"
+    "    sys.exit(code)\n"
+)
+
+
 def tree(name, files):
     """A fresh folder in the run folder holding the given test files, each at its relative path (posix form)."""
     root = os.path.join(RUN, name)
@@ -349,6 +375,13 @@ class FixtureCases(unittest.TestCase):
     def test_run_cases_returned_is_clean(self):
         found = checker().problems(fixture("run_cases_returned", RUN_CASES_RETURNED))
         self.assertEqual(found, [], "return run_cases(...) is reported: %r" % found)
+
+    def test_attribute_run_cases_bare_statement_is_reported_and_assigned_is_not(self):
+        found = checker().problems(fixture("attribute_run_cases_bare", BARE_ATTRIBUTE_RUN_CASES))
+        self.assertEqual(len(found), 1, "a bare m.run_cases(...) statement on the __main__ path is not reported: %r" % found)
+        self.assertIn("return value", found[0], "the bare m.run_cases(...) finding does not name the dropped return value: %r" % found)
+        clean = checker().problems(fixture("attribute_run_cases_assigned", ASSIGNED_ATTRIBUTE_RUN_CASES))
+        self.assertEqual(clean, [], "code = m.run_cases(...) is reported: %r" % clean)
 
 
 class RunClassCases(unittest.TestCase):
