@@ -369,3 +369,80 @@ add("owner-model-word: control, a held sonnet lifts no other rule: an agent's re
 OMW_FIRST_HAIKU = omw_file("local-first-turn-haiku", [omw_user(OMW_HAIKU)])
 add("owner-model-word: control, an Agent spawn on haiku is allowed when a local session's first typed turn names haiku", "allow",
     tool="Agent", prompt="do it", model="haiku", transcript=OMW_FIRST_HAIKU)
+
+# ---- THE NAMED MODEL IS A CEILING FOR THE ROLES HE NAMED. A judged hold
+# for haiku, sonnet or opus caps each spawn of a role he names at his model, and of every role when he names none. The hold
+# replaces that role's row as the ceiling. With no role named, the exempt rows stay (an Audit: Explore, a fix check, a
+# reviewer past round 1, the refuter, Plan). A role he does name is followed, exempt or not. Each case's clock is fixed: the
+# hold is set at 2026-11-25 17:05 UTC, 11:05 CST, and the reason may print that time in either zone.
+OMW_WORD_AT = 3279900              # seconds after OV_T0: 2026-11-25 17:05 UTC
+OMW_WORD_CALL = OMW_WORD_AT + 60   # one minute later, while the hold is on
+OMW_WORD_NOW = {"LOCAL_TIME_NOW": ov_clock(OMW_WORD_CALL)}
+OMW_WORD_TIME = ("11:05", "17:05")  # the time of his word, in CST or in UTC (any-of)
+
+
+def omw_word_carries(model):
+    """The reason names his model and the time of his word."""
+    return (model, OMW_WORD_TIME)
+
+
+def omw_word_hold(name, model, role=None, end="report", until=2 * 3600):
+    """A judged hold for `model`, set at OMW_WORD_AT and lasting `until` seconds (to the report when end is 'report').
+    Returns the config folder. The session the case names is 'omw-' + name."""
+    return omw_hold(name, "omw-" + name, model, end=end, at=OMW_WORD_AT, until=OMW_WORD_AT + until, role=role)
+
+
+# 1. A haiku hold that names no role holds every role to haiku: a sonnet builder is refused, and the reason names haiku and the time.
+add("owner-model-word: a builder spawn on sonnet is refused under agent-role-model when the owner's haiku hold names no role",
+    "deny", ROLE_MODEL_RULE, tool="Agent", config=omw_word_hold("haiku-any", "haiku"), session="omw-haiku-any",
+    transcript=OMW_PLAIN, env=OMW_WORD_NOW, carries=omw_word_carries("haiku"), lacks=ROLE_LACKS,
+    **role_input("builder", "sonnet", "Fix the failing case."))
+
+# 2. A haiku hold that names Explore: a sonnet Explore with an Audit: brief is refused (the exemption needs no role named).
+# The builder control is green on the old code: a builder's row is sonnet, and the hold names no builder.
+add("owner-model-word: an Explore spawn on sonnet with an Audit: brief is refused under agent-role-model when the owner's haiku "
+    "hold names Explore", "deny", ROLE_MODEL_RULE, tool="Agent", config=omw_word_hold("haiku-explore", "haiku", role="Explore"),
+    session="omw-haiku-explore", transcript=OMW_PLAIN, env=OMW_WORD_NOW, carries=omw_word_carries("haiku"), lacks=ROLE_LACKS,
+    **role_input("Explore", "sonnet", "Audit: check the model list against the guard."))
+add("owner-model-word: control, a builder spawn on sonnet is allowed when the owner's haiku hold names only Explore", "allow",
+    tool="Agent", config=omw_word_hold("haiku-explore-ctl", "haiku", role="Explore"), session="omw-haiku-explore-ctl",
+    transcript=OMW_PLAIN, env=OMW_WORD_NOW, **role_input("builder", "sonnet", "Fix the failing case."))
+
+# 3. An opus hold lasting 2 h: a named model is a ceiling, never a floor, so a haiku Explore is allowed. Both cases are controls:
+# the old code allows them too, since an opus pass file already lifts the Opus ceiling there.
+add("owner-model-word: control, an Explore spawn on haiku is allowed while the owner's opus 2 h hold is on, since a named model "
+    "is a ceiling, not a floor", "allow", tool="Agent", config=omw_word_hold("opus-2h-explore", "opus", end=None),
+    session="omw-opus-2h-explore", transcript=OMW_PLAIN, env=OMW_WORD_NOW,
+    **role_input("Explore", "haiku", "Find where the model list lives."))
+omw_lets_through("control, a builder spawn on opus is allowed while the owner's opus 2 h hold is on",
+                 role_input("builder", "opus", "Fix the failing case."), omw_word_hold("opus-2h", "opus", end=None),
+                 "omw-opus-2h", OMW_WORD_CALL, CEILING)
+
+# 4. A haiku hold that names no role leaves the exempt rows as they are on the old code: a fix check on sonnet and the refuter on
+# opus are both allowed. Both are controls.
+add("owner-model-word: control, a fix check reviewer on sonnet is allowed under the owner's haiku hold that names no role", "allow",
+    tool="Agent", config=omw_word_hold("haiku-fixcheck", "haiku"), session="omw-haiku-fixcheck", transcript=OMW_PLAIN,
+    env=OMW_WORD_NOW, **role_input("reviewer", "sonnet", "Fix check\nRe-run the failing case and say whether it passes."))
+add("owner-model-word: control, the refuter on opus is allowed under the owner's haiku hold that names no role", "allow",
+    tool="Agent", config=omw_word_hold("haiku-refuter", "haiku"), session="omw-haiku-refuter", transcript=OMW_PLAIN,
+    env=OMW_WORD_NOW, **role_input(REFUTER, "opus", "Try to refute the plan."))
+
+# 5. A haiku hold that names reviewer: a round-2 reviewer on sonnet is refused, because a role he names is followed past round 1.
+add("owner-model-word: a round-2 reviewer spawn on sonnet is refused under agent-role-model when the owner's haiku hold names "
+    "reviewer", "deny", ROLE_MODEL_RULE, tool="Agent", config=omw_word_hold("haiku-reviewer", "haiku", role="reviewer"),
+    session="omw-haiku-reviewer", transcript=OMW_PLAIN, env=OMW_WORD_NOW, carries=omw_word_carries("haiku"), lacks=ROLE_LACKS,
+    **role_input("reviewer", "sonnet", "Round 2 of 3. Review the diff."))
+
+# 6. The hold is read for its own session id only: the same config folder, another session, reads no hold. Control: green on the
+# old code, where no hold is read at all.
+add("owner-model-word: control, a builder spawn on opus is refused when the opus hold sits under another session id",
+    "deny", CEILING, tool="Agent", config=omw_word_hold("opus-other", "opus", end=None),
+    session="omw-opus-other-session", transcript=OMW_PLAIN, env=OMW_WORD_NOW,
+    **role_input("builder", "opus", "Fix the failing case."))
+
+# 7. A Workflow agent with no model is served the Workflow default (sonnet, settings.json). Under a haiku hold with no role named,
+# that is above the ceiling, so it is refused. On the old code a role-less Workflow spawn is not judged against any row.
+add("owner-model-word: a Workflow agent with no model is refused under agent-role-model when the owner's haiku hold names no role",
+    "deny", ROLE_MODEL_RULE, tool="Workflow", script='await agent("do it")', config=omw_word_hold("haiku-workflow", "haiku"),
+    session="omw-haiku-workflow", transcript=OMW_PLAIN, env={**WORKFLOW_SONNET, **OMW_WORD_NOW},
+    carries=omw_word_carries("haiku"), lacks=ROLE_LACKS)
