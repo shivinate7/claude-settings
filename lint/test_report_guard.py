@@ -1944,6 +1944,91 @@ class RewriteAfterMissingReportTests(unittest.TestCase):
         out = self.run_hook(records, True)
         self.assertIn("Unstarted guard", out["reason"])
 
+    # reports-done-names-models: a report the Stop hook refused is followed by the harness's summary and the hook's
+    # feedback record. That feedback is no window cut, so the correction is judged against the spawns before the refusal.
+    TEST_AUTHOR = {"subagent_type": "test-author", "model": "haiku", "prompt": "write the cases"}
+    REFUSED_SONNET = "> **Done** BUILT the cases, PR #4 (test-author sonnet)\n> **Next** Unstarted: none"
+    SONNET_NAMED = "> **Done** BUILT the cases, PR #5 (test-author sonnet)\n> **Next** Unstarted: none"
+    HAIKU_NAMED = "> **Done** BUILT the cases, PR #5 (test-author haiku)\n> **Next** Unstarted: none"
+    WRONG_NAME = "'test-author sonnet' matches no test-author spawn, which ran haiku"
+
+    @staticmethod
+    def feedback_record():
+        """The Stop hook's feedback record, as hooks/test_stall_watch_stop.py's meta_wake writes it: a user record with
+        isMeta true whose text starts "Stop hook feedback:". No module constant holds that text, so the literal is here."""
+        return {"type": "user", "isSidechain": False, "isMeta": True,
+                "message": {"role": "user", "content": "Stop hook feedback: send the report now."}}
+
+    @staticmethod
+    def summary_record():
+        """The stop_hook_summary the harness writes after a blocked Stop, just before the feedback record."""
+        return {"type": "system", "subtype": "stop_hook_summary", "hookErrors": ["Stop hook: send the report now."],
+                "hasOutput": True, "level": "suggestion"}
+
+    def refused_turn(self, reports):
+        """The turn's records: a test-author haiku spawn, then each of `reports` (a report the Stop hook refused), each
+        followed by the summary and the feedback record. The caller appends the correction."""
+        records = [human("do the task"), tool_use_msg("Agent", self.TEST_AUTHOR), tool_result_msg(),
+                   tool_use_msg("Bash", {"command": "git commit -m x"}), tool_result_msg()]
+        for report in reports:
+            records += [assistant_text(report), self.summary_record(), self.feedback_record()]
+        return records
+
+    @staticmethod
+    def models_of(records):
+        """spawn_models' map of role to sorted models, read from `records`."""
+        import report_guard  # noqa: E402  spawn_models, the one reader of spawns (one home)
+        return {role: sorted(models) for role, models in report_guard.spawn_models(records).items()}
+
+    @classmethod
+    def window_of(cls, records, reply):
+        """The spawns the rewrite's window holds for `reply`, the last record of `records`."""
+        import report_guard  # noqa: E402  records_since_report, the window's one home
+        return cls.models_of(report_guard.records_since_report(records, reply))
+
+    def test_rw_after_refusal_feedback_is_no_window_cut_blocks(self):
+        # The refused report names test-author sonnet. Its feedback record is no window cut, so the correction sees
+        # the haiku spawn that came before the refused report, and naming sonnet is refused.
+        self.missing_report_block()
+        records = self.refused_turn([self.REFUSED_SONNET]) + [assistant_text(self.SONNET_NAMED)]
+        self.assertEqual(self.window_of(records, self.SONNET_NAMED), {"test-author": ["haiku"]},
+                         "the feedback record after a refused report cut the window, so its haiku spawn is out of it")
+        out = self.run_hook(records, True)
+        self.assertIsNotNone(out, "the correction named test-author sonnet, which no spawn in its window ran, and passed")
+        self.assertIn(self.WRONG_NAME, out["reason"])
+
+    def test_rw_after_refusal_feedback_names_window_haiku_passes(self):
+        # Control for the case above: the same refusal, with the correction naming the window's haiku test-author.
+        self.missing_report_block()
+        records = self.refused_turn([self.REFUSED_SONNET]) + [assistant_text(self.HAIKU_NAMED)]
+        self.assertEqual(self.models_of(records), {"test-author": ["haiku"]}, "the turn holds no haiku test-author spawn")
+        out = self.run_hook(records, True)
+        self.assertIsNone(out, out and out["reason"])
+
+    def test_rw_after_refusal_owner_message_still_cuts_passes(self):
+        # Control: an owner message after a report still cuts the window, so no spawn lies in it and the correction
+        # naming sonnet passes. The haiku spawn is in the turn, before the cut.
+        self.missing_report_block()
+        records = [human("do the task"), tool_use_msg("Agent", self.TEST_AUTHOR), tool_result_msg(),
+                   tool_use_msg("Bash", {"command": "git commit -m x"}), tool_result_msg(),
+                   assistant_text(self.HAIKU_NAMED), human("the owner's next message"),
+                   assistant_text(self.SONNET_NAMED)]
+        self.assertEqual(self.models_of(records), {"test-author": ["haiku"]}, "the turn holds no haiku test-author spawn")
+        self.assertEqual(self.window_of(records, self.SONNET_NAMED), {}, "a spawn sits after the owner's message")
+        out = self.run_hook(records, True)
+        self.assertIsNone(out, out and out["reason"])
+
+    def test_rw_after_refusal_twice_wrong_name_blocks(self):
+        # Two refused reports, each followed by its feedback record: neither is a window cut, so the window still holds
+        # the haiku spawn, and the correction naming sonnet is refused.
+        self.missing_report_block()
+        records = self.refused_turn([self.REFUSED_SONNET, self.REFUSED_SONNET]) + [assistant_text(self.SONNET_NAMED)]
+        self.assertEqual(self.window_of(records, self.SONNET_NAMED), {"test-author": ["haiku"]},
+                         "a feedback record after a refused report cut the window, so its haiku spawn is out of it")
+        out = self.run_hook(records, True)
+        self.assertIsNotNone(out, "the correction named test-author sonnet after two refusals, which ran no sonnet, and passed")
+        self.assertIn(self.WRONG_NAME, out["reason"])
+
 
 REPORT_NO_LINE = "> **Done** BUILT abc123\n> **Deviations** none\n> **Next** ship it"
 
