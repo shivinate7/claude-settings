@@ -6,13 +6,21 @@ Usage:
   sim-lease give --pid PID
   sim-lease status
 
-take  queues PID and waits for its turn. Granted: prints the slot, `1`, `2` or `pro`, and exits 0. With --udid it
-      prints that slot's device UDID (SLOT_UDID) instead; the callers that boot by role (bin/sim-test) keep no UDID. Not granted within the wait: one stderr line with the holders and the load, exit 1, and PID leaves
+take  finds the phones by name (see Devices), then queues PID and waits for its turn. Granted: prints the slot, `1`, `2` or `pro`, and exits 0. With --udid it
+      prints that slot's device UDID instead (the id of the device its name finds, SLOT_NAME); the callers that boot by role
+      (bin/sim-test) keep no UDID. Not granted within the wait: one stderr line with the holders and the load, exit 1, and PID leaves
       the queue. The wait is --wait, else SIM_LEASE_WAIT (default 300) seconds. The state is read again every
       SIM_LEASE_POLL (default 2) seconds. --pid is required on take and give: without it, or with any other bad argument, one usage line goes to stderr and the
       exit is 2. --session defaults to $CLAUDE_CODE_SESSION_ID.
 give  frees PID's lease and its queue place. It is idempotent and always exits 0.
 status  prints one line per lease, one per waiter, and the load.
+
+Devices: no device id lives in the repo. A take reads `xcrun simctl list devices -j` once, before the queue, and finds
+each slot's phone by its exact name (SLOT_NAME) among the available devices. A duo take needs both Duo names, so a
+missing Duo refuses it even when only slot 1 is free. A name that no device has, that two devices have, or a list that
+cannot be read (non-zero exit, bad JSON) refuses the take: exit 1, one stderr line naming the devices found and the fix
+(the owner's `simctl rename` or `create`; this tool runs neither), no lease, no queue place. The grant records the
+device's `udid` in the lease entry; the guard reads it from there. A device's iOS runtime is whatever it is on.
 
 Limits on every grant: the 5-minute load is under 100 and the 1-minute load is under 60.
   duo: slot 1 when it is free; slot 2 only while slot 1 is held and the 5-minute load is under 60.
@@ -29,10 +37,11 @@ Start times: `ps` runs with TZ=UTC, so a start time recorded under one TZ matche
 State: ${CLAUDE_CONFIG_DIR:-$HOME/.claude}/state/sim-lease/leases.json, written through a temp file and os.replace
 under an fcntl.flock on the file lock in the same folder. The lock is held for one read-decide-write step, never
 while sleeping.
-Cost: per call, one `uname`, one `ps` per recorded pid, and one `sysctl` on take and status (take: one `sysctl` per poll). Files written:
+Cost: per call, one `uname`, one `ps` per recorded pid, and one `sysctl` on take and status (take: one `sysctl` per poll;
+a take that is not a no-op also makes one `simctl list devices -j`, never one per poll). Files written:
 leases.json, only when its content changes, plus the empty lock file. No daemon, no log.
-Reader: the guard calls live_leases() (SLOT_UDID maps a slot to its device) to let a session's MCP launch boot the device
-its own live lease holds. It takes no flock and writes nothing: one read of leases.json and one `ps` per lease.
+Reader: the guard calls live_leases() and reads each lease's recorded `udid` to let a session's MCP launch boot the device
+its own live lease holds; a lease with no `udid` (an older take) grants nothing. It takes no flock and writes nothing: one read of leases.json and one `ps` per lease.
 macOS only in effect; it runs under python3's standard library alone.
 """
 import argparse
@@ -50,14 +59,11 @@ import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_
 MAX_5MIN = 100.0   # a grant needs the 5-minute load under this
 MAX_1MIN = 60.0    # a grant needs the 1-minute load under this
 SLOT2_5MIN = 60.0  # slot 2 needs the 5-minute load under this
-# The device each slot boots: the one home of the device IDs (skills/ios-apps/SKILL.md, Phone simulators). The guard
-# reads it to match a lease to the device an MCP launch names (hooks/guard.py sim_boot_refusal); `take --udid` prints
-# it, so bin/sim-test keeps no UDID.
-SLOT_UDID = {
-    "1": "3553660D-315C-4B9C-8614-039D7A5B637E",    # Duo 1
-    "2": "801F55F4-F666-4C6D-AB04-7DF77C953974",    # Duo 2
-    "pro": "86F9268A-A905-4B82-9BC0-D7EBB682D341",  # iPhone 18 Pro
-}
+# The name of the device each slot boots: the one home of the phone names (skills/ios-apps/SKILL.md, Phone simulators).
+# A take looks each name up in the device list (resolve) and records the id it finds in the lease; the guard matches a
+# lease to an MCP launch by that recorded id (hooks/guard.py sim_lease_holds), and `take --udid` prints it.
+SLOT_NAME = {"1": "iPhone Duo", "2": "iPhone Duo 2", "pro": "iPhone 18 Pro"}
+SLOTS_OF = {"duo": ("1", "2"), "pro": ("pro",)}  # the slots a device role can be granted
 
 
 def state_dir():
@@ -95,6 +101,44 @@ def read_load():
     except ValueError:
         return None
     return tuple(parts[:3])
+
+
+def read_devices():
+    """The available simulators of `xcrun simctl list devices -j` as [{name, udid}], or None when the list cannot be
+    read: a missing xcrun, a non-zero exit, a timeout, or JSON of the wrong shape."""
+    try:
+        r = _nowindow.run(["xcrun", "simctl", "list", "devices", "-j"], capture_output=True, text=True, timeout=60)
+        if r.returncode != 0:
+            return None
+        groups = json.loads(r.stdout)["devices"]
+        return [{"name": d["name"], "udid": d["udid"]} for rows in groups.values() for d in rows
+                if d.get("isAvailable") is True]
+    except (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError, AttributeError):
+        return None
+
+
+def resolve(device):
+    """(ids, None) where ids maps each slot of DEVICE to the udid of the one available device with its exact name, or
+    (None, why) when the list is unreadable, a name has no device, or a name has two. The text is the stderr line's
+    reason. A duo role resolves both Duo names. It reads the device list once and never creates or renames a device."""
+    devices = read_devices()
+    if devices is None:
+        return None, ("the device list is unknown (`xcrun simctl list devices -j` failed or printed bad JSON); "
+                      "run it by hand, then retry")
+    ids = {}
+    for slot in SLOTS_OF[device]:
+        name = SLOT_NAME[slot]
+        hits = [d for d in devices if d["name"] == name]
+        if len(hits) == 1:
+            ids[slot] = hits[0]["udid"]
+            continue
+        found = "; ".join("%s (%s)" % (d["name"], d["udid"]) for d in devices if "iPhone" in d["name"]) or "no iPhone"
+        if hits:
+            return None, ("%d devices are named '%s': %s; the owner renames all but one with `xcrun simctl rename "
+                          "<udid> <new name>`" % (len(hits), name, ", ".join(d["udid"] for d in hits)))
+        return None, ("no available device is named '%s' (found: %s); the owner renames one with `xcrun simctl rename "
+                      "<udid> '%s'` or makes one with `xcrun simctl create`" % (name, found, name))
+    return ids, None
 
 
 def is_live(entry):
@@ -197,9 +241,9 @@ def describe(data, load):
     return "holders: %s; waiting: %s; load %s" % (holders, waiters, shown)
 
 
-def shown(slot, args):
-    """What a granted take prints: the slot, or with --udid the slot's device UDID."""
-    return SLOT_UDID[slot] if args.udid else slot
+def shown(slot, args, udid):
+    """What a granted take prints: the slot, or with --udid the UDID of the device the slot's name found."""
+    return udid if args.udid else slot
 
 
 def cmd_take(args):
@@ -217,6 +261,10 @@ def cmd_take(args):
     if not started:
         print("sim-lease: pid %d is not alive" % pid, file=sys.stderr)
         return 2
+    ids, why = resolve(args.device)
+    if ids is None:
+        print("sim-lease: no %s lease for pid %d: %s" % (args.device, pid, why), file=sys.stderr)
+        return 1
     entry = {"pid": pid, "start": started, "device": args.device, "session": session}
     # A TERM or INT while waiting leaves through the finally block, which drops the queue place.
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
@@ -228,7 +276,8 @@ def cmd_take(args):
                 held = st.lease_of(pid)
                 if held:
                     granted = True
-                    print(shown(held["slot"], args))
+                    recorded = held.get("udid")
+                    print(shown(held["slot"], args, recorded if isinstance(recorded, str) else ids.get(held["slot"], "")))
                     return 0
                 if not any(e["pid"] == pid for e in st.data["queue"]):
                     st.data["queue"].append(entry)
@@ -236,9 +285,9 @@ def cmd_take(args):
                 slot = decide(st.data, entry, load)
                 if slot:
                     st.data["queue"] = [e for e in st.data["queue"] if e["pid"] != pid]
-                    st.data["leases"].append(dict(entry, slot=slot))
+                    st.data["leases"].append(dict(entry, slot=slot, udid=ids[slot]))
                     granted = True
-                    print(shown(slot, args))
+                    print(shown(slot, args, ids[slot]))
                     return 0
                 last = describe(st.data, load)
             now = time.monotonic()
@@ -269,7 +318,8 @@ def cmd_status(_args):
         return 0
     with State(create=False) as st:
         for e in st.data["leases"]:
-            print("lease slot %s pid %s device %s session %s" % (e["slot"], e["pid"], e["device"], e.get("session") or "-"))
+            print("lease slot %s pid %s device %s session %s udid %s" % (e["slot"], e["pid"], e["device"],
+                                                                        e.get("session") or "-", e.get("udid") or "-"))
         for e in st.data["queue"]:
             print("waiter pid %s device %s session %s" % (e["pid"], e["device"], e.get("session") or "-"))
     load = read_load()

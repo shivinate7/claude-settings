@@ -6998,8 +6998,9 @@ def _sim_route_remedy(rest: list) -> str:
 
 
 def sim_lease_holds(session: str, udids: list) -> bool:
-    """True when SESSION holds a live sim-lease whose slot maps to every UDID in UDIDS (decision
-    sim-test-is-the-one-boot-path, ruling 5). The slot map, the liveness test and the read live in bin/sim-lease,
+    """True when SESSION holds a live sim-lease whose recorded `udid` is every UDID in UDIDS (decision
+    sim-test-is-the-one-boot-path, ruling 5). The take that granted the lease found that device by name and wrote its
+    udid; a lease with no string udid holds nothing. The liveness test and the read live in bin/sim-lease,
     loaded by path as it has no .py name. An empty session or UDIDS, or any failure to load or read, is False:
     the refusal stands. The read takes no lock and writes nothing, and no bytecode file is written for the load."""
     if not session or not udids:
@@ -7012,8 +7013,8 @@ def sim_lease_holds(session: str, udids: list) -> bool:
         spec = importlib.util.spec_from_loader("sim_lease", loader)
         lease = importlib.util.module_from_spec(spec)
         loader.exec_module(lease)
-        held = {lease.SLOT_UDID[e["slot"]].casefold() for e in lease.live_leases()
-                if session == e.get("session") and e.get("slot") in lease.SLOT_UDID}
+        held = {e["udid"].casefold() for e in lease.live_leases()
+                if session == e.get("session") and isinstance(e.get("udid"), str)}
     except Exception:
         return False
     finally:
@@ -7025,7 +7026,7 @@ def sim_boot_refusal(tool: str, names: list, remedies: dict = None, session: str
     """Refuse a boot of any of NAMES when two devices are booted, or an idle twin is booted. After those two
     rules, an `xcodebuild -destination` boot (REMEDIES maps a name to its remedy) is refused as
     simulator-boot-route, and an MCP launch as simulator-boot-lease, unless SESSION holds a live sim-lease whose
-    slot is the launched device (sim_lease_holds)."""
+    recorded udid is the launched device (sim_lease_holds)."""
     try:
         sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "janitor"))
         import sweep
