@@ -40,19 +40,17 @@ Reported, not read from a CI log or a run:
   - A UTF-8 BOM is ignored.
 - Version: the first dotted number in the output, or a bare number when none is dotted. A number inside a path token is never the version.
 - Precision: `lint/check_tool_pins.py` `matches` accepts a pin at the precision it states. `3.15` accepts 3.15.2. `3` accepts 3.2.1. `2.56` accepts 2.56.1. `2.105` rejects 2.10.5. A pre-release (3.15.0rc1) matches only a pin that states it.
-- `--local` prints a mismatch as a note and exits 0. A tool that is not found, whose command fails, or that prints no version reads `unknown` and exits 1, also with `--local`.
+- `--local` prints a mismatch as a note and exits 3 (`LOCAL_MISMATCH` in `lint/check_tool_pins.py`). A tool that is not found, whose command fails, or that prints no version reads `unknown` and exits 1, also with `--local`. `unknown` wins over a mismatch.
 - Cost: one version command per pin, per run, pinned by `test_one_process_per_pin_and_no_network` in `lint/test_check_tool_pins.py`. The case proves the process count, not the network. No file written. Runs only when invoked.
 
 ## State
 
 - This repo pins python 3.15 and git 2.56 in `.tool-versions`.
 - The 40 literal `python-version: "3.15"` lines still stand: 38 in `.github/workflows/checks.yml`, 2 in `.github/workflows/lane-touched-tests.yml`. Pull request 3876 moved them.
-- Built: the checker, its fixture suite (44 cases), the CI step that runs the suite, and a `.tool-versions` row in the code-check standard (not code).
+- Built: the checker, its fixture suite (57 cases, run by a CI step), the `tool_pins` scope flag (`.github/scripts/ci-scope.sh`), and a `.tool-versions` row in the code-check standard (not code).
+- Run points, per the 11:05 CST ruling above: the `Tool pins (this runner)` step runs in `checks`, `checks-macos` and `checks-windows` (`.github/workflows/checks.yml`). It runs on a daily run, a dispatch, and a pull request that moves `.tool-versions` or the checker. On a pull request, the macOS and Windows steps also need their own scope flag. A lane's `--lint` run reads a mismatch as `unknown`, so the merge waits for the pull request's own CI run (`bin/ci-job` `read_tool_pins`).
 - Not built:
-  - No CI job runs the check. Only its fixture suite runs.
-  - The check must also run in one Windows job and one macOS job.
   - Other repos take the check through the lint action they already call.
-  - Where the check runs: the 11:05 CST ruling above. None of that wiring exists yet.
   - Read (plan and refuter, Nov 25): a red daily run blames no PR and does not stop `stable` (`actions/ci-alarm/clear_rule.py` `blames`; `.github/workflows/stable.yml`).
   - Who moves a pin when a runner image moves a tool: the owner's open question QAG.
 - Machines: the Mac has Homebrew git 2.56.1 since 10:21 CST, 2026-11-25. The Windows upgrade is the owner's act.

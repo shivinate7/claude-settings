@@ -1,0 +1,1 @@
+- tool-pins-forced-scope-flag: lint/test_windows_split.py:2335 forces tool_pins to true in a fixture, and no code reads that forced value in the case. Check whether the case tests anything, then keep or drop the force.

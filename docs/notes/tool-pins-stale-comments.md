@@ -1,0 +1,1 @@
+- tool-pins-stale-comments: Comments that say a skipped daily reaches every job, or starts no check job, are false now the Tool pins steps run on a skipped daily: .github/workflows/checks.yml:44-47, :1909, :1980, :2246 and .github/workflows/stable.yml:6-8. Fix the comments in a comment-only change.

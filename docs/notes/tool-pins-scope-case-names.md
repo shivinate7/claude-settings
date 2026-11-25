@@ -1,0 +1,1 @@
+- tool-pins-scope-case-names: Case names and the comment at lint/test_ci_scope.py:1984, :1987 and :1999 claim the old state. Re-point them to the state the code builds now, red then green.
