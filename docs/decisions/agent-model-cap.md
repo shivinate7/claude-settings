@@ -209,7 +209,7 @@ Kind of risk: likely.
 the brief. A line that starts with it counts. When the brief's first non-blank line starts with no marker, the
 leftmost marker on that line also counts if it is `Round N of 3`, such as "Builder, Round 3 of 3. Lane ...". A
 leftmost `Try N of 3` there adds nothing. The first-line form is case-sensitive. Later lines count only
-when they start with the marker. A builder's old `Try 3 of 3` still counts until note `try-marker-sunset`. A round 2 reviewer runs on Sonnet. A round 3 reviewer runs Sonnet; its refusal names Sonnet only, and Opus needs the owner's override (2026-11-01 17:25 CST, item 127, pick a). A try 3 builder runs Sonnet (owner item 893); it needs no step-up. A guard-marked round 1 reviewer must run its `1 guard` row's model (coordinator ruling 01:20 CST Nov 15, lane spawn-model-below-role); an unmarked brief is not refused, the merge tool's record check covers it.
+when they start with the marker. A line that starts with `Try N of 3` is still scanned (`BRIEF_MARKERS` in `hooks/shared_names.py`), but no check acts on it. No marker changes a builder's model. A round 2 reviewer runs on Sonnet. A round 3 reviewer runs Sonnet; its refusal names Sonnet only, and Opus needs the owner's override (2026-11-01 17:25 CST, item 127, pick a). A try 3 builder runs Sonnet (owner item 893); it needs no step-up. A guard-marked round 1 reviewer must run its `1 guard` row's model (coordinator ruling 01:20 CST Nov 15, lane spawn-model-below-role); an unmarked brief is not refused, the merge tool's record check covers it.
 
 **No pin, and the ceiling is a refusal.** The variable is a true fallback: it decides only the spawns that name no
 model and whose definition names no model. Every agent file pins a model now (`agents/builder.md` pins
@@ -280,7 +280,7 @@ The guard holds the ceiling by a refusal (owner, 2026-11-01 17:25 CST, item 127,
 model is refused, and the owner's typed override lifts it, the same for Sonnet and Opus; before that it was an ask
 under the 2026-10-21 grant). An Agent or Task spawn that sets model opus is refused under
 `agent-model-cap`, unless a standing grant covers it. A standing grant is one of: the role Plan, the role designer or
-design-reviewer (the 2026-10-26 grant above), a builder with the `Round 3 of 3` marker (the step-up names the forms), or an Explore with the `Audit:` marker. It sits on its brief's first non-blank line (owner, 2026-11-01 18:38 CST, item 137, pick a). A reviewer's round 3 is no standing grant, so
+design-reviewer (the 2026-10-26 grant above), the role refuter (decision `plan-refuter`), or an Explore with the `Audit:` marker. It sits on its brief's first non-blank line (owner, 2026-11-01 18:38 CST, item 137, pick a). A reviewer's round 3 is no standing grant, so
 it is refused. An override, `opus 2h`, `opus <role> 2h`, the owner's plain Opus ask (decision `owner-override`) or a step grant lifts the spawn refusal. The ask on a settings write under the same
 id stays outside every override. The refusal fires only on an Opus spawn, so it stops a fan-out only where Opus was
 asked for. A justification line is written after the model is chosen, so it defends the choice; the one line
