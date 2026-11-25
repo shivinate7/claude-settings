@@ -442,7 +442,7 @@ def tearDownModule():
 
 class SessionStartMergeRoleTests(unittest.TestCase):
     """The tier line tells a cloud session how to record its merge role: `merge --role <tier>`, for the one tier that may run
-    `merge <pr> --confirm` (merge/merge.py MERGE_ROLES; decision session-tiers: the coordinator never merges).
+    `merge <pr> --confirm` (merge/merge.py MERGE_ROLES; decision session-tiers, amended by standing-merge-grant: a local coordinator merges in its own repo).
     It reads the hook's own text, so no repo fixture is built. The existing SessionStartTierLineTests prove the line prints
     once and only in the cloud."""
 
@@ -461,6 +461,12 @@ class SessionStartMergeRoleTests(unittest.TestCase):
     def says_coordinator_never_merges(sentence):
         """True when the sentence names a coordinator and says `never merges`."""
         return "coordinator" in sentence.lower() and re.search(r"\bnever merges\b", sentence, re.IGNORECASE) is not None
+
+    @staticmethod
+    def says_local_coordinator_merges_in_its_repo(sentence):
+        """True when the sentence names a local coordinator that merges in its own repo, and does not negate the merge."""
+        return (re.search(r"\blocal coordinator\b[^.;]*\bmerges?\b[^.;]*\bin the repo\b", sentence, re.IGNORECASE) is not None
+                and not SessionStartMergeRoleTests.merge_is_negated(sentence))
 
     @staticmethod
     def is_no_parent_merge(sentence):
@@ -536,15 +542,17 @@ class SessionStartMergeRoleTests(unittest.TestCase):
         self.assertIn("cs-build:batch-runner", role[0])
         self.assertNotIn("coordinator", role[0].lower(), role[0])
 
-    # decision session-tiers: no sentence of the tier line says a coordinator merges; "never merges" is not a merge
-    def test_no_sentence_of_the_tier_line_says_a_coordinator_merges(self):
-        told = [s for s in sentences(hook_role_line()) if self.says_coordinator_merges(s)]
-        self.assertEqual(told, [], "the tier line says a coordinator merges: %r" % told)
-
-    # decision session-tiers: the coordinator never merges, so one sentence of the tier line says so
-    def test_some_sentence_of_the_tier_line_says_the_coordinator_never_merges(self):
+    # decision standing-merge-grant, owner's words "No now everyone merges": no sentence says the coordinator never merges
+    def test_no_sentence_of_the_role_line_says_the_coordinator_never_merges(self):
         told = [s for s in sentences(hook_role_line()) if self.says_coordinator_never_merges(s)]
-        self.assertTrue(told, "no sentence of the tier line says the coordinator never merges")
+        self.assertEqual(told, [], "the role line says the coordinator never merges: %r" % told)
+
+    # decision standing-merge-grant, owner's words "yes coordinators can merge across repos": a local coordinator merges in its own repo
+    def test_some_sentence_of_the_role_line_says_a_local_coordinator_merges_in_its_own_repo(self):
+        named = [s for s in sentences(hook_role_line()) if "local coordinator" in s.lower()]
+        self.assertTrue(named, "no sentence of the role line names a local coordinator")
+        told = [s for s in named if self.says_local_coordinator_merges_in_its_repo(s)]
+        self.assertTrue(told, "no local-coordinator sentence says it merges in its own repo: %r" % named)
 
     # decision session-tiers: a session the owner started (no parent) merges its own PR under the merge grant, affirmatively
     def test_a_session_with_no_parent_merges_its_own_pr_under_the_merge_grant(self):

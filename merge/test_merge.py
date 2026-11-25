@@ -29255,9 +29255,15 @@ LOCAL_OTHER = "local-tier-other-session"
 class LocalSessionRoleCheck(CloudSession):
     """A local session's `merge <pr> --confirm` reads the role the launcher wrote for it: <config dir>/state/session-roles/<session id>.json,
     {"session", "role", "repo"}. The id is the one a local Bash call carries in CLAUDE_CODE_SESSION_ID, and the cloud remote id is unset.
-    The session is judged by its OWN file: one that exists must name batch-runner, and a corrupt one refuses. With no own file the confirm
-    is today's, even when another session's file lingers. CS_SESSION_ROLE, when the launcher set it, must agree with the own file (rule (c)).
+    The session is judged by its OWN file: one that exists must name a local merge role, and a corrupt one refuses. A coordinator's file for
+    this repo is the one role the design lets past the role check, and the confirm's other checks still run (see the coordinator cases).
+    Triage, lane and a file that names another session refuse. With no own file the confirm is today's, even when another session's file
+    lingers. CS_SESSION_ROLE, when the launcher set it, must agree with the own file (rule (c)).
     run_main is overridden to run as a local session, so the CloudSession assertions (no host read, no lock, no push on a refusal) apply."""
+
+    def setUp(self):
+        CloudSession.setUp(self)
+        self.host.repo = FAKE_REPO  # this checkout's repository: local_standing_repo_refusal reads the host's repo, and FakeHost names none
 
     def run_main(self, *argv, **env):
         """-> (rc, stdout, stderr) of merge.main in a local session: the cloud variables unset, CLAUDE_CODE_SESSION_ID as this case names
@@ -29277,24 +29283,129 @@ class LocalSessionRoleCheck(CloudSession):
                 rc = e.code
         return rc, out.getvalue(), err.getvalue()
 
-    def put_local_role(self, role, session=LOCAL_SID, name=LOCAL_SID):
-        """The launcher's role file for this session: `session` is the id inside, `name` the id the file is named for."""
+    def put_local_role(self, role, session=LOCAL_SID, name=LOCAL_SID, repo=FAKE_REPO):
+        """The launcher's role file for this session: `session` is the id inside, `name` the id the file is named for, `repo` the repository it names
+        (FAKE_REPO is this checkout's repository in these cases)."""
         put(os.path.join(self.cfg, "state", "session-roles", name + ".json"),
-            json.dumps({"session": session, "role": role, "repo": "o/r"}))
+            json.dumps({"session": session, "role": role, "repo": repo}))
 
     # The refusal and reach assertions have one home, MergeRoleCheck. They call run_main, which this class overrides.
     assert_refused = MergeRoleCheck.assert_refused
     assert_reaches_host = MergeRoleCheck.assert_reaches_host
 
-    # RED: the old local confirm reads no role file, so a triage file does not refuse it.
+    # CONTROL, green on the old code: a triage file refuses the local confirm. Its own pull request proof is not designed, so it stays refused.
     def test_a_triage_file_refuses_a_local_confirm(self):
         self.put_local_role("triage")
         self.assert_refused()
 
-    # RED: the old local confirm reads no role file, so a coordinator file does not refuse it.
-    def test_a_coordinator_file_refuses_a_local_confirm(self):
+    # RED on the old code: the local role check refuses every coordinator file, so the confirm never reaches the host. Decision session-tiers
+    # (the coordinator's standing merge grant), decision standing-merge-grant (coordinators merge across repos) and ruling own-everyone-merges
+    # let a coordinator merge. This case passes the role check only: the confirm's own checks (the head, the review record, --head) still run,
+    # and the cases below pin each of them.
+    def test_a_coordinator_file_for_this_repo_passes_the_local_role_check(self):
         self.put_local_role("coordinator")
-        self.assert_refused()
+        self.assert_reaches_host("7", "--confirm", "--head", self.head())
+
+    # RED on the old code: the role check refuses before the head is read, so the head check never names the red check. Once the role check
+    # passes, a red head is refused before any claim, as it is for a batch runner.
+    def test_a_coordinator_file_with_a_red_head_is_refused_by_the_head_check(self):
+        self.put_local_role("coordinator")
+        self.host.state = "red: checks: fail"  # the head reads red before any wait
+        self.host.seq = [(False, "a check is red: checks: fail")]
+        refs = self.refs()
+        rc, out, err = self.run_main("7", "--confirm", "--head", self.head())
+        self.assertEqual(rc, 1, out + err)
+        self.assertIn("a check is red: checks: fail", out + err, "the refusal does not come from the head check")
+        self.assertEqual(self.refs(), refs, "a red head claimed or pushed")
+
+    # RED on the old code: the role check refuses first and names no head flag. A confirm needs the head its CI ran on, as a batch runner's does.
+    def test_a_coordinator_file_with_no_head_flag_is_refused_for_the_missing_head(self):
+        self.put_local_role("coordinator")
+        refs = self.refs()
+        rc, out, err = self.run_main("7", "--confirm")
+        self.assertEqual(rc, 1, out + err)
+        self.assertIn("the --head flag", out + err, "the refusal does not name the --head flag")
+        self.assertEqual(self.refs(), refs, "a confirm with no head claimed or pushed")
+
+    # RED on the old code: the role check refuses before the review record is read. A code pull request needs one passing record on its head,
+    # as standing_refusal asks of a cloud standing session, and this one has none (the fake host holds no record).
+    def test_a_coordinator_file_with_a_code_pull_request_and_no_review_log_is_refused(self):
+        self.put_local_role("coordinator")
+        self.host.changed = [("merge/merge.py", "modified", 3)]  # a guard path: the review record is owed
+        rc, out, err = self.run_main("7", "--confirm", "--head", self.head())
+        self.assertEqual(rc, 1, out + err)
+        self.assertIn("its head has no passing review record", out + err, "the refusal does not come from the review record check")
+
+    # RED on the old code, for the "this repo" half: the role check refuses every coordinator file. GREEN CONTROL, for the "another repo" half:
+    # a coordinator file that names another repo stays refused, with a green head and --head given, so only the repo can refuse it.
+    def test_a_coordinator_file_is_judged_for_the_repo_it_names(self):
+        with self.subTest("this repo"):
+            self.put_local_role("coordinator", repo=FAKE_REPO)
+            self.assert_reaches_host("7", "--confirm", "--head", self.head())
+        with self.subTest("another repo"):
+            self.put_local_role("coordinator", repo="other/repo")
+            reads, refs = len(self.host.pr_calls), self.refs()
+            rc, out, err = self.run_main("7", "--confirm", "--head", self.head())
+            self.assertEqual(rc, 1, out + err)
+            self.assertEqual(len(self.host.pr_calls), reads, "the run read the host for a coordinator file that names another repo")
+            self.assertEqual(self.refs(), refs, "the run claimed or pushed for a coordinator file that names another repo")
+
+    # The cloud remote id. A local session whose environment still carries CLAUDE_CODE_REMOTE_SESSION_ID reads its role from merge-role.json alone
+    # (read_merge_record), so a launcher's coordinator file gives no role and the standing checks are skipped. Each case below sets the id with an own
+    # coordinator file and no merge-role.json, and must be refused as the same confirm is refused without the id (the four coordinator cases above).
+    def run_with_remote_id(self, *argv):
+        """-> (rc, stdout, stderr) of a local confirm whose environment also carries the cloud remote id (CLAUDE_CODE_REMOTE unset)."""
+        return self.run_main(*argv, CLAUDE_CODE_REMOTE_SESSION_ID=ROLE_SESSION)
+
+    # RED on the old code: with the id set the coordinator gets no role, so the --head gate does not run and the confirm reads the host and merges.
+    def test_a_remote_id_does_not_lift_a_coordinator_files_head_flag_check(self):
+        self.put_local_role("coordinator")
+        refs = self.refs()
+        rc, out, err = self.run_with_remote_id("7", "--confirm")
+        self.assertEqual(rc, 1, "a local coordinator's confirm with no --head merged when the session also carried the remote id: " + out + err)
+        self.assertIn("--head flag", out + err, "the refusal does not name the --head flag")
+        self.assertEqual(self.refs(), refs, "a confirm with no head claimed or pushed")
+
+    # RED on the old code: the standing check of a code pull request is skipped, so the confirm with no review log merges it.
+    def test_a_remote_id_does_not_lift_a_coordinator_files_review_log_check(self):
+        self.put_local_role("coordinator")
+        self.host.changed = [("merge/merge.py", "modified", 3)]  # a guard path: the review record is owed
+        refs = self.refs()
+        rc, out, err = self.run_with_remote_id("7", "--confirm", "--head", self.head())
+        self.assertEqual(rc, 1, "a local coordinator's confirm of a code pull request with no review log merged when the session carried the remote id: " + out + err)
+        self.assertIn("its head has no passing review record", out + err, "the refusal does not come from the review record check")
+        self.assertEqual(self.refs(), refs, "a code pull request with no review log claimed or pushed")
+
+    # PIN, green on the old code: the head-checks phase every confirm runs refuses a red head before any claim, so the id does not lift this refusal.
+    # The probe found no red-head hole for a local coordinator; this case holds the outcome, not which gate speaks.
+    def test_a_remote_id_keeps_a_coordinator_files_red_head_refused(self):
+        self.put_local_role("coordinator")
+        self.host.state = "red: checks: fail"  # the head reads red before any wait
+        refs = self.refs()
+        rc, out, err = self.run_with_remote_id("7", "--confirm", "--head", self.head())
+        self.assertEqual(rc, 1, "a local coordinator's confirm of a red head went through when the session carried the remote id: " + out + err)
+        self.assertIn("a check is red", out + err, "the red head was refused for another cause")
+        self.assertEqual(self.refs(), refs, "a red head claimed or pushed")
+
+    # RED on the old code: the repo check is skipped, so a coordinator file that names another repo reads the host and merges.
+    def test_a_remote_id_does_not_lift_a_coordinator_files_repo_check(self):
+        self.put_local_role("coordinator", repo="other/repo")
+        reads, refs = len(self.host.pr_calls), self.refs()
+        rc, out, err = self.run_with_remote_id("7", "--confirm", "--head", self.head())
+        self.assertEqual(rc, 1, "a local coordinator's confirm for a file that names another repo went through when the session carried the remote id: " + out + err)
+        self.assertIn(merge.LOCAL_REPO_ROLE_REFUSAL, out + err, "the refusal is not the repo refusal")
+        self.assertEqual(len(self.host.pr_calls), reads, "the run read the host for a coordinator file that names another repo")
+        self.assertEqual(self.refs(), refs, "the run claimed or pushed for a coordinator file that names another repo")
+
+    # CONTROL, green on the old code: a real cloud coordinator reads merge-role.json, and its confirm with no --head is refused before any host read, as on main.
+    def test_a_cloud_coordinator_file_with_no_head_is_refused_as_on_main(self):
+        self.put_role("standing")  # merge-role.json for this session, read under the cloud environment
+        reads, refs = len(self.host.pr_calls), self.refs()
+        rc, out, err = CloudSession.run_main(self, "7", "--confirm")
+        self.assertEqual(rc, 1, out + err)
+        self.assertIn("--head flag", out + err, "the refusal does not name the --head flag")
+        self.assertEqual(len(self.host.pr_calls), reads, "the cloud run read the host before the head refusal")
+        self.assertEqual(self.refs(), refs, "the cloud run claimed or pushed before the head refusal")
 
     # Pin, green on the old code: a local session's lane file names no tier a local confirm may run as, so the confirm is refused.
     # The lane role joins MERGE_ROLES for cloud sessions only, so this pins the local path that must not follow it.
@@ -29302,7 +29413,7 @@ class LocalSessionRoleCheck(CloudSession):
         self.put_local_role("lane")
         self.assert_refused()
 
-    # RED: the old local confirm reads no role file, so a file for another session does not refuse it.
+    # CONTROL, green on the old code: a file whose session field names another id refuses the local confirm.
     def test_a_file_that_names_another_session_refuses_a_local_confirm(self):
         self.put_local_role("batch-runner", session=LOCAL_OTHER)
         self.assert_refused()
@@ -29343,7 +29454,7 @@ class LocalSessionRoleCheck(CloudSession):
         self.put_local_role("batch-runner")
         self.assert_reaches_host("7", "--confirm", "--head", self.head(), CS_SESSION_ROLE="batch-runner")
 
-    # RED: the old local confirm reads no role file, so a malformed file does not refuse it.
+    # CONTROL, green on the old code: a malformed own file refuses the local confirm.
     def test_a_malformed_file_refuses_a_local_confirm(self):
         put(os.path.join(self.cfg, "state", "session-roles", LOCAL_SID + ".json"), '{"session": ')
         self.assert_refused()

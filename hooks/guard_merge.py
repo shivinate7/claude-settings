@@ -1734,7 +1734,7 @@ def conflict_markers_hit(stripped: str, cwd: str, is_test_rel=None, raw=None, wr
 
 # ---- merge --role: the role is read from this session's own get_session record
 ROLE_TIERS = ("batch-runner", "lane", "standing")  # glossary-ok: ROLE_TIERS is the existing name; merge.py MERGE_ROLES names the same roles
-LOCAL_ROLE_TIERS = ("batch-runner",)  # glossary-ok: the name a test reads; the roles a local role file may name (merge.py LOCAL_MERGE_ROLES), the lane role is a cloud role only
+LOCAL_ROLE_TIERS = ("batch-runner", "coordinator")  # glossary-ok: the name a test reads; the roles a local role file may name, read by merge.py as LOCAL_MERGE_ROLES; the lane role is a cloud role only
 ROLE_WITH_STEP = "lane"  # the role whose call also names a step (--step), proved by a cs-step tag of the own record
 STANDING_ROLE = "standing"  # ruling own-tiny-fixes-b: a standing session, not a batch runner, merges its own pull request
 STANDING_HOLDERS = ("coordinator", "triage", CONSULTANT_TAG.split(":", 1)[1])  # the cs-build tags that prove the standing session role (decision session-tiers)  # glossary-ok: session-tiers is the decision
@@ -2136,8 +2136,8 @@ def _merge_target_repo(segments, number: int, cwd: str, ends, repo_dir):
 
 LOCAL_REPO_REASON = (
     "merge-confirm-repo: the role file recorded for this session does not prove it may merge in the checkout "
-    "this command acts in. A local merge runs only from a session whose own role file names the batch runner for that repo. "
-    "Hand the pull request to the batch runner, or ask the owner. "
+    "this command acts in. A local merge runs only from a session whose own role file names the batch runner or the coordinator for that repo. "
+    "Hand the pull request to the batch runner or the coordinator of that repo, or ask the owner. "
     "(decision merge-confirm-repo, a merge acts only in a repo its own record names)"
 )
 
