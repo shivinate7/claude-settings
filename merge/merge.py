@@ -492,6 +492,14 @@ def merge_dates(wt, *shas):
     date = f"@{when} +0000"
     return {**os.environ, "GIT_AUTHOR_DATE": date, "GIT_COMMITTER_DATE": date}
 
+MAIN_MERGE_WINDOW = 50  # first-parent merges of the base that Host.main_merge_of reads
+
+
+def branch_refspec(branch):
+    """The refspec that fetches origin's `branch` into refs/remotes/origin/<branch>: the home of that string for Host.holds_head and Host.main_merge_of."""
+    return f"+refs/heads/{branch}:refs/remotes/origin/{branch}"
+
+
 def ancestor(cwd, tip, base):
     """True when `tip` is reachable from `base`, False when it is not, None when git could not tell. A shallow clone
     that cut the history reads None, never False. The one home is hooks/git_reads.branch_is_ancestor."""
@@ -1641,7 +1649,7 @@ class Host:
                     refs.append(x)
                     continue
                 if x not in self.branches_fetched:
-                    self.branches_fetched[x] = git(root, "fetch", "-q", "origin", f"+refs/heads/{x}:refs/remotes/origin/{x}")
+                    self.branches_fetched[x] = git(root, "fetch", "-q", "origin", branch_refspec(x))
                 if self.branches_fetched[x][0]:
                     raise Stop(f"{why}: git fetch of {x} failed: {' '.join(self.branches_fetched[x][1].split())[:300]}")
                 refs.append(f"refs/remotes/origin/{x}")
@@ -2173,21 +2181,22 @@ class Host:
 
     def main_merge_of(self, base, head):
         """-> the oid of the merge commit on `base` whose second parent is `head` (this run's merge landed), False when `base` holds none, None when the read failed.
-        A lost or refused merge reply with the pull request still OPEN may have landed (the Nov 25 2026 outage: HTTP 405 and 502, merge commit on main). The one home of that read.
-        Cost: one `git fetch` of `base`, then one `git rev-list` of its newest 50 first-parent merges, no gh call, once per call; never cached, since `base` moves. A failed fetch or read is None: unknown, never merged."""
+        A full window with no match is None too: the head's merge may lie older than the window. A lost or refused merge reply with the pull request still OPEN may have landed (the Nov 25 2026 outage: HTTP 405 and 502, merge commit on main). The one home of that read.
+        Cost: one `git fetch` of `base`, then one `git rev-list` of its newest MAIN_MERGE_WINDOW (50) first-parent merges, no gh call, once per call; never cached, since `base` moves. A failed fetch or read is None: unknown, never merged."""
         root = self.cwd or "."
         ref = f"refs/remotes/origin/{base}"
-        c, out = git(root, "fetch", "-q", "origin", f"+refs/heads/{base}:{ref}")
+        c, out = git(root, "fetch", "-q", "origin", branch_refspec(base))
         if c:
             return None
-        c, out = git(root, "rev-list", "--parents", "--merges", "--first-parent", "--max-count=50", ref)
+        c, out = git(root, "rev-list", "--parents", "--merges", "--first-parent", f"--max-count={MAIN_MERGE_WINDOW}", ref)
         if c:
             return None
-        for line in out.splitlines():
+        lines = out.splitlines()
+        for line in lines:
             oid, *parents = line.split()
             if len(parents) > 1 and parents[1] == head:
                 return oid
-        return False
+        return None if len(lines) >= MAIN_MERGE_WINDOW else False
 
     def merge(self, n, method, sha):
         """`PUT pulls/<n>/merge` with `sha`, so GitHub refuses (409) a head that moved. `self.commit_message`, when set, is the merge commit's message. Never --admin, never --delete-branch (cut_branch does that).
