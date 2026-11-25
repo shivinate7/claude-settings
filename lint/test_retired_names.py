@@ -372,6 +372,23 @@ class ScanScope(unittest.TestCase):
         self.assertIn("README.md", tracked(repo), "the fixture does not track README.md")
         self.assertEqual(retired_hits(repo), ["README.md:2: %s" % PLANTED])
 
+    def test_pattern_block_holds_only_pattern_assignments(self):
+        """The real file's pattern block assigns only the names the scan reads, so a pair wrapped round other code (a
+        def, an import, a test) cannot exempt that code."""
+        import ast  # local, so this edit stays inside the class
+        lines = self.this_file().splitlines()
+        begin = [n for n, line in enumerate(lines) if line.strip() == BLOCK_BEGIN]
+        end = [n for n, line in enumerate(lines) if line.strip() == BLOCK_END]
+        self.assertEqual((len(begin), len(end)), (1, 1), "the real file needs one pattern block: one begin, one end")
+        reads = {name for name in retired_hits.__code__.co_names if name.isupper()}
+        strays = []
+        for node in ast.parse("\n".join(lines[begin[0] + 1:end[0]])).body:
+            names = [t.id for t in node.targets if isinstance(t, ast.Name)] if isinstance(node, ast.Assign) else []
+            if not names or not all(name in reads for name in names):
+                strays.append(begin[0] + 1 + node.lineno)
+        self.assertEqual(strays, [], "the pattern block holds code that is not a pattern assignment, at line(s) %s"
+                         % strays)
+
 
 def tearDownModule():
     shutil.rmtree(RUN_FOLDER, ignore_errors=True)  # test-temp-standard: teardown removes the run folder
