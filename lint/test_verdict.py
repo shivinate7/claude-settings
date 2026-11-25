@@ -2117,6 +2117,29 @@ class ReadyPassLine(unittest.TestCase):
         self.assertEqual(lines[1:], [self.READY], "a PASS drops a ready-pass line that is the run's last output, with no newline after it: %r"
                          % r.stdout)
 
+    def one_line_run(self, filler, text, after):
+        """Run a wrapped command that prints one line: `filler` x bytes, then `text`, then `after` y bytes, then a newline. It exits 0."""
+        code = ("import sys\n"
+                "out = sys.stdout.buffer\n"
+                "out.write(b'x' * %d + %r.encode() + b'y' * %d + b'\\n')\n"
+                "out.flush()\n") % (filler, text, after)
+        with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as d:
+            return run(code, log=os.path.join(d, "v.log"))
+
+    def test_a_kept_prefix_at_a_chunk_edge_inside_a_line_prints_no_kept_line(self):
+        """bin/verdict reads the run in CHUNK-byte pieces, and a piece can start mid-line, on the kept prefix. The rest of that line is not a
+        ready-pass line, so the scan skips it. A line whose unfinished part passes KEPT_CARRY is skipped the same way: it prints no kept
+        line, and no partial one."""
+        keep_carry = load_verdict_module().KEPT_CARRY
+        with self.subTest("the kept prefix starts at a chunk edge, inside a longer line"):
+            lines = self.pass_lines(self.one_line_run(CHUNK, self.READY, 0))
+            self.assertEqual(lines[1:], [], "a kept prefix that starts at a chunk edge inside a longer line prints as a kept line: %r"
+                             % ([l[:80] for l in lines[1:]],))
+        with self.subTest("a line whose unfinished part passes KEPT_CARRY"):
+            lines = self.pass_lines(self.one_line_run(CHUNK, self.READY, keep_carry + 1024))
+            self.assertEqual(lines[1:], [], "a line whose unfinished part passes KEPT_CARRY prints a kept line or a partial one: %r"
+                             % ([l[:80] for l in lines[1:]],))
+
     def test_kept_forms_are_fixed_prefixes_of_both_merge_formats(self):
         kept = getattr(load_verdict_module(), "READY_PASS_KEPT", None)
         self.assertIsNotNone(kept, "bin/verdict holds no READY_PASS_KEPT constant, so no ready-pass line is kept")
