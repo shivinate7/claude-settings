@@ -5470,6 +5470,34 @@ class PastRulingRelay(SameTurnWriter, unittest.TestCase):
         reason = self.verdict(self.TWO_QUESTIONS, self.NO_DATE_REASON)
         self.assertIn("one of the questions", reason, "the refusal of two questions names neither: %r" % reason)
 
+    # Two questions in one reply. The Stop path reads the Based on (ruling) lines of the whole reply, so a line that names the
+    # ruling beside one question must not pass the other. The second question is about the apps too and names Renovate.
+    NAMED_BESIDE_UNNAMED = ("Should the GitHub apps keep their access to claude-settings?\n"
+                            "Based on (ruling): github-apps-keep-access says revisit only if the apps get bloated.\n"
+                            "Should the Renovate app keep its access to claude-settings?")
+    BOTH_NAMED = ("Should the GitHub apps keep their access to claude-settings?\n"
+                  "Based on (ruling): github-apps-keep-access says revisit only if the apps get bloated.\n"
+                  "Should the Renovate app keep its access to claude-settings?\n"
+                  "Based on (ruling): github-apps-keep-access says revisit only if the apps get bloated.")
+    RENOVATE_WORDS = "Should the Renovate app"
+
+    def test_unnamed_question_beside_a_named_one_is_refused(self):
+        out, _ = self.stop(self.decided, self.NAMED_BESIDE_UNNAMED, answer=self.judged(self.NO_DATE_REASON), to_writer=True)
+        self.assertEqual(out.get("decision"), "block",
+                         "the question that names no ruling passed beside a question that names it: %r" % out)
+
+    def test_refusal_names_the_question_beside_a_named_one(self):
+        out, _ = self.stop(self.decided, self.NAMED_BESIDE_UNNAMED, answer=self.judged(self.NO_DATE_REASON), to_writer=True)
+        reason = self.reason(out)
+        low = reason.lower()
+        self.assertTrue(self.RENOVATE_WORDS in reason or "second question" in low or "question 2" in low,
+                        "the refusal names neither the second question by its first words nor its number: %r" % reason)
+
+    def test_each_question_naming_the_ruling_passes(self):
+        # Control: when each question names the ruling, the reply passes though the judge refuses.
+        out, _ = self.stop(self.decided, self.BOTH_NAMED, answer=self.judged(self.NO_DATE_REASON), to_writer=True)
+        self.assertEqual(out, {}, "a reply whose questions each name the ruling was refused: %r" % out)
+
     def test_undated_ruling_says_time_unknown(self):
         repo = tcj.make_repo("relay-undated", decisions={"github-apps-undated": "Owner: the ruling keeps the apps' access."})
         reason = self.verdict(RELAY, "decisions/github-apps-undated: the ruling keeps the apps' access.", repo=repo)
