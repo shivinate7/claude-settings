@@ -362,6 +362,79 @@ class B:
 '''
 
 
+# A bare name shared by a top-level function and a method is ambiguous: both are candidates.
+SHARED = '''def run():
+    return 1
+
+
+class A:
+    def run(self):
+        return 2
+'''
+
+# A nested class is a unit under its dotted name. A class under a module-level `if` or `try` is a unit too.
+NESTED = '''class Outer:
+    """Outer doc."""
+
+    class Inner:
+        value = 1
+
+    def run(self):
+        return 2
+'''
+NESTED_UNITS = ["1-8 class Outer", "4-5 class Outer.Inner", "7-8 method Outer.run"]
+GATED = '''import sys
+
+if sys.platform:
+    class Gated:
+        value = 1
+'''
+TRY_CLASS = '''try:
+    class Loaded:
+        value = 1
+except ImportError:
+    pass
+'''
+
+# A YAML file indented with a tab is refused: the reader takes spaces only.
+TABBED = '''name: checks
+on: push
+jobs:
+\tbuild:
+\t\truns-on: ubuntu-latest
+'''
+
+# A form feed or a U+2028 inside a line is not a line break. Line numbers count newlines only, as sed does.
+MD_FORM_FEED = '# One\n\nfirst\fpart\n\n## Two\n\nbody\n'
+MD_LINE_SEP = MD_FORM_FEED.replace("\f", " ")
+MD_SPLIT_UNITS = ["1-7 heading One", "5-7 heading Two"]
+YAML_FORM_FEED = '''name: checks
+on: push
+jobs:
+  build:
+    # a note\fcarries on
+    steps:
+      - name: Real
+        run: echo hi
+'''
+YAML_LINE_SEP = YAML_FORM_FEED.replace("\f", " ")
+YAML_UNITS = ["4-8 job jobs.build", "7-8 step jobs.build.Real"]
+SHELL_FORM_FEED = '#!/bin/sh\n# a\fb\nbuild() {\n  echo hi\n}\n'
+SHELL_LINE_SEP = SHELL_FORM_FEED.replace("\f", " ")
+SHELL_SPLIT_UNITS = ["3-5 function build"]
+
+# A subshell body with a case pattern: the pattern's `)` is not the end of the body.
+SUBSHELL = '''#!/bin/sh
+f() (
+  case "$1" in
+    a) echo one ;;
+    *) echo other ;;
+  esac
+)
+'''
+SUBSHELL_UNITS = ["2-7 function f"]
+
+
 def assert_outline(case, path, want):
     code, out, err = run_tool([path])
     case.assertEqual(code, 0, "exit %d on a file the tool reads: %s%s" % (code, out, err))
@@ -389,6 +462,15 @@ class PythonOutline(unittest.TestCase):
         self.assertEqual(code, 0, "exit %d on an empty Python file: %s%s" % (code, out, err))
         self.assertEqual(unit_lines(out), [], "an empty Python file printed a unit")
 
+    def test_a_class_under_a_module_level_if_is_a_unit(self):
+        assert_outline(self, fixture("gated.py", GATED), ["4-5 class Gated"])
+
+    def test_a_class_under_a_module_level_try_is_a_unit(self):
+        assert_outline(self, fixture("try_class.py", TRY_CLASS), ["2-3 class Loaded"])
+
+    def test_a_nested_class_is_listed_under_its_dotted_name_with_its_range(self):
+        assert_outline(self, fixture("nested.py", NESTED), NESTED_UNITS)
+
 
 class MarkdownOutline(unittest.TestCase):
     def test_each_heading_ends_before_the_next_of_same_or_higher_level(self):
@@ -397,15 +479,36 @@ class MarkdownOutline(unittest.TestCase):
     def test_a_heading_inside_a_fenced_block_is_not_a_heading(self):
         assert_outline(self, fixture("fence.md", FENCE), FENCE_UNITS)
 
+    def test_a_form_feed_inside_a_line_is_not_a_line_break(self):
+        assert_outline(self, fixture("form.md", MD_FORM_FEED), MD_SPLIT_UNITS)
+
+    def test_a_line_separator_inside_a_line_is_not_a_line_break(self):
+        assert_outline(self, fixture("separator.md", MD_LINE_SEP), MD_SPLIT_UNITS)
+
 
 class YamlOutline(unittest.TestCase):
     def test_a_run_block_line_that_looks_like_a_step_is_not_a_step(self):
         assert_outline(self, fixture("checks.yml", WORKFLOW), WORKFLOW_UNITS)
 
+    def test_a_form_feed_inside_a_line_is_not_a_line_break(self):
+        assert_outline(self, fixture("form.yml", YAML_FORM_FEED), YAML_UNITS)
+
+    def test_a_line_separator_inside_a_line_is_not_a_line_break(self):
+        assert_outline(self, fixture("separator.yml", YAML_LINE_SEP), YAML_UNITS)
+
 
 class ShellOutline(unittest.TestCase):
     def test_a_function_inside_a_here_doc_is_not_a_function(self):
         assert_outline(self, fixture("run.sh", SHELL), SHELL_UNITS)
+
+    def test_a_form_feed_inside_a_line_is_not_a_line_break(self):
+        assert_outline(self, fixture("form.sh", SHELL_FORM_FEED), SHELL_SPLIT_UNITS)
+
+    def test_a_line_separator_inside_a_line_is_not_a_line_break(self):
+        assert_outline(self, fixture("separator.sh", SHELL_LINE_SEP), SHELL_SPLIT_UNITS)
+
+    def test_a_subshell_body_with_a_case_pattern_ends_at_its_closing_paren(self):
+        assert_outline(self, fixture("subshell.sh", SUBSHELL), SUBSHELL_UNITS)
 
 
 class SymbolMode(unittest.TestCase):
@@ -431,6 +534,33 @@ class SymbolMode(unittest.TestCase):
         self.assertEqual(len(nonblank(out + err)), 1, "a missing name did not print exactly one line: %r" % (out + err))
 
 
+    def test_a_bare_name_shared_by_a_function_and_a_method_prints_both_and_exits_1(self):
+        code, out, err = run_tool([fixture("shared.py", SHARED), "run"])
+        self.assertEqual(code, 1, "a bare name shared by a function and a method exited %d, not 1: %s%s" % (code, out, err))
+        for line in ["1-2 function run", "6-7 method A.run"]:
+            self.assertIn(line, out, "a bare name shared by a function and a method does not print %r: %s" % (line, out))
+
+    def test_a_nested_class_prints_its_range_for_its_dotted_name(self):
+        code, out, err = run_tool([fixture("nested.py", NESTED), "Outer.Inner"])
+        self.assertEqual(code, 0, "exit %d on the dotted name of a nested class: %s%s" % (code, out, err))
+        self.assertEqual(unit_lines(out), ["4-5 class Outer.Inner"], "the dotted name of a nested class did not print its range")
+
+    def test_a_nested_class_prints_its_range_for_its_bare_name_when_unique(self):
+        code, out, err = run_tool([fixture("nested.py", NESTED), "Inner"])
+        self.assertEqual(code, 0, "exit %d on the unique bare name of a nested class: %s%s" % (code, out, err))
+        self.assertEqual(unit_lines(out), ["4-5 class Outer.Inner"], "the bare name of a nested class did not print its range")
+
+    def test_a_class_under_a_module_level_if_prints_its_range_for_its_bare_name(self):
+        code, out, err = run_tool([fixture("gated.py", GATED), "Gated"])
+        self.assertEqual(code, 0, "exit %d on the bare name of a class under an if: %s%s" % (code, out, err))
+        self.assertEqual(unit_lines(out), ["4-5 class Gated"], "the bare name of a class under an if did not print its range")
+
+    def test_a_class_under_a_module_level_try_prints_its_range_for_its_bare_name(self):
+        code, out, err = run_tool([fixture("try_class.py", TRY_CLASS), "Loaded"])
+        self.assertEqual(code, 0, "exit %d on the bare name of a class under a try: %s%s" % (code, out, err))
+        self.assertEqual(unit_lines(out), ["2-3 class Loaded"], "the bare name of a class under a try did not print its range")
+
+
 class Refusals(unittest.TestCase):
     def test_a_file_type_that_is_not_read_exits_2_with_one_line(self):
         code, out, err = run_tool([fixture("notes.txt", "plain text\n")])
@@ -450,6 +580,38 @@ class Refusals(unittest.TestCase):
         self.assertEqual(len(nonblank(out + err)), 1, "a Python syntax error did not print exactly one line: %r" % (out + err))
 
 
+    def test_a_tab_indented_yaml_file_exits_2_with_one_line(self):
+        code, out, err = run_tool([fixture("tabbed.yml", TABBED)])
+        self.assertEqual(code, 2, "a tab-indented YAML file exited %d, not 2: %s%s" % (code, out, err))
+        self.assertEqual(len(nonblank(out + err)), 1, "a tab-indented YAML file did not print exactly one line: %r" % (out + err))
+
+
+class HelpFlag(unittest.TestCase):
+    def test_the_long_help_flag_prints_usage_and_exits_0(self):
+        code, out, err = run_tool(["--help"])
+        self.assertEqual(code, 0, "--help exited %d, not 0: %s%s" % (code, out, err))
+        self.assertIn("usage:", out.lower(), "--help printed no usage line: %r" % (out + err))
+
+    def test_the_short_help_flag_prints_usage_and_exits_0(self):
+        code, out, err = run_tool(["-h"])
+        self.assertEqual(code, 0, "-h exited %d, not 0: %s%s" % (code, out, err))
+        self.assertIn("usage:", out.lower(), "-h printed no usage line: %r" % (out + err))
+
+    def test_help_names_each_kind_of_unit(self):
+        code, out, err = run_tool(["--help"])
+        for kind in ("python", "markdown", "yaml", "shell"):
+            self.assertIn(kind, out.lower(), "--help does not name the %s kind: %r" % (kind, out + err))
+
+    def test_help_names_the_file_and_symbol_call_forms(self):
+        code, out, err = run_tool(["--help"])
+        self.assertIn("FILE", out, "--help does not show the FILE argument: %r" % (out + err))
+        self.assertIn("SYMBOL", out, "--help does not show the SYMBOL argument: %r" % (out + err))
+
+    def test_help_names_the_exit_codes(self):
+        code, out, err = run_tool(["--help"])
+        self.assertIn("exit", out.lower(), "--help does not name the exit codes: %r" % (out + err))
+
+
 class RealFiles(unittest.TestCase):
     def test_host_merge_is_one_def_under_200_lines_and_matches_ast(self):
         code, out, err = run_tool([MERGE, "Host.merge"])
@@ -466,7 +628,9 @@ class RealFiles(unittest.TestCase):
     def test_every_top_level_class_of_test_merge_has_its_ast_range(self):
         code, out, err = run_tool([TEST_MERGE])
         self.assertEqual(code, 0, "exit %d on merge/test_merge.py: %s%s" % (code, out, err))
-        got = [line for line in unit_lines(out) if line.split(" ", 2)[1] == "class"]
+        # A class nested in a class has a dotted name and is pinned by its own cases, so this compares dotless class units only.
+        got = [line for line in unit_lines(out)
+               if line.split(" ", 2)[1] == "class" and "." not in line.split(" ", 2)[2]]
         want = ast_class_lines(TEST_MERGE)
         self.assertGreater(len(want), 0, "ast finds no top-level class in merge/test_merge.py: the oracle is empty")
         self.assertEqual(got, want, "the class lines of merge/test_merge.py differ from ast's top-level classes")
