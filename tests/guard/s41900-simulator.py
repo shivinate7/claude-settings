@@ -818,9 +818,85 @@ def lease_fake_ps_check():
     return check
 
 
+# --------------------------------------------------------------------------- the name lookup
+# bin/sim-lease's resolve() finds each slot's phone by its exact name (SLOT_NAME) in the device list: one device for a
+# name, or a refusal. The guard reads only the udid a take recorded, so no guard case reaches resolve(). These cases
+# call it on the bin/sim-lease beside the guard under test, loaded as hooks/guard.py loads it, with the device list
+# given as data: read_devices is replaced in that module, so no xcrun runs and no file is written. The names and the
+# udids are typed here, never read from SLOT_NAME, so a changed name in bin/sim-lease fails a case.
+LEASE_NAME_DUO = "lease names: a duo take resolves slot 1 and slot 2 each to its own device's udid"
+LEASE_NAME_PRO = "lease names: the pro take resolves to the iPhone 18 Pro's udid, not another device's"
+LEASE_NAME_DOUBLE = "lease names: a name with two devices refuses the take, it does not take the first"
+LEASE_NAME_MISSING = "lease names: a duo take with no device named iPhone Duo is refused"
+LEASE_NAME_EMPTY = "lease names: an empty device list refuses a duo take"
+LEASE_TWIN = "5E7A0015-0000-4000-8000-0000000000A5"  # a second device named iPhone Duo (Duo B's twin), for the doubled name
+
+
+def load_sim_lease_under_test(rows):
+    """(module, None) for bin/sim-lease beside the guard under test, with read_devices answering ROWS, a list of
+    (udid, name). (None, why) when that file is missing or has no resolve(): the check fails on that cause."""
+    import importlib.machinery
+    import importlib.util
+    path = os.path.join(os.path.dirname(os.path.realpath(GUARD)), "..", "bin", "sim-lease")
+    if not os.path.isfile(path):
+        return None, "no bin/sim-lease beside the guard under test (looked for %s)" % path
+    keep_bytecode, keep_path = sys.dont_write_bytecode, list(sys.path)
+    try:
+        sys.dont_write_bytecode = True
+        loader = importlib.machinery.SourceFileLoader("sim_lease_names_case", path)
+        spec = importlib.util.spec_from_loader("sim_lease_names_case", loader)
+        lease = importlib.util.module_from_spec(spec)
+        loader.exec_module(lease)
+    finally:
+        sys.dont_write_bytecode = keep_bytecode
+        sys.path[:] = keep_path  # sim-lease inserts its hooks folder at position 0
+    if not callable(getattr(lease, "resolve", None)):
+        return None, "bin/sim-lease has no resolve() to find a phone by its name"
+    lease.read_devices = lambda: [{"name": name, "udid": udid} for udid, name in rows]
+    return lease, None
+
+
+def lease_names_check(device, rows, want):
+    """resolve() of the sim-lease under test, for DEVICE over ROWS. WANT maps each slot to the udid a grant must
+    return, or is None when the take must be refused: a refusal is (None, why) with a reason, and the check names
+    the one slot that went wrong."""
+    def check():
+        lease, why = load_sim_lease_under_test(rows)
+        if lease is None:
+            return False, why
+        ids, reason = lease.resolve(device)
+        if want is None:
+            if ids is None and reason:
+                return True, "%s is refused: %s" % (device, reason)
+            return False, "%s resolved to %r, not a refusal" % (device, ids)
+        got = ids or {}
+        bad = [slot for slot in sorted(want) if got.get(slot) != want[slot]]
+        if not bad:
+            return True, "%s resolves to %r" % (device, got)
+        slot = bad[0]
+        return False, "%s: slot %s resolved to %r, want %r%s" % (
+            device, slot, got.get(slot), want[slot], "" if ids else " (refused: %s)" % reason)
+    return check
+
+
+def lease_names_checks():
+    """The name lookup's (label, check) pairs. The fleet has the decoys iPhone Duo 2 and Duo 1, so a name matches
+    exactly: a duo take names the two Duo devices, never the decoys."""
+    fleet = [(LEASE_DUO1, "iPhone Duo"), (LEASE_DUO2, "iPhone Duo 2"), (LEASE_PRO, "iPhone 18 Pro"),
+             (LEASE_DECOY, "Duo 1")]
+    return [
+        (LEASE_NAME_DUO, lease_names_check("duo", fleet, {"1": LEASE_DUO1, "2": LEASE_DUO2})),
+        (LEASE_NAME_PRO, lease_names_check("pro", fleet, {"pro": LEASE_PRO})),
+        (LEASE_NAME_DOUBLE, lease_names_check("duo", fleet + [(LEASE_TWIN, "iPhone Duo")], None)),
+        (LEASE_NAME_MISSING, lease_names_check("duo", [(LEASE_DUO2, "iPhone Duo 2"), (LEASE_PRO, "iPhone 18 Pro")],
+                                               None)),
+        (LEASE_NAME_EMPTY, lease_names_check("duo", [], None)),
+    ]
+
+
 def register_simulator_lease_cases():
     """The lease allow and its controls. Returns the dead-lease case, which lease_no_write_check runs, and the
-    lease read counts as (label, check) pairs for LOG_CHECKS."""
+    (label, check) pairs for LOG_CHECKS: the lease read counts and the name lookup cases."""
     rows = [(LEASE_DUO1, "iPhone Duo A", "Shutdown", SIM_TYPE_MINI, SIM_RT),
             (LEASE_DUO2, "iPhone Duo B", "Shutdown", SIM_TYPE_MINI, SIM_RT),
             (LEASE_PRO, "iPhone 18 Pro", "Shutdown", SIM_TYPE_PRO, SIM_RT),
@@ -957,7 +1033,7 @@ def register_simulator_lease_cases():
                   lease_ps_count_check(shared_case, 2)),
                  ("simulator: a launch of a booted device makes no lease read (ruling 7)",
                   lease_ps_count_check(booted_case, 0))]
-    return dead_case, ps_counts
+    return dead_case, ps_counts + lease_names_checks()
 
 
 # The simulator cases need a POSIX shell for the fake xcrun and ps. Windows has neither to fake, so
