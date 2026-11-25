@@ -6,6 +6,8 @@ Question: how do we catch a test stand-in that cannot take a call the product ma
 
 Owner, 19:33 CST Nov 24 2026, typed in the consultant's chat: land now the guards for this mistake. The form (compare what callers pass; count what cannot be judged) is a consultant pick, not owner-typed.
 
+Owner, 20:27 CST Nov 24 2026, typed in the consultant's chat, on option c of question QQ: "im a fan of this option".
+
 Mistake it guards: on 2026-11-24, pull request 3861 added keyword `stdout_only` to `sh()` in `merge/merge.py`. Test stand-ins installed with `patch.object(merge, "sh", ...)` did not accept it. 112 tests raised TypeError. No check before CI saw it.
 
 Harm: one CI run of the merge jobs (13,404 job-seconds on a like run), and a return to draft.
@@ -14,7 +16,7 @@ What it does: `check_standins` in `lint/check_standin_signatures.py` reads each 
 
 Not judged: a form it cannot judge is counted in one `N stand-ins not judged` line, never skipped in silence. Those forms are starred targets, string targets, `patch.multiple`, `new_callable`, `**kwargs` dicts, plain assignment, and `setattr`.
 
-State: not a gate yet. Its fixture suite runs in CI (`checks.yml` step "Stand-in signature fixture suite"). The check itself does not run on the repo in CI or in the ready checks. Main has 52 findings to clear first: 51 in `merge/test_merge.py` and 1 in `skills/roadmap/test_build.py`. The owner's pick on the form of the fix is open (question QQ, asked 19:53 CST Nov 24 2026). Until then a session runs it by hand: `python3 lint/check_standin_signatures.py`.
+State: the owner ruled the fix's form (20:27 CST Nov 24 2026): no guard refuses a whole local run of a large suite; this stand-in rule lands; the merge suite is measured whole against parallel cuts on the owner's Mac, and lane lint uses the faster; a session sets one check-in per long agent so a slow or silent agent is seen. Still true: its fixture suite runs in CI (`checks.yml` step "Stand-in signature fixture suite"). The check itself does not run on the repo in CI or in the ready checks, because main's 52 findings are cleared first: 51 in `merge/test_merge.py` and 1 in `skills/roadmap/test_build.py`. A session runs it by hand: `python3 lint/check_standin_signatures.py`.
 
 Known gaps: notes `standin-union-ignores-reach`, `standin-count-holds-restores`, `standin-count-per-call`, `standin-mock-forms-uncounted`, `standin-other-module-silent`, `standin-allow-pins-missing`.
 
