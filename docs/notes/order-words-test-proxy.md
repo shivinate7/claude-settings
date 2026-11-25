@@ -1,0 +1,1 @@
+- order-words-test-proxy: the cases in hooks/test_call_judge.py that assert "none of the judge's words" check three order words only, `ORDER_WORDS` (take, pick, drop). That is a proxy for the judge's words. Seen: 2026-11-25 x1

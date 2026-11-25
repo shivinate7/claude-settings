@@ -1,0 +1,1 @@
+- item8-resend-refused-no-exit: `NO_RULING_NAMED_TEXT` (hooks/question_form.py) tells the session to send the question again as it is. A resend that the judge refuses again under item 8 leaves the session no exit it can take itself but a `Based on (ruling)` line that names a listed ruling. Seen: 2026-11-25 x1
