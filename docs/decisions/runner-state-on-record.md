@@ -8,7 +8,7 @@ Sources: owner ruling `own-runner-handoff-resilient` (22:47 CST, 2026-11-13; rel
 
 ## Past rulings read, and none contradicted
 
-- Decision `session-tiers`: "Triage is the only writer of the roadmap" (owner, 2026-10-28), and "Not built: the route from a lane to triage". This ruling builds that route for the runner. The writer stays triage.
+- Decision `session-tiers`: triage, the holder of the triage hat, writes the roadmap (owner, 2026-11-24 11:16 CST), and "Not built: the route from a lane to triage". This ruling builds that route for the runner. The writer stays triage.
 - Guard rule `roadmap-one-writer` (incident, lane commit 87a9d9c9, 2026-11-01): it denies a push to the record branch from any session but triage. The route adds no push, so the guard is untouched.
 - Decision `standing-merge-grant`: the runner merges; it holds no write grant on the record branch. Unchanged.
 - Decision `precompact-handoff`: not edited. Only the prompt text `hooks/precompact_handoff_prompt.md` gains one line, which the lane `handoff-written-by-hook` leaves alone (it edits `hooks/precompact_handoff.py`).

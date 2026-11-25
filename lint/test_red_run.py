@@ -15,8 +15,8 @@ The contract these cases read:
   - The test command runs in a copy at <TMPDIR>/claude-settings-test-temp/<pid>-<uuid>. Each case sets TMPDIR to a
     folder beside its fixture repo, never inside it.
   - The output names the class of the run as one word: pass, assert, build, crash or timeout (mutate_shared classify_run).
-  - Exit 2 for a commit that does not exist, for a missing `--`, for a --replace whose old text is missing (STALE), and for
-    a test command that cannot start. That call prints one verdict line, and leaves no copy.
+  - Exit 2 for a commit that does not exist, for a missing `--`, for a --replace whose old text is missing (STALE), for
+    a test command that cannot start, and for an --add of a path with a newline in its name, which also names that path. That call prints one verdict line, and leaves no copy.
   - The exit codes of a pass and of a fail are not read here.
   - A signal to red-run (TERM, HUP or INT) removes the copy and stops the child.
 """
@@ -268,6 +268,18 @@ class RedRunBadCallCases(RedRunFixture):
         self.assertEqual(len(lines), 1, "a test command that cannot start printed %d verdict lines, want 1" % len(lines))
         self.assertEqual(self.run_folders(), [], "a test command that cannot start left a run folder")
 
+    def test_an_add_of_a_path_with_a_newline_exits_2_and_names_the_path(self):
+        path = os.path.join(self.repo, "src", "two\nlines.py")
+        try:
+            write(path, "x = 1\n")
+        except OSError as exc:
+            self.skipTest("the file system refuses a newline in a name: %s" % exc)
+        self.assertTrue(os.path.isfile(path), "the fixture wrote no file with a newline in its name")
+        rc, out = self.red_run(self.old, "--add", "src/two\nlines.py", "--", sys.executable, "-c", "pass")
+        self.assertEqual(rc, 2, "an --add of a path with a newline exited %d, want 2: %s" % (rc, out))
+        self.assertNotIn("Traceback (most recent call last)", out, "an --add of a path with a newline printed a traceback: %s" % out)
+        self.assertIn("src/two", out, "the refusal names no part of the path: %s" % out)
+
 
 @unittest.skipIf(os.name == "nt", "proc_fixture's waits and kills are POSIX only, and the signal cases need a POSIX child")
 class RedRunStopCases(RedRunFixture):
@@ -314,6 +326,68 @@ class RedRunStopCases(RedRunFixture):
 
     def test_int_removes_the_copy_and_stops_the_child(self):
         self.stop_while_running("int", signal.SIGINT)
+
+
+def read_text(path):
+    with open(path, encoding="utf-8", newline="") as handle:
+        return handle.read()
+
+
+class RedRunTrackedCopyCases(RedRunFixture):
+    """A run_in_copy-shaped case runs to a verdict in a copy of a commit. Its copy has no .git, so tracked_tree must list it
+    by the manifest the export wrote (testing/tracked_tree.py, ManifestCases in lint/test_tracked_tree.py)."""
+
+    # The probe runs in the copy. It lists the copy's probe/ folder with the helper and writes the list to the report path it is given.
+    PROBE = (
+        "import json, os, sys\n"
+        "ROOT = os.path.dirname(os.path.abspath(__file__))\n"
+        "sys.path.insert(0, os.path.join(ROOT, 'testing'))\n"
+        "import tracked_tree\n"
+        "got = tracked_tree.tracked('probe')\n"
+        "with open(sys.argv[1], 'w', encoding='utf-8') as handle:\n"
+        "    json.dump({'cwd': os.getcwd(), 'got': got}, handle)\n"
+        "print('probe lists %s' % got)\n"
+    )
+
+    def helper_commit(self):
+        """Commit the probe, and the helper and its two imports read from this checkout at run time. A copy is stated here:
+        the probe runs the same helper and export name this checkout runs, and no test file is copied."""
+        commit(self.repo, self.env, {
+            "testing/tracked_tree.py": read_text(os.path.join(HERE, "..", "testing", "tracked_tree.py")),
+            "hooks/_nowindow.py": read_text(os.path.join(HERE, "..", "hooks", "_nowindow.py")),
+            "hooks/tree_export.py": read_text(os.path.join(HERE, "..", "hooks", "tree_export.py")),
+            "run_probe.py": self.PROBE,
+            "probe/data.txt": "data\n",
+            "probe/mod.py": "x = 1\n",
+        }, "probe: the helper and a folder to list")
+        return git(self.repo, self.env, "rev-parse", "HEAD").strip()
+
+    def probe_listing(self, sha, *add):
+        """Run the probe in a copy of SHA, with the --add paths. The verdict must be pass; the copy's listing of probe/ is returned."""
+        _, out = self.red_run(sha, *add, "--", sys.executable, "run_probe.py", os.path.join(self.outs, "listing.json"))
+        self.assertVerdict(out, "pass", "the probe in the copy of the commit")
+        return self.scoped_report("listing.json")["got"]
+
+    def test_a_run_in_copy_shaped_probe_runs_to_a_verdict_in_a_copy_of_the_commit(self):
+        sha = self.helper_commit()
+        got = self.probe_listing(sha)
+        self.assertEqual(got, ["data.txt", "mod.py"],
+                         "the copy lists probe/ as %s, want the two files the commit tracks" % (got,))
+
+    def test_add_puts_the_added_file_in_the_copys_listing(self):
+        sha = self.helper_commit()
+        write(os.path.join(self.repo, "probe", "zz_new.py"), "y = 2\n")
+        got = self.probe_listing(sha, "--add", "probe/zz_new.py")
+        self.assertEqual(got, ["data.txt", "mod.py", "zz_new.py"],
+                         "--add left probe/zz_new.py out of the copy's listing of probe/: it lists %s" % (got,))
+
+    def test_add_of_a_folder_lists_each_file_under_it_in_the_copys_listing(self):
+        sha = self.helper_commit()
+        write(os.path.join(self.repo, "probe", "extra", "a.py"), "a = 1\n")
+        write(os.path.join(self.repo, "probe", "extra", "sub", "b.py"), "b = 2\n")
+        got = self.probe_listing(sha, "--add", "probe/extra")
+        self.assertEqual(got, ["data.txt", "extra/a.py", "extra/sub/b.py", "mod.py"],
+                         "--add probe/extra left a file under that folder out of the copy's listing of probe/: it lists %s" % (got,))
 
 
 if __name__ == "__main__":
