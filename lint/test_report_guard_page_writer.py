@@ -451,6 +451,93 @@ class DesktopSendTests(PickFixture, unittest.TestCase):
         refusal = self.question_refusal(cloud, send)
         self.assertEqual(refusal, "", "a cloud-shaped delivered send to the page writer was refused: %s" % refusal)
 
+    def stop_reason(self, root, acts, before=()):
+        """The reason the Stop hook gives for a pick asked after `acts` in the same turn, run as the hook runs it: the
+        report guard as a process, whose main() reads the transcript. '' when the hook lets the reply through. `before`
+        holds the records of earlier turns, as question_refusal's does."""
+        records = [*before, trg.human("decide"), *acts, trg.assistant_text(self.reply(self.PICK))]
+        hook = {"hook_event_name": "Stop", "transcript_path": trg.write_transcript(records, self.run_dir),
+                "stop_hook_active": False, "cwd": root}
+        run = trg.run_guard(trg.REPORT_GUARD, hook)
+        self.assertEqual(run.returncode, 0, run.stderr)
+        lines = run.stdout.strip().splitlines()
+        out = json.loads(lines[-1]) if lines else {}
+        return out.get("reason", "") if out.get("decision") == "block" else ""
+
+    def page_read_stop(self, root, send):
+        """stop_reason for a pick after the turn's page read names the desktop writer, then `send`. The scope is checked
+        first: the page read names the desktop writer."""
+        acts = [*self.writer_read(DESKTOP_WRITER), *send]
+        self.assertEqual(transcript.page_writer_id([trg.human("decide"), *acts]), DESKTOP_WRITER,
+                         "scope: the page read does not name the desktop writer")
+        return self.stop_reason(root, acts)
+
+    def test_desktop_errored_send_on_the_page_read_path_is_refused(self):
+        # Catches: a send whose result is an error, with no delivery text, counted as sent on the page-read path. That
+        # path counts a send to the writer the page read names unless its result is marked undelivered, and an error with
+        # no delivery text is never marked, so it passed. The delivered send to the same writer is the control.
+        root = self.page_read_repo()
+        control = self.page_read_stop(root, self.call("SendMessage", {"to": DESKTOP_WRITER, "summary": "pick",
+                                                                      "message": "Two ways"},
+                                                      result=desktop_result("delivered")))
+        self.assertEqual(control, "", "scope: a delivered send to the page-read writer was refused: %s" % control)
+        error = "Error: the message could not be sent; no session was reached."
+        shapes = (("SendMessage, is_error", self.call("SendMessage", {"to": DESKTOP_WRITER, "summary": "pick",
+                                                                     "message": "Two ways"},
+                                                      result=error, is_error=True)),
+                  ("send_message, is_error", self.call("mcp__ccd_session_mgmt__send_message",
+                                                       {"session_id": DESKTOP_WRITER, "message": "Two ways"},
+                                                       result=error, is_error=True)),
+                  ("SendMessage, success false", self.call("SendMessage", {"to": DESKTOP_WRITER, "summary": "pick",
+                                                                         "message": "Two ways"},
+                                                          result=error, tool_use_result={"success": False})))
+        for label, send in shapes:
+            with self.subTest(shape=label):
+                refusal = self.page_read_stop(root, send)
+                self.assertNotEqual(refusal, "", "an errored send with no delivery text counted as sent to the writer the "
+                                    "page read names (%s)" % label)
+
+    def checkin_order_cases(self):
+        """The two orders of a queued send and a one-time check-in in one turn, per wording: (label, after, before), where
+        `after` puts the check-in after the send (the control) and `before` puts it ahead of the send (the red)."""
+        for label, marker in QUEUED_WORDINGS:
+            yield label, [*self.queued_send(marker), *self.checkin()], [*self.checkin(), *self.queued_send(marker)]
+
+    def test_desktop_checkin_before_a_queued_send_does_not_count(self):
+        # Catches: a one-time check-in set before the queued send in the same turn counted for that send. A check-in covers
+        # a queued send only when it is set after the send, so it can verify that the send reached its session. The
+        # check-in after the send is the control. Both paths: the key writer, and the writer the page read names.
+        root = self.desktop_root()
+        read_root = self.page_read_repo()
+        for label, after, before in self.checkin_order_cases():
+            with self.subTest(wording=label, path="key writer"):
+                control = self.stop_reason(root, after)
+                self.assertEqual(control, "", "scope: a queued send with a same-turn check-in after it was refused: %s" % control)
+                refusal = self.stop_reason(root, before)
+                self.assertNotEqual(refusal, "", "a one-time check-in set before a queued send counted for it (key writer)")
+            with self.subTest(wording=label, path="page read"):
+                control = self.page_read_stop(read_root, after)
+                self.assertEqual(control, "", "scope: a queued send with a same-turn check-in after it was refused on the "
+                                 "page-read path: %s" % control)
+                refusal = self.page_read_stop(read_root, before)
+                self.assertNotEqual(refusal, "", "a one-time check-in set before a queued send counted for it (page-read path)")
+
+    def test_desktop_queued_refusal_says_a_checkin_is_recurring_false(self):
+        # Catches: the refusal for a queued send with no same-turn check-in leaving out how a CronCreate check-in counts. It
+        # repeats unless its recurring input is false, so the check-in that counts sets recurring false. The word one-time
+        # is already in the refusal, so it is the control.
+        root = self.desktop_root()
+        read_root = self.page_read_repo()
+        for label, marker in QUEUED_WORDINGS:
+            for path, stop in (("key writer", lambda send: self.stop_reason(root, send)),
+                               ("page read", lambda send: self.page_read_stop(read_root, send))):
+                with self.subTest(wording=label, path=path):
+                    refusal = stop(self.queued_send(marker))
+                    self.assertNotEqual(refusal, "", "scope: a queued send with no check-in passed (%s)" % path)
+                    self.assertIn("one-time", refusal, "the refusal for a queued send lost the word one-time (%s)" % path)
+                    self.assertIn("recurring false", refusal, "the refusal for a queued send does not say a CronCreate "
+                                  "check-in needs recurring false (%s)" % path)
+
 
 class PeerSenderTests(unittest.TestCase):
     """The session that sent a peer message record. A cloud record names it in origin.fromSession; a desktop record
