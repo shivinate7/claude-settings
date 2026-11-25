@@ -27,8 +27,8 @@ Cost: holds() and read() start git for `ls-remote`, one `fetch` of the ref (once
 seen before in this process; a sha seen before costs the `ls-remote` alone. A commit never changes, so the sha-to-record cache is safe. The
 ref's own sha is never cached. The fetch stores the tip in the repo's own ref refs/lease-read/NAME and writes no remote-tracking ref, and the
 `log` reads the record from that ref, so a record is always the tip the fetch got, never an older sha the `ls-remote` saw. A take, give back
-or lift starts git for `remote get-url`, `mktree`, `commit-tree` and `push` (a take also for `config`); the push goes to the remote's URL, so it writes no remote-tracking
-ref. No timer, no process left running, no other file written.
+or lift starts git for `remote get-url`, `mktree`, `commit-tree` and `push` (a take also for `config`); the push goes to the remote's URL, and a second remote of the same URL rides on
+the push command (`-c`, never written to config), so git cannot pair the URL with one configured remote and writes no remote-tracking ref. No timer, no process left running, no other file written.
 """
 import argparse
 import os
@@ -47,6 +47,7 @@ PUSH_TIMEOUT_S = 30
 REF_PREFIX = "refs/heads/lease/"
 LOCAL_ENV = "CLAUDE_CODE_SESSION_ID"
 READ_REF_PREFIX = "refs/lease-read/"
+NO_TRACK_REMOTE = "remote.lease-no-track"  # the -c key prefix of the second remote a push carries (see _push_record)
 FETCH_TRIES = 2  # a read's fetch and its one retry
 HOLDER_MAX = 200
 GIT_ENV = {"GIT_TERMINAL_PROMPT": "0"}  # a credential prompt would hang until the time runs out
@@ -157,14 +158,18 @@ def _push_record(repo, remote, name, expected, message):
     ref = ref_of(name)
     deadline = time.monotonic() + PUSH_TIMEOUT_S
     code, url, _ = _git(repo, ["remote", "get-url", "--push", remote], PUSH_TIMEOUT_S)
-    target = url if code == 0 and url else remote  # a push to the URL, not the remote's name, writes no remote-tracking ref
+    target = url if code == 0 and url else remote
+    # A push to a bare URL still updates the remote-tracking ref of the one configured remote with that URL (git 2.56, remote.c
+    # repo_remote_for_push_tracking). A second remote with the same URL makes the match not unique, so git updates nothing. The remote lives in
+    # this command's -c only; older git never pairs a URL with a remote, so it is inert there.
+    shadow = ["-c", "%s.url=%s" % (NO_TRACK_REMOTE, url)] if target == url else []
     code, tree, err = _git(repo, ["mktree"], PUSH_TIMEOUT_S, input="")
     if code:
         raise Unknown("cannot make the lease tree: " + err)
     code, sha, err = _git(repo, [*GIT_IDENT, "commit-tree", tree, "-m", message], deadline - time.monotonic())
     if code:
         raise Unknown("cannot make the lease commit: " + err)
-    code, out, err = _git(repo, ["push", "-q", "--force-with-lease=%s:%s" % (ref, expected), target, "%s:%s" % (sha, ref)],
+    code, out, err = _git(repo, [*shadow, "push", "-q", "--force-with-lease=%s:%s" % (ref, expected), target, "%s:%s" % (sha, ref)],
                           deadline - time.monotonic())
     return code, (out + "\n" + err).strip(), sha
 
