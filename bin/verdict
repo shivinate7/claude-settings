@@ -162,15 +162,18 @@ def hang_sample(proc):  # (the child's process-table rows, {pid: CPU seconds} fo
     table = _nowindow.proc_table()
     if table[2] or str(proc.pid) not in table[0]: return None
     return table[0], _nowindow.tree_cpu(table, proc.pid, own=True)
-def exited(proc):  # True when the child has exited, reaped or not: a peek that leaves the zombie for the wait loop to reap, so Popen still reads the real rc. False where waitid is missing (Windows, where hang stop is off) or the pid is not our child
+def exited(proc):  # True when the child has exited, reaped or not: a peek that leaves the zombie for the wait loop to reap, so Popen still reads the real rc. False where os.waitid is missing (Windows, where hang stop is off; macOS before Python 3.13, where hang_check reads the Z state in its ps sample instead) or the pid is not our child
     try: return os.waitid(os.P_PID, proc.pid, os.WEXITED | os.WNOHANG | os.WNOWAIT) is not None
     except (OSError, AttributeError): return False
+def zombie_row(proc, sample):  # True when the sample's own row for the child has state Z (finished, not yet reaped); the state column only, so a command that contains Z does not count. False with no sample or no row for the pid
+    row = sample[0].get(str(proc.pid)) if sample else None
+    return bool(row) and row[2].startswith("Z")
 def hang_check(proc, f, w, n, now):  # one wake with the child still running: the sample of a hang to stop on, else None. No read of the process table while output grows
     size = os.fstat(f.fileno()).st_size
     if size != w["seen"]: w["seen"], w["quiet"], w["base"] = size, None, None; return None
     if w["quiet"] is not None and now - w["quiet"] < n: return None
     sample = hang_sample(proc)  # the first silent wake takes the baseline; a later one, at least N after silence began, compares to it
-    if exited(proc): return None  # it finished during the read: its zombie row still shows in ps, but a finished step is no hang; the wait loop's next wait gives its rc
+    if exited(proc) or zombie_row(proc, sample): return None  # it finished during the read: its zombie row (state Z, the child's own pid) still shows in ps, but a finished step is no hang; the Z read covers where os.waitid is missing; the wait loop's next wait gives its rc
     # where reaped CPU cannot be read (macOS), a pid not in the baseline is work too: ps time leaves out reaped children, so a step that works through short children shows only as new pids
     stop = sample is not None and w["base"] is not None and not _nowindow.cpu_advanced(w["base"], sample[1])
     if stop and not _nowindow.reaped_readable(): stop = set(sample[1]) <= set(w["base"])

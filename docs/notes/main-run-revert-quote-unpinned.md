@@ -1,0 +1,1 @@
+- main-run-revert-quote-unpinned: the MainRunVerdict tests (merge/test_merge.py, class at line 15943 on main) do not pin a revert quote that sits mid-line (PR 3858, merged; reviewer's F6 and F7, unverified). Seen: 2026-11-24 x1

@@ -60,6 +60,7 @@ import shallow_clone  # noqa: E402  the one shallow-clone fixture (testing/shall
 from pin_note import MARKER as PIN_NOTE_MARKER  # noqa: E402  the one home of the pin note's marker (hooks/pin_note.py)
 from workflow_steps import job_block, run_body, step_blocks, step_env, step_key, step_with  # noqa: E402  the one home of the step parser
 import mutate_shared  # noqa: E402  the one home of a mutation test run's report (hooks/mutate_shared.py format_report)
+from test_cheap_lints import ALSO_FAILS_ON_BASE, BASE_NOT_READ, PASSES_ON_BASE  # noqa: E402  the three base phrases, one home: lint/test_cheap_lints.py BaseRun
 
 RUN_FOLDER = _test_temp.run_folder()
 atexit.register(shutil.rmtree, RUN_FOLDER, True)
@@ -81,6 +82,7 @@ LOG, STEPS, RC, STEP_LOG, SLEEP, PARENT = __LOG__, __STEPS__, __RC__, __STEP_LOG
 DETAILS = __DETAILS__  # step name -> the text after its verdict word; a step not named here reads `stub step`
 WATCH = __WATCH__  # paths, relative to the cwd (the lint tree), whose text this run logs; a path the tree lacks logs null
 FILE_FAILS = __FILE_FAILS__  # step name -> a path: the step FAILs when the path exists in the tree the run reads (its cwd)
+CRASH = __CRASH__  # path -> exit code: a run whose tree holds the path ends with that code before any verdict line (a copy that cannot run)
 def git(*args):
     return subprocess.run(["git", *args], capture_output=True, text=True).stdout.strip()
 def watched(path):
@@ -107,6 +109,10 @@ if "--plan" in sys.argv:
 FIRED = [name for name, path in FILE_FAILS.items() if os.path.exists(path)]  # a path the run's tree holds: its step FAILs
 STEPS = [("FAIL" if name in FIRED else state, name) for state, name in STEPS]
 RC = 1 if FIRED else RC
+CRASHED = [path for path in CRASH if os.path.exists(path)]
+if CRASHED:
+    print("crash: a tree holds " + CRASHED[0], file=sys.stderr)
+    sys.exit(CRASH[CRASHED[0]])
 end = time.time() + SLEEP  # a lint that runs long: it ends after SLEEP s, or at once when the run that started it is gone
 while time.time() < end and os.getppid() == PARENT:
     time.sleep(0.05)
@@ -204,25 +210,27 @@ class CiJobStub:
         self.stub = os.path.join(self.t, "ci-job-stub.py")
         self.step_log = os.path.join(self.t, "ci-job-step.log")
 
-    def stub_text(self, steps, rc, sleep=0, details=None, file_fails=None, watch=()):
+    def stub_text(self, steps, rc, sleep=0, details=None, file_fails=None, watch=(), crash_where=None):
         """The stub ci-job's source, filled from STUB for the arguments write_stub takes. The one fill of STUB: write_stub and progress_run use it."""
         text = STUB.replace("__STEP_LOG__", repr(self.step_log)).replace("__LOG__", repr(self.log))
         return (text.replace("__STEPS__", repr(steps)).replace("__RC__", repr(rc)).replace("__SLEEP__", repr(sleep))
-                .replace("__DETAILS__", repr(details or {})).replace("__FILE_FAILS__", repr(file_fails or {})).replace("__WATCH__", repr(list(watch))))
+                .replace("__DETAILS__", repr(details or {})).replace("__FILE_FAILS__", repr(file_fails or {})).replace("__WATCH__", repr(list(watch)))
+                .replace("__CRASH__", repr(crash_where or {})))
 
-    def write_stub(self, steps, rc, sleep=0, details=None, file_fails=None, watch=()):
+    def write_stub(self, steps, rc, sleep=0, details=None, file_fails=None, watch=(), crash_where=None):
         """Write the stub ci-job: it prints `steps` ((state, step name) pairs), exits with `rc`, and runs `sleep` s first when it is set.
         `details` maps a step name to the text its line prints after the verdict word (default `stub step`). `file_fails` maps a step
         name to a path: that step FAILs (and the run exits 1) when the path exists in the stub's cwd, the tree the run reads. `watch` names paths,
         relative to the lint tree the stub runs in; each call's log line carries their text under "files", null for a path the tree lacks.
+        `crash_where` maps a path to an exit code: a run whose tree holds the path ends with that code and prints no verdict line.
         `steps` and `rc` may each be a dict keyed by job id (the run's first argument): a run of job J prints steps[J] and exits rc[J],
         and a job the dict does not name prints no step and exits 0."""
-        tm.put(self.stub, self.stub_text(steps, rc, sleep, details, file_fails, watch))
+        tm.put(self.stub, self.stub_text(steps, rc, sleep, details, file_fails, watch, crash_where))
         return self.stub
 
-    def use_ci_job(self, steps, rc, details=None, file_fails=None, watch=()):
-        """merge.CI_JOB becomes a stub that prints `steps` ((state, step name) pairs) and exits with `rc`. Either may be a dict keyed by job (see write_stub). `watch`: see write_stub."""
-        self.write_stub(steps, rc, details=details, file_fails=file_fails, watch=watch)
+    def use_ci_job(self, steps, rc, details=None, file_fails=None, watch=(), crash_where=None):
+        """merge.CI_JOB becomes a stub that prints `steps` ((state, step name) pairs) and exits with `rc`. Either may be a dict keyed by job (see write_stub). `watch` and `crash_where`: see write_stub."""
+        self.write_stub(steps, rc, details=details, file_fails=file_fails, watch=watch, crash_where=crash_where)
         patch = unittest.mock.patch.object(merge, "CI_JOB", self.stub)
         patch.start()
         self.addCleanup(patch.stop)
@@ -4227,6 +4235,14 @@ class ReadyChecks(CiJobStub, tm.RecordsEnv):
         rc, out, err = self.run_args("7", "--ready")
         return rc, out + err
 
+    def runs_split(self, base):
+        """-> (head runs, base reads) of the stub's calls. A failing check is read once more in a copy checked out at origin/`base`, so the stub
+        logs that commit as the run's head; a head run logs the tree the ready check would push, and the lane head is never that commit here."""
+        base_sha = self.head(base)
+        self.assertNotEqual(self.head("feat"), base_sha, "premise: the lane head is the base commit, so the head and base runs cannot be told apart")
+        calls = self.lint_calls()
+        return [c for c in calls if c["head"] != base_sha], [c for c in calls if c["head"] == base_sha]
+
     def fault_merge_read(self, sha):
         """Every git merge-tree that names commit `sha` exits 128, a read git cannot answer (merge_tree reads that as unknown). Every other git call runs for real."""
         real_sh = merge.sh
@@ -4286,7 +4302,10 @@ class ReadyChecks(CiJobStub, tm.RecordsEnv):
         self.use_ci_job([("FAIL", "check invariants")], 1)
         refs_before = self.refs()
         rc, out = self.draft_confirm()
-        self.assertEqual(len(self.lint_calls()), 1, "the ready check did not run the declared step once: " + out)
+        runs, base_reads = self.runs_split("main")
+        self.assertEqual(len(runs), 1, "the ready check did not run the declared step once on the head: " + out)
+        self.assertEqual(len(base_reads), 1, "the failing step was not read once on the base: " + out)
+        self.assertEqual(step_names(base_reads[0]["argv"]), ["check invariants"], "the base read did not run the failing step alone: " + out)
         self.assertEqual(rc, 1, out)
         self.assertEqual(self.refs(), refs_before, "a page was pushed on a red ready check")
         self.assertEqual(self.host.readies, [], "the pull request went ready on a red ready check")
@@ -4343,8 +4362,11 @@ class ReadyChecks(CiJobStub, tm.RecordsEnv):
         self.assertFalse(self.contains(self.head("feat"), self.head("integ")), "precondition: the head holds the base's tip, so the merge is the head and the case probes nothing")
         self.use_ci_job([("FAIL", "check invariants")], 1)
         rc, out = self.draft_confirm()
-        runs = self.lint_calls()
+        runs, base_reads = self.runs_split("integ")
         self.assertEqual(len(runs), 1, "the ready check did not run on a non-default base: " + out)
+        self.assertEqual(len(base_reads), 1, "the failing step was not read once on the non-default base: " + out)
+        self.assertIn("--base", base_reads[0]["argv"], out)
+        self.assertEqual(base_reads[0]["argv"][base_reads[0]["argv"].index("--base") + 1], "origin/integ", "the base read did not name origin/integ: " + out)
         self.assertIn("--base", runs[0]["argv"], out)
         self.assertEqual(runs[0]["argv"][runs[0]["argv"].index("--base") + 1], "origin/integ", out)
         parents = tm.sh(self.co, "git", "rev-list", "--parents", "-n", "1", runs[0]["head"]).split()[1:]
@@ -4360,7 +4382,9 @@ class ReadyChecks(CiJobStub, tm.RecordsEnv):
         self.use_ci_job([("FAIL", "check invariants")], 1)
         refs_before = self.refs()
         rc, out = self.draft_confirm()
-        self.assertEqual(len(self.lint_calls()), 1, "the Record-claim head's ready check did not run: " + out)
+        runs, base_reads = self.runs_split("main")
+        self.assertEqual(len(runs), 1, "the Record-claim head's ready check did not run: " + out)
+        self.assertEqual(len(base_reads), 1, "the failing step was not read once on the base: " + out)
         self.assertNotIn("ready by hand", out)
         self.assertEqual(rc, 1, out)
         self.assertEqual(self.refs(), refs_before, "a push on a red ready check")
@@ -4452,7 +4476,9 @@ class ReadyChecks(CiJobStub, tm.RecordsEnv):
         self.use_ci_job(steps_for(), 0, file_fails={"STE lint": "break-by-base.txt"})  # the step FAILs only on a tree that holds the base's file
         refs_before = self.refs()
         rc, out = self.pre_ready()
-        self.assertEqual(len(self.lint_calls()), 1, "the pre-ready run ran ci-job %d times, want once: %s" % (len(self.lint_calls()), out))
+        runs, base_reads = self.runs_split("integ")
+        self.assertEqual(len(runs), 1, "the pre-ready run ran ci-job %d times on the merge, want once: %s" % (len(runs), out))
+        self.assertEqual(len(base_reads), 1, "the failing STE lint was not read once on integ: %s" % out)
         self.assertTrue(verdict_line(out, "fail", "STE lint"), "the pre-ready run checked the head, not its merge with integ: no `fail STE lint` line: " + out)
         self.assertEqual(rc, 1, "a break that only the merge with integ shows did not refuse the pre-ready run: " + out)
         self.assertEqual(self.host.readies, [], out)
@@ -4526,7 +4552,11 @@ class ReadyChecks(CiJobStub, tm.RecordsEnv):
         self.use_ci_job({"checks": [("PASS", "check invariants")], "checks-rest": [("FAIL", SCAFFOLD_STEP)]}, {"checks": 0, "checks-rest": 1})
         refs_before = self.refs()
         rc, out = self.pre_ready()
-        self.assertEqual(len(self.lint_calls()), 2, "the pre-ready run did not run ci-job once per job: " + out)
+        runs, base_reads = self.runs_split("main")
+        self.assertEqual(len(runs), 2, "the pre-ready run did not run ci-job once per job on the head: " + out)
+        self.assertEqual(len(base_reads), 1, "the failing second job's step was not read once on the base: " + out)
+        self.assertEqual([run["argv"][0] for run in base_reads], ["checks-rest"], "the base read did not run the failing step's own job: " + out)
+        self.assertEqual(step_names(base_reads[0]["argv"]), [SCAFFOLD_STEP], "the base read did not run the failing step alone: " + out)
         self.assertTrue(verdict_line(out, "pass", "check invariants"), "the first job's PASS line did not read pass beside the second job's FAIL: " + out)
         self.assertTrue(verdict_line(out, "fail", SCAFFOLD_READY), "the second job's FAIL line did not read fail: " + out)
         self.assertEqual(rc, 1, "a FAIL in the second job did not refuse the pre-ready run: " + out)
@@ -4539,7 +4569,10 @@ class ReadyChecks(CiJobStub, tm.RecordsEnv):
         self.use_ci_job({"checks": [("PASS", "STE lint")], "checks-rest": [("FAIL", "STE lint")]}, {"checks": 0, "checks-rest": 1})
         refs_before = self.refs()
         rc, out = self.pre_ready()
-        self.assertEqual(len(self.lint_calls()), 2, "the pre-ready run did not run ci-job once per job: " + out)
+        runs, base_reads = self.runs_split("main")
+        self.assertEqual(len(runs), 2, "the pre-ready run did not run ci-job once per job on the head: " + out)
+        self.assertEqual(len(base_reads), 1, "the failing checks-rest STE lint was not read once on the base: " + out)
+        self.assertEqual([run["argv"][0] for run in base_reads], ["checks-rest"], "the base read ran the checks job's STE lint, not the failing one: " + out)
         self.assertTrue(verdict_line(out, "pass", "STE lint"), "the checks job's own PASS line for STE lint did not read pass: " + out)
         self.assertTrue(verdict_line(out, "fail", "checks-rest:STE lint"),
                         "the checks-rest group did not read its own FAIL line, or read the checks job's PASS line for the same step name: " + out)
@@ -4566,7 +4599,10 @@ class ReadyChecks(CiJobStub, tm.RecordsEnv):
         self.use_ci_job({"checks": [("unknown", "check invariants")], "checks-rest": [("FAIL", SCAFFOLD_STEP)]}, {"checks": 2, "checks-rest": 1})
         refs_before = self.refs()
         rc, out = self.pre_ready()
-        self.assertEqual(len(self.lint_calls()), 2, "the pre-ready run did not run ci-job once per job: " + out)
+        runs, base_reads = self.runs_split("main")
+        self.assertEqual(len(runs), 2, "the pre-ready run did not run ci-job once per job on the head: " + out)
+        self.assertEqual(len(base_reads), 1, "the failing checks-rest step was not read once on the base: " + out)
+        self.assertEqual([run["argv"][0] for run in base_reads], ["checks-rest"], "the base read ran the unknown job, not the failing one: " + out)
         self.assertTrue(verdict_line(out, "unknown", "check invariants"), "the checks job's unknown line did not read unknown: " + out)
         self.assertTrue(verdict_line(out, "fail", SCAFFOLD_READY), "the checks-rest job's FAIL line did not read fail: " + out)
         self.assertIn("against main FAIL", out, "an unknown job beside a FAIL job did not combine to FAIL: " + out)
@@ -5218,6 +5254,281 @@ class PreReadyDeclared(unittest.TestCase):
                 self.assertEqual(len(names), 1, "checks.yml job checks holds %d steps that run %s, want one: %r" % (len(names), script, names))
                 self.assertIn(names[0], declared, "merge.readyChecks does not name %r, the step that runs %s, so the draft's ready run never reads it" % (names[0], script))
                 self.assert_ci_job_reads(names[0])
+
+
+class PreReadyBaseRun(CiJobStub, unittest.TestCase):
+    """The base read of a failing ready check (merge.pre_ready_rows, the pre-ready run's verdict lines). A check that FAILs on the checkout runs
+    once in a copy of the merge base of HEAD and origin/main, and its row says `passes on <sha9>: this change broke it`, `also fails on <sha9>` or `base not read: <reason>`.
+    Every such row stays fail, and run_ready_checks still refuses. A check that passes on the checkout runs no copy. The stub logs each call's
+    folder, so a call from any folder but the checkout is a base read. Repos are plain git in this run's folder; no remote is made."""
+
+    def setUp(self):
+        self.t = tempfile.mkdtemp(dir=RUN_FOLDER)
+        self.init_stub()
+
+    def git(self, *args):
+        return tm.sh(self.wt, "git", *args)
+
+    def commit(self, message):
+        self.git("add", "-A")
+        self.git("-c", "user.name=lane", "-c", "user.email=lane@example.invalid", "-c", "commit.gpgsign=false", "commit", "-q", "-m", message)
+
+    def make_repo(self, base_files, head_files, origin=True, remove=(), tip=None):
+        """The checkout at <case>/repo: a base commit holding `base_files`, then a head commit that removes `remove` and adds `head_files`. origin/main
+        names the base commit when `origin`. `tip` = (remove, add) makes origin/main name a commit T cut from the base commit instead: T removes the
+        first list and adds the second, so the checkout is behind the tip and the merge base is the base commit (self.tip_sha is T). The base sha is
+        read as its commit is made. Each file's text is its own path."""
+        self.wt = os.path.join(self.t, "repo")
+        os.makedirs(self.wt)
+        self.git("init", "-q")
+        for path in base_files:
+            tm.put(os.path.join(self.wt, path), path + "\n")
+        self.commit("base")
+        self.base_sha = self.git("rev-parse", "HEAD")
+        target = self.base_sha
+        if tip is not None:
+            self.git("switch", "-q", "-c", "tip-side")
+            for path in tip[0]:
+                self.git("rm", "-q", path)
+            for path in tip[1]:
+                tm.put(os.path.join(self.wt, path), path + " on the tip\n")
+            self.commit("tip")
+            self.tip_sha = target = self.git("rev-parse", "HEAD")
+            self.git("switch", "-q", "-")
+        for path in remove:
+            self.git("rm", "-q", path)
+        for path in head_files:
+            tm.put(os.path.join(self.wt, path), path + " on the change\n")
+        self.commit("change")
+        if origin:
+            self.git("update-ref", "refs/remotes/origin/main", target)
+
+    def pre_ready(self, checks):
+        """merge.pre_ready_rows on the checkout, with the stub as bin/ci-job. -> (rows, state, the printed text)."""
+        with contextlib.redirect_stdout(io.StringIO()) as printed:
+            rows, (state, _lines, _log) = merge.pre_ready_rows(self.wt, 0, "main", checks, None)
+        return rows, state, printed.getvalue()
+
+    def assert_still_refuses(self, checks):
+        """run_ready_checks on the same tree raises LintFail: a base row, pass or fail, lifts nothing."""
+        with contextlib.redirect_stdout(io.StringIO()), self.assertRaises(merge.LintFail, msg="run_ready_checks did not refuse a failing check with a base row"):
+            merge.run_ready_checks(self.wt, 0, "main", checks)
+
+    def calls_from(self, same_folder):
+        """The stub's calls whose folder is (same_folder) or is not the checkout."""
+        here = os.path.realpath(self.wt)
+        return [c for c in self.lint_calls() if (os.path.realpath(c["cwd"]) == here) == same_folder]
+
+    @staticmethod
+    def steps_of(call):
+        """The step names one ci-job call names with --step, in argv order."""
+        argv = call["argv"]
+        return [argv[i + 1] for i, arg in enumerate(argv[:-1]) if arg == "--step"]
+
+    @staticmethod
+    def phrase(out, verdict, name):
+        """The text after `<verdict> <name> (` on the printed line that opens so, or None."""
+        opening = "%s %s (" % (verdict, name)
+        return next((line[len(opening):] for line in out.splitlines() if line.startswith(opening)), None)
+
+    def test_fails_here_and_passes_on_base_names_the_base_and_still_refuses(self):
+        self.make_repo(["base.txt"], ["BROKEN"])
+        checks = ["Pass one", "Breaks on change"]
+        self.use_ci_job([("PASS", name) for name in checks], 0, file_fails={"Breaks on change": "BROKEN"})
+        rows, state, out = self.pre_ready(checks)
+        self.assertEqual(sorted(self.steps_of(c) for c in self.calls_from(False)), [["Breaks on change"]],
+                         "the base read did not run the failing check alone, once, in a copy of the base: %s" % out)
+        rest = self.phrase(out, "fail", "Breaks on change")
+        self.assertIsNotNone(rest, "no `fail Breaks on change (` line, so the row names no base: %s" % out)
+        match = re.match(PASSES_ON_BASE, rest)
+        self.assertIsNotNone(match, "the row does not say `passes on <sha9>: this change broke it`: %r" % rest)
+        self.assertEqual(match.group(1), self.base_sha[:9], "the row names %s as the base, not the base commit" % match.group(1))
+        self.assertEqual(state, "fail", "a base pass turned the check's fail into %s: %s" % (state, out))
+        self.assert_still_refuses(checks)
+
+    def test_fails_here_and_on_base_says_also_fails_and_still_refuses(self):
+        self.make_repo(["base.txt", "SHARED"], ["note.txt"])
+        checks = ["Pass one", "Breaks everywhere"]
+        self.use_ci_job([("PASS", name) for name in checks], 0, file_fails={"Breaks everywhere": "SHARED"})
+        rows, state, out = self.pre_ready(checks)
+        self.assertEqual(sorted(self.steps_of(c) for c in self.calls_from(False)), [["Breaks everywhere"]],
+                         "the base read did not run the failing check alone, once, in a copy of the base: %s" % out)
+        rest = self.phrase(out, "fail", "Breaks everywhere")
+        self.assertIsNotNone(rest, "no `fail Breaks everywhere (` line, so the row names no base: %s" % out)
+        match = re.match(ALSO_FAILS_ON_BASE, rest)
+        self.assertIsNotNone(match, "the row does not say `also fails on <sha9>`: %r" % rest)
+        self.assertEqual(match.group(1), self.base_sha[:9], "the row names %s as the base, not the base commit" % match.group(1))
+        self.assertEqual(state, "fail", "a base fail turned the check's fail into %s: %s" % (state, out))
+        self.assert_still_refuses(checks)
+
+    def test_passes_here_runs_no_copy_of_the_base(self):
+        """The green control: a check that passes on the checkout is never read against the base."""
+        self.make_repo(["base.txt"], ["note.txt"])
+        checks = ["Pass one", "Breaks on change"]
+        self.use_ci_job([("PASS", name) for name in checks], 0)
+        rows, state, out = self.pre_ready(checks)
+        self.assertEqual(len(self.calls_from(True)), 1, "premise: the checkout did not run ci-job once: %s" % out)
+        self.assertTrue(any(line.startswith("pass Breaks on change") for line in out.splitlines()), "premise: no `pass Breaks on change` line: %s" % out)
+        self.assertEqual([c["argv"] for c in self.calls_from(False)], [], "a passing check ran in a copy of the base")
+        self.assertEqual(state, "pass", "every check passes, but the run reads %s: %s" % (state, out))
+
+    def test_base_not_read_when_origin_main_is_absent(self):
+        self.make_repo(["base.txt"], ["BROKEN"], origin=False)
+        checks = ["Breaks on change"]
+        self.use_ci_job([("PASS", "Breaks on change")], 0, file_fails={"Breaks on change": "BROKEN"})
+        rows, state, out = self.pre_ready(checks)
+        self.assertTrue(any(line.startswith("fail Breaks on change") for line in out.splitlines()), "premise: the checkout's run did not FAIL the check: %s" % out)
+        rest = self.phrase(out, "fail", "Breaks on change")
+        self.assertIsNotNone(rest, "no `fail Breaks on change (` line, so the row names no base: %s" % out)
+        self.assertRegex(rest, BASE_NOT_READ, "a check with no origin/main names no reason the base was not read: %r" % rest)
+        self.assertEqual(state, "fail", "an unread base turned the check's fail into %s: %s" % (state, out))
+
+    def test_a_base_copy_that_crashes_reads_base_not_read(self):
+        self.make_repo(["base.txt", "CRASH"], ["BROKEN"], remove=["CRASH"])
+        checks = ["Breaks on change"]
+        self.use_ci_job([("PASS", "Breaks on change")], 0, file_fails={"Breaks on change": "BROKEN"}, crash_where={"CRASH": 2})
+        rows, state, out = self.pre_ready(checks)
+        self.assertEqual(len(self.calls_from(False)), 1, "premise: the base copy was not run once: %s" % out)
+        rest = self.phrase(out, "fail", "Breaks on change")
+        self.assertIsNotNone(rest, "no `fail Breaks on change (` line, so the row names no base: %s" % out)
+        self.assertRegex(rest, BASE_NOT_READ, "a base copy that crashed names no reason it was not read: %r" % rest)
+        self.assertEqual(state, "fail", "a crashed base copy turned the check's fail into %s: %s" % (state, out))
+
+    def test_two_failing_checks_get_one_base_read_each(self):
+        self.make_repo(["base.txt", "SHARED"], ["BROKEN"])
+        checks = ["Breaks on change", "Breaks everywhere"]
+        self.use_ci_job([("PASS", name) for name in checks], 0,
+                        file_fails={"Breaks on change": "BROKEN", "Breaks everywhere": "SHARED"})
+        rows, state, out = self.pre_ready(checks)
+        self.assertEqual(sorted(self.steps_of(c) for c in self.calls_from(False)), [["Breaks everywhere"], ["Breaks on change"]],
+                         "the two failing checks did not get one base read each, each naming its own check: %s" % out)
+        rest_a = self.phrase(out, "fail", "Breaks on change")
+        rest_b = self.phrase(out, "fail", "Breaks everywhere")
+        self.assertIsNotNone(rest_a, "no `fail Breaks on change (` line: %s" % out)
+        self.assertIsNotNone(rest_b, "no `fail Breaks everywhere (` line: %s" % out)
+        self.assertIsNotNone(re.match(PASSES_ON_BASE, rest_a), "the first row does not say `passes on <sha9>`: %r" % rest_a)
+        self.assertIsNotNone(re.match(ALSO_FAILS_ON_BASE, rest_b), "the second row does not say `also fails on <sha9>`: %r" % rest_b)
+        self.assertEqual(state, "fail", "two failing checks read %s: %s" % (state, out))
+
+    def test_a_base_read_leaves_the_checkout_as_it_was(self):
+        self.make_repo(["base.txt"], ["BROKEN"])
+        head, status, index = self.git("rev-parse", "HEAD"), self.git("status", "--porcelain"), self.git("ls-files", "--stage")
+        self.use_ci_job([("PASS", "Breaks on change")], 0, file_fails={"Breaks on change": "BROKEN"})
+        rows, state, out = self.pre_ready(["Breaks on change"])
+        self.assertEqual(len(self.calls_from(False)), 1, "premise: the base was not read, so nothing shows whether the read touched the checkout: %s" % out)
+        self.assertEqual(self.git("rev-parse", "HEAD"), head, "the base read moved the checkout's HEAD")
+        self.assertEqual(self.git("status", "--porcelain"), status, "the base read changed the checkout's working tree")
+        self.assertEqual(self.git("ls-files", "--stage"), index, "the base read changed the checkout's index")
+        self.assertTrue(os.path.isfile(os.path.join(self.wt, "BROKEN")), "the base read removed the checkout's BROKEN")
+
+    def assert_base_copy_dropped(self, branches_before, out):
+        """After the read: the copy is gone from the disk and from the checkout's `git worktree list`, and no branch was added to the checkout's repo."""
+        copies = [c["cwd"] for c in self.calls_from(False)]
+        self.assertEqual(len(copies), 1, "premise: the base copy was not read once, so nothing shows the copy was removed: %s" % out)
+        self.assertFalse(os.path.exists(copies[0]), "the base copy is still on disk after the read: %s" % copies[0])
+        listed = [os.path.realpath(line[len("worktree "):]) for line in self.git("worktree", "list", "--porcelain").splitlines() if line.startswith("worktree ")]
+        self.assertEqual(listed, [os.path.realpath(self.wt)], "the base read left a worktree in the checkout's repo: %s" % listed)
+        self.assertEqual(self.git("branch", "--format=%(refname)"), branches_before, "the base read left a branch in the checkout's repo")
+
+    def test_a_base_read_removes_its_copy_and_leaves_no_worktree_or_branch(self):
+        self.make_repo(["base.txt"], ["BROKEN"])
+        branches = self.git("branch", "--format=%(refname)")
+        self.use_ci_job([("PASS", "Breaks on change")], 0, file_fails={"Breaks on change": "BROKEN"})
+        rows, state, out = self.pre_ready(["Breaks on change"])
+        self.assert_base_copy_dropped(branches, out)
+
+    def test_a_base_copy_that_crashes_is_removed_too(self):
+        self.make_repo(["base.txt", "CRASH"], ["BROKEN"], remove=["CRASH"])
+        branches = self.git("branch", "--format=%(refname)")
+        self.use_ci_job([("PASS", "Breaks on change")], 0, file_fails={"Breaks on change": "BROKEN"}, crash_where={"CRASH": 2})
+        rows, state, out = self.pre_ready(["Breaks on change"])
+        self.assert_base_copy_dropped(branches, out)
+
+    def test_level_checkout_names_the_base_commit_as_before(self):
+        """The control: the merge base of HEAD and origin/main is origin/main itself, so the base read is the one it always was."""
+        self.make_repo(["base.txt"], ["BROKEN"])
+        checks = ["Pass one", "Breaks on change"]
+        self.assertEqual(self.git("merge-base", "HEAD", "origin/main"), self.base_sha,
+                         "premise: the merge base is not origin/main, so the checkout is behind and this case is no control")
+        self.use_ci_job([("PASS", name) for name in checks], 0, file_fails={"Breaks on change": "BROKEN"})
+        rows, state, out = self.pre_ready(checks)
+        self.assertEqual(sorted(self.steps_of(c) for c in self.calls_from(False)), [["Breaks on change"]],
+                         "the base read did not run the failing check alone, once, in a copy of the base: %s" % out)
+        rest = self.phrase(out, "fail", "Breaks on change")
+        self.assertIsNotNone(rest, "no `fail Breaks on change (` line, so the row names no base: %s" % out)
+        match = re.match(PASSES_ON_BASE, rest)
+        self.assertIsNotNone(match, "the level checkout's row does not say `passes on <sha9>: this change broke it`: %r" % rest)
+        self.assertEqual(match.group(1), self.base_sha[:9], "the row names %s as the base, not the base commit" % match.group(1))
+        self.assertEqual(state, "fail", "a base pass turned the check's fail into %s: %s" % (state, out))
+
+    def test_behind_the_base_tip_reads_the_merge_base_and_says_also_fails(self):
+        """A lane cut before the base's tip removes BROKEN. The check fails at the merge base and on the checkout, and passes at the tip the checkout is
+        behind. The base copy is the merge base, and the row names it as also failing, so it blames this change for nothing the base lacks."""
+        self.make_repo(["base.txt", "BROKEN"], ["note.txt"], tip=(["BROKEN"], ["tip.txt"]))
+        checks = ["Pass one", "Breaks on change"]
+        self.assertEqual(self.git("merge-base", "HEAD", "origin/main"), self.base_sha,
+                         "premise: the merge base of HEAD and origin/main is not the commit the change started from")
+        self.assertNotEqual(self.base_sha, self.tip_sha, "premise: the merge base is the tip, so the checkout is level and this case is no behind case")
+        self.assertEqual(self.git("ls-tree", "--name-only", self.base_sha, "BROKEN"), "BROKEN", "premise: the merge base holds BROKEN, so the check fails there")
+        self.assertEqual(self.git("ls-tree", "--name-only", self.tip_sha, "BROKEN"), "", "premise: the tip lacks BROKEN, so the check passes there")
+        self.use_ci_job([("PASS", name) for name in checks], 0, file_fails={"Breaks on change": "BROKEN"})
+        rows, state, out = self.pre_ready(checks)
+        copies = self.calls_from(False)
+        self.assertEqual(sorted(self.steps_of(c) for c in copies), [["Breaks on change"]],
+                         "the base read did not run the failing check alone, once, in a copy of the base: %s" % out)
+        self.assertEqual(copies[0]["head"], self.base_sha, "the base read ran in a copy at %s, not the merge base %s: %s"
+                         % (copies[0]["head"][:9], self.base_sha[:9], out))
+        rest = self.phrase(out, "fail", "Breaks on change")
+        self.assertIsNotNone(rest, "no `fail Breaks on change (` line, so the row names no base: %s" % out)
+        match = re.match(ALSO_FAILS_ON_BASE, rest)
+        self.assertIsNotNone(match, "the row does not say `also fails on <sha9>`: the base read did not run on the merge base: %r" % rest)
+        self.assertEqual(match.group(1), self.base_sha[:9], "the row names %s as the base, not the merge base %s" % (match.group(1), self.base_sha[:9]))
+        self.assertEqual(state, "fail", "a base fail turned the check's fail into %s: %s" % (state, out))
+        self.assert_still_refuses(checks)
+
+    def test_behind_the_base_tip_reads_the_merge_base_and_says_this_change_broke_it(self):
+        """The change adds BROKEN. The check passes at the merge base and fails on the checkout and at the tip the checkout is behind. The row names the
+        merge base, where the check passed, and not the tip, where it fails too."""
+        self.make_repo(["base.txt"], ["BROKEN"], tip=([], ["BROKEN", "tip.txt"]))
+        checks = ["Pass one", "Breaks on change"]
+        self.assertEqual(self.git("merge-base", "HEAD", "origin/main"), self.base_sha,
+                         "premise: the merge base of HEAD and origin/main is not the commit the change started from")
+        self.assertNotEqual(self.base_sha, self.tip_sha, "premise: the merge base is the tip, so the checkout is level and this case is no behind case")
+        self.assertEqual(self.git("ls-tree", "--name-only", self.base_sha, "BROKEN"), "", "premise: the merge base lacks BROKEN, so the check passes there")
+        self.assertEqual(self.git("ls-tree", "--name-only", self.tip_sha, "BROKEN"), "BROKEN", "premise: the tip holds BROKEN, so the check fails there too")
+        self.use_ci_job([("PASS", name) for name in checks], 0, file_fails={"Breaks on change": "BROKEN"})
+        rows, state, out = self.pre_ready(checks)
+        copies = self.calls_from(False)
+        self.assertEqual(sorted(self.steps_of(c) for c in copies), [["Breaks on change"]],
+                         "the base read did not run the failing check alone, once, in a copy of the base: %s" % out)
+        self.assertEqual(copies[0]["head"], self.base_sha, "the base read ran in a copy at %s, not the merge base %s: %s"
+                         % (copies[0]["head"][:9], self.base_sha[:9], out))
+        rest = self.phrase(out, "fail", "Breaks on change")
+        self.assertIsNotNone(rest, "no `fail Breaks on change (` line, so the row names no base: %s" % out)
+        match = re.match(PASSES_ON_BASE, rest)
+        self.assertIsNotNone(match, "the row does not say `passes on <sha9>: this change broke it`: the base read did not run on the merge base: %r" % rest)
+        self.assertEqual(match.group(1), self.base_sha[:9], "the row names %s as the base, not the merge base %s" % (match.group(1), self.base_sha[:9]))
+        self.assertEqual(state, "fail", "a base pass turned the check's fail into %s: %s" % (state, out))
+        self.assert_still_refuses(checks)
+
+    def test_no_merge_base_reads_base_not_read(self):
+        """origin/main names an unrelated root commit holding the base's tree, so HEAD and origin/main share no commit. The row says base not read,
+        and no copy of that commit runs."""
+        self.make_repo(["base.txt"], ["BROKEN"])
+        tree = self.git("rev-parse", self.base_sha + "^{tree}")
+        unrelated = self.git("-c", "user.name=lane", "-c", "user.email=lane@example.invalid", "-c", "commit.gpgsign=false",
+                             "commit-tree", tree, "-m", "unrelated base")
+        self.git("update-ref", "refs/remotes/origin/main", unrelated)
+        done = subprocess.run(["git", "merge-base", "HEAD", "origin/main"], cwd=self.wt, capture_output=True, text=True)
+        self.assertEqual(done.returncode, 1, "premise: git found a merge base of HEAD and origin/main, so the case has one to read: %r" % done.stdout)
+        self.use_ci_job([("PASS", "Breaks on change")], 0, file_fails={"Breaks on change": "BROKEN"})
+        rows, state, out = self.pre_ready(["Breaks on change"])
+        self.assertTrue(any(line.startswith("fail Breaks on change") for line in out.splitlines()), "premise: the checkout's run did not FAIL the check: %s" % out)
+        rest = self.phrase(out, "fail", "Breaks on change")
+        self.assertIsNotNone(rest, "no `fail Breaks on change (` line, so the row names no base: %s" % out)
+        self.assertRegex(rest, BASE_NOT_READ, "a check with no merge base names no reason the base was not read: %r" % rest)
+        self.assertEqual(self.calls_from(False), [], "a check with no merge base ran in a copy of origin/main, the unrelated commit")
+        self.assertEqual(state, "fail", "a check with no merge base turned its fail into %s: %s" % (state, out))
 
 
 class RunFolderSweep(unittest.TestCase):
