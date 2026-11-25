@@ -401,9 +401,10 @@ def hook_command(hide=()):
     return [sys.executable, MODULE_PATH]
 
 
-def cwd_run(cfg, cwd, prompt=CWD_PROMPT, hide=()):
+def cwd_run(cfg, cwd, prompt=CWD_PROMPT, hide=(), ascii_stdout=False):
     """The hook run once as UserPromptSubmit, in a child process of its own, with `cwd` in the payload (no cwd key when
-    `cwd` is None). `hide` names modules the child cannot import. Returns (the completed process, ""), or (None, why)
+    `cwd` is None). `hide` names modules the child cannot import. `ascii_stdout` gives the child a stdout that cannot
+    encode a non-ASCII character, as a console without UTF-8 has. Returns (the completed process, ""), or (None, why)
     when the run timed out."""
     body = {"hook_event_name": "UserPromptSubmit", "session_id": CWD_SESSION, "prompt": prompt}
     if cwd is not None:
@@ -411,6 +412,8 @@ def cwd_run(cfg, cwd, prompt=CWD_PROMPT, hide=()):
     env = dict(os.environ, CLAUDE_CONFIG_DIR=cfg, HOME=cfg, USERPROFILE=cfg, LOCAL_TIME_NOW=CWD_NOW)
     for name in ("MAILBOX_REPO", "MAILBOX_CACHE", REMOTE_ENV):  # the live mailbox and a cloud marker are not this case's
         env.pop(name, None)
+    if ascii_stdout:
+        env["PYTHONIOENCODING"] = "ascii"
     try:
         proc = subprocess.run(hook_command(hide), input=json.dumps(body), capture_output=True,
                               text=True, env=env, timeout=30)
@@ -573,6 +576,91 @@ def case_cwd_gone_guard_unimportable_prints_one_sentence():
     leaked = [s for s in remedy if s in proc.stdout]
     check("cwd gone, guard unimportable: no sentence of guard.py's remedy appears in the output", not leaked,
           "leaked %r" % leaked)
+
+
+def case_cwd_regular_file_prints_gone_line():
+    """The payload's cwd is a regular file. os.stat succeeds on a file, but a session cannot stand in one, so the line
+    prints and names the file."""
+    reason = session_home_reason()
+    folder = tempfile.mkdtemp(dir=ROOT)
+    path = os.path.join(folder, "lane-file")
+    with open(path, "w", encoding="utf-8") as handle:
+        handle.write("a file, not a folder\n")
+    proc, why = cwd_run(os.path.join(folder, "config"), path)
+    if proc is None:
+        check("cwd regular file: the hook finishes within 30 s", False, why)
+        return
+    check("cwd regular file: the hook exits 0", proc.returncode == 0,
+          "rc=%d stderr=%s" % (proc.returncode, proc.stderr.strip()[-300:]))
+    constant_checked("cwd regular file", reason)
+    lines = remedy_lines(proc.stdout, reason)
+    check("cwd regular file: exactly one line carries the remedy text", len(lines) == 1,
+          "%d such lines; stdout=%r" % (len(lines), proc.stdout[-300:]))
+    check("cwd regular file: that line names the file", len(lines) == 1 and path in lines[0],
+          "line=%r" % (lines[0] if lines else None))
+
+
+def case_cwd_gone_newline_path_prints_one_escaped_line():
+    """The folder is gone and its path holds a newline. The gone line is one line after the time line, and the newline
+    shows as backslash n, so the path cannot split the line."""
+    reason = session_home_reason()
+    folder = tempfile.mkdtemp(dir=ROOT)
+    gone = os.path.join(folder, "lane\nnew")
+    os.makedirs(gone)
+    os.rmdir(gone)  # the worktree was deleted under the session
+    proc, why = cwd_run(os.path.join(folder, "config"), gone)
+    if proc is None:
+        check("cwd gone, newline in path: the hook finishes within 30 s", False, why)
+        return
+    check("cwd gone, newline in path: the hook exits 0", proc.returncode == 0,
+          "rc=%d stderr=%s" % (proc.returncode, proc.stderr.strip()[-300:]))
+    constant_checked("cwd gone, newline in path", reason)
+    after_time = [ln for ln in proc.stdout.splitlines() if not LINE_PRINTED.fullmatch(ln)]
+    check("cwd gone, newline in path: the output after the time line is one line", len(after_time) == 1,
+          "lines=%r" % after_time)
+    check("cwd gone, newline in path: a line shows the newline as backslash n",
+          any("lane\\nnew" in ln for ln in after_time), "lines=%r" % after_time)
+
+
+# The later line for the non-ASCII case: the override line, which prints after the gone line and needs no mailbox.
+# A whole-prompt override grants with no model call, so the run starts no child of its own.
+OVERRIDE_PROMPT = "override 30m"
+
+
+def gone_then_override_run(leaf):
+    """The folder `leaf` under a temp folder is removed, then the hook runs with the override prompt on an ASCII-only
+    stdout. Returns (the completed process, "") or (None, why), as cwd_run does."""
+    folder = tempfile.mkdtemp(dir=ROOT)
+    gone = os.path.join(folder, leaf)
+    os.makedirs(gone)
+    os.rmdir(gone)  # the worktree was deleted under the session
+    return cwd_run(os.path.join(folder, "config"), gone, prompt=OVERRIDE_PROMPT, ascii_stdout=True)
+
+
+def check_later_override_line(label, proc, why):
+    """The shared checks of a gone-folder run with the override prompt: the hook exits 0 and prints the override line."""
+    if proc is None:
+        check("%s: the hook finishes within 30 s" % label, False, why)
+        return
+    check("%s: the hook exits 0" % label, proc.returncode == 0,
+          "rc=%d stderr=%s" % (proc.returncode, proc.stderr.strip()[-300:]))
+    overrides = [ln for ln in proc.stdout.splitlines() if ln.startswith("Override:")]
+    check("%s: the override line after the gone line still prints" % label, len(overrides) == 1,
+          "stdout=%r stderr=%r" % (proc.stdout[-200:], proc.stderr.strip()[-200:]))
+
+
+def case_cwd_gone_non_ascii_path_ascii_stdout_keeps_later_lines():
+    """The folder is gone, its path is not ASCII, and stdout is ASCII only. The gone line cannot be printed, so the
+    later override line must still print and the hook must exit 0."""
+    proc, why = gone_then_override_run("lane-gone-é")
+    check_later_override_line("cwd gone, non-ASCII path, ASCII stdout", proc, why)
+
+
+def case_cwd_gone_ascii_path_ascii_stdout_prints_override_line():
+    """Control: the same run with an ASCII path prints the override line, so the later-line case above can fail only
+    on the path."""
+    proc, why = gone_then_override_run("lane-gone")
+    check_later_override_line("cwd gone, ASCII path, ASCII stdout", proc, why)
 
 
 # OWNER OVERRIDE. local_time.py is the only UserPromptSubmit hook, so it is where the owner's
@@ -3168,6 +3256,10 @@ def main():
         case_cwd_check_leaves_exit_and_other_output_unchanged()
         case_cwd_absent_from_payload_prints_nothing()
         case_cwd_gone_guard_unimportable_prints_one_sentence()
+        case_cwd_regular_file_prints_gone_line()
+        case_cwd_gone_newline_path_prints_one_escaped_line()
+        case_cwd_gone_non_ascii_path_ascii_stdout_keeps_later_lines()
+        case_cwd_gone_ascii_path_ascii_stdout_prints_override_line()
         case_override_grants()
         case_override_context_line()
         case_override_off()
