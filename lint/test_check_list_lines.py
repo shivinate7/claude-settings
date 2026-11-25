@@ -9,10 +9,12 @@ file is written after the head commit.
 Pinned for the builder (the cases build to these):
 - CLI: `python3 lint/check_list_lines.py --root DIR --base REF` judges the lists the head of DIR adds an item to,
   against REF. Exit 0 passes. Exit 1 refuses and prints one failure line per refusal.
-- Crowded: more than 8 items in the head. A crowded list that the change adds an item to holds one item per line.
-  Where order cannot matter (Python import names, set literals, shell case alternatives) it is also sorted. An
-  ordered list (a list, a tuple, dict keys) is never sorted by the check or by --fix.
-- Failure line for a crowded line: `<path>:<line>: list-lines: <n> items on one line, and this change adds one.
+- Refused: a list the change adds an item to, with a line of the head that holds more than 8 items (decision
+  lists-one-line-per-item: "more than 8 entries on one line"). A list wrapped at 8 or fewer items per line passes.
+  A crowded list (more than 8 items in the head) is also sorted where order cannot matter (Python import names, set
+  literals, shell case alternatives). An ordered list (a list, a tuple, dict keys, a shell array) is never sorted by
+  the check or by --fix.
+- Failure line for the first line over 8: `<path>:<line>: list-lines: <n> items on one line, and this change adds one.
   Rule: claude-settings decision lists-one-line-per-item. Fix: python3 ~/.claude/lint/check_list_lines.py --fix <path>`.
   <line> is the 1-based line in the head; <n> is the items on that line in the head.
 - Shell arm: alternatives one per line, each but the last ending in `|\\`. The last alternative ends in `)`, and the
@@ -32,15 +34,19 @@ Pinned for the builder (the cases build to these):
   actions/code-check/test_action.py, class CodeCheck: test_list_lines_switch_off_runs_no_judgment (a control) and
   test_list_lines_switch_on_refuses_crowded_shell_arm.
 - Judged per list: a new item is judged against its own list's base items only. An in-place edit that leaves the
-  item count where it was is not an add. A list that grows is judged.
+  item count where it was is not an add. A list that grows is judged. A list the base does not hold at all (whole
+  in the diff) is not an add and passes: decision lists-one-line-per-item says "only on a list that the pull request
+  adds to."
 - Shell arrays (`NAME=(...)`) are read like a case arm: each element is one item, a quoted element with a space,
   a paren or a `#` is one item, and a `#` or an apostrophe in a comment or a quoted string does not start a
   comment or a quote. `NAME+=(x)` is judged against the same array on a crowded line: the one-line form only.
-  Left out: multi-line arrays, `NAME[n]=`, `declare -a`, appends from another file or scope, and --fix for arrays.
-- Binary: a file the diff marks binary prints `unknown: <path>` and never passes silently.
+  A multi-line array (one row per line) is read the same as a one-line array: the wrapped cases pin it.
+  Left out: `NAME[n]=`, `declare -a`, appends from another file or scope, and --fix for arrays.
+- Binary: a file the diff marks binary prints `unknown: <path>` and never passes silently. Under env CI it exits 1;
+  without it, it exits 0 and still prints the line.
 - Untracked: a new file the diff does not hold prints `unknown: <path>`. The check's own docstring promises only
   `unknown:` for a file it cannot read, so that is the one pinned; the diff reader's docstring says the file "stays
-  unchecked", which is the silent pass this case refuses.
+  unchecked", which is the silent pass this case refuses. Exit codes as for a binary file.
 """
 import ast
 import contextlib
@@ -167,6 +173,25 @@ def pylist(letters):
     return "NAMES = [%s]\n" % ", ".join('"%s"' % letter for letter in letters)
 
 
+def words(count, prefix="n"):
+    return ["%s%d" % (prefix, n) for n in range(1, count + 1)]
+
+
+def chunks(items, per_line):
+    return [items[i:i + per_line] for i in range(0, len(items), per_line)]
+
+
+def wrapped_py(rows, opener="[", closer="]"):
+    """`NAMES = [...]` with each row of items on its own line, each line ending in a comma."""
+    body = "".join("    %s,\n" % ", ".join('"%s"' % v for v in row) for row in rows)
+    return "NAMES = %s\n%s%s\n" % (opener, body, closer)
+
+
+def wrapped_sh(rows):
+    """`ARR=(...)` with each row of words on its own line."""
+    return "#!/bin/bash\nARR=(\n%s)\n" % "".join("  %s\n" % " ".join(row) for row in rows)
+
+
 def arm_items(lines, start):
     """(alternatives, the arm's last line index) read from the one-per-line form that starts after the `case` line."""
     items, i = [], start + 1
@@ -199,11 +224,10 @@ class ListLinesCase(unittest.TestCase):
                       "no failure line in the spec's form for the crowded shell arm: %r" % out)
 
     def test_crowded_python_import_tuple_with_added_name_is_refused(self):
-        base = {"scripts/imports.py": "from names_mod import (\n    ALPHA, BRAVO, CHARLIE, DELTA,\n    ECHO, FOXTROT, GOLF, HOTEL,\n"
-                                      "    INDIA, JULIET,\n)\n"}
-        head = {"scripts/imports.py": "from names_mod import (\n    ALPHA, BRAVO, CHARLIE, DELTA,\n    ECHO, FOXTROT, GOLF, HOTEL,\n"
-                                      "    INDIA, JULIET, KILO,\n)\n"}
-        rc, out = self.judge("a crowded Python import tuple that gains a name is refused", base, head)
+        base = {"scripts/imports.py": "from names_mod import (ALPHA, BRAVO, CHARLIE, DELTA, ECHO, FOXTROT, GOLF, HOTEL, INDIA)\n"}
+        head = {"scripts/imports.py": "from names_mod import (ALPHA, BRAVO, CHARLIE, DELTA, ECHO, FOXTROT, GOLF, HOTEL, INDIA,"
+                                      " JULIET)\n"}
+        rc, out = self.judge("a Python import with nine names on one line that gains a name is refused", base, head)
         self.assertNotEqual(rc, 0, "the crowded import tuple passed: exit 0, output %r" % out)
         self.assertIn("scripts/imports.py:", out, "no failure line names the import tuple's file: %r" % out)
         self.assertIn(RULE, out, "the failure does not name decision %s: %r" % (RULE, out))
@@ -292,6 +316,61 @@ class ListLinesCase(unittest.TestCase):
         head = {"scripts/names.py": pylist("abcdefghij")}
         _, out = self.judge("a one-line list that grows from nine to ten items is refused", base, head)
         self.assertIn(failure_line("scripts/names.py", 1, 10), out, "the list that grew to ten was not refused: %r" % out)
+
+    # Threshold: a line over 8 items in a list the change adds to; a brand-new list is not an add (decision
+    # lists-one-line-per-item: "more than 8 entries on one line", "only on a list that the pull request adds to")
+
+    def test_twelve_items_wrapped_at_four_per_line_with_one_added_passes(self):
+        base = {"scripts/names.py": wrapped_py(chunks(words(12), 4))}
+        head = {"scripts/names.py": wrapped_py(chunks(words(13), 4))}
+        rc, out = self.judge("a list of 12 items wrapped at 4 per line passes when one item is added", base, head)
+        self.assertEqual(rc, 0, "a list wrapped at 4 per line was refused for its length: exit %d, output %r" % (rc, out))
+
+    def test_twenty_items_wrapped_at_two_per_line_in_a_tuple_with_one_added_passes(self):
+        base = {"scripts/names.py": wrapped_py(chunks(words(20), 2), "(", ")")}
+        head = {"scripts/names.py": wrapped_py(chunks(words(21), 2), "(", ")")}
+        rc, out = self.judge("a 20-item tuple wrapped at 2 per line passes when one item is added", base, head)
+        self.assertEqual(rc, 0, "a tuple wrapped at 2 per line was refused for its length: exit %d, output %r" % (rc, out))
+
+    def test_line_of_nine_in_a_wrapped_list_with_one_added_still_fails(self):
+        base = {"scripts/names.py": wrapped_py([words(3), words(9, "m")])}
+        head = {"scripts/names.py": wrapped_py([words(3), words(10, "m")])}
+        _, out = self.judge("a wrapped list whose line holds nine items, with one added to that line, is refused", base, head)
+        self.assertIn(failure_line("scripts/names.py", 3, 10), out,
+                      "the 10-item line is not the one named: %r" % out)
+        self.assertNotIn("scripts/names.py:2:", out, "the 3-item line before it is named as the crowded line: %r" % out)
+
+    def test_shell_array_of_twelve_wrapped_at_four_per_line_with_one_added_passes(self):
+        base = {"scripts/arr.sh": wrapped_sh(chunks(words(12), 4))}
+        head = {"scripts/arr.sh": wrapped_sh(chunks(words(13), 4))}
+        rc, out = self.judge("a shell array of 12 wrapped at 4 per line passes when one element is added", base, head)
+        self.assertEqual(rc, 0, "a shell array wrapped at 4 per line was refused for its length: exit %d, output %r" % (rc, out))
+
+    def test_shell_array_of_twenty_wrapped_at_two_per_line_with_one_added_passes(self):
+        base = {"scripts/arr.sh": wrapped_sh(chunks(words(20), 2))}
+        head = {"scripts/arr.sh": wrapped_sh(chunks(words(21), 2))}
+        rc, out = self.judge("a shell array of 20 wrapped at 2 per line passes when one element is added", base, head)
+        self.assertEqual(rc, 0, "a shell array wrapped at 2 per line was refused for its length: exit %d, output %r" % (rc, out))
+
+    def test_shell_array_growth_from_nine_to_ten_on_one_line_still_fails(self):
+        base = {"scripts/arr.sh": SH_ARR % " ".join(words(9))}
+        head = {"scripts/arr.sh": SH_ARR % " ".join(words(10))}
+        _, out = self.judge("a shell array that grows from nine to ten items on one line is refused", base, head)
+        self.assertIn(failure_line("scripts/arr.sh", 2, 10), out, "the shell array that grew to ten was not refused: %r" % out)
+
+    def test_shell_array_line_of_nine_in_a_wrapped_array_with_one_added_still_fails(self):
+        base = {"scripts/arr.sh": wrapped_sh([words(3), words(9, "m")])}
+        head = {"scripts/arr.sh": wrapped_sh([words(3), words(10, "m")])}
+        _, out = self.judge("a wrapped shell array whose line holds nine words, with one added to that line, is refused",
+                            base, head)
+        self.assertIn(failure_line("scripts/arr.sh", 4, 10), out, "the 10-word line is not the one named: %r" % out)
+        self.assertNotIn("scripts/arr.sh:3:", out, "the 3-word line before it is named as the crowded line: %r" % out)
+
+    def test_brand_new_nine_item_list_on_one_line_passes(self):
+        base = {"scripts/names.py": "VERSION = 1\n"}
+        head = {"scripts/names.py": "VERSION = 1\n" + pylist("abcdefghi")}
+        rc, out = self.judge("a brand-new list of nine items on one line, whole in the diff, is not an add and passes", base, head)
+        self.assertEqual(rc, 0, "a brand-new list was refused as if it were an add: exit %d, output %r" % (rc, out))
 
     # Passes
 
@@ -459,24 +538,48 @@ class ListLinesCase(unittest.TestCase):
 
     # Files the diff holds as binary or not at all: each prints unknown, never a silent pass
 
-    def test_binary_file_with_a_py_name_prints_unknown(self):
+    def binary_repo(self):
+        """The fixture: a file with a .py name that the diff marks binary. Returns (root, base sha)."""
         base = {"scripts/blob.py": "ITEMS = (1, 2)\n"}
         head = {"scripts/blob.py": "ITEMS = (1, 2, 3)\n\x00"}
         root, sha = self.repo("a binary file with a .py name prints unknown, not a silent pass", base, head)
         numstat = subprocess.run(["git", "diff", "--numstat", sha], cwd=root, capture_output=True, text=True,
                                  timeout=TIMEOUT).stdout
         self.assertEqual(numstat, "-\t-\tscripts/blob.py\n", "scope: the diff does not mark the file binary: %r" % numstat)
+        return root, sha
+
+    def test_binary_file_with_a_py_name_prints_unknown(self):
+        root, sha = self.binary_repo()
         rc, out = run_check(root, sha)
+        self.assertEqual(rc, 0, "a binary file failed the run without env CI: exit %d, output %r" % (rc, out))
         self.assertRegex(out, r"unknown: .*scripts/blob\.py", "the binary file passed silently: exit %d, output %r" % (rc, out))
 
-    def test_untracked_new_file_prints_unknown(self):
+    def test_binary_file_exits_one_under_env_ci(self):
+        root, sha = self.binary_repo()
+        rc, out = run_check(root, sha, ci=True)
+        self.assertEqual(rc, 1, "a binary file passed under env CI: exit %d, output %r" % (rc, out))
+        self.assertRegex(out, r"unknown: .*scripts/blob\.py", "no unknown line under env CI: exit %d, output %r" % (rc, out))
+
+    def untracked_repo(self):
+        """The fixture: a new .py file the diff does not hold. Returns (root, base sha)."""
         root, sha = self.repo("a new file the diff does not hold prints unknown, not a silent pass", {"README.md": "# t\n"},
                               {}, untracked={"scripts/new.py": pylist("abcdefghi")})
         status = subprocess.run(["git", "status", "--porcelain", "--untracked-files=all"], cwd=root, capture_output=True,
                                 text=True, timeout=TIMEOUT).stdout
         self.assertIn("?? scripts/new.py", status, "scope: the new file is not untracked: %r" % status)
+        return root, sha
+
+    def test_untracked_new_file_prints_unknown(self):
+        root, sha = self.untracked_repo()
         rc, out = run_check(root, sha)
+        self.assertEqual(rc, 0, "an untracked file failed the run without env CI: exit %d, output %r" % (rc, out))
         self.assertRegex(out, r"unknown: .*scripts/new\.py", "the untracked file passed silently: exit %d, output %r" % (rc, out))
+
+    def test_untracked_new_file_exits_one_under_env_ci(self):
+        root, sha = self.untracked_repo()
+        rc, out = run_check(root, sha, ci=True)
+        self.assertEqual(rc, 1, "an untracked file passed under env CI: exit %d, output %r" % (rc, out))
+        self.assertRegex(out, r"unknown: .*scripts/new\.py", "no unknown line under env CI: exit %d, output %r" % (rc, out))
 
     # --fix
 
