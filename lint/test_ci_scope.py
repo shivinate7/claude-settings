@@ -1914,7 +1914,7 @@ class RecordsOnlyEveryJob(unittest.TestCase):
 @unittest.skipUnless(BASH, "bash not on PATH")
 class SkippedDaily(unittest.TestCase):
     """A skipped daily (EVENT=schedule, NIGHTLY_SKIP=true). ci-scope.sh turns every flag off, sets records_only_skip and
-    skip_comment_delta, and keeps tool_pins on (decision tool-pins; owner ruling fb-1105-1, 11:05 CST Nov 25 2026). On that run
+    skip_comment_delta, and keeps tool_pins on (decision tool-pins). On that run
     each pin job starts for its Tool pins step, and no job runs a test step. Each job's and step's if: is read on the script's own
     outputs by RecordsOnlyEveryJob's reader. The plain daily is the control: its test steps and Tool pins steps run."""
 

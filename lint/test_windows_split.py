@@ -2846,8 +2846,7 @@ class ReadyPullShards(unittest.TestCase):
 
     def test_the_scope_job_runs_on_a_ready_pull_request_and_waits_on_both_skip_outputs(self):
         # Named failure: scope skips a ready PR, or runs a push that push-skip says to skip. A scheduled run with the nightly skip
-        # set runs scope too: its flags stay off and its tool pins are judged there (owner ruling fb-1105-1, 11:05 CST Nov 25 2026;
-        # decision tool-pins).
+        # set runs scope too: its flags stay off and its tool pins are judged there (decision tool-pins).
         jobs = all_jobs(self.text)
         self.assertIn("scope", jobs, "no scope job")
         expr = jobs["scope"]["if"]
