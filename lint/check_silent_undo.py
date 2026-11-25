@@ -853,8 +853,13 @@ def check(cwd, upstream, head, default=None, tool=None, pr_body="", run_state=No
     if git(cwd, "merge-base", "--is-ancestor", h, upstream, ok=(0, 1))[0] == 0:
         return [], []  # at or behind upstream: nothing lands
     ok = allowed(cwd, "%s..%s" % (upstream, h), pr_body)
-    refs = [upstream] + [r for r in ((default,) if default else ("origin/HEAD", "origin/main", "main")) if r != upstream and git(
-        cwd, "rev-parse", "--verify", "-q", r + "^{commit}", ok=(0, 1))[0] == 0][:1]  # the default branch too
+    try:  # a failed read leaves no commit to match, so no default ref is dropped as upstream's twin
+        up_sha = git(cwd, "rev-parse", "--verify", "-q", upstream + "^{commit}")[1].strip()
+    except Unknown:
+        up_sha = None
+    shas = [(r, git(cwd, "rev-parse", "--verify", "-q", r + "^{commit}", ok=(0, 1))) for r in ((default,) if default else ("origin/HEAD", "origin/main", "main"))]
+    # the first default ref at a commit other than upstream's: origin/HEAD beside an equal origin/main adds nothing, so local main is still read
+    refs = [upstream] + [r for r, (rc, out) in shas if rc == 0 and out.strip() != up_sha][:1]
     items, unspent = [], {}
     for m in git(cwd, "rev-list", "--merges", "%s..%s" % (upstream, h))[1].split():
         items += [(x[0], fmt_lost(m, *x)) for x in unrestored(cwd, h, m, lost_lines(cwd, m, refs), unspent)]
