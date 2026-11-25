@@ -760,6 +760,7 @@ STOPPED = re.compile(r"\s*Successfully stopped task: (\S+)")
 RESTART_TASK = re.compile(r"\(task (\w+)\)")  # how a restart notice names each task it stopped
 RESTART_REMINDER = "are now stopped"  # the text before the list of tasks a container restart stopped
 TERMINAL = ("completed", "failed", "killed", "stopped")
+NOTICE_SUMMARY = re.compile(r"<summary>(.*?)</summary>", re.S)
 
 
 def text_of(content):
@@ -799,7 +800,7 @@ def scan_jobs(transcript, keep_waiting=False):
     Stop run that this check ran in (see below); None when there is none or its timestamp is unreadable.
     A Stop that a hook blocked is followed by a run with stop_hook_active true, where stop() prints
     nothing: the summary of that run lists nothing, so it is not a Stop.
-    keep_waiting (the Stop check only) changes two things. A completed notice that carries the waiting text
+    keep_waiting (the Stop check only) changes two things. A completed notice whose summary ends with the waiting text
     (AGENT_WAITING_TEXT) does not close its agent. Each job's tuple then ends with three more items: the
     agent's description, the check-in calls of the session as (time, input text) pairs (read by ci_events,
     the one reader of check-ins; a check-in whose result was an error is not in it), and whether the agent
@@ -905,11 +906,22 @@ def scan_jobs(transcript, keep_waiting=False):
              for k, v in jobs.items() if k not in done or (k in resumed and done[k] < resumed[k][0])}, prev_stop)
 
 
+def says_waiting(note):
+    """True when the notice's own summary ends with the waiting text (AGENT_WAITING_TEXT). The result body after it
+    may quote the phrase or hold a <summary> string of its own, so only the first summary before the result counts; the
+    phrase must end it, since a description the summary carries may hold the phrase mid-line. The substring test
+    comes first because the scan runs on every tool call."""
+    if not AGENT_WAITING_TEXT or AGENT_WAITING_TEXT not in note:
+        return False
+    head = NOTICE_SUMMARY.search(note.split("<result>", 1)[0])
+    return bool(head) and head.group(1).rstrip().endswith(AGENT_WAITING_TEXT)
+
+
 def closed_by_notice(text, keep_waiting=False):
     """The ids that text closes. A <task-notification> block with a terminal status closes its <task-id>.
     A terminal block with no <task-id> is a restart notice: it closes each '(task <id>)' it names. A
     reminder that says the background tasks 'are now stopped' closes each '(task <id>)' after that text.
-    A non-terminal status closes nothing. With keep_waiting, a terminal notice that carries the waiting text
+    A non-terminal status closes nothing. With keep_waiting, a terminal notice whose summary ends with the waiting text
     (AGENT_WAITING_TEXT) closes nothing: the agent ended its turn but its own background work runs. Each test is a substring check before any regex, because the
     scan runs on every tool call."""
     ids = []
@@ -920,7 +932,7 @@ def closed_by_notice(text, keep_waiting=False):
     for note in text.split(TASK_NOTIFICATION_TAG)[1:]:
         tid, st = TASK_ID.search(note), TASK_STATUS.search(note)
         if st and st.group(1).strip().lower() in TERMINAL:
-            if keep_waiting and AGENT_WAITING_TEXT and AGENT_WAITING_TEXT in note:
+            if keep_waiting and says_waiting(note):
                 continue
             if tid:
                 ids.append(tid.group(1).strip())
@@ -930,13 +942,13 @@ def closed_by_notice(text, keep_waiting=False):
 
 
 def waiting_ids(text):
-    """The ids of the agents whose terminal notice in text carries the waiting text (see closed_by_notice)."""
+    """The ids of the agents whose terminal notice in text has a summary that ends with the waiting text (see says_waiting)."""
     if not (TASK_NOTIFICATION_TAG and AGENT_WAITING_TEXT) or AGENT_WAITING_TEXT not in text:
         return []
     ids = []
     for note in text.split(TASK_NOTIFICATION_TAG)[1:]:
         tid, st = TASK_ID.search(note), TASK_STATUS.search(note)
-        if tid and st and st.group(1).strip().lower() in TERMINAL and AGENT_WAITING_TEXT in note:
+        if tid and st and st.group(1).strip().lower() in TERMINAL and says_waiting(note):
             ids.append(tid.group(1).strip())
     return ids
 
