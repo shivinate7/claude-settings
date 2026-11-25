@@ -3086,6 +3086,23 @@ MUTATIONS = [
      '    if at >= until or (role is not None',
      '    if at > until or (role is not None',
      "override", 'opus override: `opus 2h` lets an Opus spawn through'),
+    # THE OWNER'S MODEL HOLD (hooks/override.py). Each row names the case that kills it.
+    ("owner-model-word: the hold reader drops `end`, so a hold that ends at the report outlives it",
+     '"end": data.get("end"),',
+     '"end": None,',
+     "override", "owner-model-word: control, an Agent spawn on haiku is refused after a report ends the haiku hold"),
+    ("owner-model-word: take() has no `until` check, so a held model lifts a spawn past its 2 h end",
+     '    if at >= until or (role is not None and role != str(spawn_role).lower()):',
+     '    if role is not None and role != str(spawn_role).lower():',
+     "override", "opus override: `opus 2h` lets an Opus spawn through, an agent's too, until it ends"),
+    ("owner-model-word: take() lets a held sonnet lift the Opus ceiling, since the model check is dropped",
+     'if hold["model"] != ("opus" if model is None else _family(model)):',
+     'if False:',
+     "override", "owner-model-word: a held sonnet does not lift the Opus ceiling for a spawn with no role"),
+    ("owner-model-word: the role hold skips the ceiling for a named role, so a round-2 reviewer on sonnet walks past",
+     'if not hold_covers_role(hold, role) or (hold.get("role") is None and hold_exempt(spawn, role, rounds)):',
+     'if not hold_covers_role(hold, role) or hold.get("role") is not None:',
+     "guard", "owner-model-word: a round-2 reviewer spawn on sonnet is refused under agent-role-model when the owner's haiku hold names reviewer"),
     # THE VETO AND THE TAKE (decision owner-override). never_lifted names the acts an override may not lift, and
     # override.take reads the one-act override. A mutant that lifts a never-lifted act, or reads no override, must go red.
     ("never-lifted: a shell kill of pid 1 is liftable, so an override reaches it",
