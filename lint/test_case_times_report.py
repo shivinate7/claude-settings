@@ -14,6 +14,7 @@ a constant. Times here are fixed JSON values, never measured (rule P5).
 import ast
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -72,8 +73,8 @@ def fresh(test, suffix=""):
     return folder
 
 
-def row(suite, group, case, seconds, outcome="pass"):
-    return {"suite": suite, "group": group, "case": case, "s": seconds, "fixture_s": 0.0, "outcome": outcome}
+def row(suite, group, case, seconds, outcome="pass", fixture=0.0):
+    return {"suite": suite, "group": group, "case": case, "s": seconds, "fixture_s": fixture, "outcome": outcome}
 
 
 def write_job(folder, job, rows):
@@ -275,6 +276,37 @@ class Literal(unittest.TestCase):
         result = run_reader(folder)
         self.assertNotIn("skip_probe", result.stdout,
                          "a case at 9.8 times its group median was flagged: the skipped rows moved the median")
+
+    def test_fixture_time_counts_toward_the_flag(self):
+        decisive_control(self)
+        folder = fresh(self)
+        suite = "lint/fixture_fixture_time.py"
+        # four cases at 0.5 s and a probe at s 0.1 + fixture_s 4.9 = 5.0 s: 10 times the group median of 0.5 s, over
+        # the 1.0 s floor. The probe's own s is 0.1 s, under the floor, so only its fixture_s can flag it.
+        rows = [row(suite, suite, "T.fixture_normal_%d" % i, 0.5) for i in range(4)]
+        rows.append(row(suite, suite, "T.fixture_probe", 0.1, fixture=4.9))
+        write_job(folder, "fixture", rows)
+        result = run_reader(folder)
+        self.assertIn("fixture_probe", result.stdout,
+                      "a case with s 0.1 and fixture_s 4.9 (5.0 s in all, 10 times its group median) was not flagged: "
+                      "the reader leaves fixture_s out of a case's time")
+        flag = [line for line in result.stdout.splitlines() if "fixture_probe" in line]
+        numbers = [float(n) for line in flag for n in re.findall(r"\d+(?:\.\d+)?", line)]
+        for want in (0.1, 4.9):
+            self.assertTrue(any(abs(n - want) < 0.005 for n in numbers),
+                            "the flag line for fixture_probe does not show the number %g: %r" % (want, flag))
+
+    def test_small_fixture_time_not_flagged(self):
+        decisive_control(self)
+        folder = fresh(self)
+        suite = "lint/fixture_fixture_small.py"
+        # four cases at 0.5 s and a probe at s 0.3 + fixture_s 0.2 = 0.5 s, the group median
+        rows = [row(suite, suite, "T.small_normal_%d" % i, 0.5) for i in range(4)]
+        rows.append(row(suite, suite, "T.small_probe", 0.3, fixture=0.2))
+        write_job(folder, "small", rows)
+        result = run_reader(folder)
+        self.assertNotIn("small_probe", result.stdout,
+                         "a case at the group median in all (s 0.3 and fixture_s 0.2 = 0.5 s) was flagged")
 
 
 if __name__ == "__main__":
