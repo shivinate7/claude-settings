@@ -917,6 +917,15 @@ add("brief-destructive-git: Avoid a span, a colon, then a reset span is denied",
     prompt="Avoid `git stash`: `git reset --hard origin/main`.", subagent_type="builder", model="sonnet")
 add("brief-destructive-git: Without a span, a colon, then a reset span is denied", "deny", BRIEF_DESTRUCTIVE, tool="Agent",
     prompt="Without `git stash`: `git reset --hard origin/main`.", subagent_type="builder", model="sonnet")
+# A span with no joiner after it ends the list (_brief_prohibits): a space or a `)` between two spans does not carry the
+# negator on to the second span. An "or" joins them as one list the negator covers, so that control stays allowed.
+add("brief-destructive-git: a forbidding word, a span, a space, then a reset span is denied", "deny", BRIEF_DESTRUCTIVE,
+    tool="Agent", prompt="Never run `git stash` `git reset --hard origin/main`.", subagent_type="builder", model="sonnet")
+add("brief-destructive-git: a forbidding word, a span, a closing paren, then a reset span is denied", "deny",
+    BRIEF_DESTRUCTIVE, tool="Agent", prompt="Never run `git stash`) `git reset --hard origin/main`.",
+    subagent_type="builder", model="sonnet")
+add("brief-destructive-git: control, a forbidding word over two spans joined by or is allowed", "allow", tool="Agent",
+    prompt="Never run `git stash` or `git reset --hard origin/main`.", subagent_type="builder", model="sonnet")
 # Control: plain words with no backtick span name no command, so the scan has nothing to read and allows the brief.
 add("brief-destructive-git: control, plain no rebase and no force words with no span are allowed", "allow", tool="Agent",
     prompt="Do the check with no rebase, no force, then report.", subagent_type="builder", model="sonnet")
