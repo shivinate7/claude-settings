@@ -8,16 +8,17 @@ Stop: when this turn ran `git commit`, `git push`, `git merge`, `git revert` or 
 (not with --abort, --quit, -n, --no-commit, -h or --help; --skip and --continue commit), `gh pr merge`,
 `gh pr create` or `gh pr update-branch` (not with --help or -h, nor `--disable-auto` on merge or `--web` on create),
 or a landing GitHub MCP tool (LANDING_TOOLS, which includes delete_file, update_pull_request_branch
-and enable_pr_auto_merge) after the last human message, block once unless the reply ends with one blockquote holding
+and enable_pr_auto_merge) after the last human message, refuse once unless the reply ends with one blockquote holding
 the bold labels Done, Deviations, Input Needed, Next, in that order (CLAUDE.md, "Reports, in
 order"; the blockquote and no-fence rule lives in the `shiv-stylisms` output style). Prose may sit above the report on any turn. Nothing may follow the report.
 When stop_hook_active is set, the reply is already a rewrite, so the guard stays quiet, with one
-exception: a block that asked for the missing report leaves a marker file (local_time.report_marker_path,
-holding the index of the turn's human record). The next stop_hook_active Stop consumes it and checks
-the rewrite once for model names, the `Unstarted:` line, an unsourced "answered" line, an unsourced recovered
-item and the plain-form faults (a bare id, a UTC time, a contradiction with no question). A failure blocks with a correction.
-Cost: one small file per missing-report block, written at that block, deleted at the next Stop with
-stop_hook_active; no process, timer or log. A correction block leaves no marker, so no loop follows.
+exception: a refusal for the missing report or a wrong model name leaves a marker file
+(local_time.report_marker_path, holding the index of the turn's human record, and for a wrong name the word
+"names"). The next stop_hook_active Stop consumes it and checks the rewrite once for model names (a "names"
+marker: the wrong name alone), the `Unstarted:` line, an unsourced "answered" line, an unsourced recovered
+item and the plain-form faults (a bare id, a UTC time, a contradiction with no question). A failure is refused with a correction.
+Cost: one small file per missing-report or wrong-name refusal, written at that refusal, deleted at the next Stop with
+stop_hook_active; no process, timer or log. A correction's refusal leaves no marker, so no loop follows.
 
 On landed turns whose report has the right shape, it also blocks a Deviations item that admits a mistake
 the writer made ("I broke ...", a first-person clause with a fault word and no negator before it) and names no
@@ -190,7 +191,7 @@ import sys
 HERE = os.path.dirname(os.path.realpath(__file__))
 sys.path.insert(0, HERE)
 from _transcript import (  # noqa: E402
-    ARTIFACT_DATA, SEND_TOOLS, delivered_tool_use_ids, inactive_tool_use_ids, is_last_human, is_stop_feedback, items_write, last_incoming_index, last_reply, page_read_ran, page_writer_id, peer_sender, tool_verb,
+    ARTIFACT_DATA, SEND_TOOLS, delivered_tool_use_ids, inactive_tool_use_ids, is_incoming, is_last_human, is_stop_feedback, items_write, last_incoming_index, last_reply, page_read_ran, page_writer_id, peer_sender, tool_verb,
     read_transcript, records_after_last_human, send_targets, tool_results, tool_uses)
 import layout  # noqa: E402
 import _clause  # noqa: E402
@@ -405,8 +406,9 @@ BLOCK_REASON = owner_line(
 # The owner has read the report before a refusal lands, so a resent report doubles it. The missing-report refusal
 # asks for the report itself; every other refusal asks for a short correction. Both asks live in the record.
 # A Stop hook cannot read a reply before it is shown. The correction runs with stop_hook_active
-# set, so this guard stays quiet on it. The rewrite after a missing-report refusal is the one
-# exception: rewrite_problems() checks it once, and its own refusal leaves no marker.
+# set, so this guard stays quiet on it. The rewrite after a missing-report refusal is one
+# exception, as is the rewrite after a wrong-name refusal: rewrite_problems() checks it once, and its own refusal
+# leaves no marker.
 
 MODELS_REASON = owner_line(
     "Model-name guard",
@@ -1136,12 +1138,13 @@ def spawn_models(records):
 
 
 def _refused(records, i):
-    """True when the report at `records[i]` was refused: the next record, past the harness's system records and
-    other isMeta records, is the Stop hook's feedback record."""
+    """True when the report at `records[i]` was refused: the Stop hook's feedback record comes before the next
+    assistant record or incoming message. The harness writes other records (system, isMeta, data-flow-records,
+    attachment, queue-operation) between the two, so every record that is neither is skipped."""
     for rec in records[i + 1:]:
         if is_stop_feedback(rec):
             return True
-        if rec.get("type") != "system" and not rec.get("isMeta"):
+        if rec.get("type") == "assistant" or is_incoming(rec):
             return False
     return False
 
@@ -1165,17 +1168,22 @@ def records_since_report(records, text):
 WRONG_NAME_MARK = " matches no "
 
 
-def done_models_problem(text, spawned, window=None):
+def done_models_problem(text, spawned, every=None, window=None):
     """Name what Done gets wrong about the spawned roles' models, else ''.
 
-    `spawned` is the turn's spawns and sets which roles Done must name. `window` is the spawns made since the
-    session's previous report (the whole transcript with none): a model Done names for a role must be one a
-    same-role spawn in it ran. An older spawn's model does not count, and a spawn whose model is unknown ''
-    does not switch the check off while another same-role spawn in the window resolves.
-    A role named in Done with no spawn of that role in the window passes, and the missing-role check
-    keeps the turn's window (both on purpose).
+    `spawned` is the turn's spawns and sets which roles Done must name. `every` is the whole transcript's
+    spawns, a compaction included. `window` is the spawns made since the session's previous report (the whole
+    transcript with none). Two checks judge each model Done names for a role:
+    - it must be one that role ran in the turn or anywhere in the transcript; a spawn whose model is unknown ''
+      in the turn lets any name pass, and an unknown earlier spawn is no model;
+    - when the role has spawns in the window and all are resolved, at least one model named for it must be one
+      of them, so Done cannot name only an older run's model for work this window's agents did. An unknown
+      window spawn never refuses a name, since it may have run it.
+    The missing-role check keeps the turn's spawns. A role Done names with no spawn in the window passes the
+    second check.
     """
-    if not spawned:
+    every = every or {}
+    if not spawned and not every:
         return ""
     done = " ".join(done_items(block_text(text, keep_indent=True)))
     named = {(r.lower(), m.lower()) for roles, m in ROLE_MODEL_RE.findall(done)
@@ -1186,9 +1194,15 @@ def done_models_problem(text, spawned, window=None):
     if missing:
         return "no model named for " + ", ".join(missing)
     for role, model in sorted(named):
-        ran = {m for m in (spawned if window is None else window).get(role, ()) if m}
-        if ran and model not in ran:
+        ran = set(spawned.get(role, ())) | {m for m in every.get(role, ()) if m}
+        if ran and "" not in ran and model not in ran:
             return f"'{role} {model}'{WRONG_NAME_MARK}{role} spawn, which ran " + ", ".join(sorted(ran))
+    if window is not None:
+        for role in sorted({r for r, _ in named}):
+            ran = set(window.get(role, ()))
+            models = sorted(m for r, m in named if r == role)
+            if ran and "" not in ran and not ran.intersection(models):
+                return f"'{role} {models[0]}'{WRONG_NAME_MARK}{role} spawn, which ran " + ", ".join(sorted(ran))
     return ""
 
 
@@ -3282,7 +3296,7 @@ def _marker_path(hook):
 
 
 def rewrite_problems(hook):
-    """Reasons for the rewrite that follows a missing-report or a wrong-model block, or []. The marker is
+    """Reasons for the rewrite that follows a missing-report or a wrong-model refusal, or []. The marker is
     consumed before any check, so a second rewrite finds none and stays quiet. It holds the
     index of the turn's human record, so the spawns are read from the same turn whether or not
     the hook's feedback record counts as human. Fails open on any error."""
@@ -3311,7 +3325,7 @@ def rewrite_problems(hook):
         text = last_reply(hook)
         spawned = spawn_models(records[idx + 1:])
         reasons = []
-        models = done_models_problem(text, spawned, spawn_models(records_since_report(records, text)))
+        models = done_models_problem(text, spawned, spawn_models(records), spawn_models(records_since_report(records, text)))
         if kind == NAMES_MARKER:  # the correction of a wrong-name refusal: only the wrong name is judged again
             return [MODELS_REASON % models] if WRONG_NAME_MARK in models else []
         if models:
@@ -3887,7 +3901,8 @@ def main():
             "a Done line does not say BUILT, RECORDED or OTHER, or says BUILT or RECORDED with no PR or commit: "
             + repr(item)))
     spawned = spawn_models(after)
-    models = done_models_problem(text, spawned, spawn_models(records_since_report(records, text))) if shape_ok else ""
+    models = (done_models_problem(text, spawned, spawn_models(records), spawn_models(records_since_report(records, text)))
+              if shape_ok else "")
     if models:
         reasons.append(MODELS_REASON % models)
     if shape_ok and unstarted_problem(text, spawned):
@@ -3931,9 +3946,10 @@ def main():
         reasons.append(refusal)
     if reasons:
         reason = " ".join(reasons) + " (rule reports-order-of-labels)"
-        # A wrong-name refusal leaves the same marker as a missing report: the harness's feedback record then counts as
-        # the last human message, so only the marker lets the correction's rewrite read this turn's spawns. A
-        # "no model named" refusal leaves none, as on main. Its correction is judged for the wrong name alone.
+        # A wrong-name refusal leaves a marker, as a missing report does: the harness's feedback record then counts as
+        # the last human message, so only the marker lets the correction's rewrite read this turn's spawns. The
+        # marker's second word, NAMES_MARKER, limits that rewrite to the wrong name. A "no model named" refusal
+        # leaves no marker.
         if not shape_ok:
             write_marker(hook, last_human_idx)
         elif WRONG_NAME_MARK in models:

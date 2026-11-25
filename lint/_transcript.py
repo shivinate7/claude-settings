@@ -90,13 +90,13 @@ def owner_text(rec, notice_tags=()):
     return text
 
 
-# The text a blocked Stop hook's feedback record starts with. The harness writes it as a user record after the
-# stop_hook_summary record; it is the hook's order to the session, not an owner message.
+# The text a refused Stop hook's feedback record starts with. The harness writes it as a user record after a refused
+# report; it is the hook's order to the session, not an owner message.
 STOP_FEEDBACK_PREFIX = "Stop hook feedback:"
 
 
 def is_stop_feedback(rec):
-    """True for the user record that carries a blocked Stop hook's feedback."""
+    """True for the user record that carries a refused Stop hook's feedback."""
     text = owner_text(rec)
     return text is not None and text.lstrip().startswith(STOP_FEEDBACK_PREFIX)
 

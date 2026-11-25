@@ -159,7 +159,7 @@ def _session_base(session_id):
 
 
 def report_marker_path(session_id):
-    """The file report_guard.py writes when it blocks for a missing report, or None. Same folder
+    """The file report_guard.py writes when it refuses a report for a missing report or a wrong model name, or None. Same folder
     as the inbox files."""
     base = _session_base(session_id)
     return None if base is None else base + ".report-block"
