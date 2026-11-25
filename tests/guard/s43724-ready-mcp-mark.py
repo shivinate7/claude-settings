@@ -46,6 +46,8 @@ RPM_BG_FAST = os.path.join(RPM, "bg-fast-checks.jsonl")         # a background `
 RPM_OTHER_PR = os.path.join(RPM, "other-pr-pass.jsonl")         # a foreground `merge 13 --ready` whose pass is the current head of #12
 RPM_SKIPPED_PASS = os.path.join(RPM, "skipped-pass-current-head.jsonl")  # a ready run whose pass skipped one listed action step, on feat-current
 RPM_SKIPPED_OLD = os.path.join(RPM, "skipped-pass-older-head.jsonl")     # the same pass, skipped step and all, on feat-current^
+RPM_VERDICT_PASS = os.path.join(RPM, "verdict-pass-current-head.jsonl")  # `verdict merge 12 --ready`: verdict's PASS line, then the ready-pass line it keeps, on feat-current
+RPM_VERDICT_ONLY = os.path.join(RPM, "verdict-pass-line-only.jsonl")     # the same wrapped run, whose result is verdict's PASS line alone
 
 
 def _rpm_pass(sha):
@@ -61,6 +63,11 @@ def _rpm_pass_skipped(sha, skipped):
 def _rpm_ready_run(tool_id, *results):
     """One paired Bash call, `merge 12 --ready`, whose result lines are `results`."""
     return [role_use(tool_id, "Bash", {"command": MERGE_SHIM + " 12 --ready"}), role_result(tool_id, "\n".join(results))]
+
+
+def _rpm_verdict_run(tool_id, *results):
+    """One paired Bash call, `verdict merge 12 --ready`, whose result lines are `results`: verdict's PASS line, then what it keeps of the run."""
+    return [role_use(tool_id, "Bash", {"command": "verdict " + MERGE_SHIM + " 12 --ready"}), role_result(tool_id, "\n".join(results))]
 
 
 def _rpm_run(tool_id, args, *results):
@@ -207,6 +214,8 @@ def _build_readymark():
                        role_result("other-pr-ready", _rpm_pass(current))],
         RPM_SKIPPED_PASS: _rpm_ready_run("skipped-now", _rpm_pass_skipped(current, 1), RPM_DRAFT_LINE),
         RPM_SKIPPED_OLD: _rpm_ready_run("skipped-old", _rpm_pass_skipped(older, 1), RPM_DRAFT_LINE),
+        RPM_VERDICT_PASS: _rpm_verdict_run("verdict-now", "PASS %s (41.3s)" % (MERGE_SHIM + " 12 --ready"), _rpm_pass(current)),
+        RPM_VERDICT_ONLY: _rpm_verdict_run("verdict-only", "PASS %s (41.3s)" % (MERGE_SHIM + " 12 --ready")),
     }
     for path, rows in lines.items():
         with open(path, "w", encoding="utf-8") as handle:
@@ -217,7 +226,7 @@ lazy_fixture([RPM_NO_PASS, RPM_OLD_PASS, RPM_PASS, RPM_CLAIM_PASS, RPM_CONFIRM_P
               RPM_NOCHECKS_PASS, RPM_NOCHECKS_OLD, RPM_DRY_PASS, RPM_DRY_OLD,
               RPM_UNCHECKED_PASS, RPM_UNCHECKED_OLD, RPM_CLAIM_STOP, RPM_CLAIM_STOP_OLD,
               RPM_BG_READ, RPM_BG_CAT, RPM_BG_OLD, RPM_BG_FAILED, RPM_BG_NEVER, RPM_BG_NOTICE, RPM_BG_OTHER, RPM_BG_FAST,
-              RPM_OTHER_PR, RPM_SKIPPED_PASS, RPM_SKIPPED_OLD], _build_readymark)
+              RPM_OTHER_PR, RPM_SKIPPED_PASS, RPM_SKIPPED_OLD, RPM_VERDICT_PASS, RPM_VERDICT_ONLY], _build_readymark)
 
 
 def rpm_mcp(name, expected, transcript, fake=GHREADY_CURRENT, carries=(), lacks=(), cwd=RPR_REPO, **tool_input):
@@ -239,6 +248,12 @@ rpm_mcp("ready-mcp-mark: MCP draft false after a ready pass on the current head 
 rpm_mcp("ready-mcp-mark: MCP draft false after a skipped-step pass on the current head is allowed", "allow", RPM_SKIPPED_PASS,
         owner="y", repo="x", pullNumber=12, draft=False)
 rpm_mcp("ready-mcp-mark: MCP draft false after a skipped-step pass on an older head is refused", "deny", RPM_SKIPPED_OLD,
+        carries=RPM_REMEDY, lacks=RPM_TARGET_LACKS, owner="y", repo="x", pullNumber=12, draft=False)
+# A ready run wrapped in verdict: verdict's PASS line, then the ready-pass line it keeps. The guard reads that line as it reads a bare run.
+rpm_mcp("ready-mcp-mark: MCP draft false after a verdict-wrapped ready pass on the current head is allowed", "allow", RPM_VERDICT_PASS,
+        owner="y", repo="x", pullNumber=12, draft=False)
+# verdict's PASS line alone names no head, so a wrapped run whose output keeps no ready-pass line stands for nothing.
+rpm_mcp("ready-mcp-mark: MCP draft false after a verdict PASS line with no kept ready-pass line is refused", "deny", RPM_VERDICT_ONLY,
         carries=RPM_REMEDY, lacks=RPM_TARGET_LACKS, owner="y", repo="x", pullNumber=12, draft=False)
 rpm_mcp("ready-mcp-mark: MCP draft true with no ready pass is allowed", "allow", RPM_NO_PASS,
         owner="y", repo="x", pullNumber=12, draft=True)

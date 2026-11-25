@@ -200,7 +200,6 @@
 - octopus-push-chain-unread: `git merge a b && git push` passes, because the octopus does not exist when the hook reads the range; conflict-markers has a chain rule and octopus-push has none (hooks/guard_merge.py octopus_push_hit)
 - octopus-push-shell-source: a push source given as a shell variable is read as HEAD, so an octopus on that branch passes; the reader is shared with conflict-markers (hooks/guard_merge.py _plain_source)
 - octopus-push-wrapped-pushes: a push inside `bash -c` or `eval`, and `--all`, `--mirror` or `--tags` alone, are not read (hooks/guard_merge.py octopus_push_hit)
-- old-before-was-flags-history: the history rule flags the word old followed later by was and a colon in one block, so a plain description fails as history (lint/hook_catalog.py) Fix: none — rare and harmless. Until: 2026-11-20
 - one-term-per-meaning-unchecked: no check reads the 'one term per meaning' clause of output-write-in-ste (CLAUDE.md, lint/rule_mechanisms.json) Fix: none — owner decides. Until: 2026-11-21
 - override-agent-text-unmeasured: no check shows whether a session-sent message reading exactly `override` fires the prompt hook and grants an override. Decision: owner-override Fix: none — rare and harmless. Until: 2026-11-22
 - override-once-not-bound: a one-act override lifts the next refusal within 10 minutes, whatever it is (owner 15:34: not a safety hole). Decision: owner-override Fix: none — owner decides. Until: 2026-11-23
