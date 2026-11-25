@@ -1213,6 +1213,13 @@ def suite_paths(step):
     return [p for ln in run_lines(step) if (p := pick_line(ln))]
 
 
+def suite_runs(step):
+    """[(path, env)]: each suite a CI step runs, keyed by the suite's path and the step's own env: (sorted (name, value) pairs). A suite that
+    CI runs in several steps that differ by env (one step per shard) is several runs; two steps with the same path and the same env are one."""
+    env = tuple(sorted(step_env(step).items()))
+    return [(path, env) for path in suite_paths(step)]
+
+
 def repo_path(word, folder):
     """The repo-relative path `word` names for a shell in `folder` (repo-relative, "" for the top; None when a `cd` left it unreadable): a
     variable that names the checkout (`$REPO_ROOT`, `$GITHUB_WORKSPACE`, `$PWD`) and `./` come off, and the rest is joined to the folder.
@@ -1515,7 +1522,7 @@ def prune_own_logs(folder, now=None):
 
 def main(argv, sibling=False, ran_suites=None):
     """sibling: this run is the second pass over another job of the workflow that holds a picked suite (see the tail of this function); it runs
-    that job's picked suite steps only, and takes no sibling of its own. ran_suites: the suite paths already run in this process, so a suite two jobs hold runs once."""
+    that job's picked suite steps only, and takes no sibling of its own. ran_suites: the (path, env) of each suite run already in this process (suite_runs), so a suite two jobs hold with the same env runs once."""
     ran_suites = set() if ran_suites is None else ran_suites
     args = list(argv)
     opts = {"--workflow": None, "--base": None}
@@ -1606,14 +1613,14 @@ def main(argv, sibling=False, ran_suites=None):
     if sibling:  # only the picked suite steps of this job: its own lint steps are CI's, not part of the lane lint
         kind = ["" if k in ("lint", "local") else k for k in kind]
     suites = [suite_paths(st) if lint and not k else [] for st, k in zip(steps, kind)]  # each step's suite lines
-    elsewhere = {}  # each other job: the suites of its CI steps, which this run does not run
+    elsewhere = {}  # each other job: the suite runs (suite_runs) of its CI steps, which this run does not run
     reaching = set()  # each other job with a CI step that CI runs for this diff and that holds a suite the selector does not govern (owed_suites)
     jobs = re.findall(r"^  ([\w-]+):\s*$", text.split("\njobs:", 1)[-1], re.M)
     if lint and base and not sibling:
         for other in jobs:
             if other == job:
                 continue
-            found = {path for st in step_blocks(job_block(text, other)) for path in suite_paths(st)}
+            found = {run for st in step_blocks(job_block(text, other)) for run in suite_runs(st)}
             if found:
                 elsewhere[other] = found
             if job_reached(job_block(text, other)) and any(owed_suites(st) for st in step_blocks(job_block(text, other))):
@@ -1739,7 +1746,7 @@ def main(argv, sibling=False, ran_suites=None):
             ran += 1
             ran_lint += kind[n - 1] in ("lint", "suite")  # a picked suite step that ran is a lint run too
             if kind[n - 1] == "suite" and picked is not None:
-                ran_suites.update(picked.intersection(suites[n - 1]))
+                ran_suites.update(run for run in suite_runs(step) if run[0] in picked)
             if dry:
                 print("%-15s %s" % ("would run", name))
                 continue
@@ -1779,14 +1786,15 @@ def main(argv, sibling=False, ran_suites=None):
             print("%-15s suites of other jobs: --lint could not select them: %s" % ("not run", why))
         print("summary: %s %d of %d steps" % ("would run" if dry else "ran", ran, len(steps)))
         for other in (j for j in jobs if j in elsewhere or j in reaching):  # the second pass: each other job that holds a picked suite, or a suite CI runs for this diff, run as CI's own list of jobs names it
-            hit = picked.intersection(elsewhere.get(other, ())) if picked is not None else set()
+            hit = {run for run in elsewhere.get(other, ()) if run[0] in picked} if picked is not None else set()
+            hit_paths = ", ".join(sorted({path for path, _ in hit}))
             runner = job_runner(job_block(text, other))
             if hit and not runner.startswith("ubuntu"):
-                print("%-15s job %s: picked %s; it runs on %s, which this Linux lint does not run" % ("not run", other, ", ".join(sorted(hit)), runner))
+                print("%-15s job %s: picked %s; it runs on %s, which this Linux lint does not run" % ("not run", other, hit_paths, runner))
             elif hit and hit <= ran_suites:
-                print("%-15s job %s: picked %s; each already ran above" % ("not run", other, ", ".join(sorted(hit))))
+                print("%-15s job %s: picked %s; each already ran above" % ("not run", other, hit_paths))
             elif hit:  # the sibling pass runs the job's picked steps, and tells each other suite step of it the same way
-                print("job %s: picked %s; running its suite steps" % (other, ", ".join(sorted(hit))))
+                print("job %s: picked %s; running its suite steps" % (other, hit_paths))
                 sub = main([other, "--lint", "--base", base, "--workflow", workflow] + (["--plan"] if dry else []), True, ran_suites)
                 code = 1 if 1 in (code, sub) else 2 if 2 in (code, sub) else 0
                 continue
