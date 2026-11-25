@@ -38,8 +38,9 @@ result, is no marker. The transcript is
 `<config dir>/projects/<project>/<session_id>.jsonl`; the session id is in the handoff's
 path. It reports three lists in 40 lines or fewer, one item per line, each with one backticked
 token: MISSING (rulings, facts and work in the transcript that the handoff lacks), STALE
-(handoff lines the transcript replaced) and DONE (handoff lines whose work landed). Then
-rewrite the handoff whole (step 4) from that report. One agent per compaction, never per Stop
+(handoff lines the transcript replaced) and DONE (handoff lines whose work landed on main,
+or the item is answered, closed or withdrawn). Then rewrite the handoff whole (step 4) from
+that report. One agent per compaction, never per Stop
 checkpoint.
 
 After that rewrite, the next Stop checks it. Keep each `#N` and `fb-` id the old handoff held,
