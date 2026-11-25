@@ -45,13 +45,20 @@ def without_opt_out(env):
 
 
 class Repo:
-    def __init__(self):
+    def __init__(self, origin_head=None):
+        """origin_head pins origin/HEAD, the default-branch ref the check reads first. None keeps the machine's own default:
+        a bare repo's HEAD is `main` on this Mac and `master` where git's default is master, and a fetch makes origin/HEAD
+        only on some gits. True: origin/HEAD is origin/main after every push. False: origin/HEAD is absent, since the bare's
+        HEAD names no branch."""
         self.signs = False  # a case that signs on purpose sets this, and its git runs without the opt-out
+        self.origin_head = origin_head
         self.tmp = tempfile.TemporaryDirectory(dir=RUN)
         REPOS.append(self)
         self.dir = os.path.join(self.tmp.name, "w")
         origin = os.path.join(self.tmp.name, "o.git")
         self.sh("init", "-q", "--bare", origin, cwd=self.tmp.name)
+        if origin_head is False:
+            self.sh("symbolic-ref", "HEAD", "refs/heads/unborn", cwd=origin)  # no branch: no fetch makes origin/HEAD
         self.sh("init", "-q", "-b", "main", self.dir, cwd=self.tmp.name)
         self.sh("remote", "add", "origin", origin)
 
@@ -79,6 +86,8 @@ class Repo:
     def push(self):
         self.sh("push", "-q", "origin", "main")
         self.sh("fetch", "-q", "origin")
+        if self.origin_head is True:
+            self.sh("remote", "set-head", "origin", "main")
 
     def verdict(self, head="HEAD"):
         got, self.notes = C.check(self.dir, "origin/main", head)
@@ -903,9 +912,10 @@ class MainLineDrop:
     """The one home of the fixture for a case that merges main into a feat branch and drops lines main added to
     app.txt. main is pushed with app.txt at BODY, and feat is cut from it with the commit `cut_feat` writes."""
     T0, T1, T2 = "2026-01-01T10:00:00", "2026-01-02T10:00:00", "2026-01-03T10:00:00"
+    ORIGIN_HEAD = None  # the origin_head option of the Repo that cut_feat makes; None keeps the machine's default
 
     def cut_feat(self, msg, **files):
-        r = self.r = Repo()
+        r = self.r = Repo(origin_head=self.ORIGIN_HEAD)
         r.put("app.txt", BODY)
         r.commit("base", date="2025-12-01T10:00:00", other_txt="o1\n")
         r.push()
@@ -960,6 +970,14 @@ class MainLineDrop:
 
     def parent_count(self, rev):
         return len(self.r.sh("rev-list", "--parents", "-n", "1", rev).split()) - 1
+
+    def assert_origin_head(self, origin_head):
+        """Premise: origin/HEAD is origin/main when origin_head is True, and absent when False. Pins the default-branch refs."""
+        head = self.r.sh("rev-parse", "--verify", "-q", "origin/HEAD", ok=False)
+        if origin_head is True:
+            self.assertEqual(head, self.r.sh("rev-parse", "origin/main"), "premise: origin/HEAD is not origin/main")
+        else:
+            self.assertEqual(head, "", "premise: origin/HEAD resolves to %s, though the fixture pins it absent" % head[:9])
 
     def assert_dropped(self, head, carried):
         """Premise: the carrier's app.txt holds the line, and the merge's app.txt does not."""
@@ -3585,6 +3603,39 @@ class OctopusCommonBase(MainLineDrop, unittest.TestCase):
         self.assertEqual(self.parent_count(pair), 2, "premise: the head is a merge of two parents")
         self.assert_dropped(pair, self.carrier)
         self.assert_drops(self.r.verdict(pair), self.carrier, pair)
+
+    def assert_readd_drop_found(self, origin_head):
+        """build_readd's octopus drop, with origin/HEAD pinned by origin_head. The carrier's adder is on local main only, so
+        the default-branch refs must include local main for each parent order to report the line the carrier holds."""
+        self.ORIGIN_HEAD = origin_head
+        self.build_readd()
+        self.assert_origin_head(origin_head)
+        parents = ("dropper", "carrier", "third")
+        for first in parents:
+            with self.subTest(first=first):
+                head = self.merge_of(first, [p for p in parents if p != first], "octopus: %s first" % first, drop=True)
+                self.assertEqual(self.parent_count(head), 3, "premise: the head is an octopus merge of three parents")
+                self.assert_dropped(head, self.carrier)
+                problems, _ = octopus_verdict(self.r.dir, head)
+                self.assert_drops(problems, self.carrier, head)
+
+    def test_readd_drop_is_found_with_origin_head_present(self):
+        self.assert_readd_drop_found(True)
+
+    def test_readd_drop_is_found_with_origin_head_absent(self):  # control: the path Linux CI takes
+        self.assert_readd_drop_found(False)
+
+    def test_clean_octopus_with_origin_head_origin_main_and_main_at_one_commit_is_not_refused(self):  # control
+        self.ORIGIN_HEAD = True
+        for carrier in ("feat", "side-a", "side-b"):
+            with self.subTest(carrier=carrier):
+                head, _ = self.octopus_of(carrier, ("side-a", "side-b"))
+                self.assert_origin_head(True)
+                self.assertEqual(self.r.sh("rev-parse", "main"), self.r.sh("rev-parse", "origin/main"),
+                                 "premise: local main is not origin/main")
+                self.assertEqual(self.parent_count(head), 3, "premise: the head is an octopus merge of three parents")
+                problems, _ = octopus_verdict(self.r.dir, head)
+                self.assertEqual(problems, [], "a clean octopus with %s holding the line is refused: %r" % (carrier, problems))
 
 
 class DefaultBase(unittest.TestCase):
