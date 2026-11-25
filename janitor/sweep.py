@@ -3135,11 +3135,13 @@ def _trash_siblings(parent: str, base: str, original: str):
 
 
 def _own_trash_lines(parent: str, base: str, original: str, lines):
-    """The status LINES that belong to the trash folder BASE, or None when a line cannot be placed. A line
-    under the trash name is its own. A tracked file the rename moved away from the original name is listed
-    as deleted there, and belongs to the trash folder that now holds that file. Sibling trash folders from
-    one original name list their moved files under the same original name, so a deletion whose file sits in
-    a sibling and not in BASE is the sibling's. A line that cannot be placed counts as BASE's: it keeps."""
+    """The status LINES that belong to the trash folder BASE, or None when git cannot say: the path prefix
+    read or the sibling listing failed. A line under the trash name is its own. A tracked file the rename
+    moved away from the original name is listed as deleted there, and belongs to the trash folder that now
+    holds that file. Sibling trash folders from one original name list their moved files under the same
+    original name, so a deletion whose file sits in a sibling and not in BASE is the sibling's. A line it
+    cannot place (untracked, quoted, renamed, not a deletion, outside the original name) stays BASE's: it keeps,
+    never drops."""
     answer = git_reads._git(parent, "rev-parse", "--show-prefix")
     if answer is None or answer.returncode != 0:
         return None
