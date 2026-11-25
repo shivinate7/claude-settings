@@ -10,7 +10,7 @@ Mistake it guards: on 2026-11-24, pull request 3861 added keyword `stdout_only` 
 
 Harm: one CI run of the merge jobs (13,404 job-seconds on a like run), and a return to draft.
 
-What it does: `lint/check_standin_signatures.py` reads each paired test and product file with the Python `ast` module. It reports a stand-in that does not accept a keyword, or a positional count, that the product passes to the patched name. A stand-in with `**kwargs` accepts every keyword. Remedy on a finding: build the stand-in through the file's helper, or give it `**kwargs`.
+What it does: `check_standins` in `lint/check_standin_signatures.py` reads each paired test and product file with the Python `ast` module. It reports a stand-in that does not accept a keyword, or a positional count, that the product passes to the patched name. A stand-in with `**kwargs` accepts every keyword. Remedy on a finding: build the stand-in through the file's helper, or give it `**kwargs`.
 
 Not judged: a form it cannot judge is counted in one `N stand-ins not judged` line, never skipped in silence. Those forms are starred targets, string targets, `patch.multiple`, `new_callable`, `**kwargs` dicts, plain assignment, and `setattr`.
 
@@ -18,7 +18,8 @@ State: not a gate yet. Its fixture suite runs in CI (`checks.yml` step "Stand-in
 
 Known gaps: notes `standin-union-ignores-reach`, `standin-count-holds-restores`, `standin-count-per-call`, `standin-mock-forms-uncounted`, `standin-other-module-silent`, `standin-allow-pins-missing`.
 
-Cost: one read and one parse of each paired test and product file, about 3 s on the whole repo (2.96 s real, measured 2026-11-24). It runs only when a session runs it. It starts no process on its own and writes no file.
+Cost: at most one read and one parse of each paired test and product file, about 3 s on the whole repo (2.96 s real, measured 2026-11-24). It runs only when a session runs it. It starts no process on its own and writes no file.
 
-Home: `lint/check_standin_signatures.py`.
+Kind: process
+Home: lint/check_standin_signatures.py
 Check: `lint/test_standin_signatures.py`, classes such as `KeywordTests`, `PositionalTests` and `SpellingTests`.
