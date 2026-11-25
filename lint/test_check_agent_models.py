@@ -20,6 +20,10 @@ names its file and line as file:line.
 Every agent file withholds the claude-code-remote server: disallowedTools: names the whole server (`mcp__claude-code-remote__*`
 or bare `mcp__claude-code-remote`), or tools: is an allow-list with no entry for it. Only the frontmatter counts, never the
 body or a description.
+An agent file's `effort:` must equal the first word of its role's Effort cell in the same record. A cell may hold a word
+and a note after it, as the lane row does. A role with no row is not compared. A file with no effort value fails where its
+row names one, and so does a file whose effort is only a comment, a decoy line or a null. The failure names the file, the
+row's effort and the file's effort. The cases go through main(), so a red case fails on its exit-code assert.
 """
 import contextlib, io, os, re, shutil, sys, tempfile, time, unittest, uuid
 from unittest import mock
@@ -35,26 +39,34 @@ RUN_FOLDER = _test_temp.run_folder()
 
 ROLES = ("explore", "claude-code-guide", "test-author", "reviewer")
 MODELS = ("haiku", "claude-haiku-5-5", "Haiku")
+# The real agent roles by the table's spelling: (model, effort), each the first word of the row's cell. PinEffort ties this to the
+# record two ways: the check prints the row's effort for a wrong one (test_every_real_row_names_the_effort_the_fixtures_assume), and
+# each real agent file carries it (test_every_real_agent_file_carries_its_rows_effort).
+ROW_PINS = {"Explore": ("haiku", "xhigh"), "claude-code-guide": ("haiku", "xhigh"), "test-author": ("haiku", "xhigh"),
+            "reviewer": ("haiku", "xhigh"), "record-writer": ("haiku", "xhigh"), "builder": ("sonnet", "high"),
+            "Plan": ("opus", "high"), "designer": ("opus", "high"), "design-reviewer": ("opus", "high"),
+            "refuter": ("opus", "high")}
 # The model table of docs/decisions/agent-model-cap.md, reduced to its lane session row. Only the effort cell varies.
 RECORD_RELPATH = os.path.join("docs", "decisions", "agent-model-cap.md")
 LANE_RECORD = ("| Point | Model | Effort |\n|---|---|---|\n"
                "| lane session (decision `session-tiers`) | sonnet (temporary), the owner's ruling of 2026-11-08 12:21 CST, waiting-page item 439 (lane-model-sonnet), pick none; debt `lane-model-recheck` rechecks it | %s |\n")
 
 
-def verdict(relpath, model=None, closed=True, text=None, relative=False, name="x", pinned=True):
+def verdict(relpath, model=None, closed=True, text=None, relative=False, name="x", pinned=True, effort=None):
     """Write one fixture under this run's folder and return the check's (code, stdout).
 
     An agent file with frontmatter, unless `text` gives the whole file (a record). `relative` runs
     the check from the fixture's folder with the path as given, as a run from a repository root does.
-    `name` is the frontmatter name, the role key. `pinned=False` writes no model line.
+    `name` is the frontmatter name, the role key. `pinned=False` writes no model line. `effort` is the
+    file's `effort:` value, and none writes no effort line.
     """
     with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as tmp:
         path = os.path.join(tmp, relpath)
         os.makedirs(os.path.dirname(path))
         with open(path, "w") as handle:
             if text is None:
-                head = "---\nname: %s\ndisallowedTools: mcp__claude-code-remote__*\n%s" % (
-                    name, "model: %s\n" % model if pinned else "")
+                head = "---\nname: %s\ndisallowedTools: mcp__claude-code-remote__*\n%s%s" % (
+                    name, "model: %s\n" % model if pinned else "", "effort: %s\n" % effort if effort else "")
                 handle.write("%s%sbody\n" % (head, "---\n" if closed else ""))
             else:
                 handle.write(text)
@@ -74,6 +86,12 @@ def agent_file(role, *lines, body="body\n"):
     """A fixture agents/<role>.md: closed frontmatter with the name, the remote withheld and the given lines, no pin."""
     return "---\nname: %s\ndisallowedTools: mcp__claude-code-remote__*\n%s---\n%s" % (
         role, "".join(line + "\n" for line in lines), body)
+
+
+def effort_lines(role):
+    """The `effort:` frontmatter line of a role with a row, as a tuple for agent_file; () for a role with no row.
+    A fixture that is not about effort carries its row's effort, so only the fault the case names can fail it."""
+    return ("effort: %s" % ROW_PINS[role][1],) if role in ROW_PINS else ()
 
 
 # The two sizes a pin fixture runs at (test-fixtures reach the empty and the full-size state): no filler line, and a
@@ -112,6 +130,13 @@ def names(out, filename, *words):
     return any(filename in line and all(word in line for word in words) for line in out.splitlines())
 
 
+def names_words(out, filename, *words):
+    """True when one line of the check's output names the file and each word as a whole word, case aside. `names` matches
+    substrings, and `high` sits inside `xhigh`, so an effort needs this one."""
+    return any(filename in line and all(re.search(r"(?<![\w-])%s(?![\w-])" % re.escape(word), line, re.I) for word in words)
+               for line in out.splitlines())
+
+
 class PinEqualsRow(unittest.TestCase):
     # The role is the frontmatter `name:`, as the guard keys it (role_agent_keys). Table keys are case-exact (Explore,
     # Plan). The rows come from the real record through the guard's one reader. A case that names a row first asserts
@@ -126,7 +151,7 @@ class PinEqualsRow(unittest.TestCase):
         self.assertNotIn(role, table, "the record has a row for %r; re-point the cases that name it as unlisted" % role)
 
     def agent(self, role, model):
-        return verdict("agents/%s.md" % role.lower(), model, name=role)
+        return verdict("agents/%s.md" % role.lower(), model, name=role, effort=ROW_PINS[role][1] if role in ROW_PINS else None)
 
     def test_pin_that_differs_from_its_row_is_flagged(self):
         # Sonnet and opus pins clear the Haiku floor, so these fail only on the pin-equals-row rule.
@@ -196,7 +221,8 @@ class PinEqualsRow(unittest.TestCase):
         self.assertRow("builder", "sonnet")
         for size, lines in SIZES:
             with self.subTest(size=size):
-                self.assertEqual(verdict("agents/builder.md", text=agent_file("builder", "model: sonnet", *lines)), (0, ""))
+                self.assertEqual(verdict("agents/builder.md", text=agent_file("builder", "model: sonnet", *effort_lines("builder"), *lines)),
+                                 (0, ""))
 
     def test_role_with_no_table_row_is_not_flagged(self):
         self.assertNotIn("some-role", C._guard.role_model_table(C.ROOT) or {})
@@ -220,7 +246,8 @@ class PinEqualsRow(unittest.TestCase):
         # A comment after a haiku pin that names sonnet leaves the pin haiku, so the file passes.
         self.assertEqual(verdict("agents/reviewer.md",
                                  text="---\nname: reviewer\ndisallowedTools: mcp__claude-code-remote__*\n"
-                                      "model: haiku  # sonnet is above the row\n---\nbody\n"),
+                                      "model: haiku  # sonnet is above the row\n%s---\nbody\n"
+                                      % "".join(line + "\n" for line in effort_lines("reviewer"))),
                          (0, ""))
 
     def test_pin_that_is_only_a_comment_is_no_pin(self):
@@ -262,7 +289,151 @@ class PinEqualsRow(unittest.TestCase):
             for line in ('model: "sonnet" # note', "model: sonnet"):
                 for size, lines in SIZES:
                     with self.subTest(role=role, line=line, size=size):
-                        self.assertEqual(verdict("agents/%s.md" % role, text=agent_file(role, line, *lines)), (0, ""))
+                        self.assertEqual(verdict("agents/%s.md" % role, text=agent_file(role, line, *effort_lines(role), *lines)),
+                                         (0, ""))
+
+
+class PinEffort(unittest.TestCase):
+    # An agent file's `effort:` must equal the first word of its role's Effort cell. The rows come from the real record, as in
+    # PinEqualsRow, and every fixture pins its row's model, so only the effort rule can fail it. Each case goes through main(),
+    # so a red case fails on its exit-code assert. A cell's word is compared as a word: `high` is not `xhigh`, in either direction.
+    OTHER = {"high": "xhigh", "xhigh": "high"}
+
+    def file(self, role, *lines):
+        """A fixture agent file for `role`: its row's model pin, then `lines`."""
+        return agent_file(role, "model: %s" % ROW_PINS[role][0], *lines)
+
+    def flagged(self, role, text, what, *words):
+        """The check fails the fixture, and one line of its output names the file and each of `words` (whole words)."""
+        code, out = verdict("agents/%s.md" % role.lower(), text=text)
+        self.assertEqual(code, 1, "%s passes the check: %r" % (what, out))
+        self.assertTrue(names_words(out, "%s.md" % role.lower(), *words),
+                        "no line names %s.md and %s for %s: %r" % (role.lower(), " and ".join(words), what, out))
+
+    def clean(self, role, text, what):
+        code, out = verdict("agents/%s.md" % role.lower(), text=text)
+        self.assertEqual((code, out), (0, ""), "%s is flagged: %r" % (what, out))
+
+    def test_effort_that_differs_from_its_row_is_flagged(self):
+        # The row is xhigh and the file says high, then the other way round. A compare that asks whether one word holds the
+        # other passes one of the two directions.
+        for role in ("reviewer", "builder"):
+            row = ROW_PINS[role][1]
+            wrong = self.OTHER[row]
+            for size, lines in SIZES:
+                with self.subTest(role=role, size=size):
+                    self.flagged(role, self.file(role, "effort: %s" % wrong, *lines), "effort %s on the %s row" % (wrong, row),
+                                 "effort", row, wrong)
+
+    def test_effort_equal_to_its_row_passes(self):
+        # The green control beside the cases above and below: the same files at their row's effort pass.
+        for role, (_, effort) in ROW_PINS.items():
+            for size, lines in SIZES:
+                with self.subTest(role=role, size=size):
+                    self.clean(role, self.file(role, "effort: %s" % effort, *lines), "effort %s on its own row" % effort)
+
+    def test_effort_is_read_past_quotes_and_comments(self):
+        # Source-text cases (building-scanner-respects-strings): the value is read without its quotes or a trailing comment, so a
+        # comment that names the row's word does not make the effort that word, and a comment that names the other does not
+        # change it.
+        for line in ('effort: "high"', "effort: high  # xhigh is above the row", "effort: 'high' # note"):
+            with self.subTest(line=line):
+                self.clean("builder", self.file("builder", line), "the builder row's effort as %s" % line)
+        for line in ("effort: xhigh  # not high", 'effort: "xhigh" # high', "effort: xhigh # it's high"):
+            with self.subTest(line=line):
+                self.flagged("builder", self.file("builder", line), "xhigh on the high row as %s" % line, "effort", "high", "xhigh")
+
+    def test_agent_file_with_no_effort_line_is_flagged(self):
+        for role in ("reviewer", "builder"):
+            for size, lines in SIZES:
+                with self.subTest(role=role, size=size):
+                    text = self.file(role, *lines)
+                    keys, _, problem = agent_parts(text)
+                    self.assertIsNone(problem, "fixture error: %s" % problem)
+                    self.assertNotIn("effort", keys, "fixture error: the frontmatter has an effort: key")
+                    self.flagged(role, text, "an agent file with no effort: line", "effort")
+
+    def test_decoy_effort_lines_are_not_an_effort(self):
+        # Source-text cases (building-scanner-respects-strings): a comment line, an indented block-scalar line, a body line, a
+        # description with a lone quote and a comment opener, and a capitalised `Effort:` key each name the builder row's effort.
+        # None of them is the frontmatter effort, which is the lowercase `effort:` key alone.
+        decoys = (("comment line", self.file("builder", "# effort: high")),
+                  ("indented block-scalar line", self.file("builder", "description: |", "  effort: high")),
+                  ("body line", agent_file("builder", "model: sonnet", body="effort: high\n")),
+                  ("description with a lone quote", self.file("builder", "description: Don't pin # effort: high")),
+                  ("capitalised Effort: key", self.file("builder", "Effort: high")))
+        for label, text in decoys:
+            with self.subTest(label=label):
+                keys, _, problem = agent_parts(text)
+                self.assertIsNone(problem, "fixture error: %s" % problem)
+                self.assertEqual(C.scalar(keys.get("effort", "")), "", "fixture error: the %s fixture has an effort: value" % label)
+                self.flagged("builder", text, "a decoy %s" % label, "effort")
+
+    def test_empty_or_null_effort_is_no_effort(self):
+        # `effort:` with nothing, a comment only, or a YAML null names no effort, so the file is flagged as one with no line is.
+        # The scope is the fixture's own line, never the reader under test.
+        for line in ("effort:", 'effort: ""', "effort: # high", "effort: ~", "effort: null"):
+            with self.subTest(line=line):
+                text = self.file("builder", line)
+                self.assertIn(line, C.frontmatter(text), "fixture error: the frontmatter has no %r line" % line)
+                self.flagged("builder", text, "an effort line with no value, %s" % line, "effort")
+
+    def test_effort_cell_with_a_note_compares_on_its_first_word(self):
+        # The real lane row's effort cell is a word and a note: `medium, ...; set by the start's effort field, below`. The note
+        # holds a lone quote, a comma and a semicolon. A file at `medium` matches it, and one at `high` does not. The scope reads
+        # the cell through the check's own lane-row reader (LANE_ROW), never through the effort rule under test.
+        table = C._guard.role_model_table(C.ROOT) or {}
+        self.assertEqual(table.get("lane"), "sonnet", "the record's lane row moved; re-point this case")
+        with open(os.path.join(C.ROOT, C.LANE_RECORD), encoding="utf-8") as handle:
+            cells = C.LANE_ROW.findall(handle.read())
+        self.assertEqual(len(cells), 1, "the record holds %d lane rows; this case reads one" % len(cells))
+        self.assertTrue(cells[0].startswith("medium") and len(cells[0].split()) > 1,
+                        "the lane row's effort cell is no longer `medium` and a note: %r" % cells[0])
+        for size, lines in SIZES:
+            with self.subTest(size=size):
+                self.clean("lane", agent_file("lane", "model: sonnet", "effort: medium", *lines), "effort medium on the lane row")
+                self.flagged("lane", agent_file("lane", "model: sonnet", "effort: high", *lines), "effort high on the lane row",
+                             "effort", "medium", "high")
+
+    def test_role_with_no_row_is_not_compared(self):
+        # Control: a role the table lacks has no effort to equal, so it passes with any effort and with none.
+        self.assertNotIn("some-role", C._guard.role_model_table(C.ROOT) or {}, "the record has a row for 'some-role'; re-point this case")
+        for effort in (None, "high", "xhigh", "medium"):
+            with self.subTest(effort=effort):
+                self.assertEqual(verdict("agents/some-role.md", "sonnet", name="some-role", effort=effort), (0, ""))
+
+    def test_every_real_row_names_the_effort_the_fixtures_assume(self):
+        # Ties ROW_PINS to the record. A wrong effort on each real role fails and the failure names the row's effort, so a row
+        # that moved reads as a stale constant, not as a false pass. It covers a row shared by two names (claude-code-guide), a
+        # row with a parenthetical (Plan) and a role with a second, round row below its first (reviewer, first row wins).
+        for role, (_, row) in ROW_PINS.items():
+            wrong = self.OTHER[row]
+            with self.subTest(role=role):
+                self.flagged(role, self.file(role, "effort: %s" % wrong), "effort %s on the real %s row" % (wrong, role),
+                             "effort", row, wrong)
+
+    def test_every_real_agent_file_carries_its_rows_effort(self):
+        # The real repo passes: each real agent file's effort equals its row's, and the check finds nothing in it. The scope reads
+        # the file's own text, never the check.
+        folder = os.path.join(C.ROOT, "agents")
+        seen = set()
+        for name in sorted(name for name in os.listdir(folder) if name.endswith(".md")):
+            path = os.path.join(folder, name)
+            with open(path, encoding="utf-8-sig") as handle:
+                keys, _, problem = agent_parts(handle.read())
+            self.assertIsNone(problem, "agents/%s: %s" % (name, problem))
+            role = C.scalar(keys.get("name", ""))
+            if role not in ROW_PINS:
+                continue
+            seen.add(role)
+            with self.subTest(agent=name):
+                self.assertEqual(C.scalar(keys.get("effort", "")), ROW_PINS[role][1],
+                                 "agents/%s names another effort than its row's; re-point ROW_PINS or the file" % name)
+                out = io.StringIO()
+                with contextlib.redirect_stdout(out):
+                    code = C.main([path])
+                self.assertEqual((code, out.getvalue()), (0, ""), "agents/%s fails the check: %r" % (name, out.getvalue()))
+        self.assertEqual(seen, set(ROW_PINS), "ROW_PINS names a role no agent file carries; re-point it")
 
 
 # The kind is the backticked first cell of a table row, as hooks/test_precompact_handoff.py reads it.
