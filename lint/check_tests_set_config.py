@@ -23,6 +23,7 @@ SETTERS = ("update", "setdefault")  # os.environ.<name>(...) forms that set a ke
 SKIP_DIRS = ("node_modules", "__pycache__")
 HERE = os.path.dirname(os.path.abspath(__file__))
 COMPOUND = (ast.If, ast.For, ast.While, ast.Try, ast.With, ast.ClassDef)
+COMPREHENSIONS = (ast.ListComp, ast.SetComp, ast.GeneratorExp, ast.DictComp)
 
 
 def is_var(node):
@@ -236,6 +237,28 @@ def is_patch_dict(item):
     return is_patch_dict_call(item.context_expr)
 
 
+def bind_loop(target, iterable, names, loop_names, swept):
+    """The (loop_names, swept) a loop or comprehension clause `for target in iterable` adds: its variable, when `iterable` may visit VAR."""
+    if not names.loops_over_var(iterable):
+        return loop_names, swept
+    if isinstance(target, ast.Tuple) and target.elts:  # `for key, value in os.environ.items()`
+        target = target.elts[0]
+    if not isinstance(target, ast.Name):
+        return loop_names, swept
+    return loop_names + (target.id,), (swept + (target.id,) if names.sweeps_environ(iterable) else swept)
+
+
+def comprehension_elements(statement, names, loop_names, swept):
+    """Yield the element expression of a comprehension statement as a statement of its own, with the comprehension's loop variables
+    bound as a `for` loop binds them, so it is judged by the same rules as the loop form."""
+    comprehension = statement.value
+    for generator in comprehension.generators:
+        loop_names, swept = bind_loop(generator.target, generator.iter, names, loop_names, swept)
+    elements = [comprehension.key, comprehension.value] if isinstance(comprehension, ast.DictComp) else [comprehension.elt]
+    for element in elements:
+        yield ast.copy_location(ast.Expr(value=element), statement), loop_names, swept
+
+
 def import_time(body, names, loop_names=(), swept=()):
     """Yield each statement that runs at import time, in source order: the module body, and what sits in its if, for, while, try, with
     and class blocks. A def is skipped, so is a with patch.dict block, whose changes the block undoes, and so is the branch of an
@@ -247,15 +270,11 @@ def import_time(body, names, loop_names=(), swept=()):
         if isinstance(node, ast.With) and any(is_patch_dict(item) for item in node.items):
             continue
         yield node, loop_names, swept
+        if isinstance(node, ast.Expr) and isinstance(node.value, COMPREHENSIONS):
+            yield from comprehension_elements(node, names, loop_names, swept)
         inner, inner_swept = loop_names, swept
-        if isinstance(node, ast.For) and names.loops_over_var(node.iter):
-            target = node.target
-            if isinstance(target, ast.Tuple) and target.elts:  # `for key, value in os.environ.items()`
-                target = target.elts[0]
-            if isinstance(target, ast.Name):
-                inner = loop_names + (target.id,)
-                if names.sweeps_environ(node.iter):
-                    inner_swept = swept + (target.id,)
+        if isinstance(node, ast.For):
+            inner, inner_swept = bind_loop(node.target, node.iter, names, loop_names, swept)
         if isinstance(node, ast.If) and isinstance(node.test, ast.Constant):
             blocks = [node.body if node.test.value else node.orelse]
         elif isinstance(node, ast.If) and is_main_guard(node):
