@@ -1106,6 +1106,38 @@ class TransitiveWalkFixtures(unittest.TestCase):
         self.assertIn(("skills/impeccable/SKILL.md", "lint/helper.sh"), [(m, rel) for m, rel, _ in self.walk(files, entry="a/entry.sh")[0]],
                       "a bash run under an absolute path does not follow the shell file it runs")
 
+    def follows_helper(self, line):
+        files = {"a/entry.sh": line + "\n", "lint/helper.sh": "cat skills/impeccable/SKILL.md\n"}
+        self.assertIn(("skills/impeccable/SKILL.md", "lint/helper.sh"), [(m, rel) for m, rel, _ in self.walk(files, entry="a/entry.sh")[0]],
+                      "%r does not follow the shell file it runs" % line)
+
+    def test_a_bare_shell_file_run_is_a_read(self):
+        self.follows_helper("lint/helper.sh")
+
+    def test_a_dot_sourced_shell_file_is_a_read(self):
+        self.follows_helper(". lint/helper.sh")
+
+    def test_a_shell_file_in_command_substitution_is_a_read(self):
+        self.follows_helper("$(lint/helper.sh)")
+
+    def test_a_zsh_run_of_a_shell_file_is_a_read(self):
+        self.follows_helper("zsh lint/helper.sh")
+
+    def test_a_dash_run_of_a_shell_file_is_a_read(self):
+        self.follows_helper("dash lint/helper.sh")
+
+    def test_a_command_after_a_case_arm_is_a_read(self):
+        self.follows_helper("  merge/x.sh) bash lint/helper.sh ;;")
+
+    def test_a_case_arm_naming_a_shell_file_is_no_read(self):
+        # The arm of ci-scope.sh line 205, copied: a pattern that names a .sh path and a .md path, and a body with no command.
+        arm = ('      bin/sim-test|docs/decisions/agent-model-cap.md|merge/install_from_main.sh|janitor/sweep.py|janitor/temp_sweep.py|'
+               'lint/_guard_sections.py|lint/check_record_slugs.py|lint/check_red_run.py|lint/check_skill_model_rows.py|lint/hook_catalog.py|'
+               'lint/rule_audit.py|lint/ruled_store.py|lint/stale_cites.py|skills/impeccable/SKILL.md|testing/shallow_clone.py) '
+               'on="$on guard checks_guard " ;;\n')
+        files = {"a/entry.sh": 'case "$f" in\n' + arm + "esac\n"}
+        self.assertEqual(self.walk(files, entry="a/entry.sh")[0], [], "a case arm that names a .sh and a .md path counts as a read")
+
     def test_an_empty_file_reaches_and_reads_nothing(self):
         self.assertEqual(self.walk({"a/entry.py": ""}), ([], False))
 
