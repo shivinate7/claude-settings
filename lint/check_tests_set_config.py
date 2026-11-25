@@ -2,7 +2,8 @@
 """Fails when a test_*.py removes CLAUDE_CONFIG_DIR from the environment at import time and does not set it again.
 
 Such a file runs its cases with the variable unset, so a case that reads the config folder reads the real ~/.claude. Only an import-time
-removal counts: a pop, a del, or os.environ.clear(). It reaches every case. A pop inside one test method, or inside patch.dict, is that
+removal counts: a pop, a del, os.environ.clear(), or patch.dict(os.environ, ..., clear=True).start(), also in a loop over a tuple or dict
+that holds the name or over os.environ itself (a sweep by prefix is flagged whatever its prefix: the check does not evaluate prefixes). It reaches every case. A pop inside one test method, or inside patch.dict, is that
 case's own choice. The file is clean when a set follows its last removal at import time: a set at module level, or in a function the
 module calls at module level. A set in setUpModule() clears it too. A set under `if False:`, under `if __name__ == "__main__":`, in one test method, or inside a
 with patch.dict block does not. A set is a subscript or annotated assignment, `os.environ |= {...}`, os.environ.update, setdefault or
@@ -141,7 +142,33 @@ class Names:
         return is_var(node) or (isinstance(node, ast.Name) and (node.id in loop_names or node.id in self.var_names))
 
     def loops_over_var(self, iterable):
-        return holds_var(iterable) or (isinstance(iterable, ast.Name) and iterable.id in self.var_tuples)
+        """True when a loop over `iterable` visits VAR: a tuple or a dict that holds it, or a sweep of os.environ itself."""
+        iterable = self.unwrapped(iterable)
+        return holds_var(iterable) or (isinstance(iterable, ast.Name) and iterable.id in self.var_tuples) \
+            or self.dict_has_var(iterable, ()) or self.is_environ(iterable)
+
+    @staticmethod
+    def unwrapped(node):
+        """`node` without the calls that keep its keys: list(), tuple(), set(), sorted(), iter(), .keys(), .items() and .copy()."""
+        while isinstance(node, ast.Call):
+            if isinstance(node.func, ast.Name) and node.func.id in ("list", "tuple", "set", "frozenset", "sorted", "iter", "reversed") \
+                    and len(node.args) == 1:
+                node = node.args[0]
+            elif isinstance(node.func, ast.Attribute) and node.func.attr in ("keys", "items", "copy") and not node.args:
+                node = node.func.value
+            else:
+                break
+        return node
+
+    def clears_environ(self, call):
+        """True for `patch.dict(os.environ, ..., clear=X)` unless X is the constant False, and unless its values name VAR. An X
+        the check cannot read counts as a clear (unknown never passes)."""
+        if not (is_patch_dict_call(call) and call.args and self.is_environ(call.args[0])):
+            return False
+        flag = call.args[2] if len(call.args) > 2 else next((keyword.value for keyword in call.keywords if keyword.arg == "clear"), None)
+        if flag is None or (isinstance(flag, ast.Constant) and not flag.value):
+            return False
+        return not (any(self.dict_has_var(arg, ()) for arg in call.args[1:2]) or self.keywords_have_var(call.keywords, ()))
 
     def removal_line(self, statement, loop_names):
         """The line of an os.environ pop, del or clear of VAR in this one statement, else None."""
@@ -151,6 +178,8 @@ class Names:
                     return statement.lineno
         if isinstance(statement, ast.Expr) and isinstance(statement.value, ast.Call):
             call = statement.value
+            if isinstance(call.func, ast.Attribute) and call.func.attr == "start" and self.clears_environ(call.func.value):
+                return statement.lineno
             if isinstance(call.func, ast.Attribute) and self.is_environ(call.func.value):
                 if call.func.attr == "pop" and call.args and self.names_var(call.args[0], loop_names):
                     return statement.lineno
@@ -227,8 +256,12 @@ def import_time(body, names, loop_names=()):
             continue
         yield node, loop_names
         inner = loop_names
-        if isinstance(node, ast.For) and isinstance(node.target, ast.Name) and names.loops_over_var(node.iter):
-            inner = loop_names + (node.target.id,)
+        if isinstance(node, ast.For) and names.loops_over_var(node.iter):
+            target = node.target
+            if isinstance(target, ast.Tuple) and target.elts:  # `for key, value in os.environ.items()`
+                target = target.elts[0]
+            if isinstance(target, ast.Name):
+                inner = loop_names + (target.id,)
         if isinstance(node, ast.If) and isinstance(node.test, ast.Constant):
             blocks = [node.body if node.test.value else node.orelse]
         elif isinstance(node, ast.If) and is_main_guard(node):
