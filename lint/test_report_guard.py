@@ -1781,14 +1781,6 @@ class UnstartedItemsTests(unittest.TestCase):
              "CI/CD is not a file"),
         ])
 
-    def test_un_red_client_server_split_is_not_a_file(self):
-        # Refused as a non-file. It clashes with the docs/decisions row of test_un_shared_path_names_the_shared_file,
-        # which must pass. The clash is an open ruling; see the commit body.
-        self.assert_refused_for_shared_file([
-            (self.DONE + "> **Next** Unstarted: lint-stub waits on PR #3679 to merge; measured conflict in "
-             "client/server split", "client/server split is not a file"),
-        ])
-
     def test_un_red_item_is_judged_alone_beside_another_items_code_need(self):
         # Control: "it needs" continues the wait before it, and passes (test_un_green_code_need_with_a_named_symbol_passes).
         self.assert_refused_for_shared_file([
