@@ -4190,11 +4190,102 @@ def case_past_ruling_text_drops_orders_the_phrase_list_lacks():
 
 
 def case_past_ruling_text_refuses_only_the_question_the_judge_matched():
-    # The judge matched question 1, which names the ruling. Question 2 names none, but it is not the one judged.
+    # The judge lists Q1, which names the ruling. Q2 names none and the judge did not list it, so it is never refused.
     reason = "decisions/github-apps-keep-access: the ruling keeps the apps as is."
-    text = question_form.past_ruling_text(reason, TEXT_IDS, TEXT_CANDIDATES, [TEXT_NAMED, TEXT_UNNAMED], 1)
-    check("past ruling text: the judge matched question 1, which names the ruling, so no question is refused",
+    text = question_form.past_ruling_text(reason, TEXT_IDS, TEXT_CANDIDATES, [TEXT_NAMED, TEXT_UNNAMED], ["Q1"])
+    check("past ruling text: the judge lists Q1, which names the ruling, and the unlisted Q2 is not refused, so no text",
           text == "", text)
+
+
+# ------------------------------------------------------------------ the judge's labels and the refusal text
+#
+# The code labels each question unit Q1, Q2, ... and the judge's answer lists the labels of the units a listed ruling
+# covers (`questions`). A listed unit that names the ruling passes. A listed unit that names no ruling is refused and named
+# by its label and first words. A unit the list does not name is never refused. With no list, or a label that does not
+# exist, every unit that names no ruling is refused and the text says "one of the questions". Each case calls
+# past_ruling_text, the one home of the text for both paths.
+TEXT_CI = "Do you want the CI cap raised?"
+RENOVATE_FIRST = "Should the Renovate app"
+CI_FIRST = "Do you want the CI cap"
+TEXT_REASON = "decisions/github-apps-keep-access: the ruling keeps the apps as is."
+
+
+def case_past_ruling_text_listed_unnamed_question_is_refused_by_its_label():
+    # The judge lists Q1 (it names the ruling) and Q2 (it names none): Q2 is refused, named by label and first words.
+    text = question_form.past_ruling_text(TEXT_REASON, TEXT_IDS, TEXT_CANDIDATES, [TEXT_NAMED, TEXT_UNNAMED], ["Q1", "Q2"])
+    check("past ruling text: a listed unit that names no ruling is refused, named by its label Q2 and its first words",
+          "Q2" in text and RENOVATE_FIRST in text, text)
+    check("past ruling text: the listed unit that names the ruling is not named in the refusal",
+          "Q1" not in text and "Should the GitHub apps" not in text, text)
+
+
+def case_past_ruling_text_unlisted_unit_is_never_refused():
+    # Three units, and the judge lists Q2 only. Q3 names no ruling but is not listed, so it is never refused.
+    text = question_form.past_ruling_text(TEXT_REASON, TEXT_IDS, TEXT_CANDIDATES, [TEXT_NAMED, TEXT_UNNAMED, TEXT_CI],
+                                          ["Q2"])
+    check("past ruling text: the listed Q2 is refused, named by its label and its first words", "Q2" in text
+          and RENOVATE_FIRST in text, text)
+    check("past ruling text: the unlisted Q3 is never refused, so the text does not say one of the questions",
+          "one of the questions" not in text and CI_FIRST not in text, text)
+
+
+def case_past_ruling_text_fallback_without_a_list_names_no_question():
+    # No list, or a label that names no unit: every unit that names no ruling is refused, and the text names none of them.
+    for listed in (None, ["Q9"]):
+        text = question_form.past_ruling_text(TEXT_REASON, TEXT_IDS, TEXT_CANDIDATES, [TEXT_NAMED, TEXT_UNNAMED], listed)
+        check("past ruling text: with the list %r the refusal says one of the questions and names no label" % (listed,),
+              "one of the questions" in text and "Q2" not in text, text)
+
+
+def case_past_ruling_text_a_listed_unit_that_names_the_ruling_passes():
+    # Control: each listed unit names the ruling, so no unit is refused and the text is empty.
+    text = question_form.past_ruling_text(TEXT_REASON, TEXT_IDS, TEXT_CANDIDATES, [TEXT_NAMED, TEXT_NAMED], ["Q1", "Q2"])
+    check("past ruling text control: each listed unit names the ruling, so the text is empty", text == "", text)
+
+
+QUOTED_IDS = ["decisions/quoted-rule"]
+QUOTED_CANDIDATE = ['decisions/quoted-rule: Owner, 2026-10-28: "Keep the apps as is." is the owner\'s words. Later note.']
+PLAIN_IDS = ["decisions/plain-rule"]
+PLAIN_CANDIDATE = ["decisions/plain-rule: Owner, 2026-10-28: keep the apps as is. Later note."]
+
+
+def case_past_ruling_text_decides_stops_at_a_quote_end():
+    # The sentence that says what the ruling decides stops at its closing quote; the words after it never reach the text.
+    text = question_form.past_ruling_text("decisions/quoted-rule: the ruling keeps the apps as is.", QUOTED_IDS,
+                                          QUOTED_CANDIDATE, [TEXT_UNNAMED], None)
+    check("past ruling text: the sentence of what the ruling decides stops at its closing quote",
+          "Keep the apps as is." in text and "owner's words" not in text and "Later note" not in text, text)
+
+
+def case_past_ruling_text_decides_stops_at_the_first_sentence_end():
+    # Control: a plain sentence end already stops the sentence.
+    text = question_form.past_ruling_text("decisions/plain-rule: the ruling keeps the apps as is.", PLAIN_IDS,
+                                          PLAIN_CANDIDATE, [TEXT_UNNAMED], None)
+    check("past ruling text control: the sentence stops at its first sentence end",
+          "keep the apps as is." in text and "Later note" not in text, text)
+
+
+def case_past_ruling_text_unchecked_ruled_entry_keeps_its_mark():
+    # A ruled entry that is unchecked keeps its (unchecked, not law) mark; a decision record never gains one.
+    ruled = ("ruled:own-goal-dont-wait-on-me: Do not wait on me for a pick: the owner decides. (owner 2026-11-14 20:18; "
+             "open, not on main; supersedes none) (unchecked, not law)")
+    text = question_form.past_ruling_text("ruled:own-goal-dont-wait-on-me: the ruling says do not wait.",
+                                          ["ruled:own-goal-dont-wait-on-me"], [ruled], [TEXT_UNNAMED], None)
+    check("past ruling text: an unchecked ruled entry keeps its (unchecked, not law) mark", "unchecked, not law" in text,
+          text)
+    plain = question_form.past_ruling_text(TEXT_REASON, TEXT_IDS, TEXT_CANDIDATES, [TEXT_UNNAMED], None)
+    check("past ruling text control: a decision record's refusal carries no unchecked mark",
+          "unchecked" not in plain, plain)
+
+
+def case_past_ruling_text_record_with_several_rulings_shows_its_first():
+    # Control: a record that holds two owner rulings shows the first one's date and sentence, the record's own first.
+    many = ["decisions/many-rulings: Owner, 2026-10-28: keep the apps as is. Owner, 2026-11-24: drop the apps."]
+    text = question_form.past_ruling_text("decisions/many-rulings: the ruling keeps the apps as is.",
+                                          ["decisions/many-rulings"], many, [TEXT_UNNAMED], None)
+    check("past ruling text control: a record with several rulings shows the first ruling's date and sentence",
+          "2026-10-28" in text and "keep the apps as is" in text and "2026-11-24" not in text
+          and "drop the apps" not in text, text)
 
 
 def case_past_ruling_text_two_unnamed_questions_without_a_number_name_neither():
@@ -4211,6 +4302,14 @@ def main():
                  case_ruling_time_is_the_rulings_own_date, case_past_ruling_text_drops_orders_the_phrase_list_lacks,
                  case_past_ruling_text_refuses_only_the_question_the_judge_matched,
                  case_past_ruling_text_two_unnamed_questions_without_a_number_name_neither,
+                 case_past_ruling_text_listed_unnamed_question_is_refused_by_its_label,
+                 case_past_ruling_text_unlisted_unit_is_never_refused,
+                 case_past_ruling_text_fallback_without_a_list_names_no_question,
+                 case_past_ruling_text_a_listed_unit_that_names_the_ruling_passes,
+                 case_past_ruling_text_decides_stops_at_a_quote_end,
+                 case_past_ruling_text_decides_stops_at_the_first_sentence_end,
+                 case_past_ruling_text_unchecked_ruled_entry_keeps_its_mark,
+                 case_past_ruling_text_record_with_several_rulings_shows_its_first,
                  case_named_rulings_full_id, case_named_rulings_bare_slug, case_named_rulings_ruled_store_id,
                  case_named_rulings_several_lines_name_two_ids, case_named_rulings_code_line_yields_none,
                  case_named_rulings_problem_line_yields_none, case_named_rulings_longer_word_is_no_name,
