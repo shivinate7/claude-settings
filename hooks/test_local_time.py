@@ -603,6 +603,9 @@ def case_cwd_regular_file_prints_gone_line():
 def case_cwd_gone_newline_path_prints_one_escaped_line():
     """The folder is gone and its path holds a newline. The gone line is one line after the time line, and the newline
     shows as backslash n, so the path cannot split the line."""
+    if os.name == "nt":  # Windows refuses a line feed in a file name (WinError 123), so no folder can hold one there
+        print("SKIP: cwd gone, newline in path: Windows cannot hold a line feed in a file name")
+        return
     reason = session_home_reason()
     folder = tempfile.mkdtemp(dir=ROOT)
     gone = os.path.join(folder, "lane\nnew")
