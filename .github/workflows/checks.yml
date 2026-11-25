@@ -494,7 +494,7 @@ jobs:
         run: python3 lint/test_tests_set_config.py
 
       - name: Tests set config check
-        if: ${{ !cancelled() && (needs.scope.outputs.code == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
+        if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}
         run: python3 lint/check_tests_set_config.py
 
       - name: Record slug fixture suite
