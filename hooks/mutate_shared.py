@@ -806,7 +806,7 @@ def run_suite_file(folder: str, rel: str, timeout: float, argv=None, classify=No
     narrow its cases."""
     file, family = split_suite(rel)
     env = {k: v for k, v in os.environ.items()
-           if not k.endswith("_UNDER_TEST") and k not in ("MUTATE_ONLY", "MUTATE_SHARD", "GUARD_FAMILY")}
+           if not k.endswith("_UNDER_TEST") and k not in ("MUTATE_ONLY", "MUTATE_SHARD", "GUARD_FAMILY", "CASE_TIMES")}
     if family:
         env["GUARD_FAMILY"] = family
     # No bytecode: a mutant of the same size and second as the clean file would load the clean .pyc.
