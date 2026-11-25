@@ -49,6 +49,10 @@ import check_comment_narration as narration  # noqa: E402  the one home of the d
 
 Unread = narration.Unread
 LIMIT = 8  # a list of more than this many items is crowded
+
+
+def crowded(count):
+    return count > LIMIT
 RULE = "claude-settings decision lists-one-line-per-item"
 FIX_CMD = "python3 ~/.claude/lint/check_list_lines.py --fix %s"
 READ = ("python", "shell")
@@ -78,7 +82,7 @@ class Lst:
 
     def faulty(self):
         """The fault of a crowded list: 'lines' (two or more items on one line), 'order' (one per line, not sorted), or ''."""
-        if len(self.items) <= LIMIT:
+        if not crowded(len(self.items)):
             return ""
         if self.per_line():
             return "lines"
@@ -150,7 +154,7 @@ class PySource:
         return None
 
     def wanted(self, count, line, everything):
-        return count > 1 and (everything or count > LIMIT or MARKER.match(self.comments.get(line - 1, "")))
+        return count > 1 and (everything or crowded(count) or MARKER.match(self.comments.get(line - 1, "")))
 
     def display(self, node, elts, everything):
         count = len(node.keys) if elts is None else len(elts)
@@ -241,7 +245,7 @@ class ShSource:
     def lists(self, everything=False):
         out = []
         for start, paren, seps, case_at in self.scan.arms:
-            if not seps or not (everything or len(seps) >= LIMIT or MARKER.match(self.comments.get(self.line_of(case_at) - 1, ""))):
+            if not seps or not (everything or crowded(len(seps) + 1) or MARKER.match(self.comments.get(self.line_of(case_at) - 1, ""))):
                 continue
             items = []
             for a, b in zip([start] + [s + 1 for s in seps], seps + [paren]):
@@ -298,13 +302,13 @@ def judge(path, lang, head_text, base_text, added):
     for lst in cands:
         if not any(line in added and text not in known for text, line in lst.items):
             continue
-        crowded = len(lst.items) > LIMIT
+        is_crowded = crowded(len(lst.items))
         reason = head.marker(lst)
         if reason is not None:
             if not reason:
                 out.append((lst.marker_line, failure(path, lst.marker_line,
                             "the list-lines-ok marker has no reason; write the reason after the colon, or remove the marker.")))
-            elif not crowded:
+            elif not is_crowded:
                 out.append((lst.marker_line, failure(path, lst.marker_line,
                             "the list-lines-ok marker is on a list of %d items, which is not crowded (more than %d); remove it." % (len(lst.items), LIMIT))))
             continue
@@ -335,7 +339,7 @@ def reflow(lang, path, text):
         src = parse(lang, path, text)
         todo = []
         for lst in src.lists():
-            if len(lst.items) > LIMIT and lst.faulty() and not src.marker(lst):
+            if lst.faulty() and not src.marker(lst):
                 if lst.rebuild is None:  # named on the first read only: later reads count lines that the edits moved
                     note = "%s:%d: not reflowed, %s" % (path, lst.first, lst.why)
                     if turn == 0:
