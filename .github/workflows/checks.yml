@@ -497,6 +497,10 @@ jobs:
         if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}
         run: python3 lint/check_tests_set_config.py
 
+      - name: Merge config layout fixture suite
+        if: ${{ !cancelled() && (needs.scope.outputs.code == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
+        run: python3 lint/test_merge_config_layout.py
+
       - name: Record slug fixture suite
         if: ${{ !cancelled() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_check_record_slugs.py
