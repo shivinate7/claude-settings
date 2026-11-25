@@ -9,6 +9,8 @@ sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (the one home, lint/_test_temp.py)
 from proc_fixture import alive, default_sigint, kill_all, stop_group, wait_for, wait_gone, zombie  # noqa: E402  the one home of the signal-test helpers (testing/proc_fixture.py)
 import _nowindow  # noqa: E402  the module bin/verdict imports too; its reaped_readable() is the seam the hang-stop cases patch
+sys.path.insert(0, os.path.join(HERE, "..", "merge"))
+import merge  # noqa: E402  the one home of READY_PASS_FMT and READY_PASS_SKIPPED_FMT; the ready-pass cases read them, never a copy
 RUN_FOLDER = _test_temp.run_folder()  # its sweep is proved in test_find_copies.py
 V = os.environ.get("VERDICT_UNDER_TEST") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "bin", "verdict")
 # The Windows launcher. It always runs its sibling bin/verdict, so VERDICT_UNDER_TEST does not reach it.
@@ -1994,6 +1996,66 @@ class HangLineOneHome(unittest.TestCase):
                 'two = """\nno output or CPU for\n"""\n'
                 "# don't count this: no output or CPU for\n")
         self.assertEqual(len(self.constants_with(text, self.WORDS)), 2, "the scan does not read string constants alone")
+
+
+def fifty_lines_with(line=None):
+    """Code that prints 50 filler lines, and `line` among them when given, 25 lines in: a ready-pass line in the middle of a long run."""
+    body = ["print('filler %d')" % i for i in range(50)]
+    if line is not None: body.insert(25, "print(%r)" % line)
+    return "\n".join(body) + "\n"
+
+class ReadyPassLine(unittest.TestCase):
+    """On a PASS, verdict prints its PASS line, then each line of the wrapped output that is a ready-pass line of the merge tool, word for
+    word, and nothing else of the log. The merge guard reads that line from the transcript (hooks/guard_merge.py _ready_pass_shas)."""
+    READY = merge.READY_PASS_FMT.format(checks="lint, guard", sha="1234abcde")  # the line merge/merge.py prints on a pass
+    SKIPPED = merge.READY_PASS_SKIPPED_FMT.format(checks="lint, guard", sha="1234abcde", skipped=1)  # the pass beside one skipped step
+
+    def pass_lines(self, r):
+        lines = r.stdout.splitlines()
+        self.assertTrue(lines and lines[0].startswith("PASS "), "the run did not print its PASS line first: %r" % r.stdout)
+        return lines
+
+    def test_pass_keeps_the_ready_pass_line_after_its_pass_line(self):
+        r = run(fifty_lines_with(self.READY))
+        lines = self.pass_lines(r)
+        self.assertEqual(r.returncode, 0)
+        self.assertEqual(lines[1:], [self.READY], "a PASS drops the merge tool's ready-pass line, which the merge guard reads: %r" % r.stdout)
+
+    def test_pass_keeps_the_skipped_ready_pass_line_after_its_pass_line(self):
+        # verdict's skip count reads the line's `1 skipped`, so its first line is SKIP, not PASS: the kept line follows either first line
+        r = run(fifty_lines_with(self.SKIPPED))
+        lines = r.stdout.splitlines()
+        self.assertEqual(r.returncode, 0)
+        self.assertTrue(lines and lines[0].startswith(("PASS ", "SKIP ")), "the run did not print a pass or skip line first: %r" % r.stdout)
+        self.assertEqual(lines[1:], [self.SKIPPED], "a passing run drops the skipped-step ready-pass line, which the merge guard reads: %r" % r.stdout)
+
+    def test_pass_with_no_ready_pass_line_prints_its_pass_line_only(self):
+        r = run(fifty_lines_with())
+        lines = self.pass_lines(r)
+        self.assertEqual(r.returncode, 0)
+        self.assertEqual(len(lines), 1, "a PASS with no ready-pass line in its output prints more than its PASS line: %r" % r.stdout)
+
+    def test_fail_prints_no_ready_pass_line(self):  # control: a FAIL keeps today's excerpt, which does not carry the early ready-pass line
+        r = run(fifty_lines_with(self.READY) + "import sys\nprint('FAIL boom')\nsys.exit(1)\n")
+        lines = r.stdout.splitlines()
+        self.assertEqual(r.returncode, 1)
+        self.assertTrue(lines and lines[0].startswith("FAIL "), "a failing run does not lead with its FAIL line: %r" % r.stdout)
+        self.assertNotIn(self.READY, lines, "a FAIL prints the ready-pass line, which only a PASS keeps: %r" % r.stdout)
+
+    def test_a_line_that_quotes_the_format_mid_line_is_not_kept(self):  # control: the format is kept at a line start only
+        r = run(fifty_lines_with("note: " + self.READY))
+        lines = self.pass_lines(r)
+        self.assertEqual(lines[1:], [], "a PASS keeps a line that only quotes the ready-pass format mid-line: %r" % r.stdout)
+
+    def test_kept_forms_are_fixed_prefixes_of_both_merge_formats(self):
+        kept = getattr(load_verdict_module(), "READY_PASS_KEPT", None)
+        self.assertIsNotNone(kept, "bin/verdict holds no READY_PASS_KEPT constant, so no ready-pass line is kept")
+        formats = (merge.READY_PASS_FMT, merge.READY_PASS_SKIPPED_FMT)
+        for form in kept:
+            for fmt in formats:
+                self.assertTrue(form and "{" not in form and fmt.startswith(form), "kept form %r is not a fixed prefix of %r" % (form, fmt))
+        for fmt in formats:
+            self.assertTrue(any(fmt.startswith(form) for form in kept), "no kept form covers %r" % fmt)
 
 
 def tearDownModule():
