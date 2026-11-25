@@ -252,12 +252,19 @@ def tag_orphan(env_entries=(), argv_extra=(), holder=None):
     return None
 
 
-def stranded_job(job_env_words, wrappers=0):
-    """The `holder` of a stranded stub: a shell that runs one `sleep` as its child and waits. The
+# THE JOB. A python process, not `sleep`: macOS hides the environment of an Apple platform binary from
+# the guard's read (debt kill-tag-platform-binary-blind), so a `sleep` job reads as foreign there.
+PY_JOB = [sys.executable, "-c", "import time; time.sleep(300)"]
+# The stub's shells, and `env`, which execs into the job. Until the job's exec its pid still shows one.
+LAUNCHERS = ("sh", "env")
+
+
+def stranded_job(job_env_words, wrappers=0, command=PY_JOB):
+    """The `holder` of a stranded stub: a shell that runs `command` as its child and waits. The
     child's environment is set by `job_env_words`: `env NAME=value` gives it a tag, `env -u NAME`
     takes the stub's away. `wrappers` adds that many shell wrappers between the stub and the job.
     The stub's own environment is `env_entries` of tag_orphan."""
-    return ["sh", "-c", '"$@" & wait', "sh"] * (1 + wrappers) + list(job_env_words) + ["sleep", "300"]
+    return ["sh", "-c", '"$@" & wait', "sh"] * (1 + wrappers) + list(job_env_words) + list(command)
 
 
 def child_of(parent):
@@ -278,8 +285,9 @@ def child_of(parent):
 
 
 def stub_job(stub, depth=1):
-    """The pid `depth` levels under `stub`, once that pid has exec'd `sleep`, or None. Until its
-    exec, a forked pid holds its parent's environment, so the tag is read only after it."""
+    """The pid `depth` levels under `stub`, once that pid has exec'd its job (its name is no
+    launcher), or None. Until its exec, a forked pid holds its parent's environment, so the tag is
+    read only after it."""
     pid = stub
     for _ in range(depth):
         pid = child_of(pid)
@@ -291,7 +299,7 @@ def stub_job(stub, depth=1):
                                   text=True, timeout=10).stdout.strip()
         except (OSError, subprocess.SubprocessError):
             return None
-        if comm == "sleep":
+        if comm and comm not in LAUNCHERS:
             return pid
         time.sleep(0.05)
     return None
@@ -375,6 +383,18 @@ tag_case("kill: a job under a PPID-1 stub that holds this session's id, the job 
          job=True, carries="did not start")
 tag_case("kill: a job under a PPID-1 stub, neither holding a session id, stays refused", "deny",
          holder=stranded_job(["env", "-u", TAG]), job=True, carries="did not start")
+# THE KNOWN LIMIT (debt kill-tag-platform-binary-blind). On macOS the environment of an Apple platform
+# binary is hidden from the read, so a stranded `/bin/sleep` that holds this session's id reads as
+# foreign and is refused. That fails closed. The python-job cases above do not reach the limit.
+LIMIT_LABEL = ("kill: a stranded Apple platform binary holding this session's id is refused on macOS "
+               "(known limit, debt kill-tag-platform-binary-blind)")
+if sys.platform == "darwin":
+    tag_case(LIMIT_LABEL, "deny", holder=stranded_job(["env", TAG + "=" + SUB_SESSION],
+                                                      command=["/bin/sleep", "300"]),
+             job=True, carries="did not start")
+else:
+    skip_case(LIMIT_LABEL, "the Apple platform binary's hidden environment is a macOS read, so this "
+                           "limit is not reached on this host")
 
 sh("kill: a pid list made by pgrep", "kill $(pgrep -f node)", "deny", "machine-wide-kill",
    cwd=NOGIT)
@@ -550,6 +570,7 @@ sh("rm-var: a quoted variable then a variable is refused",
 sh("rm-var: a variable then a trailing slash is refused",
    "rm -rf $S/", "deny", "rm-var-unguarded", cwd=NOGIT,
    carries=("literal path",), lacks=("${S:?}",))
+NO_GITBASH_DRIVE = "a Git Bash drive spelling (/c/...) is a Windows path form, so this case does not run here"
 # Windows only: a Git Bash drive spelling (/c/Users/<name>) names the real home, so the variable
 # is the home folder or the drive root and the remedy is the literal path, never ${S:?}.
 if os.name == "nt":
@@ -561,6 +582,9 @@ if os.name == "nt":
     sh("rm-var: a variable set to the drive root in Git Bash spelling names a literal path",
        "S=/%s; rm -rf $S/" % _home[0].lower(), "deny", "rm-var-unguarded", cwd=NOGIT,
        carries=("literal path",), lacks=("${S:?}",))
+else:
+    skip_case("rm-var: a variable set to the home folder in Git Bash spelling names a literal path", NO_GITBASH_DRIVE)
+    skip_case("rm-var: a variable set to the drive root in Git Bash spelling names a literal path", NO_GITBASH_DRIVE)
 # Not refused (ruling item 1): a literal follows the slash, so Claude Code does not prompt.
 sh("rm-var: a quoted $ROOT with a literal dist is not refused",
    'rm -rf "$ROOT/dist"', "allow", cwd=NOGIT)
@@ -836,6 +860,7 @@ sh("rm-var: a prefix assignment before the rm names a literal path, not ${OLDPWD
 sh("rm-var: a binding after the rm names a literal path, not ${OLDPWD:?}",
    "rm -rf $OLDPWD/; OLDPWD=/tmp", "deny", "rm-var-unguarded", cwd=NOGIT,
    carries=("literal path",), lacks=("${OLDPWD:?}",))
+NO_MACOS_FOLD = "the home folder is case-folded only on macOS, so this spelling names it only there"
 # macOS only: the home folder's file system is case-folded, so an upper or lower spelling of it
 # is the home folder and must name a literal path. The case is not registered elsewhere.
 if sys.platform == "darwin":
@@ -845,6 +870,9 @@ if sys.platform == "darwin":
     sh("rm-var: the home path lower-cased in a variable names a literal path on macOS",
        "D=%s; rm -rf $D/" % HOME.lower(), "deny", "rm-var-unguarded", cwd=NOGIT,
        carries=("literal path",), lacks=("${D:?}", HOME))
+else:
+    skip_case("rm-var: the home path upper-cased in a variable names a literal path on macOS", NO_MACOS_FOLD)
+    skip_case("rm-var: the home path lower-cased in a variable names a literal path on macOS", NO_MACOS_FOLD)
 # The cwd spelled through a symlink is the cwd, so it names a literal path. Registered only where
 # the fixture can build the link (no symlink privilege means no case, and the report says so).
 CWDLINK = os.path.join(ROOT, "nogit-link")
@@ -856,6 +884,8 @@ if CWDLINK:
     sh("rm-var: the cwd spelled through a symlink names a literal path, not ${D:?}",
        "D=%s; rm -rf $D/" % CWDLINK, "deny", "rm-var-unguarded", cwd=NOGIT,
        carries=("literal path",), lacks=("${D:?}", CWDLINK))
+else:
+    skip_case("rm-var: the cwd spelled through a symlink names a literal path, not ${D:?}", NO_LINK_HERE)
 # Ruling item 1 (decision rm-on-a-variable-needs-a-guard): a binding written AFTER a wrapper
 # still comes before no rm in the wrapper's own text, so the name must get the literal-path reason,
 # never ${NAME:?}.
