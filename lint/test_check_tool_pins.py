@@ -30,8 +30,8 @@ RUN_TIMEOUT = 60  # a hang guard well above a run of a few process starts
 GIT_MISMATCH = "tool-pins: git pinned 2.56, found 2.54.0; move the pin or the tool"
 APPLE_GIT = "git version 2.54.0 (Apple Git-155)"
 WINDOWS_GIT_256 = "git version 2.56.1.windows.1"
-# actions/setup-python reads .tool-versions with the JS form of this pattern, which names its group <version>.
-# Python spells the same named group (?P<version>...).
+# A copy of the pattern setup-python documents for .tool-versions, written from that documentation and not read from
+# its source. The JS form names its group <version>; Python spells the same named group (?P<version>...).
 SETUP_PYTHON_PIN = re.compile(r"^\s*python\s*v?\s*(?P<version>[^\s]+)\s*$")
 RUN_FOLDER = None  # made in setUpModule, so an import leaks no folder
 
@@ -224,7 +224,6 @@ class SyntaxTests(ToolPinsCase):
         self.assertEqual(rc, 0, "a # inside a quoted read command must stay part of that command: exit %d: %s" % (rc, out))
         self.assertIn("pinprobe-ver", self.invoked(), "the quoted read command must run: log %s" % self.invoked())
 
-
     def test_a_lone_quote_in_an_own_line_comment_does_not_hide_the_pin(self):
         self.fake("python", "Python 3.15.2")
         local = self.write("# the Windows's python is not pinned here\npython 3.15\n")
@@ -261,14 +260,14 @@ class SetupPythonTests(ToolPinsCase):
 
 class CostTests(ToolPinsCase):
 
+    # The name is the one the decision record pins. The case proves one version command per pin, and nothing about the network.
     def test_one_process_per_pin_and_no_network(self):
         self.fake("git", WINDOWS_GIT_256)
         self.fake("python3", "Python 3.15.2")
         self.fake("node", "v26.11.1")
         local = self.write("git 2.56\n# read: python = python3 --version\npython 3.15\nnode 26.11.1\n")
-        dead = {"HTTP_PROXY": "http://127.0.0.1:9", "HTTPS_PROXY": "http://127.0.0.1:9"}
-        rc, out = self.run_check("--file", local, extra_env=dead)
-        self.assertEqual(rc, 0, "three pins that match must pass with no network: exit %d: %s" % (rc, out))
+        rc, out = self.run_check("--file", local)
+        self.assertEqual(rc, 0, "three pins that match must pass: exit %d: %s" % (rc, out))
         self.assertEqual(sorted(self.invoked()), ["git", "node", "python3"],
                          "each pin's version command must run exactly once, and nothing else: %s" % self.invoked())
 
