@@ -26,13 +26,13 @@ Exit codes: 0 done (take: taken or own; give: given or free; lift: lifted or fre
 Cost: holds() and read() start git for `ls-remote`, one `fetch` of the ref (once more when that fetch fails) and one `log` on a sha not
 seen before in this process; a sha seen before costs the `ls-remote` alone. A commit never changes, so the sha-to-record cache is safe. The
 ref's own sha is never cached. The fetch stores the tip in the repo's own ref refs/lease-read/NAME and writes no remote-tracking ref, and the
-`log` reads the record from that ref, so a record is always the tip the fetch got, never an older sha the `ls-remote` saw. A take, give back
-or lift starts git for `remote get-url`, `mktree`, `commit-tree`, `push` and two `for-each-ref` reads of refs/remotes/*/lease/NAME, one before and one
-after the push (a take also for `config`). The push goes to the remote's URL, and a second remote of the same URL rides on the push command (`-c`,
-never written to config). The lease tool writes no remote-tracking ref in the caller's clone. Newer git is reported, unverified, to pair a bare push
-URL with the one configured remote of that URL and update its tracking ref; the second remote makes that pairing not unique. As the backstop, a
-tracking ref that the second `for-each-ref` shows and the first did not is deleted, by its full name and its new value (one `update-ref -d`, started
-only then); a ref that was there before the push is left alone. A snapshot that fails skips the clean-up. No timer, no process left running, no other file written.
+`log` reads the record from that ref, so a record is always the tip the fetch got, never an older sha the `ls-remote` saw. A push (take, give back or lift) starts git six times: `remote get-url`,
+`for-each-ref` (before), `mktree`, `commit-tree`, `push` and `for-each-ref` (after), plus one `update-ref -d` per new tracking ref; a take also starts `config` once. The push
+goes to the remote's URL, and a second remote of the same URL rides on the push command (`-c`, never written to config). A push by URL writes no
+remote-tracking ref. A push by remote name (the fallback, when the push URL cannot be read) makes git write one: the clean-up deletes a new ref
+(by its full name and its new value), and a ref that was there before is left as git moved it, to the pushed record. Newer git is reported,
+unverified, to pair a bare push URL with the one configured remote of that URL; the second remote makes that pairing not unique. A snapshot that
+fails skips the clean-up. No timer, no process left running, no other file written.
 """
 import argparse
 import os
