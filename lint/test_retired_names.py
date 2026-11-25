@@ -228,6 +228,7 @@ class RepoGlossaryTests(unittest.TestCase):
         self.assertEqual(problems, [], "\n".join(problems))
 
 
+# retired-names: pattern block begins
 # o13 lane B retired these names (GLOSSARY.md rows agent, mutation test, red run, command). Claude
 # Code's own names stay: the hook events, `subagent_type`, the CLAUDE_CODE_* settings keys and the
 # `subagents/` transcript folder. Two old names stay readable until their end day, each in one file:
@@ -250,35 +251,120 @@ STAYS = {  # path: the one old name it may still hold, and why
     # stays, so a bare "subagent" elsewhere in the file still fails.
     "lint/report_guard.py": "agent|subagent|",
 }
-SKIP = ("skills/impeccable/", "lint/test_check_glossary.py", "lint/test_retired_names.py", "GLOSSARY.md")
-# GLOSSARY names them as "Not"; the glossary suite quotes them as fixtures; this file holds the patterns
+# retired-names: pattern block ends
+# The scan skips the paths in SKIP: an exact file, or a folder (its name ends in /) and every path under it.
+SKIP = ("skills/impeccable/", "GLOSSARY.md")  # GLOSSARY.md names the retired words in its "Not" cells, on purpose
+BLOCK_BEGIN = "# retired-names: pattern block begins"  # the scan reads this file as data between the two markers
+BLOCK_END = "# retired-names: pattern block ends"
+
+
+def skipped(rel):
+    """True for a path the whole-tree scan skips: an exact SKIP file, or a path under a SKIP folder."""
+    return any(rel == entry or (entry.endswith("/") and rel.startswith(entry)) for entry in SKIP)
+
+
+def scanned_lines(rel, lines):
+    """(number, text) for each line the scan reads in a tracked file. In this file the lines from BLOCK_BEGIN to
+    BLOCK_END are data, and are left out. Each marker must stand alone once, begin before end; otherwise None, a hit,
+    so an unpaired marker cannot exempt the rest of the file."""
+    if rel != SELF:
+        return list(enumerate(lines, 1))
+    begin = [n for n, line in enumerate(lines, 1) if line.strip() == BLOCK_BEGIN]
+    end = [n for n, line in enumerate(lines, 1) if line.strip() == BLOCK_END]
+    if len(begin) != 1 or len(end) != 1 or end[0] < begin[0]:
+        return None
+    return [(n, line) for n, line in enumerate(lines, 1) if not begin[0] <= n <= end[0]]
+
+
+def retired_hits(repo):
+    """The hits of the whole-tree scan of repo, one text line each: a path, or a numbered line, that holds a retired
+    name. None when git cannot list repo."""
+    listed = subprocess.run(["git", "-C", repo, "ls-files"], capture_output=True, encoding="utf-8")
+    if listed.returncode != 0:
+        return None
+    retired, platform = re.compile(RETIRED_PATTERN), re.compile(PLATFORM)
+    found = []
+    for rel in listed.stdout.splitlines():
+        if skipped(rel):
+            continue
+        if retired.search(rel):
+            found.append("%s: the path" % rel)
+        try:
+            with open(os.path.join(repo, rel), encoding="utf-8") as f:
+                text = f.read()
+        except (OSError, UnicodeDecodeError):
+            continue
+        text = platform.sub("", text)
+        if rel in STAYS:
+            text = text.replace(STAYS[rel], "")
+        lines = scanned_lines(rel, text.splitlines())
+        if lines is None:
+            found.append("%s: the pattern block markers are not one begin, then one end" % rel)
+            continue
+        for number, line in lines:
+            hit = retired.search(line)
+            if hit:
+                found.append("%s:%d: %s" % (rel, number, hit.group(0)))
+    return found
 
 
 class RepoRetiredNamesTests(unittest.TestCase):
     def test_no_retired_name_in_tracked_files(self):
-        """Every tracked path and text file: no name o13 lane B retired, outside the platform's own."""
-        listed = subprocess.run(["git", "ls-files"], cwd=ROOT, capture_output=True, encoding="utf-8")
-        self.assertEqual(listed.returncode, 0, listed.stderr)
-        retired, platform = re.compile(RETIRED_PATTERN), re.compile(PLATFORM)
-        found = []
-        for rel in listed.stdout.splitlines():
-            if rel.startswith(SKIP):
-                continue
-            if retired.search(rel):
-                found.append("%s: the path" % rel)
-            try:
-                with open(os.path.join(ROOT, rel), encoding="utf-8") as f:
-                    text = f.read()
-            except (OSError, UnicodeDecodeError):
-                continue
-            text = platform.sub("", text)
-            if rel in STAYS:
-                text = text.replace(STAYS[rel], "")
-            for number, line in enumerate(text.splitlines(), 1):
-                hit = retired.search(line)
-                if hit:
-                    found.append("%s:%d: %s" % (rel, number, hit.group(0)))
+        """Every tracked path and text file, less the SKIP paths and this file's pattern block: no name o13 lane B
+        retired, outside the platform's own."""
+        found = retired_hits(ROOT)
+        self.assertIsNotNone(found, "git ls-files could not list %s" % ROOT)
         self.assertEqual(found, [], "\n".join(found[:40]))
+
+
+PLANTED = "HARNESS_" "SCOPE"  # a retired name, split so this file's own source holds none in matchable form
+
+
+class ScanScope(unittest.TestCase):
+    """retired_hits reads this file outside its pattern block, and every other tracked file less SKIP. Each case
+    plants a name in a scratch repo, so the scan's reach is shown, not assumed."""
+
+    def this_file(self):
+        with open(os.path.join(ROOT, SELF), encoding="utf-8") as f:
+            return f.read()
+
+    def test_unplanted_copy_of_this_file_is_clean(self):
+        repo = make_repo({SELF: self.this_file()})
+        self.assertIn(SELF, tracked(repo), "the fixture does not track %s" % SELF)
+        self.assertEqual(retired_hits(repo), [])
+
+    def test_name_planted_outside_the_pattern_block_is_named(self):
+        text = self.this_file()
+        repo = make_repo({SELF: text + '\nNOTE = "%s"\n' % PLANTED})
+        self.assertIn(SELF, tracked(repo), "the fixture does not track %s" % SELF)
+        self.assertEqual(retired_hits(repo), ["%s:%d: %s" % (SELF, text.count("\n") + 2, PLANTED)])
+
+    def test_name_planted_inside_the_pattern_block_is_not_a_hit(self):
+        text = self.this_file()
+        planted = text.replace(BLOCK_BEGIN + "\n", BLOCK_BEGIN + '\nNOTE = "%s"\n' % PLANTED, 1)
+        self.assertNotEqual(planted, text, "the fixture did not plant the name")
+        repo = make_repo({SELF: planted})
+        self.assertIn(SELF, tracked(repo), "the fixture does not track %s" % SELF)
+        self.assertEqual(retired_hits(repo), [])
+
+    def test_unpaired_block_marker_is_a_hit(self):
+        kept = [line for line in self.this_file().splitlines() if line.strip() != BLOCK_END]
+        repo = make_repo({SELF: "\n".join(kept) + "\n"})
+        self.assertEqual(retired_hits(repo),
+                         ["%s: the pattern block markers are not one begin, then one end" % SELF])
+
+    def test_bak_sibling_of_this_file_is_scanned(self):
+        repo = make_repo({SELF + ".bak": 'NOTE = "%s"\n' % PLANTED})
+        self.assertIn(SELF + ".bak", tracked(repo), "the fixture does not track %s.bak" % SELF)
+        self.assertEqual(retired_hits(repo), ["%s.bak:1: %s" % (SELF, PLANTED)])
+
+    def test_skip_entries_match_exact_paths_and_folders_only(self):
+        planted = 'NOTE = "%s"\n' % PLANTED
+        repo = make_repo({"GLOSSARY.md": planted, "GLOSSARY.md.bak": planted,
+                          "skills/impeccable/a.md": planted, "skills/impeccable-old/a.md": planted})
+        self.assertIn("GLOSSARY.md.bak", tracked(repo), "the fixture does not track GLOSSARY.md.bak")
+        self.assertEqual(retired_hits(repo), ["GLOSSARY.md.bak:1: %s" % PLANTED,
+                                              "skills/impeccable-old/a.md:1: %s" % PLANTED])
 
 
 def tearDownModule():
