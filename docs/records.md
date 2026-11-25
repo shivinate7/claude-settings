@@ -299,6 +299,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `sim-lease-tool` | bin/sim-lease is the one simulator queue and lease on a Mac | [`docs/decisions/sim-lease-tool.md`](../docs/decisions/sim-lease-tool.md) |
 | `sim-test-is-the-one-boot-path` | One lock makes sim-test the one boot path on a Mac | [`docs/decisions/sim-test-is-the-one-boot-path.md`](../docs/decisions/sim-test-is-the-one-boot-path.md) |
 | `sim-test-stops-a-crash-loop` | sim-test stops a simulator that crash-loops | [`docs/decisions/sim-test-stops-a-crash-loop.md`](../docs/decisions/sim-test-stops-a-crash-loop.md) |
+| `skill-edits-follow-work` | A held skill edit never holds up real work. | [`docs/decisions/skill-edits-follow-work.md`](../docs/decisions/skill-edits-follow-work.md) |
 | `source-prose-lint-ships-dark` | The comment-and-docstring mode of `ste_lint.py` stays off by default (`--source-prose` and `check_source`). | [`docs/decisions/source-prose-lint-ships-dark.md`](../docs/decisions/source-prose-lint-ships-dark.md) |
 | `spawn-searches-existing-builds` | Rule `spawn-searches-existing-builds` in `hooks/guard.py` refuses a build spawn whose brief has no `Prior work:` line with text after it. | [`docs/decisions/spawn-searches-existing-builds.md`](../docs/decisions/spawn-searches-existing-builds.md) |
 | `spawns-use-no-window` | Owner, 2026-10-19 16:20 CDT: helper programs that hooks, mods and tools start use the "no window" option. | [`docs/decisions/spawns-use-no-window.md`](../docs/decisions/spawns-use-no-window.md) |
