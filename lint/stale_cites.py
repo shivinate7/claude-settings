@@ -962,36 +962,44 @@ def fenced_lines(rows):
 
 
 def paren_cites(row):
-    """The text of each parenthesised group of the row that no code span swallows, with backticks dropped so
-    "(read `hooks/x.py:2`)" reads as "(read hooks/x.py:2)". The one home of what a backing looks like on a line."""
+    """The text of each parenthesised group of the row that no code span swallows, backticks kept: `cite_targets` and
+    `leading_names` tell a backticked name from a bare word by them. A reader of a path, a symbol, a route id or a
+    finding takes it through `plain`. The one home of what a backing looks like on a line."""
     spans = [m.span() for m in CODE_SPAN.finditer(row)]
-    return [m.group(1).replace("`", "").strip() for m in PAREN_GROUP.finditer(row)
+    return [m.group(1).strip() for m in PAREN_GROUP.finditer(row)
             if not any(a <= m.start() < b for a, b in spans)]
 
 
+def plain(text):
+    """`text` with its backticks dropped, so "`hooks/x.py:2`" reads as "hooks/x.py:2". Every reader of a cite's `rest` but `cite_targets` takes it so."""
+    return text.replace("`", "")
+
+
 def cite_kind(cite):
-    """(kind, rest) of "kind rest": the first word lower-cased, and what follows it."""
+    """(kind, rest) of "kind rest": the first word lower-cased, and what follows it. `rest` keeps the backticks of the cite (see `plain`)."""
     word, _, rest = cite.strip().partition(" ")
-    return word.lower(), rest.strip()
+    return plain(word).lower(), rest.strip()
 
 
 def has_source(rest):
     """True when `rest` holds a source path as one of its words (split at spaces, commas and semicolons)."""
-    return any(SOURCE.match(word.rstrip(".")) for word in re.split(r"[\s,;]+", rest) if word)
+    return any(SOURCE.match(word.rstrip(".")) for word in re.split(r"[\s,;]+", plain(rest)) if word)
 
 
 SYMBOL_WORD = re.compile(r"([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*)(?:\(\))?\Z")  # a name, or a dotted Class.method
 FILE_WORD = re.compile(r"/|\.(?:py|mjs|cjs|js|ts|sh|md|json|ya?ml|toml|txt|cfg|ini|html|css)\Z")  # a word that is a file, not Class.method
 CITE_VERBS = ("read", "test")  # the words that open a cite, never a name
 ARTICLES = ("a", "an", "the", "every", "each", "both", "this", "that", "its")  # a word before a bare word that makes it prose, not a name
+POSSESSIVES = ("'s", "\u2019s")  # a straight or a curly apostrophe before the s
 CITE_TOKEN = re.compile(r"([^\s,;]+)([\s,;]*)")  # a word and the separator after it
 
 
-def leading_names(tokens):
+def leading_names(tokens, ticked=frozenset()):
     """({path index: [names]}, {token indices of those names and the `and` / `in` words around them}) for each name that sits before its
     path: `NAME in PATH`, or `NAME and NAME in PATH`. A name here is a symbol word that is no cite verb, `in` or `and`. An article
-    or determiner (ARTICLES), or a possessive (a token ending `'s`), directly before the first name makes the whole chain prose: it
-    governs the list, so no name of it leads."""
+    or determiner (ARTICLES), or a possessive (a token ending `'s` or `’s`), directly before the first name makes the whole chain prose: it
+    governs the list, so no name of it leads. `ticked` holds the indices of the tokens the cite wrote in backticks: a backticked first
+    name is a name after any word, and a backticked last name may be followed by bare prose words before `in` (`the `guard` helper in PATH`)."""
     def is_name(word):
         return bool(SYMBOL_WORD.match(word)) and word not in CITE_VERBS + ("in", "and") and not FILE_WORD.search(word)
     led, covered, prose = {}, set(), set()
@@ -1002,10 +1010,13 @@ def leading_names(tokens):
         while at + 2 < len(tokens) and tokens[at + 1][0] == "and" and is_name(tokens[at + 2][0]):
             at += 2
             names.append(at)
+        if at in ticked:
+            while at + 1 < len(tokens) and at + 1 not in ticked and is_name(tokens[at + 1][0]):
+                at += 1  # a bare prose word after a backticked name
         path = at + 2
         if path < len(tokens) and tokens[at + 1][0] == "in" and SOURCE.match(tokens[path][0]) and not is_name(tokens[path][0]):
             before = tokens[start - 1][0].lower() if start else ""
-            if before in ARTICLES or before.endswith("'s"):  # raw token: `guard's` is no SYMBOL_WORD
+            if start not in ticked and (before in ARTICLES or before.endswith(POSSESSIVES)):  # raw token: `guard's` is no SYMBOL_WORD
                 prose.update(names)
                 continue
             led[path] = [SYMBOL_WORD.match(tokens[n][0]).group(1) for n in names]
@@ -1021,13 +1032,16 @@ def cite_targets(kind, rest):
     path, unless an earlier path of the cite already owns it, or an article, determiner or possessive stands directly before the first name: then the words are
     prose and the cite shows the file top. Empty for any other kind."""
     if kind == "test":
+        rest = plain(rest)
         node = TEST_CITE.match(rest)
         return [(node.group(1), rest, [rest.rsplit("::", 1)[-1]])] if node else []
     if kind != "read":
         return []
-    raw = [(word, sep) for word, sep in CITE_TOKEN.findall(rest) if word.rstrip(".")]
+    marked = [(word, sep) for word, sep in CITE_TOKEN.findall(rest) if plain(word).rstrip(".")]
+    ticked = {index for index, (word, _) in enumerate(marked) if "`" in word}  # the words the cite wrote in backticks; no word below keeps one
+    raw = [(plain(word), sep) for word, sep in marked]
     tokens = [(word.rstrip("."), sep) for word, sep in raw]
-    leading, leading_at = leading_names(tokens)
+    leading, leading_at = leading_names(tokens, ticked)
     found, collecting = [], False
     for index, (word, sep) in enumerate(tokens):
         if index in leading_at:
@@ -1399,12 +1413,13 @@ class RouteClaimReader:
             kind, rest = cite_kind(cite)
             path = backing_path(kind, rest)
             if kind in BACKING_KINDS or kind == "test":
-                sourced = bool(TEST_CITE.match(rest)) if kind == "test" else has_source(rest)
+                sourced = bool(TEST_CITE.match(plain(rest))) if kind == "test" else has_source(rest)
                 if sourced and path is not None and rng.batch.get("%s:%s" % (rng.head, posixpath.normpath(path))) is None:
                     dead_files.append(path)  # a read or test backing is dead when its file is not at head
                 else:
                     backed = backed or sourced
-            elif kind == "route" and ROUTE_CITE.match(rest):
+            elif kind == "route" and ROUTE_CITE.match(plain(rest)):
+                rest = plain(rest)
                 ids, why = route_ids(rng, rows_at_head)
                 if ids is None:
                     unchecked.append((rest, why))
@@ -1446,7 +1461,7 @@ class RouteClaimReader:
                     continue
                 if "ste-disable-line" in row and self.code in disabled(row):
                     continue
-                ids = [rest for kind, rest in map(cite_kind, paren_cites(row)) if kind == "route" and rest in gone]
+                ids = [plain(rest) for kind, rest in map(cite_kind, paren_cites(row)) if kind == "route" and plain(rest) in gone]
                 if ids:
                     found.setdefault((md, number), "cites %s, a route row this range removes" % ", ".join(ids))
 
