@@ -36,7 +36,7 @@ At head `1ad9bbe43c`:
 - Precision: `lint/check_tool_pins.py matches` matches a pin at the precision it states. `3.15` accepts 3.15.2. `2.56` accepts 2.56.1. `2.105` rejects 2.10.5. Departs from "one stated version" (the consultant's pick).
 - `--local`: `lint/check_tool_pins.py main` prints a mismatch as a note and exits 0. An unknown tool still exits 1.
 - Unknown: a tool that is not found, or whose command fails, prints `unknown` and exits 1.
-- Cost: one version command per pin, per run, pinned by `test_one_process_per_pin_and_no_network`. No network. No file written. Runs only when invoked.
+- Cost: one version command per pin, per run, pinned by `test_one_process_per_pin_and_no_network` in `lint/test_check_tool_pins.py`. No network. No file written. Runs only when invoked.
 
 ## State
 
