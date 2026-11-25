@@ -15,8 +15,10 @@ block cost.
 
 GUARD_RULE_EXACT=report prints, for each case that names a rule, a rule-mismatch line when the reason does not
 lead with that rule (the text before its first ": "), a rule-unset line for each deny or ask case that names no
-rule, and a rule-total line. It fails no case: the PASS and FAIL lines are the same as without it. Any other
-value stops the run before a case runs.
+rule, and a rule-total line. It fails no case: the PASS and FAIL lines are the same as without it. GUARD_RULE_EXACT=exact
+is the mode that will fail a case whose printed rule is another rule. It is accepted now and reports as report
+does, so the self-test that pins it (rule_exact_selftest_check, section 39497) fails until exact is built. Any
+other value stops the run before a case runs.
 
 GUARD_HEARTBEAT=<seconds> sets the quiet time after which the run prints a progress line to stderr,
 and appends it to STALL_WATCH_BEAT when that is set (default 60; a number above 0). A run that prints
@@ -218,7 +220,8 @@ if GUARD_FAMILY and GUARD_FAMILY not in FAMILIES:
              % (GUARD_FAMILY, ", ".join(sorted(FAMILIES))))
 # GUARD_RULE_EXACT=report: the rule check in run_cases passes a case when its reason holds the rule anywhere. Report
 # mode prints the cases whose printed rule (the text before the first ": ") is not the wanted rule, and decides no verdict.
-RULE_EXACT_MODES = ("", "report")
+# GUARD_RULE_EXACT=exact is accepted and reports as report does until it fails those cases (see the self-test, section 39497).
+RULE_EXACT_MODES = ("", "report", "exact")
 RULE_EXACT = os.environ.get("GUARD_RULE_EXACT", "")
 
 
@@ -654,12 +657,16 @@ NAME_NUMBER_LABEL = "sections: a section file named for another number than its 
 LATE_APPEND_LABEL = "sections: a log check appended after the join stops the run before any case"
 
 
-def section_child_run(folder):
-    """This runner, in a child process, on the section files of `folder`, under the family that builds no fixture.
+def section_child_run(folder, family="load-brake", extra_env=None):
+    """This runner, in a child process, on the section files of `folder`, under `family` (the family that builds no
+    fixture, unless a check names another) and with `extra_env` set on top of the runner's own environment.
     -> (rc, output), rc None when it does not end in 300 s. The child leads its own process group: a sleep that
     its import starts (OWNED) would hold a pipe open, so the output goes to a file, and the group ends with the child."""
     env = {k: v for k, v in os.environ.items() if not k.startswith(("GUARD_", "MUTATE_ONLY"))}
-    env.update(GUARD_FAMILY="load-brake", GUARD_SECTION_DIR=folder)
+    env.update(GUARD_SECTION_DIR=folder)
+    if family:
+        env["GUARD_FAMILY"] = family
+    env.update(extra_env or {})
     posix = os.name != "nt"
     log = os.path.join(folder, "child-output.txt")
     with open(log, "w", encoding="utf-8") as out:
@@ -877,7 +884,7 @@ def run_cases():
         say("GUARD_TESTS=%r: want unset, 'windows-slice' or 'macos-slice'. Nothing ran." % mode)
         return 2
     if RULE_EXACT not in RULE_EXACT_MODES:
-        say("GUARD_RULE_EXACT=%r: want unset or 'report'. Nothing ran." % RULE_EXACT)
+        say("GUARD_RULE_EXACT=%r: want unset, 'report' or 'exact'. Nothing ran." % RULE_EXACT)
         return 2
     problems = macos_arm_problems()
     if problems:

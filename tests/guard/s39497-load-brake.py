@@ -1598,6 +1598,72 @@ LOG_FAMILY["GUARD_SHARD: the shards are disjoint and hold every case"] = "misc"
 FIXTURELESS_CHECKS.add(shard_split_check)
 
 
+# GUARD_RULE_EXACT=exact must fail a case whose printed reason leads with another rule. The check below runs this runner
+# in a child on the real section files plus one probe section. The probe's two cases name a stand-in guard (add's `guard`),
+# a script that prints `records-page-ready: x` for the wrong-rule probe and `records-page: x` for the control. The child
+# runs only the two probes (MUTATE_ONLY). The check joins the log checks only under exact mode, so a default run keeps its lines.
+RULE_EXACT_PROBE = "rule-exact probe"
+RULE_EXACT_WRONG = RULE_EXACT_PROBE + ": a reason that leads with records-page-ready fails a case that wants records-page"
+RULE_EXACT_CONTROL = RULE_EXACT_PROBE + " control: a reason that leads with records-page passes"
+RULE_EXACT_STAND_IN = (
+    "import json, sys\n"
+    "command = str(json.loads(sys.stdin.read() or '{}').get('tool_input', {}).get('command', ''))\n"
+    "reason = 'records-page: x' if 'right-rule' in command else 'records-page-ready: x'\n"
+    "print(json.dumps({'hookSpecificOutput': {'permissionDecision': 'deny', 'permissionDecisionReason': reason}}))\n"
+)
+
+
+def rule_exact_probe_section(stand_in):
+    """The probe section the child loads: two Bash cases judged by the stand-in, one wrong, one right."""
+    return (
+        "# section 99990\n"
+        "FAMILY = \"misc\"\n"
+        "add(%r, \"deny\", \"records-page\", guard=%r, command=\"wrong-rule probe\")\n"
+        "add(%r, \"deny\", \"records-page\", guard=%r, command=\"right-rule probe\")\n"
+    ) % (RULE_EXACT_WRONG, stand_in, RULE_EXACT_CONTROL, stand_in)
+RULE_EXACT_LABEL = "GUARD_RULE_EXACT: exact fails a case whose reason leads with another rule, and passes the control"
+
+
+def rule_exact_selftest_check():
+    """GUARD_RULE_EXACT=exact: the wrong-rule probe must FAIL, and the control must PASS. The child reads the real sections
+    and the probe section, and the stand-in answers. Before the verdicts are read, the stand-in must have judged the
+    wrong-rule probe deny, and the report must name its mismatch, so a red here is the exact gap and nothing else."""
+    folder = tempfile.mkdtemp(dir=ROOT)
+    stand_in = os.path.join(folder, "rule-exact-stand-in.py")
+    with open(stand_in, "w", encoding="utf-8") as f:
+        f.write(RULE_EXACT_STAND_IN)
+    sections = os.path.join(folder, "sections")
+    os.mkdir(sections)
+    build_with_extra("s99990-rule-exact-probe.py", rule_exact_probe_section(stand_in))(sections)
+    rc, out = section_child_run(sections, family="misc", extra_env={
+        "GUARD_RULE_EXACT": "exact", "MUTATE_ONLY": RULE_EXACT_PROBE})
+    if rc is None:
+        return False, "the child run did not end within 300 s"
+    lines = out.splitlines()
+    wrong = [line for line in lines if line[:4] in ("PASS", "FAIL") and RULE_EXACT_WRONG in line]
+    control = [line for line in lines if line[:4] in ("PASS", "FAIL") and RULE_EXACT_CONTROL in line]
+    if len(wrong) != 1 or len(control) != 1:
+        return False, "the child gave %d wrong-rule and %d control verdict lines, want 1 each; its last line: %s" % (
+            len(wrong), len(control), (lines or [""])[-1][:100])
+    if "deny" not in wrong[0].split("(want")[0]:
+        return False, "the stand-in did not judge the wrong-rule probe as deny: %s" % wrong[0][:110]
+    mismatch = [line for line in lines if line.startswith("rule-mismatch") and RULE_EXACT_WRONG in line]
+    if not mismatch or "records-page-ready" not in mismatch[0]:
+        return False, "the report names no mismatch for the wrong-rule probe, so the detector is not in this run"
+    if not control[0].startswith("PASS"):
+        return False, "the control probe, whose reason leads with its own rule, did not pass: %s" % control[0][:110]
+    if wrong[0].startswith("PASS"):
+        return False, ("the wrong-rule probe passed under GUARD_RULE_EXACT=exact: exact does not fail a reason "
+                       "that leads with another rule")
+    return True, "exact fails the wrong-rule probe, passes the control, and the report names the mismatch"
+
+
+if RULE_EXACT == "exact":
+    LOG_CHECKS_EXTRA.append((RULE_EXACT_LABEL, rule_exact_selftest_check))
+    LOG_FAMILY[RULE_EXACT_LABEL] = "misc"
+    FIXTURELESS_CHECKS.add(rule_exact_selftest_check)
+
+
 # =========================================================================== agent role model
 #
 # Rule agent-role-model (decision agent-model-cap). Three parts, one reader of the table:
