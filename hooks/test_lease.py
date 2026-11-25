@@ -6,10 +6,7 @@
 A lease is the ref refs/heads/lease/NAME on the repo's remote. Its record is a commit with an empty tree, whose message
 lines are `lease NAME`, `holder:`, `repo:`, `taken:` and `roster:`. Give back and lift push a released record, one with an
 `expires: 0` line, and never delete the ref. Each case builds a bare remote and a clone under this run's folder, with no
-network. Roster removal is not covered here; it has its own file.
-
-Until hooks/lease.py exists, every case fails on the assert in `need()`, whose message names the missing module. A missing
-module never reads as a pass or as an import error.
+network. Roster removal is not built.
 """
 import os
 import shutil
@@ -28,6 +25,11 @@ try:
     import lease  # noqa: E402  the one lease home (hooks/lease.py)
 except Exception:  # a missing or broken module: each case then fails on need()'s assert, never on this import
     lease = None
+
+try:
+    import override  # noqa: E402  the cloud id's reader (hooks/override.py, remote_session_id)
+except Exception:  # a missing or broken module: the cases that read it fail on need_override()'s assert
+    override = None
 
 LEASE_CMD = os.path.join(HERE, "lease.py")
 MISSING = "hooks/lease.py is missing: the lease module does not exist yet"
@@ -55,6 +57,46 @@ exec "$REAL_GIT" "$@"
 '''
 COUNT_SHIM = '#!/bin/sh\necho start >> "$COUNT_LOG"\nexec "$REAL_GIT" "$@"\n'
 SLOW_SHIM = "#!/bin/sh\nexec sleep 20\n"
+# MOVE_ON_FETCH_SHIM moves the ref on the remote just before the first fetch, so the ls-remote has already read the old sha.
+MOVE_ON_FETCH_SHIM = r'''#!/bin/sh
+case " $* " in
+  *" fetch "*)
+    if [ ! -e "$MOVE_MARK" ]; then
+      : > "$MOVE_MARK"
+      "$REAL_GIT" --git-dir="$MOVE_REMOTE" update-ref "$MOVE_REF" "$MOVE_SHA"
+    fi
+    ;;
+esac
+exec "$REAL_GIT" "$@"
+'''
+# REFUSED_PUSH_SHIM moves the ref to MOVE_SHA, then refuses the first push with a message the push's output must keep.
+REFUSED_PUSH_SHIM = r'''#!/bin/sh
+case " $* " in
+  *" push "*)
+    if [ ! -e "$MOVE_MARK" ]; then
+      : > "$MOVE_MARK"
+      "$REAL_GIT" --git-dir="$MOVE_REMOTE" update-ref "$MOVE_REF" "$MOVE_SHA"
+      echo "fixture: push refused after the lease moved" >&2
+      exit 1
+    fi
+    ;;
+esac
+exec "$REAL_GIT" "$@"
+'''
+# LOST_REPLY_SHIM lands the first push, then reports that it failed: the release is on the remote, and the reply is lost.
+LOST_REPLY_SHIM = r'''#!/bin/sh
+case " $* " in
+  *" push "*)
+    if [ ! -e "$MOVE_MARK" ]; then
+      : > "$MOVE_MARK"
+      "$REAL_GIT" "$@"
+      echo "fixture: reply lost after the push landed" >&2
+      exit 1
+    fi
+    ;;
+esac
+exec "$REAL_GIT" "$@"
+'''
 
 
 def tearDownModule():
@@ -90,6 +132,10 @@ class LeaseBase(unittest.TestCase):
         self.assertIsNotNone(lease, MISSING)
         self.assertTrue(os.path.isfile(LEASE_CMD), "hooks/lease.py is missing: the command file does not exist yet")
 
+    def need_override(self):
+        """The first line of a case that reads the cloud id through hooks/override.py."""
+        self.assertIsNotNone(override, "hooks/override.py did not import, so the cloud id cannot be compared with it")
+
 
 class LeaseCase(LeaseBase):
     """A bare remote and a clone of it under this run's folder. The caller's lease variables are stripped for the case."""
@@ -118,13 +164,26 @@ class LeaseCase(LeaseBase):
     def ref_message(self):
         return git(self.remote, "log", "-1", "--format=%B", "refs/heads/lease/" + NAME).stdout
 
-    def put_record(self, message):
-        """Write a record commit with this message as the lease ref, and return its sha. A fixture: no lease module writes it."""
+    def make_record(self, message):
+        """Make a record commit with this message, push it to the remote under a fixture branch, and return its sha. A fixture."""
         tree = git(self.repo, "mktree", stdin="").stdout.strip()
         sha = git(self.repo, "commit-tree", tree, "-m", message).stdout.strip()
         git(self.repo, "push", "-q", "origin", sha + ":refs/heads/fixture-" + sha[:12])
+        return sha
+
+    def put_record(self, message):
+        """Write a record commit with this message as the lease ref, and return its sha. A fixture: no lease module writes it."""
+        sha = self.make_record(message)
         git(self.remote, "update-ref", "refs/heads/lease/" + NAME, sha)
         return sha
+
+    def shim_env(self, text, **extra):
+        """The env to patch in for a `git` shim: PATH with the shim's folder first, the real git, and its marker file. `extra` adds more."""
+        folder = write_shim(tempfile.mkdtemp(dir=self.base), text)
+        env = {"PATH": folder + os.pathsep + os.environ.get("PATH", ""), "REAL_GIT": REAL_GIT,
+               "MOVE_MARK": os.path.join(folder, "fired")}
+        env.update(extra)
+        return env
 
     def command(self, *args, remote="origin"):
         """Run hooks/lease.py against this case's clone. -> the finished process."""
@@ -237,6 +296,34 @@ class LeaseGiveTest(LeaseCase):
         self.assertEqual(lease.give(self.repo, "origin", NAME, ALPHA), "free", "a give with no lease did not read free")
         self.assertEqual(self.ref_sha(), "", "a give with no lease created a ref")
 
+    @unittest.skipIf(os.name == "nt", "the refused push is a POSIX shell shim on PATH")
+    def test_a_refused_give_keeps_the_push_output_when_the_lease_moved_to_another_holder(self):
+        self.need()
+        lease.take(self.repo, "origin", NAME, ALPHA)
+        beta = self.make_record("lease %s\nholder: %s\nrepo: fixture\ntaken: 2026-11-24T00:00:00Z" % (NAME, BETA))
+        env = self.shim_env(REFUSED_PUSH_SHIM, MOVE_REMOTE=self.remote, MOVE_REF="refs/heads/lease/" + NAME, MOVE_SHA=beta)
+        with mock.patch.dict(os.environ, env):
+            run = self.command("give", NAME, "--holder", ALPHA)
+        text = run.stdout + run.stderr
+        self.assertEqual(run.returncode, 1, "control: a give whose lease moved to another holder did not exit 1: " + text)
+        self.assertIn("not-holder", text, "control: a give whose lease moved to another holder did not name not-holder")
+        self.assertIn("push refused after the lease moved", text, "a give whose push was refused dropped the push output")
+
+    @unittest.skipIf(os.name == "nt", "the lost reply is a POSIX shell shim on PATH")
+    def test_a_give_whose_release_landed_before_its_reply_was_lost_reads_given(self):
+        self.need()
+        lease.take(self.repo, "origin", NAME, ALPHA)
+        env = self.shim_env(LOST_REPLY_SHIM)
+        with mock.patch.dict(os.environ, env):
+            run = self.command("give", NAME, "--holder", ALPHA)
+        text = run.stdout + run.stderr
+        self.assertEqual(run.returncode, 0, "a give whose release had landed exited 1, not given: " + text)
+        self.assertIn("lease %s: given" % NAME, run.stdout, "a give whose release had landed did not print given")
+        self.assertIn("reply lost after the push landed", text, "a give whose release had landed dropped the push output")
+        record = lease.read(self.repo, "origin", NAME)
+        self.assertIsNotNone(record, "control: the give removed the record")
+        self.assertTrue(record.released, "the release that landed is not on the remote")
+
 
 class LeaseLiftCorruptTest(LeaseCase):
     def test_lift_works_on_a_record_whose_message_is_junk(self):
@@ -290,6 +377,46 @@ class LeaseReadUnknownTest(LeaseCase):
                 run = self.command(verb, NAME, *extra, remote=missing)
                 self.assertEqual(run.returncode, 2, verb + " on an unreadable remote did not exit 2: " + run.stdout + run.stderr)
 
+    def moved_ref_env(self, released):
+        """The env for a shim that moves the lease ref to `released` on the remote, just before the first fetch."""
+        return self.shim_env(MOVE_ON_FETCH_SHIM, MOVE_REMOTE=self.remote, MOVE_REF="refs/heads/lease/" + NAME, MOVE_SHA=released)
+
+    @unittest.skipIf(os.name == "nt", "the moving ref is a POSIX shell shim on PATH")
+    def test_read_never_returns_the_old_record_when_the_ref_moves_before_the_fetch(self):
+        self.need()
+        lease.take(self.repo, "origin", NAME, ALPHA)
+        released = self.make_record("lease %s\nexpires: 0\nreleased: 1\nby: lift" % NAME)
+        env = self.moved_ref_env(released)
+        refused = False
+        with mock.patch.dict(os.environ, env):
+            try:
+                record = lease.read(self.repo, "origin", NAME)
+            except lease.Unknown:
+                refused = True
+        self.assertTrue(os.path.isfile(env["MOVE_MARK"]), "control: the ref never moved between the ls-remote and the fetch")
+        if refused:
+            return  # Unknown refuses: an allowed answer
+        self.assertIsNotNone(record, "a read whose ref moved before its fetch reported the lease free")
+        self.assertEqual(record.sha, released, "a read whose ref moved before its fetch returned the record of the old sha")
+        self.assertTrue(record.released, "a read whose ref moved before its fetch did not return the released record")
+
+    @unittest.skipIf(os.name == "nt", "the moving ref is a POSIX shell shim on PATH")
+    def test_holds_never_passes_the_old_holder_when_the_ref_moves_before_the_fetch(self):
+        self.need()
+        lease.take(self.repo, "origin", NAME, ALPHA)
+        released = self.make_record("lease %s\nexpires: 0\nreleased: 1\nby: lift" % NAME)
+        env = self.moved_ref_env(released)
+        refused = False
+        with mock.patch.dict(os.environ, env):
+            try:
+                held = lease.holds(self.repo, "origin", NAME, ALPHA)
+            except lease.Unknown:
+                refused = True
+        self.assertTrue(os.path.isfile(env["MOVE_MARK"]), "control: the ref never moved between the ls-remote and the fetch")
+        if refused:
+            return  # Unknown refuses: an allowed answer
+        self.assertFalse(held, "a holds read whose ref moved before its fetch passed the old holder")
+
 
 class LeaseReadBudgetTest(LeaseCase):
     def test_the_default_budget_is_a_number_at_most_fifteen_seconds(self):
@@ -321,10 +448,34 @@ class LeaseHolderIdTest(LeaseBase):
         env = {"CLAUDE_CODE_REMOTE_SESSION_ID": "cse_abc123", "CLAUDE_CODE_SESSION_ID": "local-9"}
         self.assertEqual(lease.holder_id(env), "session_abc123", "the local id was used when a cloud id was set")
 
-    def test_a_cloud_value_without_the_cse_form_is_not_used(self):
+    def test_a_malformed_cloud_value_gives_no_id_and_never_falls_through(self):
         self.need()
+        self.need_override()
         env = {"CLAUDE_CODE_REMOTE_SESSION_ID": "abc123", "CLAUDE_CODE_SESSION_ID": "local-9"}
-        self.assertEqual(lease.holder_id(env), "local-9", "a cloud value with no cse_ form was used as the holder id")
+        with mock.patch.dict(os.environ, env, clear=True):
+            self.assertIsNone(override.remote_session_id(), "control: the override does not reject the cloud value abc123")
+            self.assertIsNone(lease.holder_id(env), "a cloud value with no cse_ form fell through to the local id")
+            self.assertIsNone(lease.holder_id(env, payload_session_id="payload-7"),
+                              "a cloud value with no cse_ form fell through to the payload id")
+
+    def test_an_empty_cloud_suffix_gives_no_id_and_never_falls_through(self):
+        self.need()
+        self.need_override()
+        env = {"CLAUDE_CODE_REMOTE_SESSION_ID": "cse_", "CLAUDE_CODE_SESSION_ID": "local-9"}
+        with mock.patch.dict(os.environ, env, clear=True):
+            self.assertIsNone(override.remote_session_id(), "control: the override does not reject a cloud value with no id after cse_")
+            self.assertIsNone(lease.holder_id(env), "a cloud value with no id after cse_ fell through to the local id")
+            self.assertIsNone(lease.holder_id(env, payload_session_id="payload-7"),
+                              "a cloud value with no id after cse_ fell through to the payload id")
+
+    def test_a_well_formed_cloud_id_reads_the_same_in_both_functions(self):
+        self.need()
+        self.need_override()
+        env = {"CLAUDE_CODE_REMOTE_SESSION_ID": "cse_abc123", "CLAUDE_CODE_SESSION_ID": "local-9"}
+        with mock.patch.dict(os.environ, env, clear=True):
+            self.assertEqual(override.remote_session_id(), "session_abc123", "control: the override did not read cse_abc123 as session_abc123")
+            self.assertEqual(lease.holder_id(env), override.remote_session_id(),
+                             "lease and override read the same cloud id as different holder ids")
 
     def test_the_local_id_is_used_as_it_stands(self):
         self.need()
@@ -402,6 +553,22 @@ class LeaseNoExpiryTest(LeaseCase):
                       "a give back did not write the expires 0 line that releases the record")
 
 
+class LeaseRecordFieldsTest(LeaseCase):
+    def test_the_repo_line_of_a_taken_record_holds_no_credential(self):
+        self.need()
+        url = "https://fixture-user:fixture-token@example.invalid/owner/name.git"
+        git(self.repo, "config", "remote.origin.url", url)
+        git(self.repo, "config", "url.%s.insteadOf" % self.remote, url)  # the fetches and pushes still reach the local remote
+        lease.take(self.repo, "origin", NAME, ALPHA)
+        record = lease.read(self.repo, "origin", NAME)
+        self.assertIsNotNone(record, "control: the taken lease left no record")
+        self.assertIn("repo", record.fields, "control: the taken record has no repo line")
+        repo = record.fields["repo"]
+        self.assertNotIn("token", repo, "the repo line of the taken record carries the token from the remote URL")
+        self.assertNotIn("user:", repo, "the repo line of the taken record carries the user name from the remote URL")
+        self.assertNotIn("fixture-token", self.ref_message(), "a credential from the remote URL reached the record's commit message")
+
+
 class LeaseReadCost(LeaseCase):
     @unittest.skipIf(os.name == "nt", "the counting git is a POSIX shell shim on PATH")
     def test_holds_starts_git_at_most_three_times_then_at_most_twice_for_the_same_sha(self):
@@ -445,8 +612,20 @@ class LeaseCommandTest(LeaseCase):
         self.assertEqual(self.command("take", NAME, "--holder", ALPHA).returncode, 0, "control: the take did not exit 0")
         refused = self.command("give", NAME, "--holder", BETA)
         self.assertEqual(refused.returncode, 1, "a give back by a caller who is not the holder did not exit 1")
+        self.assertIn("not-holder", refused.stdout + refused.stderr,
+                      "the refused give back did not name the not-holder outcome")
         given = self.command("give", NAME, "--holder", ALPHA)
         self.assertEqual(given.returncode, 0, "the holder's give back did not exit 0: " + given.stdout + given.stderr)
+
+    def test_give_back_as_two_words_releases_the_lease_as_give_does(self):
+        self.need()
+        self.assertEqual(self.command("take", NAME, "--holder", ALPHA).returncode, 0, "control: the take did not exit 0")
+        run = self.command("give", "back", NAME, "--holder", ALPHA)
+        self.assertEqual(run.returncode, 0, "give back NAME did not exit 0: " + run.stdout + run.stderr)
+        self.assertEqual(run.stdout.strip(), "lease %s: given" % NAME, "give back NAME did not print the outcome that give NAME prints")
+        record = lease.read(self.repo, "origin", NAME)
+        self.assertIsNotNone(record, "give back NAME removed the record instead of releasing it")
+        self.assertTrue(record.released, "give back NAME did not release the record")
 
     def test_lift_exits_0_and_the_lifted_lease_is_then_takeable(self):
         self.need()
