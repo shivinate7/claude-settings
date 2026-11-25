@@ -136,6 +136,47 @@ def decide(case):
         # the case names one (`load`). Only the load-brake family sets a busy or full reading.
         command = [sys.executable, "-c", LB_PROBE, guard_file, os.devnull,
                    json.dumps({"mode": "judge", "reading": case.get("load") or LB_NORMAL})]
+    # A crash row (the guard's fail-open or fail-closed write, decision `crash`) this run appended to its config's
+    # guard.log is a failure, unless the case declares one (`crash=True`). The log is read only where this run wrote.
+    log = os.path.join(env["CLAUDE_CONFIG_DIR"], "guard.log")
+    before = _log_size(log)
+    got, reason = _judged(case, command, payload, env)
+    crashed = _new_crash_rows(log, before)
+    if crashed and not case.get("crash"):
+        fields = crashed[0].split("\t")
+        return "crash", "the guard logged a crash row this case does not declare, %s: %s" % (
+            fields[3] if len(fields) > 3 else "?", (fields[4] if len(fields) > 4 else "")[:120])
+    return got, reason
+
+
+CRASH_DECISION = "crash"   # the decision column of a guard.log row that a crash writes (guard.py main, and its import writer)
+
+
+def _log_size(path):
+    try:
+        return os.path.getsize(path)
+    except OSError:
+        return 0
+
+
+def _new_crash_rows(path, before):
+    """The crash rows appended to the log at `path` after it was `before` bytes long. A log now shorter than that was
+    rewritten, so all of it is read. A run that appends nothing costs two stats and no read."""
+    after = _log_size(path)
+    if after == before:
+        return []
+    try:
+        with open(path, "rb") as handle:
+            handle.seek(0 if after < before else before)
+            added = handle.read().decode("utf-8", "replace")
+    except OSError:
+        return []
+    return [row for row in added.splitlines() if row.split("\t")[2:3] == [CRASH_DECISION]]
+
+
+def _judged(case, command, payload, env):
+    """The (decision, reason) of one guard run: "slow" past the case's limit, "error" on a nonzero exit, else what the
+    guard printed."""
     started = time.monotonic()
     limit = case.get("max_seconds")
     try:
