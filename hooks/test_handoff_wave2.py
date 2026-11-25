@@ -1801,6 +1801,38 @@ def case_stop_remedy_spawn_clears_unpatched_home():
     spawn_from_remedy(UNPATCHED, "stop")
 
 
+def guard_module():
+    """hooks/guard.py imported in this process, or None when the import fails. The guard imports reread_check."""
+    try:
+        spec = importlib.util.spec_from_file_location("guard_under_test", GUARD)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+    except Exception:
+        return None
+
+
+def case_remedy_cite_twins_match():
+    """The guard's refusal (guard.COMPACTION_AUDIT_REASON) spells its cite as a literal, since the refusal-cite scan
+    reads literals only. reread_check.AUDIT_CITE is its twin. Pinned equal: the refusal ends with the twin, and the
+    Stop text audit_reason builds ends with it exactly once. A change to one that misses the other goes red."""
+    rc = read_check_module()
+    if not step("reread_check.py imports in this process", "" if rc is not None else "the import raised"):
+        return
+    guard = guard_module()
+    if not step("guard.py imports in this process", "" if guard is not None else "the import raised"):
+        return
+    cite = rc.AUDIT_CITE
+    refusal = guard.COMPACTION_AUDIT_REASON
+    step("the guard's refusal ends with reread_check.AUDIT_CITE",
+         "" if refusal.endswith(cite) else "the refusal ends %r, the twin is %r" % (refusal[-60:], cite))
+    stop = rc.audit_reason("/handoff.md")
+    step("the Stop text ends with reread_check.AUDIT_CITE",
+         "" if stop.endswith(cite) else "the Stop text ends %r, the twin is %r" % (stop[-60:], cite))
+    step("the Stop text holds reread_check.AUDIT_CITE exactly once",
+         "" if stop.count(cite) == 1 else "the cite appears %d times in the Stop text" % stop.count(cite))
+
+
 # --------------------------------------------------------------------------- part 5
 # Owed state is per session: PostCompact writes <session_id>.reread and <session_id>.audit under state/handoff/.
 # An agent shares its parent's session_id and carries agent_id, so an agent's compaction must not owe its
@@ -3420,6 +3452,7 @@ def main() -> int:
     case_refusal_remedy_spawn_clears_probe_home()
     case_refusal_remedy_spawn_clears_unpatched_home()
     case_stop_remedy_spawn_clears_unpatched_home()
+    case_remedy_cite_twins_match()
 
     print("Part 5: owed state is per session, and an agent's compaction owes its parent nothing (hooks/reread_check.py)")
     case_other_session_compaction_owes_nothing()
