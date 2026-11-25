@@ -4,7 +4,7 @@
 
 A suite run directly must exit 1 when it runs no case. A suite whose cases all skip still exits 0.
 
-- A hand runner with an empty case list prints `<runner> FAIL: no cases ran, so nothing was checked` and exits 1. The check runs before any filter. `run_cases` in `hooks/case_runner_test.py` does the same.
+- A hand runner with an empty case list prints `<runner> FAIL: no cases ran, so nothing was checked` and exits 1. The check comes before the case loop (`hooks/test_config_watch.py` `main`), so a filter inside the loop is not seen (see Limits). `run_cases` in `hooks/case_runner_test.py` does the same.
 - A skipped case counts as a case that ran. A run of skips exits 0.
 - A mods test collector exits 1 when its results list is empty. Its helper never skips: each result is a PASS or a FAIL.
 - A `test_*.py` file that defines a TestCase and calls neither `unittest.main` nor `run_class` is a problem. `lint/check_suites_have_main.py` reports it.
@@ -36,7 +36,7 @@ CI stays green while a suite tests nothing. CI runs most steps without `bin/verd
 
 ## Limits
 
-- No `checks.yml` step runs the checker, `hooks/test_case_runner.py`, `lint/test_suites_have_main.py` or `lint/test_zero_case_runs.py`. On a draft PR, `lane-touched-tests.yml` runs a touched `test_*.py` on Windows. The checker is not a `test_*.py`, so no workflow runs it.
+- No `checks.yml` step runs the checker, `hooks/test_case_runner.py`, `lint/test_suites_have_main.py` or `lint/test_zero_case_runs.py`. CiCoverage (`lint/test_windows_split.py`) flags the three test files for it. On a draft PR, `lane-touched-tests.yml` runs a touched `test_*.py` on Windows. The checker is not a `test_*.py`, so no workflow runs it.
 - A filter after the check. In `hooks/test_config_watch.py`, `MUTATE_ONLY` filters the case loop in `main()` after `no_cases_exit`. A value that names no case runs zero cases, skips the sweep check, prints `PASS: N of N cases right` and exits 0. `no_cases_exit` does not catch this.
 - `RUNNERS` in `lint/test_zero_case_runs.py` is a hand list. A hand runner not in it is not checked there. The file's own comment names `hooks/test_guard.py` and `lint/check_guardset_lists.py` as left out.
 - `STATIC_IMPORT` in `lint/test_zero_case_runs.py` is a text match, not a parse. It matches `from `, `import ` or `import(`, then a `'` or `"` quote, then a specifier that starts `./` or `../`, up to the same quote. It matches inside strings and comments too. It misses backtick specifiers, `require(...)`, and `import (` with a space. In the same copy step, `zero_test_exit` replaces every `import.meta.url` and every `await test(` as plain text.
