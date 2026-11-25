@@ -17,6 +17,7 @@ Run it from the repository root:
 
 Exits 0 and prints nothing on agreement. Exits 1 and names the disagreeing site otherwise.
 """
+import ast
 import glob
 import os
 import re
@@ -73,12 +74,61 @@ def parse_manifest(text):
     return dirs
 
 
+def find_guard_tuple(text, name):
+    """(entries, body, start): the string argument of each os.path.normcase(...) entry of the module-level
+    tuple `name`, the source lines the assignment spans (comments included), and where they start in text.
+    Reads the Python syntax tree, so a commented-out entry is no entry. Fails loudly when the guard source
+    does not parse, the assignment is missing, or an entry is not a normcase call on one string."""
+    try:
+        tree = ast.parse(text)
+    except SyntaxError as e:
+        fail("hooks/guard*.py: could not parse the guard source (line %s): %s" % (e.lineno, e.msg))
+    node = None
+    for stmt in tree.body:
+        if isinstance(stmt, ast.Assign) and any(isinstance(t, ast.Name) and t.id == name for t in stmt.targets):
+            if node is not None:
+                fail("hooks/guard*.py: %s is assigned more than once at module level; the reader cannot tell which one "
+                     "the guard uses" % name)
+            node = stmt
+    for stmt in ast.walk(tree):
+        changes_it = (
+            isinstance(stmt, ast.AugAssign) and isinstance(stmt.target, ast.Name) and stmt.target.id == name
+        ) or (
+            isinstance(stmt, ast.Call)
+            and isinstance(stmt.func, ast.Attribute)
+            and stmt.func.attr in ("append", "extend")
+            and isinstance(stmt.func.value, ast.Name)
+            and stmt.func.value.id == name
+        )
+        if changes_it:
+            fail("hooks/guard*.py: %s is changed after its literal (line %s); the reader reads only the literal"
+                 % (name, stmt.lineno))
+    if node is None:
+        fail("hooks/guard*.py: could not find a %s = (...) literal to parse" % name)
+    if not isinstance(node.value, ast.Tuple):
+        fail("hooks/guard*.py: %s is not a tuple literal" % name)
+    entries = []
+    for elt in node.value.elts:
+        ok = (
+            isinstance(elt, ast.Call)
+            and ast.unparse(elt.func) == "os.path.normcase"
+            and len(elt.args) == 1
+            and not elt.keywords
+            and isinstance(elt.args[0], ast.Constant)
+            and isinstance(elt.args[0].value, str)
+        )
+        if not ok:
+            fail("hooks/guard*.py: %s has an entry that is not os.path.normcase(\"...\"): %s" % (name, ast.unparse(elt)))
+        entries.append(elt.args[0].value)
+    # ast counts lines at \n, \r and \r\n only; str.splitlines also splits at form feed and U+2028.
+    lines = re.findall(r"[^\r\n]*(?:\r\n|\r|\n)|[^\r\n]+", text)
+    start = sum(len(line) for line in lines[: node.lineno - 1])
+    body = "".join(lines[node.lineno - 1 : node.end_lineno])
+    return entries, body, start
+
+
 def parse_guard_frozen_dirs(text):
-    m = re.search(r"CONFIG_FROZEN_DIRS\s*=\s*\((.*?)\n\)", text, re.DOTALL)
-    if not m:
-        fail("hooks/guard*.py: could not find a CONFIG_FROZEN_DIRS = (...) literal to parse")
-    body = m.group(1)
-    entries = re.findall(r'os\.path\.normcase\("([^"]+)"\)', body)
+    entries, body, _ = find_guard_tuple(text, "CONFIG_FROZEN_DIRS")
     if not entries:
         fail("hooks/guard*.py: CONFIG_FROZEN_DIRS parsed but held no os.path.normcase(...) entries")
     for extra, reason_fragment in KNOWN_GUARD_ONLY_EXTRAS.items():
@@ -91,17 +141,14 @@ def parse_guard_frozen_dirs(text):
 
 
 def parse_guard_frozen_skills(text):
-    m = re.search(r"CONFIG_FROZEN_SKILLS\s*=\s*\((.*?)\n\)", text, re.DOTALL)
-    if not m:
-        fail("hooks/guard*.py: could not find a CONFIG_FROZEN_SKILLS = (...) literal to parse")
-    body = m.group(1)
+    entries, body, start = find_guard_tuple(text, "CONFIG_FROZEN_SKILLS")
     for skill, reason_fragment in KNOWN_MANIFEST_ONLY_PARTIAL_FREEZE.items():
-        if reason_fragment not in body and reason_fragment not in text[: m.start()]:
+        if reason_fragment not in body and reason_fragment not in text[:start]:
             fail(
                 "hooks/guard*.py: CONFIG_FROZEN_SKILLS has no comment saying %r near it; the "
                 "per-skill freeze and its reason must not drift apart" % reason_fragment
             )
-    return set(re.findall(r'os\.path\.normcase\("([^"]+)"\)', body))
+    return set(entries)
 
 
 def repo_skills(repo_root):

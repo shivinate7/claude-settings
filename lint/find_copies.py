@@ -34,6 +34,7 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "hooks"))
 import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
+import tree_export  # noqa: E402  the one home of the export manifest's name (hooks/tree_export.py, MANIFEST)
 
 MAX_BYTES = 1_000_000
 MIN_BYTES = 200  # a byte-equal file smaller than this is boilerplate, not a copy
@@ -50,7 +51,12 @@ DEFAULT_PARENT = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 
 
 def list_files(root):
-    """Tracked files when root is a git tree, else every file outside SKIP_DIRS."""
+    """Tracked files when root is a git tree, else every file outside SKIP_DIRS. The export manifest at the root is no file of the repo, so it is left out."""
+    files = _list_files(root)
+    return None if files is None else [rel for rel in files if rel != tree_export.MANIFEST]
+
+
+def _list_files(root):
     if os.path.exists(os.path.join(root, ".git")):
         proc = _nowindow.run(["git", "-C", root, "ls-files", "-z"], capture_output=True)
         if proc.returncode != 0:

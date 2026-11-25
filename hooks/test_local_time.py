@@ -37,6 +37,7 @@ The machine-zone case runs a child with TZ=Asia/Tokyo: the answer must not follo
 
 The expected strings are hardcoded here. They are never computed with zoneinfo in this file.
 """
+import ast
 import contextlib
 import importlib.util
 import inspect
@@ -325,6 +326,346 @@ def case_cli_no_tz_database():
           "stdout=%r" % proc.stdout[-200:])
 
 
+# THE TURN-START CWD CHECK (lane cwd-gone-tells-session). A session whose working folder was removed under it is told,
+# at its next prompt, to make a new worktree. The hook prints ONE line that names the gone folder and carries guard.py's
+# SESSION_HOME_REASON verbatim. The constant is read from guard.py with the ast, never run and never copied here: a copy
+# of its text would pass a hook that made the same copy. The folder is the payload's cwd. A cwd that cannot be statted
+# prints nothing, and so does a payload with no cwd. These cases run the hook as a child, as Claude Code does.
+CWD_SESSION = "cwd-gone-session-0001"
+CWD_NOW = "2026-11-24T22:17:00-06:00"  # the synthetic clock: the time line reads 22:17 CST
+CWD_PROMPT = "fix the parser and run the tests"  # no override word and no Opus word: no model call, no child
+GUARD_PATH = os.path.join(HERE, "guard.py")
+
+
+def session_home_reason():
+    """guard.py's SESSION_HOME_REASON string, read with the ast (guard.py is not run), or None when it has none."""
+    try:
+        with open(GUARD_PATH, encoding="utf-8") as handle:
+            tree = ast.parse(handle.read(), GUARD_PATH)
+    except (OSError, SyntaxError, ValueError):
+        return None
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and any(getattr(t, "id", None) == "SESSION_HOME_REASON" for t in node.targets):
+            try:
+                value = ast.literal_eval(node.value)
+            except ValueError:
+                return None
+            return value if isinstance(value, str) else None
+    return None
+
+
+def remedy_sentences(reason):
+    """The sentences of guard.py's remedy: the constant's sentences from the one that starts `Remedy:` to its end, split
+    at each sentence end. The split is of the constant itself, so the cases hold the output to its own words. [] when
+    the constant has no such sentence."""
+    if not reason:
+        return []
+    sentences = re.split(r"(?<=[.!?])\s+", reason)
+    starts = [i for i, s in enumerate(sentences) if s.startswith("Remedy:")]
+    return sentences[starts[0]:] if starts else []
+
+
+def constant_checked(label, reason):
+    """Fails `label` when guard.py's SESSION_HOME_REASON cannot be read. remedy_lines() matches nothing without it, so a
+    case that expects no remedy line would pass on nothing."""
+    check("%s: guard.py has SESSION_HOME_REASON as a string" % label, reason is not None,
+          "no string constant SESSION_HOME_REASON in %s" % GUARD_PATH)
+
+
+def remedy_lines(out, reason):
+    """The lines of `out` that carry the remedy text. None match when the constant could not be read."""
+    return [ln for ln in out.splitlines() if reason and reason in ln]
+
+
+def other_lines(out, reason):
+    """Every line of `out` that is not a remedy line."""
+    return [ln for ln in out.splitlines() if not (reason and reason in ln)]
+
+
+def stat_denied(path):
+    """True when stat on `path` is refused with PermissionError: a folder under a parent this user cannot search."""
+    try:
+        os.stat(path)
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+    return False
+
+
+def hook_command(hide=()):
+    """The command that runs the hook as Claude Code runs it, or, with `hide`, the same run in a child whose import of
+    each named module fails (HIDE_DRIVER)."""
+    if hide:
+        return [sys.executable, "-c", HIDE_DRIVER, os.path.dirname(MODULE_PATH), MODULE_PATH] + list(hide)
+    return [sys.executable, MODULE_PATH]
+
+
+def cwd_run(cfg, cwd, prompt=CWD_PROMPT, hide=(), ascii_stdout=False):
+    """The hook run once as UserPromptSubmit, in a child process of its own, with `cwd` in the payload (no cwd key when
+    `cwd` is None). `hide` names modules the child cannot import. `ascii_stdout` gives the child a stdout that cannot
+    encode a non-ASCII character, as a console without UTF-8 has. Returns (the completed process, ""), or (None, why)
+    when the run timed out."""
+    body = {"hook_event_name": "UserPromptSubmit", "session_id": CWD_SESSION, "prompt": prompt}
+    if cwd is not None:
+        body["cwd"] = cwd
+    env = dict(os.environ, CLAUDE_CONFIG_DIR=cfg, HOME=cfg, USERPROFILE=cfg, LOCAL_TIME_NOW=CWD_NOW)
+    for name in ("MAILBOX_REPO", "MAILBOX_CACHE", REMOTE_ENV):  # the live mailbox and a cloud marker are not this case's
+        env.pop(name, None)
+    if ascii_stdout:
+        env["PYTHONIOENCODING"] = "ascii"
+    try:
+        proc = subprocess.run(hook_command(hide), input=json.dumps(body), capture_output=True,
+                              text=True, env=env, timeout=30)
+    except subprocess.TimeoutExpired:
+        return None, "timed out after 30 s"
+    return proc, ""
+
+
+def check_exit_and_other_output(label, run, why, baseline, reason):
+    """The shared checks of a cwd state: the hook finishes, exits 0, and every line but a remedy line matches the baseline."""
+    if run is None:
+        check("%s: the hook finishes within 30 s" % label, False, why)
+        return
+    check("%s: the hook exits 0" % label, run.returncode == 0,
+          "rc=%d stderr=%s" % (run.returncode, run.stderr.strip()[-300:]))
+    check("%s: every line but a remedy line matches the cwd-present run" % label,
+          other_lines(run.stdout, reason) == baseline,
+          "lines %r, cwd-present run %r" % (other_lines(run.stdout, reason), baseline))
+
+
+def case_cwd_gone_prints_one_remedy_line():
+    """The session's folder was removed under it: one line names the folder and carries guard.py's remedy text."""
+    reason = session_home_reason()
+    folder = tempfile.mkdtemp(dir=ROOT)
+    gone = os.path.join(folder, "lane-gone")
+    os.makedirs(gone)
+    os.rmdir(gone)  # the worktree was deleted under the session
+    proc, why = cwd_run(os.path.join(folder, "config"), gone)
+    if proc is None:
+        check("cwd gone: the hook finishes within 30 s", False, why)
+        return
+    check("cwd gone: the hook exits 0", proc.returncode == 0,
+          "rc=%d stderr=%s" % (proc.returncode, proc.stderr.strip()[-300:]))
+    constant_checked("cwd gone", reason)
+    lines = remedy_lines(proc.stdout, reason)
+    check("cwd gone: exactly one line carries the remedy text", len(lines) == 1,
+          "%d such lines; stdout=%r" % (len(lines), proc.stdout[-300:]))
+    check("cwd gone: that line names the gone folder", len(lines) == 1 and gone in lines[0],
+          "line=%r" % (lines[0] if lines else None))
+
+
+def case_cwd_present_prints_no_remedy_line():
+    """Control: the folder exists, so no line carries the remedy text, and the hook exits 0."""
+    reason = session_home_reason()
+    folder = tempfile.mkdtemp(dir=ROOT)
+    here = os.path.join(folder, "lane-here")
+    os.makedirs(here)
+    proc, why = cwd_run(os.path.join(folder, "config"), here)
+    if proc is None:
+        check("cwd present: the hook finishes within 30 s", False, why)
+        return
+    check("cwd present: the hook exits 0", proc.returncode == 0,
+          "rc=%d stderr=%s" % (proc.returncode, proc.stderr.strip()[-300:]))
+    constant_checked("cwd present", reason)
+    check("cwd present: no line carries the remedy text", remedy_lines(proc.stdout, reason) == [],
+          "stdout=%r" % proc.stdout[-300:])
+
+
+def case_cwd_stat_denied_prints_nothing():
+    """The stat of the cwd is refused, so the check cannot tell: no remedy line, and the hook exits 0."""
+    reason = session_home_reason()
+    constant_checked("cwd stat denied", reason)
+    folder = tempfile.mkdtemp(dir=ROOT)
+    locked = os.path.join(folder, "locked")
+    inner = os.path.join(locked, "lane")
+    os.makedirs(inner)
+    os.chmod(locked, 0)
+    try:
+        if not stat_denied(inner):
+            print("SKIP: cwd stat denied: this user can stat under a locked folder (running as root?)")
+            return
+        proc, why = cwd_run(os.path.join(folder, "config"), inner)
+    finally:
+        os.chmod(locked, 0o755)
+    if proc is None:
+        check("cwd stat denied: the hook finishes within 30 s", False, why)
+        return
+    check("cwd stat denied: the hook exits 0", proc.returncode == 0,
+          "rc=%d stderr=%s" % (proc.returncode, proc.stderr.strip()[-300:]))
+    check("cwd stat denied: no line carries the remedy text", remedy_lines(proc.stdout, reason) == [],
+          "stdout=%r" % proc.stdout[-300:])
+
+
+def case_cwd_check_leaves_exit_and_other_output_unchanged():
+    """In all three cwd states the exit code is 0 and every line but a remedy line matches the cwd-present run."""
+    reason = session_home_reason()
+    constant_checked("cwd check leaves", reason)
+    folder = tempfile.mkdtemp(dir=ROOT)
+    cfg = os.path.join(folder, "config")
+    here = os.path.join(folder, "lane-here")
+    os.makedirs(here)
+    gone = os.path.join(folder, "lane-gone")
+    locked = os.path.join(folder, "locked")
+    inner = os.path.join(locked, "lane")
+    os.makedirs(inner)
+    base, why = cwd_run(cfg, here)
+    if base is None:
+        check("cwd present (baseline): the hook finishes within 30 s", False, why)
+        return
+    baseline = other_lines(base.stdout, reason)
+    check("cwd present (baseline): the output is one Central line", len(baseline) == 1
+          and LINE_PRINTED.fullmatch(baseline[0]) is not None, "stdout=%r" % base.stdout[-300:])
+    gone_run, gone_why = cwd_run(cfg, gone)
+    check_exit_and_other_output("cwd gone", gone_run, gone_why, baseline, reason)
+    os.chmod(locked, 0)
+    try:
+        if not stat_denied(inner):
+            print("SKIP: cwd stat denied: this user can stat under a locked folder (running as root?)")
+            return
+        denied_run, denied_why = cwd_run(cfg, inner)
+    finally:
+        os.chmod(locked, 0o755)
+    check_exit_and_other_output("cwd stat denied", denied_run, denied_why, baseline, reason)
+
+
+def case_cwd_absent_from_payload_prints_nothing():
+    """Control: a payload with no cwd cannot be checked: no remedy line, and the hook exits 0."""
+    reason = session_home_reason()
+    constant_checked("cwd absent", reason)
+    folder = tempfile.mkdtemp(dir=ROOT)
+    proc, why = cwd_run(os.path.join(folder, "config"), None)
+    if proc is None:
+        check("cwd absent: the hook finishes within 30 s", False, why)
+        return
+    check("cwd absent: the hook exits 0", proc.returncode == 0,
+          "rc=%d stderr=%s" % (proc.returncode, proc.stderr.strip()[-300:]))
+    check("cwd absent: no line carries the remedy text", remedy_lines(proc.stdout, reason) == [],
+          "stdout=%r" % proc.stdout[-300:])
+
+
+def case_cwd_gone_guard_unimportable_prints_one_sentence():
+    """RED. The folder was removed and guard.py cannot be imported, so the hook prints its own fallback line. That line
+    names the folder and says it is gone, in one sentence. It holds no remedy sentence: the remedy is guard.py's
+    SESSION_HOME_REASON, and a copy of it in the hook would drift from the constant."""
+    reason = session_home_reason()
+    folder = tempfile.mkdtemp(dir=ROOT)
+    gone = os.path.join(folder, "lane-gone")
+    os.makedirs(gone)
+    os.rmdir(gone)  # the worktree was deleted under the session
+    proc, why = cwd_run(os.path.join(folder, "config"), gone, hide=("guard",))
+    if proc is None:
+        check("cwd gone, guard unimportable: the hook finishes within 30 s", False, why)
+        return
+    check("cwd gone, guard unimportable: the hook exits 0", proc.returncode == 0,
+          "rc=%d stderr=%s" % (proc.returncode, proc.stderr.strip()[-300:]))
+    constant_checked("cwd gone, guard unimportable", reason)
+    remedy = remedy_sentences(reason)
+    check("cwd gone, guard unimportable: guard.py's remedy has a sentence that starts Remedy:", remedy != [],
+          "no such sentence in %r" % reason)
+    named = [ln for ln in proc.stdout.splitlines() if gone in ln]
+    check("cwd gone, guard unimportable: exactly one line names the gone folder", len(named) == 1,
+          "stdout=%r" % proc.stdout[-300:])
+    if len(named) == 1:
+        line = named[0]
+        check("cwd gone, guard unimportable: that line says the folder is gone",
+              "gone" in line.replace(gone, ""), "line=%r" % line)
+        sentences = re.split(r"(?<=[.!?])\s+", line.strip())
+        check("cwd gone, guard unimportable: that line is one sentence, with no remedy sentence of its own",
+              len(sentences) == 1, "line=%r" % line)
+    leaked = [s for s in remedy if s in proc.stdout]
+    check("cwd gone, guard unimportable: no sentence of guard.py's remedy appears in the output", not leaked,
+          "leaked %r" % leaked)
+
+
+def case_cwd_regular_file_prints_gone_line():
+    """The payload's cwd is a regular file. os.stat succeeds on a file, but a session cannot stand in one, so the line
+    prints and names the file."""
+    reason = session_home_reason()
+    folder = tempfile.mkdtemp(dir=ROOT)
+    path = os.path.join(folder, "lane-file")
+    with open(path, "w", encoding="utf-8") as handle:
+        handle.write("a file, not a folder\n")
+    proc, why = cwd_run(os.path.join(folder, "config"), path)
+    if proc is None:
+        check("cwd regular file: the hook finishes within 30 s", False, why)
+        return
+    check("cwd regular file: the hook exits 0", proc.returncode == 0,
+          "rc=%d stderr=%s" % (proc.returncode, proc.stderr.strip()[-300:]))
+    constant_checked("cwd regular file", reason)
+    lines = remedy_lines(proc.stdout, reason)
+    check("cwd regular file: exactly one line carries the remedy text", len(lines) == 1,
+          "%d such lines; stdout=%r" % (len(lines), proc.stdout[-300:]))
+    check("cwd regular file: that line names the file", len(lines) == 1 and path in lines[0],
+          "line=%r" % (lines[0] if lines else None))
+
+
+def case_cwd_gone_newline_path_prints_one_escaped_line():
+    """The folder is gone and its path holds a newline. The gone line is one line after the time line, and the newline
+    shows as backslash n, so the path cannot split the line."""
+    if os.name == "nt":  # Windows refuses a line feed in a file name (WinError 123), so no folder can hold one there
+        print("SKIP: cwd gone, newline in path: Windows cannot hold a line feed in a file name")
+        return
+    reason = session_home_reason()
+    folder = tempfile.mkdtemp(dir=ROOT)
+    gone = os.path.join(folder, "lane\nnew")
+    os.makedirs(gone)
+    os.rmdir(gone)  # the worktree was deleted under the session
+    proc, why = cwd_run(os.path.join(folder, "config"), gone)
+    if proc is None:
+        check("cwd gone, newline in path: the hook finishes within 30 s", False, why)
+        return
+    check("cwd gone, newline in path: the hook exits 0", proc.returncode == 0,
+          "rc=%d stderr=%s" % (proc.returncode, proc.stderr.strip()[-300:]))
+    constant_checked("cwd gone, newline in path", reason)
+    after_time = [ln for ln in proc.stdout.splitlines() if not LINE_PRINTED.fullmatch(ln)]
+    check("cwd gone, newline in path: the output after the time line is one line", len(after_time) == 1,
+          "lines=%r" % after_time)
+    check("cwd gone, newline in path: a line shows the newline as backslash n",
+          any("lane\\nnew" in ln for ln in after_time), "lines=%r" % after_time)
+
+
+# The later line for the non-ASCII case: the override line, which prints after the gone line and needs no mailbox.
+# A whole-prompt override grants with no model call, so the run starts no child of its own.
+OVERRIDE_PROMPT = "override 30m"
+
+
+def gone_then_override_run(leaf):
+    """The folder `leaf` under a temp folder is removed, then the hook runs with the override prompt on an ASCII-only
+    stdout. Returns (the completed process, "") or (None, why), as cwd_run does."""
+    folder = tempfile.mkdtemp(dir=ROOT)
+    gone = os.path.join(folder, leaf)
+    os.makedirs(gone)
+    os.rmdir(gone)  # the worktree was deleted under the session
+    return cwd_run(os.path.join(folder, "config"), gone, prompt=OVERRIDE_PROMPT, ascii_stdout=True)
+
+
+def check_later_override_line(label, proc, why):
+    """The shared checks of a gone-folder run with the override prompt: the hook exits 0 and prints the override line."""
+    if proc is None:
+        check("%s: the hook finishes within 30 s" % label, False, why)
+        return
+    check("%s: the hook exits 0" % label, proc.returncode == 0,
+          "rc=%d stderr=%s" % (proc.returncode, proc.stderr.strip()[-300:]))
+    overrides = [ln for ln in proc.stdout.splitlines() if ln.startswith("Override:")]
+    check("%s: the override line after the gone line still prints" % label, len(overrides) == 1,
+          "stdout=%r stderr=%r" % (proc.stdout[-200:], proc.stderr.strip()[-200:]))
+
+
+def case_cwd_gone_non_ascii_path_ascii_stdout_keeps_later_lines():
+    """The folder is gone, its path is not ASCII, and stdout is ASCII only. The gone line cannot be printed, so the
+    later override line must still print and the hook must exit 0."""
+    proc, why = gone_then_override_run("lane-gone-é")
+    check_later_override_line("cwd gone, non-ASCII path, ASCII stdout", proc, why)
+
+
+def case_cwd_gone_ascii_path_ascii_stdout_prints_override_line():
+    """Control: the same run with an ASCII path prints the override line, so the later-line case above can fail only
+    on the path."""
+    proc, why = gone_then_override_run("lane-gone")
+    check_later_override_line("cwd gone, ASCII path, ASCII stdout", proc, why)
+
+
 # OWNER OVERRIDE. local_time.py is the only UserPromptSubmit hook, so it is where the owner's
 # word `override` becomes an override. It calls override.grant(session_id, prompt, now), which writes
 # <config dir>/state/override/<session_id>.json as {"kind": "once" or "timed", "until": a time}.
@@ -376,11 +717,8 @@ def ov_type(cfg, prompt, session=OV_SESSION, hide=(), transcript=None, remote=No
     if extra:
         payload.update(extra)
     payload = json.dumps(payload)
-    command = [sys.executable, MODULE_PATH]
-    if hide:
-        command = [sys.executable, "-c", HIDE_DRIVER, os.path.dirname(MODULE_PATH), MODULE_PATH] + list(hide)
     try:
-        return subprocess.run(command, input=payload, capture_output=True, text=True, env=env, timeout=30)
+        return subprocess.run(hook_command(hide), input=payload, capture_output=True, text=True, env=env, timeout=30)
     except subprocess.TimeoutExpired:
         return None
 
@@ -2793,6 +3131,33 @@ class CostTests(unittest.TestCase):
         with remote_env(None):
             return cost_probe.run_hook(MODULE_PATH, json.dumps(payload), folder, answers)
 
+    def test_the_cwd_check_starts_no_child_and_writes_no_file(self):
+        """The cost of the cwd check at one owner prompt. A gone cwd and a present cwd start the same children and write
+        the same files, so the check adds neither; the gone run prints its one remedy line."""
+        reason = session_home_reason()
+        folder = tempfile.mkdtemp(dir=self.folder)
+        here = os.path.join(folder, "lane-here")
+        os.makedirs(here)
+        gone = os.path.join(folder, "lane-gone")
+
+        def payload(cwd):
+            return json.dumps({"hook_event_name": "UserPromptSubmit", "session_id": OV_SESSION,
+                               "prompt": CWD_PROMPT, "cwd": cwd})
+
+        env = {"LOCAL_TIME_NOW": CWD_NOW}
+        with remote_env(None):
+            present = cost_probe.run_hook(MODULE_PATH, payload(here), os.path.join(folder, "present"), None, env=env)
+            gone_run = cost_probe.run_hook(MODULE_PATH, payload(gone), os.path.join(folder, "gone"), None, env=env)
+        self.assertEqual(present["code"], 0, "the cwd-present run exits 0; got %r" % (present["code"],))
+        self.assertEqual(gone_run["code"], 0, "the cwd-gone run exits 0; got %r" % (gone_run["code"],))
+        self.assertEqual(gone_run["children"], present["children"],
+                         "the cwd check starts no child beyond the cwd-present run's; got %r"
+                         % (gone_run["children"],))
+        self.assertEqual(gone_run["files"], present["files"],
+                         "the cwd check writes no file beyond the cwd-present run's; got %r" % (gone_run["files"],))
+        self.assertEqual(len(remedy_lines(gone_run["out"], reason)), 1,
+                         "the cwd-gone run prints its one remedy line; stdout %r" % (gone_run["out"][-300:],))
+
     def test_a_prompt_with_no_opus_word_makes_no_model_call(self):
         run = self.fire("fix the parser and run the tests", [[{"ok": True}, None]])
         self.assertEqual((run["code"], run["models"], run["children"]), (0, [], []),
@@ -2888,6 +3253,16 @@ def main():
         case_cli_agent()
         case_cli_agent("--subagent")  # the old flag, read until local_time.OLD_FLAG_ENDS
         case_cli_no_tz_database()
+        case_cwd_gone_prints_one_remedy_line()
+        case_cwd_present_prints_no_remedy_line()
+        case_cwd_stat_denied_prints_nothing()
+        case_cwd_check_leaves_exit_and_other_output_unchanged()
+        case_cwd_absent_from_payload_prints_nothing()
+        case_cwd_gone_guard_unimportable_prints_one_sentence()
+        case_cwd_regular_file_prints_gone_line()
+        case_cwd_gone_newline_path_prints_one_escaped_line()
+        case_cwd_gone_non_ascii_path_ascii_stdout_keeps_later_lines()
+        case_cwd_gone_ascii_path_ascii_stdout_prints_override_line()
         case_override_grants()
         case_override_context_line()
         case_override_off()

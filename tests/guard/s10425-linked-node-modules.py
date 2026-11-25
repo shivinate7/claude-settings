@@ -264,8 +264,9 @@ NM_READ_ONLY = (
 for _command in NM_READ_ONLY:
     nm_case("linked-nm: " + _command + " (Bash) in a linked folder is allowed", _command, "allow", NMLINKED)
 
-# THE JUNCTION WITHOUT os.path.isjunction. Python 3.11, the CI interpreter, has no os.path.isjunction, so
-# the link test must read the junction itself. This case runs the guard with that function removed.
+# THE JUNCTION WITHOUT os.path.isjunction. os.path.isjunction exists only from Python 3.12, and the 3.9 floor
+# lacks it, so the link test must read the junction itself. CI runs 3.15, which has it, so this case removes it
+# with NMSHIM. The guard reads a junction the same way on either interpreter.
 def nm_case_without_isjunction(name, command, expected, cwd, tool="Bash"):
     """nm_case, run with os.path.isjunction removed from the guard's interpreter by NMSHIM."""
     nm_case(name, command, expected, cwd, tool)

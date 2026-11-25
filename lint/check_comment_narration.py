@@ -181,8 +181,9 @@ class NodeToolFailed(Exception):
     """The node tool could not run at all, as opposed to one file it could not read."""
 
 
-def git(*args):
-    r = _nowindow.run(["git", "-c", "core.quotepath=off", *args], capture_output=True, encoding="utf-8", errors="replace")
+def git(*args, cwd=None):
+    r = _nowindow.run(["git", "-c", "core.quotepath=off", *args], capture_output=True, encoding="utf-8", errors="replace",
+                      cwd=cwd)
     if r.returncode:
         raise Unread("git %s failed: %s" % (" ".join(args[:2]), r.stderr.strip() or r.returncode))
     return r.stdout
@@ -220,19 +221,28 @@ def language_of(path, std):
     return next((n for n in SCANNED if word and word in rows.get(n, {}).get("shebangs", [])), None)
 
 
-def added_lines(base, std, exclude=()):
+def added_lines(base, std, exclude=(), cwd=None, classify=None):
     """Map each changed path in a scanned language to (language, the set of line numbers the diff adds).
+
+    `cwd` is the folder the diff is read in, and its paths are relative to that folder (the current folder when None).
+    `classify(path)` names a path's language, or None to skip it; the default is `language_of` over `std`. A second
+    check that reads added lines (lint/find_time_pinned.py --base) passes its own `classify` and no `std`.
 
     A path that starts with an `exclude` prefix is not scanned, on either side of the diff. A line the same
     diff deletes, with the same text, from a scanned path is a move and not added (diff_moves). A move into an
     untracked file has no diff, so it is no move: that file is not in the diff and stays unchecked here."""
 
-    def scanned(path):
-        return not path.startswith(exclude) and language_of(path, std) is not None
+    if classify is None:
+        def classify(path):
+            return language_of(path, std)
 
-    git("rev-parse", "--verify", "--quiet", base + "^{commit}")
-    fork = git("merge-base", base, "HEAD").strip()
-    diff = git("diff", "-U0", "-M", "--no-color", "--no-ext-diff", fork)
+    def scanned(path):
+        return not path.startswith(exclude) and classify(path) is not None
+
+    git("rev-parse", "--verify", "--quiet", base + "^{commit}", cwd=cwd)
+    fork = git("merge-base", base, "HEAD", cwd=cwd).strip()
+    relative = ["--relative"] if cwd else []  # a folder inside a repo reads its own paths, not the repo's
+    diff = git("diff", "-U0", "-M", "--no-color", "--no-ext-diff", *relative, fork, cwd=cwd)
     left = diff_moves.deleted_texts(diff, scanned)
     added, path, header, line = {}, None, False, 0
     for row in diff.split("\n"):
@@ -240,7 +250,7 @@ def added_lines(base, std, exclude=()):
             path, header = None, True
         elif header and row.startswith("+++ "):
             path = None if row == "+++ /dev/null" else row[6:].split("\t")[0]
-            lang = language_of(path, std) if path and not path.startswith(exclude) else None
+            lang = classify(path) if path and not path.startswith(exclude) else None
             if lang is None:
                 path = None
             else:
