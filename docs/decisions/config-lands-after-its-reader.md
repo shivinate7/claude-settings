@@ -44,8 +44,8 @@
 
 ## Cost
 
-- One `git diff --name-status --no-renames origin/<base>...<head> -- .github/stamp.json` per call.
-- A touched file adds one `git show` of the head file and one parse. The parse reads the head's workflow caps: one `git ls-tree` of `.github/workflows`, one `git show` per workflow file, and one `git check-ref-format --branch` per `keepBranches` entry that passes the name check. At head af4a47b89e (the round-2 code head) that is 5 workflow files and 5 `keepBranches` entries, counted with `git ls-tree -r --name-only af4a47b89e -- .github/workflows` and `git show af4a47b89e:.github/stamp.json`.
+- At most one `git diff --name-status --no-renames origin/<base>...<head> -- .github/stamp.json` per call.
+- A touched file adds at most one `git show` of the head file and one parse. The parse reads the head's workflow caps: at most one `git ls-tree` of `.github/workflows`, at most one `git show` per workflow file, and at most one `git check-ref-format --branch` per `keepBranches` entry that passes the name check. At head af4a47b89e (the round-2 code head) that is at most 5 workflow files and at most 5 `keepBranches` entries, counted with `git ls-tree -r --name-only af4a47b89e -- .github/workflows` and `git show af4a47b89e:.github/stamp.json`.
 - No process, log or timer is added.
 
 Kind: process
