@@ -779,6 +779,56 @@ add("brief-destructive-git: control, builder brief that says `git reset --hard o
     subagent_type="builder", model="sonnet")
 
 
+# Three shapes that name a span the rule should not read as an order: a span holding its own never-run list (shape a), a
+# span followed directly by "-free" (shape b), and a span after "ran", "had run" or "has run", which reports an act that
+# is done (shape c). Each allow is a false alarm the scan raises. Each control is an order or a near-miss, and stays denied.
+add("brief-destructive-git: a span whose own text opens with Never run, naming stash, checkout and restore, is allowed",
+    "allow", tool="Agent",
+    prompt="Keep the lane's tree as it is:\n`- Never run git stash, git checkout <path>, or git restore.`",
+    subagent_type="builder", model="sonnet")
+add("brief-destructive-git: control, the same span with Run for Never run is denied", "deny",
+    BRIEF_DESTRUCTIVE, tool="Agent",
+    prompt="Keep the lane's tree as it is:\n`- Run git stash, git checkout <path>, or git restore.`",
+    subagent_type="builder", model="sonnet")
+add("brief-destructive-git: control, a span that opens Never mind, then orders a reset is denied", "deny",
+    BRIEF_DESTRUCTIVE, tool="Agent", prompt="Undo the edit with `Never mind, git reset --hard origin/main`.",
+    subagent_type="builder", model="sonnet")
+add("brief-destructive-git: a git stash span followed directly by -free is allowed", "allow",
+    tool="Agent", prompt="Do the check in a `git stash`-free aside, then report.",
+    subagent_type="builder", model="sonnet")
+add("brief-destructive-git: control, the same span with the -free suffix dropped is denied", "deny",
+    BRIEF_DESTRUCTIVE, tool="Agent", prompt="Do the check in a `git stash` aside, then report.",
+    subagent_type="builder", model="sonnet")
+add("brief-destructive-git: a reported act, a builder ran git checkout, is allowed", "allow",
+    tool="Agent", prompt="The first builder ran `git checkout -- <path>` and lost the edit. Redo it.",
+    subagent_type="builder", model="sonnet")
+add("brief-destructive-git: control, run in place of ran is denied", "deny",
+    BRIEF_DESTRUCTIVE, tool="Agent", prompt="The first builder run `git checkout -- <path>` and lost the edit. Redo it.",
+    subagent_type="builder", model="sonnet")
+add("brief-destructive-git: a reported act, the lane had run git reset --hard, is allowed", "allow",
+    tool="Agent", prompt="The lane had run `git reset --hard origin/main` before the crash. Redo it.",
+    subagent_type="builder", model="sonnet")
+add("brief-destructive-git: control, run in place of had run is denied", "deny",
+    BRIEF_DESTRUCTIVE, tool="Agent", prompt="The lane run `git reset --hard origin/main` before the crash. Redo it.",
+    subagent_type="builder", model="sonnet")
+add("brief-destructive-git: a reported act, the lane has run git reset --hard, is allowed", "allow",
+    tool="Agent", prompt="The lane has run `git reset --hard origin/main` after the crash. Redo it.",
+    subagent_type="builder", model="sonnet")
+add("brief-destructive-git: control, run in place of has run is denied", "deny",
+    BRIEF_DESTRUCTIVE, tool="Agent", prompt="The lane run `git reset --hard origin/main` after the crash. Redo it.",
+    subagent_type="builder", model="sonnet")
+add("brief-destructive-git: control, a plain order to run git stash outside any negator is denied", "deny",
+    BRIEF_DESTRUCTIVE, tool="Agent", prompt="Set the work aside: run `git stash` now.",
+    subagent_type="builder", model="sonnet")
+add("brief-destructive-git: control, an order in the sentence after a forbidding span is denied", "deny",
+    BRIEF_DESTRUCTIVE, tool="Agent", prompt="Never run `git stash`. Then run `git reset --hard origin/main`.",
+    subagent_type="builder", model="sonnet")
+add("brief-destructive-git: known limit, a sentence saying a guard asks for a reset is denied", "deny",
+    BRIEF_DESTRUCTIVE, tool="Agent",
+    prompt="The shell guard asks for `git reset --hard origin/main` before the lane starts.",
+    subagent_type="builder", model="sonnet")
+
+
 # The owner's override lifts this refusal the way it lifts an Opus spawn's (decision owner-override): a one-act override
 # lets the first brief through, a timed one lets every brief through until it ends. Each story is refused with no override.
 BRIEF_DESTRUCTIVE_SPAWN = {"prompt": "Then run `git reset --hard origin/main` and re-apply your change.",
