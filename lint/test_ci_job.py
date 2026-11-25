@@ -5264,8 +5264,9 @@ class CarryUnmappedDelta(unittest.TestCase):
 class ToolPinsLane(Job):
     """Under --lint, a checkout with a root .tool-versions gets one run of its checker with --local (decision tool-pins). A
     mismatch or an unknown read prints one line that starts unknown and names the tool, and the run is no pass. Matching tools
-    print no extra line. A checkout whose .tool-versions or checker is missing prints one `unknown tool pins:` line naming the
-    missing file (never silent), starts no checker, and is no pass. --step (the ready run) starts nothing new.
+    print no extra line. A checkout with neither pin file is silent and passes: a repo with no pins has nothing to judge. A
+    checkout with exactly one of them missing prints one `unknown tool pins:` line naming the missing file, starts no checker, and
+    is no pass. A pin file that is present but unreadable reads unknown too. --step (the ready run) starts nothing new.
     The checker in the checkout is the real one behind a line that logs each run's arguments, so a case counts the runs."""
 
     LOG_RUN = "import sys\nopen('checker-runs.txt', 'a', encoding='utf-8').write(' '.join(sys.argv[1:]) + '\\n')\n"
@@ -5302,7 +5303,7 @@ class ToolPinsLane(Job):
     def lines_naming(self, lines, word, tool):
         return [ln for ln in lines if ln.startswith(word) and tool in ln]
 
-    def missing_file_lines(self, lines, name):
+    def unknown_lines_naming(self, lines, name):
         """The `unknown tool pins:` lines that name `name`."""
         return [ln for ln in lines if ln.startswith("unknown") and "tool pins:" in ln and name in ln]
 
@@ -5337,7 +5338,7 @@ class ToolPinsLane(Job):
     def test_a_checkout_with_no_tool_versions_prints_one_unknown_line_naming_it_and_starts_no_checker(self):
         self.checkout(None)
         rc, lines, out = self.run_job(self.LINT_STEP, args=self.ARGS)
-        self.assertEqual(len(self.missing_file_lines(lines, ".tool-versions")), 1,
+        self.assertEqual(len(self.unknown_lines_naming(lines, ".tool-versions")), 1,
                          "a checkout with the checker and no .tool-versions must print one `unknown tool pins:` line naming .tool-versions, never silence: %s" % out)
         self.assertEqual(self.file_lines("checker-runs.txt"), [], "with no .tool-versions no checker may start: %s" % out)
         self.assertNotEqual(rc, 0, "a missing pin file is no proof, so the run must not exit 0: %s" % out)
@@ -5345,9 +5346,26 @@ class ToolPinsLane(Job):
     def test_a_checkout_with_no_checker_prints_one_unknown_line_naming_it_and_is_no_pass(self):
         self.checkout("pinprobe 4.2\n", checker=False)
         rc, lines, out = self.run_job(self.LINT_STEP, args=self.ARGS)
-        self.assertEqual(len(self.missing_file_lines(lines, "check_tool_pins.py")), 1,
+        self.assertEqual(len(self.unknown_lines_naming(lines, "check_tool_pins.py")), 1,
                          "a checkout with pins and no lint/check_tool_pins.py must print one `unknown tool pins:` line naming the checker: %s" % out)
         self.assertNotEqual(rc, 0, "a missing checker is no proof, so the run must not exit 0: %s" % out)
+
+    def test_control_a_checkout_with_neither_pin_file_is_silent_and_passes(self):
+        # Control, green on the head: a repo with no pins has nothing to judge. No tool-pins line, no checker, exit 0.
+        self.checkout(None, checker=False)
+        rc, lines, out = self.run_job(self.LINT_STEP, args=self.ARGS)
+        self.assertEqual([ln for ln in lines if "tool pins" in ln], [], "with neither pin file the lane lint must print no tool-pins line: %s" % out)
+        self.assertEqual(self.file_lines("checker-runs.txt"), [], "with neither pin file no checker may start: %s" % out)
+        self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS"]), out)
+
+    def test_control_a_pin_file_that_cannot_be_read_stays_unknown(self):
+        # Control, green on the head: .tool-versions is present but a directory, so the checker cannot read it. One unknown line, no pass.
+        self.checkout(None)
+        os.makedirs(os.path.join(self.root, ".tool-versions", "unreadable"))
+        rc, lines, out = self.run_job(self.LINT_STEP, args=self.ARGS)
+        self.assertEqual(len(self.unknown_lines_naming(lines, ".tool-versions")), 1,
+                         "an unreadable .tool-versions must print one `unknown tool pins:` line naming it: %s" % out)
+        self.assertNotEqual(rc, 0, "an unreadable pin file is no proof, so the run must not exit 0: %s" % out)
 
     def test_the_ready_run_with_step_starts_no_checker(self):
         self.checkout("pinprobe 4.2\n")
