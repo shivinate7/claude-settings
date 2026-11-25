@@ -835,9 +835,9 @@ while True:
             raise ImportError("reread_check has no unread_handoff")
         # The rest of what judge() and main() take from it: a stale copy that lacks one would raise mid-judge, and main()
         # fails open on a raise, so the refusal it was loaded for would turn into an allow.
-        _missing = [_name for _name in ("unread_note", "too_big_estimate", "agent_rewrite") if not callable(getattr(reread_check, _name, None))]
+        _missing = [_name for _name in ("unread_note", "too_big_estimate", "agent_rewrite", "audit_helper_command") if not callable(getattr(reread_check, _name, None))]
         _missing += [_name for _name in ("HANDOFF_MAX_TOKENS", "READ_CAP_TOKENS", "READ_MAX_LINES") if not isinstance(getattr(reread_check, _name, None), int)]
-        _missing += [_name for _name in ("AUDIT_OWED", "AUDIT_REMEDY") if not isinstance(getattr(reread_check, _name, None), str)]
+        _missing += [_name for _name in ("AUDIT_OWED", "AUDIT_REMEDY", "AUDIT_HELPER_HEAD") if not isinstance(getattr(reread_check, _name, None), str)]
         if _missing:
             raise ImportError("reread_check lacks %s" % ", ".join(_missing))
 
@@ -1601,6 +1601,15 @@ def handoff_unread_fields(path, payload):
 
 # The remedy is reread_check's: its one text serves this refusal and the Stop block. One `%s`: the handoff path.
 COMPACTION_AUDIT_REASON = "Rule (compaction audit): " + reread_check.AUDIT_OWED + reread_check.AUDIT_REMEDY
+# The refusal ends with the session's transcript path, which an `Audit:` brief must name (reread_check.audit_spawn).
+COMPACTION_AUDIT_TRANSCRIPT = " This session's transcript path, which the brief must name: "
+
+
+def audit_helper_hit(tool: str, tool_input, handoff: str) -> bool:
+    """True when the call is the audit helper command the compaction-audit remedy prints, in that exact text: the
+    helper under its own path, the handoff path filled in, nothing chained, piped or added."""
+    command = tool_input.get("command") if isinstance(tool_input, dict) else None
+    return tool == "Bash" and isinstance(command, str) and command == reread_check.audit_helper_command(handoff)
 
 HANDOFF_SECTIONS_REASON = (
     "Rule (handoff-sections): this write would leave the session handoff without a section the "
@@ -8492,8 +8501,12 @@ def judge(payload) -> None:
     if pending:
         if audit_spawn(payload, SPAWN_TOOLS):
             AUDIT_SPAWN_PASSED.append(True)
+        elif audit_helper_hit(tool, tool_input, pending):   # the printed remedy passes and leaves the audit owed
+            pass
         elif not audit_disk_cleanup_hit(tool, tool_input):   # a disk cleanup passes and leaves the audit owed
-            refuse(tool, "deny", "compaction-audit", COMPACTION_AUDIT_REASON % pending, pending)
+            transcript = payload.get("transcript_path")
+            note = COMPACTION_AUDIT_TRANSCRIPT + transcript if isinstance(transcript, str) and transcript else ""
+            refuse(tool, "deny", "compaction-audit", COMPACTION_AUDIT_REASON % pending + note, pending)
     # 0. Each agent stays inside its own worktree.
     home_hit = worktree_home_hit(payload, tool, tool_input, cwd)
     if home_hit:

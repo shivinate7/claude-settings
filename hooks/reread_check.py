@@ -297,13 +297,21 @@ def _esc(text):
 # The one remedy text for an owed audit. The Stop block uses it, and so does the guard's compaction-audit refusal
 # (guard.COMPACTION_AUDIT_REASON), so the two cannot drift. It holds one `%s`: the handoff path.
 AUDIT_OWED = "context was compacted and the handoff audit is still owed. "
+# The audit helper's command, in the one form the remedy prints and the guard's compaction-audit rule lets through.
+AUDIT_HELPER_HEAD = ('python3 "' + os.path.join(os.path.dirname(os.path.realpath(__file__)), "precompact_handoff.py")
+                     + '" --audit-brief --handoff "')
+
+
+def audit_helper_command(handoff):
+    """The helper command with the handoff path filled in: the exact text the guard allows while the audit is owed."""
+    return AUDIT_HELPER_HEAD + handoff + '"'
+
+
 AUDIT_REMEDY = (
-    "Remedy: print the brief with `python3 \"" + _esc(os.path.join(os.path.dirname(os.path.realpath(__file__)),
-                                                                    "precompact_handoff.py"))
-    + "\" --audit-brief --handoff \"%s\"`, then spawn one Explore agent on Sonnet with exactly that brief, whose "
-    "first line is `" + _esc(EXPLORE_AUDIT_MARKER or "Audit:") + "` (step 3 of the handoff prompt). The brief names "
-    "this session's transcript path, and a spawn whose brief does not name it clears nothing. That spawn clears this "
-    "check. Then repeat the call. (decision precompact-handoff, item 16)")
+    "Remedy: print the brief with `" + _esc(AUDIT_HELPER_HEAD) + "%s\"`, then spawn one Explore agent on Sonnet with "
+    "exactly that brief, whose first line is `" + _esc(EXPLORE_AUDIT_MARKER or "Audit:") + "` (step 3 of the handoff "
+    "prompt). The brief names this session's transcript path, and a spawn whose brief does not name it clears nothing. "
+    "That spawn clears this check. Then repeat the call. (decision precompact-handoff, item 16)")
 
 
 def audit_reason(handoff):
@@ -332,19 +340,26 @@ def _text(content):
     return ""
 
 
+def _item_tokens(heading, line):
+    """The backticked tokens one item line adds to its list. The audit brief asks for exactly one token per item, so a
+    MISSING item requires its first token only: a second span is prose, not a required token."""
+    tokens = [t.strip() for t in _TICKS.findall(line) if t.strip()]
+    return tokens[:1] if heading == "MISSING" else tokens
+
+
 def parse_audit(text):
     """{heading: [backticked tokens]} for the audit's reply: a line that is a MISSING, STALE or DONE heading (see
     _HEADING) starts a list, and each token in backticks after it, on the heading line or the lines below, joins that
-    list. None when the text has no heading."""
+    list (a MISSING line adds its first token only). None when the text has no heading."""
     lists, cur = {}, None
     for line in text.splitlines():
         found = _HEADING.match(line)
         if found:
             cur = found.group(1).upper()
             lists.setdefault(cur, [])
-            lists[cur] += [t.strip() for t in _TICKS.findall(found.group("inline") or "") if t.strip()]
+            lists[cur] += _item_tokens(cur, found.group("inline") or "")
         elif cur:
-            lists[cur] += [t.strip() for t in _TICKS.findall(line) if t.strip()]
+            lists[cur] += _item_tokens(cur, line)
     return lists or None
 
 
