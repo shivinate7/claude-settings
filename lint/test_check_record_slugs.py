@@ -11,6 +11,13 @@ and a name that does not read so is refused. Its number must be its name's numbe
 hold it. The tree is read, not only the diff, and file arguments do not skip that read. A clash's fault names each
 file on the number and the next free number, and the ready run (merge.readyChecks) reads the step that finds it.
 
+A line that a change adds to a decision record holds one sentence, or is 200 characters or fewer, so two lanes that add
+sentences to one record add different lines and git merges them clean. A heading, a table row, fenced code, a list item of
+one sentence and a line that is one quoted owner quote are exempt. A line the change did not add is never judged: not an old
+long line left alone, not one moved or renamed with its text, not one that a merge of main brought in. A line edited in place
+is an added line. The prose cases are the `test_prose_` ones; each adds one sentinel line that must be refused, so a
+case that expects an exempt line to pass also proves the check read the record.
+
 Each case builds a temp tree: a copy of the module, and the records it checks. It runs the real
 script from that tree. The diff cases also make a temp git repo and set refs/remotes/origin/main,
 the base the script diffs against. RECORD_SLUGS_UNDER_TEST overrides the module path.
@@ -98,6 +105,48 @@ REAL_NOTE_LINE = "- ps-scriptblock-path-refused: %s Seen: 2026-11-17 x1\n" % REA
 RENAME_FROM = "alpha-note"  # a rename pair of one length, so git reads the rename: the slug changes, the text does not
 RENAME_TO = "bravo-note"
 
+# One sentence per line in a decision record (slug record-prose-one-sentence-line): a line a change adds to a decision
+# record holds one sentence, or is PROSE_LIMIT characters or fewer. Exempt: a heading, a table row, fenced code, a list
+# item of one sentence, and a line that is one quoted owner quote. A line the change did not add is never judged.
+REC = "docs/decisions/lane-record.md"  # the record the prose cases edit; the tree is rolled out, so decisions live under docs/
+PROSE_LIMIT = 200  # a line is refused when it is longer than this and holds more than one sentence
+LINE_REF = re.compile(r"(\S+\.md):(\d+)(?!\d)")  # `<path>:<line>` in a FAIL line; the line is 1-based in the file at HEAD
+PROSE_HEAD = ["# A lane record", "", "## The ruling", ""]  # four lines, so the first line a case adds is line 5, as in a real record
+
+
+def line_of(n, head, tail):
+    """One line of exactly n characters: `head`, one word made of the letter a, then `tail`. `head` ends in a space."""
+    run = n - len(head) - len(tail)
+    assert run >= 1, (n, head, tail)
+    return head + "a" * run + tail
+
+
+def sentences(n, k=2):
+    """One line of exactly n characters that holds k sentences, each ending in a period."""
+    lead = " ".join(["Each lane reads its record once."] * (k - 1))
+    return line_of(n, lead + " Then it stops and reads ", ".")
+
+
+def one_sentence(n):
+    """One line of exactly n characters with no sentence end inside it."""
+    return line_of(n, "The lane reads the record and then it reads the lane and stops and reads ", ".")
+
+
+SENT = sentences(PROSE_LIMIT + 30, 2)  # the sentinel: two sentences, 230 characters, so a check that reads the record refuses it
+OLD_LONG = sentences(400, 3)  # an old record line: three sentences, 400 characters
+assert len(SENT) > PROSE_LIMIT and len(OLD_LONG) > PROSE_LIMIT
+
+# Each form of a thing that must not end a sentence: (case name, the head of one long sentence). The case adds that
+# sentence, then the same sentence with a real second one after it; only the second line is refused.
+NOT_A_SENTENCE_END = [
+    ("e_g", "Use a strict flag, e.g. the one that stops the lane, and read the record twice before it hands off "),
+    ("i_e", "Use the head, i.e. the last commit that the run proved, and read the record twice before it hands off "),
+    ("version_number", "Use Python 3.15 or the newer 3.16.2 when the lane runs, and read the record twice before it stops "),
+    ("file_name", "Edit merge.py and check_record_slugs.py before the lane runs, and read the record twice before it stops "),
+    ("time_of_day", "The owner ruled at 11:12 CST and the lane read it at 11:14 CST, and it read the record twice before it stops "),
+    ("month_and_day", "The owner ruled on Nov. 25 and the lane read it on Dec. 1 and Sept. 9, and it read the record twice before it stops "),
+]
+
 
 def section_text(n, body=""):
     """A section file: its first line is the `# section <n>` header that test_guard.py reads."""
@@ -155,6 +204,13 @@ def flagged(out):
     """The paths the check named as FAIL: each FAIL line ends with its path."""
     return [line.rsplit(" ", 1)[1] for line in out.splitlines()
             if line.startswith("check_record_slugs: FAIL:")]
+
+
+def prose_hits(out):
+    """[(path, line)], sorted, for each FAIL line of the check that names `<path>:<line>`. The slug and note refusals
+    end in a bare path, so they name no line."""
+    refs = (LINE_REF.search(line) for line in out.splitlines() if line.startswith("check_record_slugs: FAIL:"))
+    return sorted((m.group(1), int(m.group(2))) for m in refs if m)
 
 
 AGENT_RULES = "AGENT_FORM_RULES"  # the one list of agent-facing record-form rules, in check_record_slugs.py
@@ -1290,6 +1346,205 @@ class RecordSlugsTests(unittest.TestCase):
         self.assertEqual(rc, 1, "a section name the check cannot read must be refused, not passed:\n" + out)
         self.assertEqual(flagged(out), [SECTIONS + "/S43501-x.py"], out)
 
+    # One sentence per line in a decision record (slug record-prose-one-sentence-line). A case commits `base` as origin/main,
+    # commits `change` on top and runs the check in diff mode. Both are {path: lines}; a path set to None in `change` is deleted.
+
+    def prose_run(self, base, change, rolled_out=True):
+        """(exit code, output, hits): hits is [(path, line)], sorted, for each line a FAIL line of the check names."""
+        if rolled_out:
+            self.roll_out()
+        for path, lines in base.items():
+            self.put(path, "".join(l + "\n" for l in lines))
+        self.commit_base()
+        for path, lines in change.items():
+            if lines is None:
+                self.delete(path)
+            else:
+                self.put(path, "".join(l + "\n" for l in lines))
+        self.commit_change()
+        rc, out = self.lint()
+        return rc, out, prose_hits(out)
+
+    def assert_only_sentinel(self, rc, out, hits, sentinel, what):
+        """Scope first: the check refused the sentinel line, so it read the record. Then it refused nothing else."""
+        ref = (REC, sentinel)
+        self.assertIn(ref, hits, "the sentinel at line %d was not refused, so the check read nothing of the record:\n%s"
+                      % (sentinel, out))
+        self.assertEqual(hits, [ref], "%s:\n%s" % (what, out))
+        self.assertEqual(rc, 1, out)
+
+    def prose_exempt(self, lines, what):
+        """A new record: the head, `lines`, a blank line, then the sentinel. The check names the sentinel and no line of `lines`."""
+        text = PROSE_HEAD + lines + ["", SENT]
+        rc, out, hits = self.prose_run({}, {REC: text})
+        self.assert_only_sentinel(rc, out, hits, len(text), what)
+
+    def test_prose_two_sentences_over_the_limit_are_refused_by_line(self):
+        rc, out, hits = self.prose_run({}, {REC: PROSE_HEAD + [SENT]})
+        self.assertEqual(hits, [(REC, 5)], "a %d-character line of two sentences must be refused, named by its line:\n%s"
+                         % (len(SENT), out))
+        self.assertEqual(rc, 1, out)
+
+    def test_prose_refusal_tells_the_writer_the_fix(self):
+        rc, out, hits = self.prose_run({}, {REC: PROSE_HEAD + [SENT]})
+        self.assertEqual(hits, [(REC, 5)], "no refusal to read the fix from:\n" + out)
+        self.assertIn("one sentence per line", out, "the refusal names the line but not the fix:\n" + out)
+
+    def test_prose_limit_is_over_200_characters_not_at_200(self):
+        at, over = sentences(PROSE_LIMIT, 2), sentences(PROSE_LIMIT + 1, 2)
+        self.assertEqual((len(at), len(over)), (PROSE_LIMIT, PROSE_LIMIT + 1))
+        rc, out, hits = self.prose_run({}, {REC: PROSE_HEAD + [at, over]})
+        self.assert_only_sentinel(rc, out, hits, 6, "a two-sentence line of exactly 200 characters is not over the limit")
+
+    def test_prose_limit_counts_characters_not_bytes(self):
+        head = "Each lane reads its record once. Then it stops and reads "
+        wide = head + "\u00e9" * (150 - len(head) - 1) + "."
+        self.assertTrue(len(wide) <= PROSE_LIMIT < len(wide.encode("utf-8")), "the fixture is not wide: %d characters" % len(wide))
+        rc, out, hits = self.prose_run({}, {REC: PROSE_HEAD + [wide, SENT]})
+        self.assert_only_sentinel(rc, out, hits, 6, "a line of %d characters (%d bytes) is under the limit" %
+                                  (len(wide), len(wide.encode("utf-8"))))
+
+    def test_prose_one_long_sentence_is_not_refused(self):
+        long_one = one_sentence(4500)
+        rc, out, hits = self.prose_run({}, {REC: PROSE_HEAD + [long_one, SENT]})
+        self.assert_only_sentinel(rc, out, hits, 6, "one sentence of %d characters is one sentence, so it is not refused" % len(long_one))
+
+    def test_prose_full_size_ruling_line_is_refused(self):
+        big = sentences(4500, 25)
+        rc, out, hits = self.prose_run({}, {REC: PROSE_HEAD + [big]})
+        self.assertEqual(hits, [(REC, 5)], "a %d-character line of 25 sentences must be refused:\n%s" % (len(big), out))
+        self.assertEqual(rc, 1, out)
+
+    def test_prose_empty_record_and_blank_lines_pass(self):
+        rc, out, hits = self.prose_run({}, {REC: [], "docs/decisions/blank-record.md": ["", "", ""]})
+        self.assertEqual((rc, hits), (0, []), out)
+
+    def test_prose_question_and_exclamation_marks_end_a_sentence(self):
+        text = line_of(230, "Does the lane read the record? Yes it does! Then it reads ", ".")
+        rc, out, hits = self.prose_run({}, {REC: PROSE_HEAD + [text]})
+        self.assertEqual(hits, [(REC, 5)], "a line of three sentences that end in ? ! and . must be refused:\n" + out)
+
+    def test_prose_old_long_line_left_alone_is_not_refused(self):
+        # A green control: a change that leaves an old long line alone adds no refused line.
+        rc, out, hits = self.prose_run({REC: PROSE_HEAD + [OLD_LONG]}, {REC: PROSE_HEAD + [OLD_LONG, "A short line."]})
+        self.assertEqual((rc, hits), (0, []), out)
+
+    def test_prose_only_the_line_the_change_adds_is_named(self):
+        rc, out, hits = self.prose_run({REC: PROSE_HEAD + [OLD_LONG]}, {REC: PROSE_HEAD + [OLD_LONG, SENT]})
+        self.assert_only_sentinel(rc, out, hits, 6, "the old long line at 5 was named, though the change did not add it")
+
+    def test_prose_old_line_edited_in_place_is_an_added_line(self):
+        edited = OLD_LONG.replace("Each", "One", 1)
+        rc, out, hits = self.prose_run({REC: PROSE_HEAD + [OLD_LONG]}, {REC: PROSE_HEAD + [edited]})
+        self.assertEqual(hits, [(REC, 5)], "an old line edited in place is a line the change adds, so it must be refused:\n" + out)
+        self.assertEqual(rc, 1, out)
+
+    def test_prose_old_line_rewritten_one_sentence_per_line_adds_no_refused_line(self):
+        parts = OLD_LONG.replace(". ", ".\n").split("\n")
+        self.assertEqual(len(parts), 3)
+        text = PROSE_HEAD + parts + [SENT]
+        rc, out, hits = self.prose_run({REC: PROSE_HEAD + [OLD_LONG]}, {REC: text})
+        self.assert_only_sentinel(rc, out, hits, len(text), "a line split into one sentence per line was refused")
+
+    def test_prose_old_line_moved_with_its_text_is_not_new(self):
+        # Pick, surfaced to the owner: a moved line is held, as a moved note line is (new_note_lines). A -U0 diff would call it added.
+        base = PROSE_HEAD + [OLD_LONG, "Short line one.", "Short line two."]
+        text = PROSE_HEAD + ["Short line one.", "Short line two.", OLD_LONG, SENT]
+        rc, out, hits = self.prose_run({REC: base}, {REC: text})
+        self.assert_only_sentinel(rc, out, hits, len(text), "an old line moved down the record, text unchanged, was named")
+
+    def test_prose_renamed_record_keeps_its_old_lines_old(self):
+        moved_to, fresh = "docs/decisions/lane-record-renamed.md", "docs/decisions/lane-record-fresh.md"
+        old = PROSE_HEAD + [OLD_LONG]
+        rc, out, hits = self.prose_run({REC: old}, {REC: None, moved_to: old, fresh: PROSE_HEAD + [SENT]})
+        self.assertIn((fresh, 5), hits, "the fresh record's sentinel was not refused, so the check read nothing:\n" + out)
+        self.assertEqual(hits, [(fresh, 5)], "a renamed record's old long line was named as new:\n" + out)
+        self.assertEqual(rc, 1, out)
+
+    def test_prose_lines_a_merge_of_main_brought_in_are_not_the_branchs(self):
+        other = "docs/decisions/lane-record-other.md"
+        self.roll_out()
+        self.put(REC, "".join(l + "\n" for l in PROSE_HEAD + ["Short line."]))
+        self.commit_base()
+        base = self.git_out("rev-parse", "HEAD").strip()
+        self.put(other, "".join(l + "\n" for l in PROSE_HEAD + [OLD_LONG]))  # main moves: another lane's long line lands
+        self.commit_change()
+        self.git("update-ref", "refs/remotes/origin/main", "HEAD")
+        self.git("checkout", "-q", "-b", "lane", base)
+        self.put(REC, "".join(l + "\n" for l in PROSE_HEAD + ["Short line.", SENT]))
+        self.commit_change()
+        self.git("merge", "-q", "--no-edit", "origin/main")
+        rc, out = self.lint()
+        self.assert_only_sentinel(rc, out, prose_hits(out), 6, "a long line that main added and the lane merged in was named")
+
+    def test_prose_heading_is_exempt(self):
+        self.prose_exempt(["# " + SENT, "### " + sentences(260, 3)], "a heading is a label, so a long one with two sentences passed over")
+
+    def test_prose_table_row_is_exempt(self):
+        rows = ["| Step | What it does |", "| --- | --- |", "| One | " + sentences(260, 2) + " |"]
+        self.prose_exempt(rows, "a table row with two sentences in a cell was named")
+
+    def test_prose_fenced_code_of_either_kind_is_exempt(self):
+        lines = ["```text", sentences(260, 2), "```", "", "~~~", sentences(260, 3), "~~~"]
+        self.prose_exempt(lines, "a line inside a backtick or tilde fence was named")
+
+    def test_prose_fence_opened_above_the_change_still_covers_an_added_line(self):
+        base = PROSE_HEAD + ["```text", "old code line", "```"]
+        text = PROSE_HEAD + ["```text", sentences(260, 2), "old code line", "```", SENT]
+        rc, out, hits = self.prose_run({REC: base}, {REC: text})
+        self.assert_only_sentinel(rc, out, hits, 9, "a line added inside a fence that an old line opened was named")
+
+    def test_prose_fenced_code_with_comment_openers_and_a_template_literal_is_exempt_and_closes(self):
+        lines = ["```js", "/* " + sentences(260, 2), "// " + sentences(260, 2), "# " + sentences(260, 2),
+                 "const t = `" + sentences(260, 2), sentences(260, 2) + "`;", "```"]
+        self.prose_exempt(lines, "a comment opener or an open template literal in a fence changed which lines were read")
+
+    def test_prose_list_item_of_one_sentence_is_exempt(self):
+        lines = ["- " + one_sentence(400), "1. " + one_sentence(400), "  - " + one_sentence(400)]
+        self.prose_exempt(lines, "a list item of one long sentence was named")
+
+    def test_prose_one_quoted_owner_quote_is_exempt(self):
+        quote = sentences(240, 3)
+        lines = ['"' + quote + '"', '> "' + quote + '"', "\u201c" + quote + "\u201d"]
+        self.prose_exempt(lines, "a line that is one quote, bare, in a blockquote or in curly marks, was named")
+
+    def test_prose_list_item_of_two_sentences_is_refused_nested_or_numbered(self):
+        lines = ["- " + sentences(260, 2), "  - " + sentences(260, 2), "1. " + sentences(260, 2)]
+        rc, out, hits = self.prose_run({}, {REC: PROSE_HEAD + lines})
+        self.assertEqual(hits, [(REC, 5), (REC, 6), (REC, 7)], "a list item of two sentences over the limit must be refused:\n" + out)
+
+    def test_prose_comment_openers_in_text_do_not_hide_a_line(self):
+        lines = [line_of(240, "Run `grep '/*' file` and `echo //x # y` now. Then it reads ", "."),
+                 line_of(240, "See https://example.com/a//b for the plan. Then it reads ", "."),
+                 line_of(240, "#5 is the lane that reads the record once. Then it reads ", ".")]
+        rc, out, hits = self.prose_run({}, {REC: PROSE_HEAD + lines})
+        self.assertEqual(hits, [(REC, 5), (REC, 6), (REC, 7)], "a /*, // or # in the text hid a refused line:\n" + out)
+
+    def test_prose_lone_quote_or_apostrophe_does_not_exempt_a_line(self):
+        lines = [line_of(240, "The 5\" pipe stays in the line. Don't cut it, then it reads ", "."),
+                 line_of(240, "Edit <p>Don't</p> in the page. Then it reads ", "."),
+                 line_of(240, "\"The lane reads the record once. Then it reads ", ".")]
+        rc, out, hits = self.prose_run({}, {REC: PROSE_HEAD + lines})
+        self.assertEqual(hits, [(REC, 5), (REC, 6), (REC, 7)], "a lone quote or apostrophe made a line count as a quote:\n" + out)
+
+    def test_prose_a_quote_that_is_not_the_whole_line_does_not_exempt_it(self):
+        lines = [line_of(240, "\"Run it now.\" Then the lane stopped and read ", "."),
+                 line_of(240, "The lane waited a while. Owner said: \"run it now. Stop reading ", ".\"")]
+        rc, out, hits = self.prose_run({}, {REC: PROSE_HEAD + lines})
+        self.assertEqual(hits, [(REC, 5), (REC, 6)], "a line with prose outside its quote was exempted as a quote:\n" + out)
+
+    def test_prose_only_decision_records_are_read(self):
+        guide, debt = "docs/guide.md", "docs/debts/lane-debt.md"
+        text = PROSE_HEAD + [SENT]
+        rc, out, hits = self.prose_run({}, {REC: text, guide: text, debt: text})
+        self.assertIn((REC, 5), hits, "the decision record's sentinel was not refused, so the check read nothing:\n" + out)
+        self.assertEqual(hits, [(REC, 5)], "a file that is not a decision record was read:\n" + out)
+
+    def test_prose_decision_folder_comes_from_the_layout(self):
+        legacy = "decisions/lane-record.md"  # a tree that has not rolled out keeps its records here (lint/layout.py, legacy)
+        rc, out, hits = self.prose_run({}, {legacy: PROSE_HEAD + [SENT]}, rolled_out=False)
+        self.assertEqual(hits, [(legacy, 5)], "the decisions folder of an unrolled tree was not read:\n" + out)
+
 
 READY_STEP = "Record slug length"  # the step that reads the section folder; also its name in .github/workflows/checks.yml
 # The text hooks/test_guard.py looks for when a duplicate number stops its run: `section number <n> is on <k> section files`.
@@ -1458,6 +1713,19 @@ class ImportTests(unittest.TestCase):
             except SystemExit as err:
                 self.fail("importing the module ran the check and exited %r: %s" % (err.code, out.getvalue().strip()))
         self.assertEqual(out.getvalue(), "")
+
+
+def _not_a_sentence_end(head):
+    def test(self):
+        one = line_of(240, head, ".")
+        two = one + " Then it stops."
+        rc, out, hits = self.prose_run({}, {REC: PROSE_HEAD + [one, two]})
+        self.assert_only_sentinel(rc, out, hits, 6, "the one long sentence at line 5 was split at a dot that does not end it")
+    return test
+
+
+for _name, _head in NOT_A_SENTENCE_END:  # one method per form, so the report names the form that splits a sentence
+    setattr(RecordSlugsTests, "test_prose_dot_in_%s_does_not_end_a_sentence" % _name, _not_a_sentence_end(_head))
 
 
 if __name__ == "__main__":
