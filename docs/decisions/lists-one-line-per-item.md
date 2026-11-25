@@ -3,13 +3,11 @@
 ## The ruling
 
 The owner's words are quoted below.
-The rule sentences here are the consultant's wording of them.
-The owner approved doing this in claude-settings "for the most part" (his words, 11:15 CST, Nov 25, 2026).
+The rule sentences here are the consultant's wording, drawn from the owner's words below.
+The owner's 11:15 CST words, Nov 25, 2026, are "approved on doign this in claude-settings for the most part".
 A list, table or registry that many lanes add to holds one entry per line.
-Where order cannot matter, the lines are sorted.
 A list may hold one file per entry instead.
 One list has one home, and other places read it.
-Record prose holds one sentence per line.
 The mistake it stops: two lanes that each add one entry to a one-line list conflict at their merge of main.
 
 ## Owner words, 2026-11-25 (CST)
@@ -41,6 +39,8 @@ The script lint/conflict_hotspots.py (branch conflict-hotspots, in flight) will 
 The consultant chose these.
 The owner has not ruled on them.
 
+- Where order cannot matter, the lines are sorted.
+- Record prose holds one sentence per line.
 - No file lease.
 - No split of merge/test_merge.py now.
 - The list check fires at more than 8 entries on one line, and only on a list that the pull request adds to.
@@ -63,7 +63,7 @@ None is built.
 ## Not built
 
 - The list check is not built yet, and it will live on its own in-flight branch (named under In flight, slug held back).
-- The compliance-check skill section comes later, and by decision `skill-edits-follow-work` (owner, 22:21 CST Nov 24, 2026: "other skill edits come later"; "nothing in wanting to change the skills should hold up the real work") the check lands now without it.
+- The compliance-check skill section comes later, and the check lands now without it (the consultant's pick; reason, decision `skill-edits-follow-work`: "A held skill edit never holds up real work.").
 - The whole-read note, a note only, inside hooks/reread_check.py --pre-read.
 - The big splits: merge/merge.py by concern, merge/test_lane_lint.py, and .github/workflows/checks.yml.
 
