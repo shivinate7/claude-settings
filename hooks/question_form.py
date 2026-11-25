@@ -2237,7 +2237,7 @@ RULING_EXTRA_CAP = 600  # the most a record's ruling section adds past INDEX_CAP
 RULING_HEADING = re.compile(r"^##[ \t]+The ruling[ \t]*$", re.I | re.M)
 RULING_WORDS = re.compile(r"ruling|owner|shiv", re.I)
 SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+")
-DATE_STAMP = re.compile(r"\b20\d\d-\d\d-\d\d(?: \d\d:\d\d)?")
+DATE_IN_TEXT = re.compile(r"\b20\d\d-\d\d-\d\d(?: \d\d:\d\d)?")
 WORD = re.compile(r"[a-z]{4,}")
 STOPWORDS = frozenset(("that", "this", "with", "from", "have", "will", "should", "would", "could", "there", "their",
                        "about", "which", "when", "what", "were", "been", "into", "than", "then", "them", "they",
@@ -2300,15 +2300,15 @@ def _units(section):
 def _owner_sentences(section) -> str:
     """The units of `section` (see _units) that end past INDEX_CAP and carry a ruling word (RULING_WORDS), joined
     with a space, at most RULING_EXTRA_CAP characters in all, the space before them included. When they do not all
-    fit, the one with the newest date stamp comes first, then the rest in document order (a later ruling sits late
+    fit, the one with the newest date comes first, then the rest in document order (a later ruling sits late
     in a long section); a unit that does not fit is skipped. The kept ones read in document order. "" when none."""
     found, pos = [], 0
     for unit in _units(section):
         end = pos + len(unit)
         pos = end + 1
         if end > INDEX_CAP and RULING_WORDS.search(unit):
-            stamps = DATE_STAMP.findall(unit)
-            found.append((len(found), max(stamps) if stamps else "", unit))
+            dates = DATE_IN_TEXT.findall(unit)
+            found.append((len(found), max(dates) if dates else "", unit))
     picked, size = [], 1
     for index, _stamp, unit in sorted(found, key=lambda item: item[1], reverse=True):  # stable: ties keep order
         cost = len(unit) + bool(picked)
@@ -2569,11 +2569,11 @@ def named_rulings(text, ids) -> list:
 
 
 def ruling_time(candidates, ruling_id) -> str:
-    """The date of the listed ruling line of `ruling_id` (the newest stamp in it), else "time unknown"."""
+    """The date of the listed ruling line of `ruling_id` (the newest date in it), else "time unknown"."""
     for line in candidates:
         if line.startswith(ruling_id + ": "):
-            stamps = DATE_STAMP.findall(line[len(ruling_id) + 2:])
-            return max(stamps) if stamps else TIME_UNKNOWN
+            dates = DATE_IN_TEXT.findall(line[len(ruling_id) + 2:])
+            return max(dates) if dates else TIME_UNKNOWN
     return TIME_UNKNOWN
 
 
