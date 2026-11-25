@@ -16,4 +16,4 @@ A capability has one home. Read this page before you build a helper, and extend 
 ## Code files
 
 - `skills/plain-english-map/scripts/lib/lazy-typescript.mjs` — Loads the `typescript` package for the map skill at its first use, and never at import.
-  - The skill pins typescript to version ~5.8.2. — `package.json: dependencies.typescript = "~5.8.2"`
+  - The skill pins typescript to 5.9.3. — `package.json: dependencies.typescript = "5.9.3"`
