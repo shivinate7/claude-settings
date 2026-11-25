@@ -210,15 +210,15 @@ def shebang_word(path):
     return re.sub(r"[\d.]+$", "", os.path.basename(words[0])) if words else None
 
 
-def language_of(path, std):
-    """The language row name for a path, or None when it is not a scanned language."""
+def language_of(path, std, names=SCANNED):
+    """The language row name for a path among `names` (the scanned languages by default), or None."""
     base = os.path.basename(path)
     ext = os.path.splitext(base)[1].lower() or (base.lower() if base.startswith(".") else "")
     rows = std["languages"]
     if ext:
-        return next((n for n in SCANNED if ext in rows.get(n, {}).get("extensions", [])), None)
+        return next((n for n in names if ext in rows.get(n, {}).get("extensions", [])), None)
     word = shebang_word(path)
-    return next((n for n in SCANNED if word and word in rows.get(n, {}).get("shebangs", [])), None)
+    return next((n for n in names if word and word in rows.get(n, {}).get("shebangs", [])), None)
 
 
 def added_lines(base, std, exclude=(), cwd=None, classify=None):
@@ -491,10 +491,14 @@ def sh_try_arith(src, i, spans, pending):
     or `$((` that does not close with `))` is a subshell or a command substitution that holds a subshell, as in
     `((cd /tmp; ls) | wc -l)`; the caller then reads it as code."""
     kept, saved = len(spans), list(pending)
+    arms = getattr(spans, "arms", None)
+    kept_arms = len(arms) if arms is not None else 0
     try:
         return sh_arith_end(src, i, spans, pending)
     except Unread:
         del spans[kept:]
+        if arms is not None:
+            del arms[kept_arms:]
         pending[:] = saved
         return None
 
@@ -580,6 +584,7 @@ def sh_code_end(src, i, spans, pending, close=None):
     and word1 before `in`, pat for the arm patterns, body for an arm's commands. A pattern's `)` ends the pattern,
     never the substitution."""
     ws, cmd, test, sub, parens, cases = True, True, False, 0, [], []
+    arms = getattr(spans, "arms", None)
 
     def starts_cmd():
         return not test and (not parens or parens[-1] == "cmd")
@@ -604,6 +609,8 @@ def sh_code_end(src, i, spans, pending, close=None):
                 cases.pop()
                 i, ws, cmd = i + 4, False, False
                 continue
+            if arms is not None and st[2] is None and c not in " \t\n#" and not src.startswith("\\\n", i):
+                st[2] = (i, [])  # the arm's pattern starts here
         if test and ws and (m := SH_TEST_CLOSE.match(src, i)):
             test = False
             i, ws, cmd = m.end(), False, False
@@ -618,7 +625,7 @@ def sh_code_end(src, i, spans, pending, close=None):
         if cmd and (not st or st[0] == "body") and (m := SH_CMD_WORD.match(src, i)):
             word = m.group(0)
             if word == "case":
-                cases.append(["word0", len(parens)])
+                cases.append(["word0", len(parens), None, i])
                 i, ws, cmd = m.end(), True, False
             elif word == "esac":
                 if not st:
@@ -700,6 +707,9 @@ def sh_code_end(src, i, spans, pending, close=None):
             i += 1
             base = st[1] if st else 0
             if st and st[0] == "pat" and len(parens) == base:
+                if st[2] is not None:
+                    arms.append((st[2][0], i - 1, st[2][1], st[3]))
+                    st[2] = None
                 st[0], ws, cmd = "body", True, True
             elif len(parens) > base:
                 if parens.pop() == "word":
@@ -713,6 +723,8 @@ def sh_code_end(src, i, spans, pending, close=None):
             else:
                 ws = cmd = True  # a stray `)` at top level closes nothing
         else:
+            if c == "|" and st and st[0] == "pat" and st[2] is not None and len(parens) == st[1]:
+                st[2][1].append(i)  # an alternative of the arm; a | in quotes or brackets never reaches here
             redirect = c in "&|" and i > 0 and src[i - 1] in "<>"  # `>&2` and `>|` are redirections
             i += 1
             ws = c in " \t;&|<>"
@@ -727,10 +739,19 @@ def sh_code_end(src, i, spans, pending, close=None):
     return i
 
 
-def shell_comment_spans(path, src):
-    """The (start, end) offsets of each comment in `src`, the text of a shell file with newline line ends. The one scan that
-    shell_comments and lint/comment_only.py read. Raises Unread on an unclosed quote, expansion or heredoc."""
-    spans, pending = [], []
+class ShellScan(list):
+    """The comment spans of a shell file, as the list itself, and in `arms` each case arm's pattern as
+    (offset of its first character, offset of the `)` that ends it, offsets of its top-level `|`, offset of its `case`)."""
+
+    def __init__(self):
+        super().__init__()
+        self.arms = []
+
+
+def shell_scan(path, src):
+    """One scan of `src`, the text of a shell file with newline line ends: its ShellScan. Raises Unread on an unclosed
+    quote, expansion or heredoc."""
+    spans, pending = ShellScan(), []
     try:
         first = src.find("\n") if src.startswith("#!") else 0
         sh_code_end(src, len(src) if first < 0 else first, spans, pending)
@@ -739,6 +760,12 @@ def shell_comment_spans(path, src):
     except Unread as e:
         raise Unread("%s: cannot read: %s" % (path, e))
     return spans
+
+
+def shell_comment_spans(path, src):
+    """The (start, end) offsets of each comment in `src`, the text of a shell file with newline line ends. The one scan that
+    shell_comments and lint/comment_only.py read. Raises Unread on an unclosed quote, expansion or heredoc."""
+    return list(shell_scan(path, src))
 
 
 def shell_comments(path):
