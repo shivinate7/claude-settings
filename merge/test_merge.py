@@ -16271,6 +16271,39 @@ class MainRunVerdict(Env):
         jobs = {self.NOW: [main_job("scope", "success"), main_job("checks", "cancelled", 20)], self.PREV: [main_job("checks", "success", 20)]}
         self.judged(self.UNKNOWN, self.NEW_SHA, runs, jobs)
 
+    # A superseded run (the shared test in clear_rule): a push run cancelled before any job started, with a newer push run of main on the
+    # page. Its commit has no verdict of its own, so its line reads `superseded`, which is neither green nor unknown.
+    LATER, LATER_SHA = 1003, "7d1c0a52" + "4" * 32  # the newer push run, in progress, that replaces NOW
+
+    def test_a_cancelled_push_run_with_no_job_that_a_newer_run_replaced_reads_superseded(self):
+        """Red on the old code: a cancelled run reads unknown, which refuses every merge. Superseded, it reads `superseded`, exit 0."""
+        runs = [main_run(self.LATER, None, status="in_progress", sha=self.LATER_SHA), main_run(self.NOW, "cancelled", sha=self.NEW_SHA),
+                main_run(self.PREV, "success", sha=self.GREEN_SHA)]
+        jobs = {self.NOW: [], self.PREV: [main_job("scope", "success"), main_job("checks", "success", 20)]}
+        self.judged("superseded", self.NEW_SHA, runs, jobs)
+
+    def test_control_a_cancelled_push_run_with_no_newer_run_reads_unknown_beside_a_replaced_one(self):
+        """Control, unknown on the old code too: a cancel that no newer run replaced has no verdict, though its own cancelled newer run exists."""
+        runs = [main_run(self.LATER, "cancelled", sha=self.LATER_SHA), main_run(self.NOW, "cancelled", sha=self.NEW_SHA),
+                main_run(self.PREV, "success", sha=self.GREEN_SHA)]
+        jobs = {self.LATER: [], self.NOW: [], self.PREV: [main_job("scope", "success"), main_job("checks", "success", 20)]}
+        self.judged(self.UNKNOWN, self.LATER_SHA, runs, jobs)
+
+    def test_control_a_run_replaced_by_a_cancelled_run_is_not_proven_green(self):
+        """Control, not green on the old code: the replacement is itself cancelled and no run replaced it, so the green run below proves nothing."""
+        runs = [main_run(self.LATER, "cancelled", sha=self.LATER_SHA), main_run(self.NOW, "cancelled", sha=self.NEW_SHA),
+                main_run(self.PREV, "success", sha=self.GREEN_SHA)]
+        jobs = {self.LATER: [], self.NOW: [], self.PREV: [main_job("scope", "success"), main_job("checks", "success", 20)]}
+        _rc, text, word, _line = self.verdict(self.NEW_SHA, runs, jobs)
+        self.assertNotEqual(word, "green", "a run replaced by a cancelled run that nothing replaced reads green, so it is proven:\n" + text)
+
+    def test_control_a_cancel_after_a_job_started_beside_a_newer_run_is_unknown(self):
+        """Control, unknown on the old code too: a job that started makes the cancel a real cancel, so a newer run does not replace it."""
+        runs = [main_run(self.LATER, None, status="in_progress", sha=self.LATER_SHA), main_run(self.NOW, "cancelled", sha=self.NEW_SHA),
+                main_run(self.PREV, "success", sha=self.GREEN_SHA)]
+        jobs = {self.NOW: [main_job("scope", "success"), main_job("checks", "cancelled", 20)], self.PREV: [main_job("checks", "success", 20)]}
+        self.judged(self.UNKNOWN, self.NEW_SHA, runs, jobs)
+
     def test_a_failed_runs_list_read_is_unknown(self):
         """The one runs read that every verdict starts from fails: unknown, and no run of the commit is judged."""
         runs = [main_run(self.NOW, "failure", sha=self.NEW_SHA), main_run(self.PREV, "success", sha=self.GREEN_SHA)]
