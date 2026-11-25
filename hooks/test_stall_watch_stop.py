@@ -36,6 +36,11 @@ stdin, scans the session transcript for background shells, and prints ONE JSON l
   its last assistant record holds a tool_use with no result (one long call is not a stall). A
   completed notice or a TaskStop result closes it, as for a shell. A missing transcript is listed
   as unknown, once.
+- In the Stop check, a background agent that has run AGENT_LONG seconds (1800; STALL_WATCH_LONG overrides)
+  blocks the Stop: quiet or busy, in an open call or not, with its transcript missing too. The block names
+  the agent and asks for one send_later check-in that names its id. A check-in made after the crossing,
+  with a good result, clears it. A notice that says the agent is waiting on its own background work keeps
+  it open: it gets no quiet row and no close.
 - When guard_stream cannot be imported, --stop still lists each stale job, with no note.
 - The busy check (a job whose process tree burns CPU is not listed) shares one deadline, BUSY_BUDGET:
   a stalled lsof or ps cannot hold the Stop past the hook timeout, and a busy holder that lsof names
@@ -44,7 +49,8 @@ stdin, scans the session transcript for background shells, and prints ONE JSON l
 
 Seams: STALL_WATCH_NOW (epoch seconds, the clock), STALL_WATCH_OUTPUT_BASE (a folder that
 replaces the folder of each transcript output path and keeps its file name), STALL_WATCH_QUIET
-(the age in seconds). STALL_WATCH_MODULE picks the module under test, as in test_stall_watch.py.
+(the age in seconds), STALL_WATCH_LONG (the age in seconds at which a background agent blocks the
+Stop). STALL_WATCH_MODULE picks the module under test, as in test_stall_watch.py.
 
 No posix check: this mode must run on Windows. These cases use no sh, ps or lsof, except S21a and
 S21c to S21e: they start a shell job, or put a stub sh, ps or lsof first on PATH, and skip off posix,
@@ -320,11 +326,12 @@ def output_file(base, job_id, idle):
 
 
 def run_stop(transcript_path, base=None, stop_hook_active=False, quiet=None, stdin=None, nt=False,
-             module=None, now=None, path_first=None):
+             module=None, now=None, path_first=None, long=None):
     """Run the Stop mode the way the Stop hook does. Return (rc, stdout, stderr). module, when
     given, is the script run in place of MODULE. now, when given, is the clock of this Stop (epoch
     seconds), so a case can run an earlier Stop than the others. path_first, when given, is a folder put
-    first on PATH, so a stub of lsof or ps in it runs in place of the tool."""
+    first on PATH, so a stub of lsof or ps in it runs in place of the tool. long, when given, is
+    STALL_WATCH_LONG: the age in seconds at which a background agent blocks the Stop."""
     mod = module or MODULE
     if not os.path.isfile(mod):
         raise Fail(f"{mod} is missing")
@@ -338,6 +345,8 @@ def run_stop(transcript_path, base=None, stop_hook_active=False, quiet=None, std
         env["STALL_WATCH_OUTPUT_BASE"] = base
     if quiet is not None:
         env["STALL_WATCH_QUIET"] = str(quiet)
+    if long is not None:
+        env["STALL_WATCH_LONG"] = str(long)
     if stdin is None:
         payload = {"session_id": "test-stall-watch-stop", "hook_event_name": "Stop", "cwd": SCRATCH,
                    "transcript_path": transcript_path, "stop_hook_active": stop_hook_active}
@@ -1722,6 +1731,21 @@ def A6_agent_with_no_transcript_is_unknown_at_the_first_stop_only():
 
 
 @case
+def A6b_agent_at_31_min_with_no_transcript_still_blocks():
+    """A6b. a background agent launched 31 min before the Stop whose transcript is missing, both beside the session
+    and at its outputFile: the Stop blocks and names it. Control: the same missing transcript, launched 29 min
+    before, is named in no block (A6 keeps its unknown row)"""
+    a31, a29 = agent_id(90), agent_id(91)
+    folder = new_dir()
+    rc, out, err = run_stop(transcript(stamped(agent_launch(a31, win_path(a31)), 1860)
+                                       + stamped(agent_launch(a29, win_path(a29)), 1740), folder=folder))
+    problems = expect(rc == 0, f"exit {rc}, want 0: {err.strip()[:200]}")
+    problems += agent_block(out, a31)
+    problems += expect(a29 not in block_text(out), f"control: the 29-min agent {a29} is named in a block")
+    return problems
+
+
+@case
 def A7_quiet_agent_is_listed_once_per_crossing():
     """A7. a quiet agent whose stall crossed after the previous Stop is listed at the next Stop, and not again
     at the one after, as for a shell job. Control: an agent that goes quiet after that Stop is listed at the
@@ -1749,7 +1773,9 @@ def A7_quiet_agent_is_listed_once_per_crossing():
 def A8_cost_one_stat_per_running_agent_and_a_read_only_when_quiet():
     """A8. the cost of the agent check, run in this process: each running agent is stat'ed once per Stop, a
     fresh agent is not opened, and a quiet agent is read. Scope first: the session file was opened and the
-    quiet agent was read, so the counts below come from the agent check"""
+    quiet agent was read, so the counts below come from the agent check. The default scan_jobs call (no
+    keep_waiting) keeps today's result: an agent whose notice says it is waiting on its own background work
+    is closed by that notice, and a quiet control beside it stays listed"""
     folder = new_dir()
     lf, fresh = background_agent(folder, agent_id(17), agent_step("f1"), 10)
     lq, quiet = background_agent(folder, agent_id(18), agent_step("q1"), 600)
@@ -1766,6 +1792,16 @@ def A8_cost_one_stat_per_running_agent_and_a_read_only_when_quiet():
                        f"fresh agent {agent_id(17)} was opened: {opens}")
     quiet_stats = sum(agent_id(18) in p for p in stats)
     problems += expect(quiet_stats == 1, f"quiet agent {agent_id(18)} stat count {quiet_stats}, want 1: {stats}")
+    folder2 = new_dir()
+    lw, waiting = background_agent(folder2, agent_id(19), agent_step("w2"), 600)
+    lq, control = background_agent(folder2, agent_id(20), agent_step("q2"), 600)
+    wpath = transcript(stamped(lw + lq, 900) + [waiting_notice(agent_id(19))], agents=[waiting, control],
+                       folder=folder2)
+    jobs, _prev = load_module("stall_watch_default_scan").scan_jobs(wpath)
+    problems += expect(agent_id(19) not in jobs,
+                       f"default scan_jobs keeps the waiting agent {agent_id(19)} open: {sorted(jobs)}")
+    problems += expect(agent_id(20) in jobs,
+                       f"default scan_jobs does not list the quiet control {agent_id(20)}: {sorted(jobs)}")
     return problems
 
 
@@ -1802,6 +1838,247 @@ def A10_full_size_each_quiet_agent_is_listed_once():
     msg = system_message(out, problems)
     for aid in ids:
         problems += listed_once(msg, aid, by_line=True)
+    return problems
+
+
+# ---- Background agents past the long age (decision stall-watch, "The Stop-time check") ----
+# A background agent that has run LONG_AGE seconds (AGENT_LONG; STALL_WATCH_LONG overrides) blocks the Stop until one
+# send_later check-in, made after the crossing, names its id. A notice that says the agent is waiting on its own
+# background work keeps it open in the Stop check. The age is measured from the launch record's timestamp.
+
+WAITING = "is waiting on its own background work"  # the harness's notice text for an agent that ended its turn with work of its own
+LONG_AGE = 1800  # seconds: the age at which a background agent demands a check-in
+
+
+def waiting_notice(aid):
+    """The completed notice of an agent that ended its turn while its own background work still runs."""
+    return notice(aid, "completed", summary='Agent "review the diff" ' + WAITING)
+
+
+def finished_notice(aid):
+    """The completed notice of an agent that finished its work."""
+    return notice(aid, "completed", summary='Agent "review the diff" completed')
+
+
+def agent_checkin(ago, aid, is_error=False):
+    """A send_later check-in that names agent aid, made ago seconds before NOW, with its result: an error when
+    is_error, else a good result. Both records are stamped, so the check-in's time is known."""
+    rec = tool_call(SEND_LATER, {"message": "check agent %s" % aid})
+    call_id = rec["message"]["content"][0]["id"]
+    text = "send_later failed: no session" if is_error else "scheduled"
+    return stamped([rec, tool_result(call_id, text, is_error=is_error, tool_use_result=text)], ago)
+
+
+def block_text(out):
+    """The reason of the Stop's block line, or '' when the output holds no block. Adds no problem."""
+    try:
+        body = json.loads(out)
+    except ValueError:
+        return ""
+    if isinstance(body, dict) and body.get("decision") == "block" and isinstance(body.get("reason"), str):
+        return body["reason"]
+    return ""
+
+
+def agent_block(out, aid):
+    """The problems with the Stop output as the one block line that names agent aid and asks for a send_later check-in."""
+    if out.strip() == "":
+        return ["no block printed, want one naming agent %s" % aid]
+    problems = []
+    reason = block_reason(out, problems)
+    if reason is None:
+        return problems
+    problems += expect(aid in reason, f"block reason does not name agent {aid}: {reason!r}")
+    problems += expect("send_later" in reason, f"block reason does not ask for a send_later check-in: {reason!r}")
+    return problems
+
+
+@case
+def A11_active_agent_at_31_min_blocks_and_at_29_min_does_not():
+    """A11. a background agent launched 31 min before the Stop, still writing (its transcript changed 10 s ago):
+    the Stop blocks, and its reason names the agent. Control: an agent with the same activity, launched 29 min
+    before, is named in no block"""
+    a31, a29 = agent_id(30), agent_id(31)
+    folder = new_dir()
+    l31, s31 = background_agent(folder, a31, agent_step("a31"), 10)
+    l29, s29 = background_agent(folder, a29, agent_step("a29"), 10)
+    rc, out, err = run_stop(transcript(stamped(l31, 1860) + stamped(l29, 1740), agents=[s31, s29], folder=folder))
+    problems = expect(rc == 0, f"exit {rc}, want 0: {err.strip()[:200]}")
+    problems += agent_block(out, a31)
+    problems += expect(a29 not in block_text(out), f"control: the 29-min agent {a29} is named in a block")
+    return problems
+
+
+@case
+def A11b_STALL_WATCH_LONG_sets_the_age_at_which_an_agent_blocks():
+    """A11b. the env STALL_WATCH_LONG sets the age, here 600 s: an agent launched 700 s before the Stop, still
+    writing, blocks and is named. Control: an agent launched 500 s before is named in no block"""
+    a700, a500 = agent_id(33), agent_id(34)
+    folder = new_dir()
+    l7, s7 = background_agent(folder, a700, agent_step("e1"), 10)
+    l5, s5 = background_agent(folder, a500, agent_step("e2"), 10)
+    rc, out, err = run_stop(transcript(stamped(l7, 700) + stamped(l5, 500), agents=[s7, s5], folder=folder), long=600)
+    problems = expect(rc == 0, f"exit {rc}, want 0: {err.strip()[:200]}")
+    problems += agent_block(out, a700)
+    problems += expect(a500 not in block_text(out), f"control: the 500-s agent {a500} is named in a block")
+    return problems
+
+
+@case
+def A11c_full_size_thirty_long_agents_are_each_named_once_in_one_block():
+    """A11c. full size: thirty agents, each launched 31 min before the Stop and still writing. One block line
+    names each id once, as `<id>)`. Control: the same thirty launched 29 min before are named in no block"""
+    def session(ago):
+        folder = new_dir()
+        launches, specs, ids = [], [], []
+        for n in range(30):
+            aid = agent_id(200 + n)
+            launch, spec = background_agent(folder, aid, agent_step("t%d" % n), 10)
+            launches += stamped(launch, ago)
+            specs.append(spec)
+            ids.append(aid)
+        return transcript(launches, agents=specs, folder=folder), ids
+
+    path, ids = session(1860)
+    rc, out, err = run_stop(path)
+    problems = expect(rc == 0, f"exit {rc}, want 0: {err.strip()[:200]}")
+    reason = block_text(out)
+    for aid in ids:
+        n = reason.count(aid + ")")
+        problems += expect(n == 1, f"agent {aid} is named {n} times in the block, want 1")
+    path, ids = session(1740)
+    rc, out, err = run_stop(path)
+    problems += expect(rc == 0, f"control: exit {rc}, want 0: {err.strip()[:200]}")
+    problems += expect(not any(aid in block_text(out) for aid in ids),
+                       f"control: a 29-min agent is named in a block: {block_text(out)[:200]!r}")
+    return problems
+
+
+@case
+def A11d_AGENT_LONG_is_1800_seconds():
+    """A11d. the constant AGENT_LONG is 1800: the age at which a background agent demands a check-in"""
+    value = getattr(load_module("stall_watch_constant"), "AGENT_LONG", None)
+    return expect(value == LONG_AGE, f"AGENT_LONG is {value!r}, want {LONG_AGE}")
+
+
+@case
+def A11e_waiting_text_has_one_home_in_shared_names():
+    """A11e. the harness's waiting text is one string constant in hooks/shared_names.py, the one home of it"""
+    spec = importlib.util.spec_from_file_location("shared_names_home", os.path.join(HERE, "shared_names.py"))
+    shared = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(shared)
+    homes = sorted(name for name, val in vars(shared).items() if isinstance(val, str) and WAITING in val)
+    return expect(len(homes) == 1, f"the waiting text has {len(homes)} homes in shared_names, want 1: {homes}")
+
+
+@case
+def A12_waiting_notice_keeps_the_agent_open_and_blocks_at_31_min():
+    """A12. a background agent launched 31 min before the Stop, whose completed notice says it is waiting on its
+    own background work: the agent stays open, and the Stop blocks and names it. Control: a second agent,
+    launched 31 min before, with a finished notice, is closed and named in no block"""
+    waiting_id, done_id = agent_id(40), agent_id(41)
+    folder = new_dir()
+    lw, waiting = background_agent(folder, waiting_id, agent_step("w1"), 10)
+    ld, done = background_agent(folder, done_id, agent_step("d1"), 10)
+    recs = stamped(lw + ld, 1860) + [waiting_notice(waiting_id), finished_notice(done_id)]
+    rc, out, err = run_stop(transcript(recs, agents=[waiting, done], folder=folder))
+    problems = expect(rc == 0, f"exit {rc}, want 0: {err.strip()[:200]}")
+    problems += agent_block(out, waiting_id)
+    problems += expect(WAITING in block_text(out),
+                       f"the block does not say the agent is waiting on its own background work: {block_text(out)!r}")
+    problems += expect(done_id not in block_text(out), f"control: the finished agent {done_id} is named in a block")
+    return problems
+
+
+@case
+def A13_checkin_after_the_crossing_that_names_the_agent_clears_the_block():
+    """A13. a background agent launched 31 min before the Stop and still writing: with no check-in, the Stop
+    blocks and names it. Control: the same session with a send_later check-in that names it, made 30 s before
+    the Stop (after the crossing at 30 min), prints no block"""
+    aid = agent_id(50)
+    folder = new_dir()
+    launch, spec = background_agent(folder, aid, agent_step("c1"), 10)
+    rc, out, err = run_stop(transcript(stamped(launch, 1860), agents=[spec], folder=folder))
+    problems = expect(rc == 0, f"exit {rc}, want 0: {err.strip()[:200]}")
+    problems += agent_block(out, aid)
+    folder = new_dir()
+    launch, spec = background_agent(folder, aid, agent_step("c1"), 10)
+    recs = stamped(launch, 1860) + agent_checkin(30, aid)
+    rc, out, err = run_stop(transcript(recs, agents=[spec], folder=folder))
+    problems += expect(rc == 0, f"control: exit {rc}, want 0: {err.strip()[:200]}")
+    problems += expect('"decision"' not in out, f"control: a check-in after the crossing left a block: {out[:200]!r}")
+    return problems
+
+
+@case
+def A13b_checkin_before_the_crossing_another_id_or_an_error_does_not_clear_the_block():
+    """A13b. the same 31-min agent with a check-in that does not clear it: one made before the crossing (17 min
+    old then), one that names another agent, and one whose result is an error. Each run still blocks and names
+    the agent"""
+    aid, other = agent_id(51), agent_id(52)
+    variants = (("a check-in made before the crossing", agent_checkin(1000, aid)),
+                ("a check-in that names another agent", agent_checkin(30, other)),
+                ("a check-in whose result is an error", agent_checkin(30, aid, is_error=True)))
+    problems = []
+    for label, extra in variants:
+        folder = new_dir()
+        launch, spec = background_agent(folder, aid, agent_step("c1"), 10)
+        rc, out, err = run_stop(transcript(stamped(launch, 1860) + extra, agents=[spec], folder=folder))
+        problems += expect(rc == 0, f"{label}: exit {rc}, want 0: {err.strip()[:200]}")
+        problems += [f"{label}: {p}" for p in agent_block(out, aid)]
+    return problems
+
+
+@case
+def A14_waiting_agent_quiet_for_10_min_at_15_min_gets_no_quiet_row():
+    """A14. a background agent launched 15 min before the Stop, quiet for 10 min, whose completed notice says it
+    is waiting on its own background work: no quiet row, since a waiting agent is silent by design. Control: a
+    non-waiting agent quiet for 10 min at the same age is listed once"""
+    waiting_id, ctl_id = agent_id(60), agent_id(61)
+    folder = new_dir()
+    lw, waiting = background_agent(folder, waiting_id, agent_step("w1"), 600)
+    lc, ctl = background_agent(folder, ctl_id, agent_step("c1"), 600)
+    recs = stamped(lw + lc, 900) + [waiting_notice(waiting_id)]
+    rc, out, err = run_stop(transcript(recs, agents=[waiting, ctl], folder=folder))
+    problems = expect(rc == 0, f"exit {rc}, want 0: {err.strip()[:200]}")
+    msg = system_message(out, problems)
+    problems += listed_once(msg, ctl_id, by_line=True)
+    problems += expect(waiting_id not in out, f"waiting agent {waiting_id} has a quiet row: {out[:200]!r}")
+    return problems
+
+
+@case
+def A15_agent_in_one_open_call_at_31_min_blocks_and_at_29_min_does_not():
+    """A15. a background agent launched 31 min before the Stop, quiet for 10 min, its last record a tool_use with
+    no result (one long call, which the stall check never lists): the Stop blocks and names it. Control: the
+    same open call, launched 29 min before, is named in no block"""
+    a31, a29 = agent_id(70), agent_id(71)
+    folder = new_dir()
+    l31, s31 = background_agent(folder, a31, agent_long_call(), 600)
+    l29, s29 = background_agent(folder, a29, agent_long_call(), 600)
+    rc, out, err = run_stop(transcript(stamped(l31, 1860) + stamped(l29, 1740), agents=[s31, s29], folder=folder))
+    problems = expect(rc == 0, f"exit {rc}, want 0: {err.strip()[:200]}")
+    problems += agent_block(out, a31)
+    problems += expect(a29 not in block_text(out), f"control: the 29-min agent {a29} is named in a block")
+    return problems
+
+
+@case
+def A16_ready_pr_and_a_long_agent_give_one_block_naming_both():
+    """A16. an open CI wait on the fixture PR (CI_PR, a ready call with no check-in) and a background agent launched
+    31 min before the Stop, still writing: one block line, whose reason names the PR and the agent. Control: the
+    ready call alone blocks and names the PR"""
+    aid = agent_id(80)
+    folder = new_dir()
+    launch, spec = background_agent(folder, aid, agent_step("b1"), 10)
+    rc, out, err = run_stop(transcript(stamped(launch, 1860) + [ready()], agents=[spec], folder=folder))
+    problems = expect(rc == 0, f"exit {rc}, want 0: {err.strip()[:200]}")
+    problems += agent_block(out, aid)
+    problems += block_problems(out, pr=CI_PR)
+    folder = new_dir()
+    rc, out, err = run_stop(transcript([ready()], folder=folder))
+    problems += expect(rc == 0, f"control: exit {rc}, want 0: {err.strip()[:200]}")
+    problems += ["control: " + p for p in block_problems(out, pr=CI_PR)]
     return problems
 
 
