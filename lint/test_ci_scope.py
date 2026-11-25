@@ -854,6 +854,18 @@ class GuardReadsReader(unittest.TestCase):
                 else:
                     self.fail("%s: the reader read %s and did not fail" % (form, got))
 
+    def test_a_read_only_call_reads_whole_and_a_mutating_call_fails(self):
+        # .index and .count read the list and change nothing, so the reader reads it whole. .append changes it, so it fails.
+        for name in ("index", "count"):
+            with self.subTest(call=name):
+                text = ('GUARD_READ_FILES = [os.path.join("bin", "sim-lease")]\n'
+                        'GUARD_READ_FILES.%s(os.path.join("bin", "sim-lease"))\n' % name)
+                self.assertEqual(self.reads_of("read only " + name, text), ["bin/sim-lease"])
+        with self.assertRaises(AssertionError) as cm:
+            self.reads_of("append call", 'GUARD_READ_FILES = [os.path.join("bin", "sim-lease")]\n'
+                          'GUARD_READ_FILES.append(os.path.join("janitor", "sweep.py"))\n')
+        self.assertIn(" line 2: ", str(cm.exception))
+
 
 # A records-only push after a fully green head. GREEN_HEAD names the
 # pull request's newest earlier head whose `checks` run was fully green. When the delta from it to HEAD is docs/records.md
