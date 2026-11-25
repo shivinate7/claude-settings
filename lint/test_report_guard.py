@@ -5427,10 +5427,12 @@ class PastRulingRelay(SameTurnWriter, unittest.TestCase):
     ID_AND_DATE = "decisions/github-apps-keep-access (2026-10-28)"
     TWO_QUESTIONS = "Should the GitHub apps keep their access to claude-settings?\nDo you want the CI cap raised?"
 
-    def judged(self, reason, question=None):
+    def judged(self, reason, question=None, labels=None):
         body = {"ok": False, "reason": reason}
-        if question is not None:  # the number of the question the judge matched, counting from 1
+        if question is not None:  # the retired number form of the answer (F8): the code no longer reads it
             body["question"] = question
+        if labels is not None:  # the labels of the questions the listed ruling covers, as the prompt gave them: Q1, Q2, ...
+            body["questions"] = labels
         return json.dumps(body)
 
     def verdict(self, reply, reason, repo=None, config=None):
@@ -5576,15 +5578,17 @@ class PastRulingRelay(SameTurnWriter, unittest.TestCase):
         out, _ = self.stop(self.decided, self.NAMED_ALONE, answer=self.judged(self.NO_DATE_REASON), to_writer=True)
         self.assertEqual(out, {}, "a question that names the listed ruling was refused: %r" % out)
 
-    def test_judged_question_one_that_names_the_ruling_passes_beside_another(self):
-        # The judge matched question 1, which names the ruling. Question 2 names none and is not the one judged.
+    def test_judged_question_one_naming_the_ruling_does_not_pass_its_unnamed_neighbour(self):
+        # F8: the retired number form named question 1, which names the ruling. Question 2 names none, so it is refused.
         out, _ = self.stop(self.decided, self.JUDGED_FIRST, answer=self.judged(self.NO_DATE_REASON, question=1),
                            to_writer=True)
-        self.assertEqual(out, {}, "the judge matched question 1, which names the ruling, yet the reply was refused: %r" % out)
+        self.assertEqual(out.get("decision"), "block",
+                         "the question that names no ruling passed beside the question that names it: %r" % out)
+        self.assertIn(self.RENOVATE_WORDS, self.reason(out), "the refusal does not name the unnamed question: %r" % out)
 
     def test_question_the_judge_never_saw_is_not_refused(self):
-        # A question outside the text window the judge was given is never refused, even when the judge's number is 1.
-        out, _ = self.stop(self.decided, self.OUT_OF_WINDOW, answer=self.judged(self.NO_DATE_REASON, question=1),
+        # A question outside the text window the judge was given is never refused, even when the judge lists Q1.
+        out, _ = self.stop(self.decided, self.OUT_OF_WINDOW, answer=self.judged(self.NO_DATE_REASON, labels=["Q1"]),
                            to_writer=True)
         self.assertEqual(out, {}, "a question outside the text the judge saw was refused: %r" % out)
 
@@ -5623,6 +5627,89 @@ class PastRulingRelay(SameTurnWriter, unittest.TestCase):
         fields = lines[0].split("\t") if lines else []
         self.assertEqual(len(fields), 6, "the Stop line has %d fields, not the six of a line with a session: %r" % (len(fields), lines))
         self.assertEqual(fields[5], self.SESSION, "the Stop line's session column is not the session id: %r" % lines[0])
+
+    # The labels, the list and the refusal text on the Stop path. The judge reads each question unit under its label (Q1,
+    # Q2, ...), and its list names the labels of the units the ruling covers. The units are the ones the refusal counts: a
+    # Done line with a question mark, an option line with a question mark and a question with no question mark each count.
+    F9_PROSE = ("> **Done** OTHER did the audit pass?\n\n"
+                "Should the GitHub apps keep their access to claude-settings?\n"
+                "Based on (ruling): github-apps-keep-access says revisit only if the apps get bloated.\n\n"
+                "Should the Renovate app keep its access to claude-settings?")
+    F9_ITEMS = ("> **Input Needed**\n> - Keep the caps at 2x? a) yes b) no\n> - Tell me the cap pick\n"
+                "> - Should the GitHub apps keep their access to claude-settings?\n"
+                "Based on (ruling): github-apps-keep-access says revisit only if the apps get bloated.\n"
+                "> - Should the Renovate app keep its access to claude-settings?")
+    THIRD_PROSE = "Do you want the CI cap raised?"
+    CI_FIRST = "Do you want the CI cap"
+    HINT_PHRASE = "on its own line under its question"
+
+    def renovate_label(self, reply):
+        """The labels the judge's text gives the Renovate question, read from the prompt of one judged Stop (no list asked)."""
+        self.reset_calls()
+        self.stop(self.decided, reply, to_writer=True)
+        calls = self.model_calls()
+        return tcj.question_labels(calls[0]["prompt"] if calls else "", self.RENOVATE_WORDS)
+
+    def refusal_for_listed_label(self, reply, labels):
+        """The refusal of `reply` when the stub judge lists `labels`, which must be a block of the past-ruling verdict."""
+        out, _ = self.stop(self.decided, reply, answer=self.judged(self.NO_DATE_REASON, labels=labels), to_writer=True)
+        self.assertEqual(out.get("decision"), "block", "the listed question was not refused: %r" % out)
+        return self.reason(out)
+
+    def test_judge_text_labels_the_renovate_question_and_the_refusal_names_that_label(self):
+        # F9: the Done line holds a question mark, so it is a unit of its own. The judge lists the label of the Renovate
+        # question, and the refusal names that label and its first words; the Done line is not refused.
+        labels = self.renovate_label(self.F9_PROSE)
+        self.assertEqual(len(labels), 1, "the judge's text gives the Renovate question no single label Q1, Q2, ...: %r" % labels)
+        label = next(iter(labels))
+        reason = self.refusal_for_listed_label(self.F9_PROSE, [label])
+        self.assertIn(label, reason, "the refusal does not name the listed label %s: %r" % (label, reason))
+        self.assertIn(self.RENOVATE_WORDS, reason, "the refusal does not give the Renovate question's first words: %r" % reason)
+        self.assertNotIn("did the audit pass", reason, "the Done line, which the judge did not list, was refused: %r" % reason)
+
+    def test_judge_text_labels_an_input_needed_question_past_an_option_line_with_a_mark(self):
+        # F9: an option line with a question mark is a unit of its own, and so is a question with no question mark that
+        # starts an item. The Renovate question's label is the one the refusal names.
+        labels = self.renovate_label(self.F9_ITEMS)
+        self.assertEqual(len(labels), 1, "the judge's text gives the Renovate question no single label Q1, Q2, ...: %r" % labels)
+        label = next(iter(labels))
+        reason = self.refusal_for_listed_label(self.F9_ITEMS, [label])
+        self.assertIn(label, reason, "the refusal does not name the listed label %s: %r" % (label, reason))
+        self.assertIn(self.RENOVATE_WORDS, reason, "the refusal does not give the Renovate question's first words: %r" % reason)
+        self.assertNotIn("Tell me the cap pick", reason, "the unlisted item was refused: %r" % reason)
+
+    def test_unlisted_question_beside_a_listed_unnamed_one_is_never_refused(self):
+        # Three units; the judge lists the Renovate question only. The CI question names no ruling and is not listed.
+        reply = self.NAMED_BESIDE_UNNAMED + "\n" + self.THIRD_PROSE
+        labels = self.renovate_label(reply)
+        self.assertEqual(len(labels), 1, "the judge's text gives the Renovate question no single label: %r" % labels)
+        reason = self.refusal_for_listed_label(reply, sorted(labels))
+        self.assertIn(self.RENOVATE_WORDS, reason, "the refusal does not name the listed Renovate question: %r" % reason)
+        self.assertNotIn("one of the questions", reason, "the unlisted CI question was refused too: %r" % reason)
+        self.assertNotIn(self.CI_FIRST, reason, "the unlisted CI question was named in the refusal: %r" % reason)
+
+    def test_fallback_without_a_list_or_with_a_bad_label_says_one_of_the_questions(self):
+        # No list, or a label that names no question: each question that names no ruling is refused, and the text names none.
+        for labels in (None, ["Q9"]):
+            reason = self.refusal_for_listed_label(self.NAMED_BESIDE_UNNAMED, labels)
+            self.assertIn("one of the questions", reason, "the fallback with the list %r does not say one of the questions: %r"
+                          % (labels, reason))
+            self.assertNotIn(self.RENOVATE_WORDS, reason, "the fallback with the list %r names the question: %r"
+                             % (labels, reason))
+
+    def test_unattached_based_on_ruling_line_gets_the_hint(self):
+        # F10: the Based on (ruling) line is in bold, so the code cannot read it as the question's own line. The refusal
+        # says where that line must sit.
+        reply = ("> **Input Needed** Should the GitHub apps keep their access to claude-settings?\n"
+                 "**Based on (ruling):** github-apps-keep-access says revisit only if the apps get bloated.")
+        reason = self.verdict(reply, self.NO_DATE_REASON)
+        self.assertIn(self.HINT_PHRASE, reason, "the refusal does not say where the Based on (ruling) line sits: %r" % reason)
+
+    def test_question_with_no_based_on_ruling_line_gets_no_hint(self):
+        # Control: a question with no Based on (ruling) line gets no hint about where one sits.
+        reason = self.verdict("> **Input Needed** Should the GitHub apps keep their access to claude-settings?",
+                              self.NO_DATE_REASON)
+        self.assertNotIn(self.HINT_PHRASE, reason, "a question with no Based on (ruling) line got the hint: %r" % reason)
 
 
 class AnsweredNeedsSourceTests(unittest.TestCase):
