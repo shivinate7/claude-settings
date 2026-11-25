@@ -2144,8 +2144,8 @@ class MutationReport(unittest.TestCase):
         self.assertEqual(push["mutation_report"], "true", f"a push: {push}")
 
 
-# The guard-inputs gate. The Windows guard shards (checks-windows-guard and its -2 to -n copies) run only when a diff touches a guard input:
-# windows_guard in ci-scope.sh, read from .github/guard-inputs.txt. The gate is read from checks.yml's own step condition, so each
+# The guard-inputs gate. The daily runs the Windows guard shards (checks-windows-guard and its -2 to -n copies) when a diff touches a guard
+# input, and a ready pull_request runs the guard Windows slice instead (owner, 21:19 CST Nov 24 2026). The gate is windows_guard in ci-scope.sh, read from .github/guard-inputs.txt. The gate is read from checks.yml's own step condition, so each
 # case states what the workflow does with the scope outputs, not the value of one output. Cost: parses checks.yml once per call.
 GUARD_SHARDS = split.WINDOWS_GUARD_JOBS  # the family's count, one home: SHARD_COUNTS in lint/test_windows_split.py
 # Flags the old script sets true for SNAPSHOT_DIFFS, each run() with its default arguments. windows_guard is left out of the
@@ -2186,13 +2186,49 @@ def guard_shards_run(got, event="pull_request"):
     return out
 
 
+def guard_job_starts(name, got, event):
+    """-> bool: whether job `name`'s own job-level if: lets it start for `event`, with run()'s dict `got`. A job with no if: starts."""
+    with open(split.CHECKS, encoding="utf-8") as f:
+        job = split.windows_jobs(f.read())[name]
+    return job["if"] is None or split.eval_with(job["if"], event, got)
+
+
+def guard_full_starts(got, event):
+    """-> {job: bool}: whether each Windows guard shard's full step starts for `event`, its job-level if and its step's own if both read.
+    guard_shards_run reads only the step. The Nov 24 cut (owner, 21:19 CST Nov 24 2026) gates the shards at the job level on a ready pull_request."""
+    steps = guard_shards_run(got, event)
+    return {name: steps[name] and guard_job_starts(name, got, event) for name in GUARD_SHARDS}
+
+
+def guard_slice_runs(got):
+    """-> bool: whether checks-windows-guard's Windows slice step (split.GUARD_SLICE) runs on a ready pull_request for `got`. The slice is
+    the one guard step a ready pull_request runs, and windows_guard gates it. Exactly one slice step must exist, or the case fails by name."""
+    with open(split.CHECKS, encoding="utf-8") as f:
+        jobs = split.windows_jobs(f.read())
+    steps = [st for st in jobs[split.GUARD_JOB]["steps"] if split.key(st) == split.GUARD_SLICE]
+    assert len(steps) == 1, f"{split.GUARD_JOB} holds {len(steps)} Windows slice steps, want 1"
+    return steps[0].get("if") is None or split.eval_with(steps[0]["if"], "pull_request", got)
+
+
 @unittest.skipUnless(BASH, "bash not on PATH")
 class WindowsGuardShards(unittest.TestCase):
-    """The guard-inputs gate: the Windows guard shards run when a diff touches a guard input, and stay off for any other diff."""
+    """The guard-inputs gate. The daily (a schedule) runs every guard shard when a diff touches a guard input. A ready pull_request starts
+    none of the shards and runs the guard Windows slice in their place, gated the same way (owner, 21:19 CST Nov 24 2026)."""
 
-    # Named failure: a diff that touches a guard input runs no guard shard, so the guard suite goes unrun on it. The two
+    def assert_daily_and_ready_pull_request(self, paths, **kw):
+        """The daily runs every guard full step for the diff `paths`, and a ready pull_request starts none of them. The guard slice runs on
+        that ready pull_request. Named failure: a guard shard or a full guard step starts on a ready pull_request, or the daily leaves one off."""
+        daily = run(paths, event="schedule", **kw)
+        self.assertEqual(set(guard_full_starts(daily, "schedule").values()), {True},
+                         f"the daily run leaves a guard shard off for {paths}: {daily}")
+        ready = run(paths, **kw)
+        started = guard_full_starts(ready, "pull_request")
+        self.assertEqual(set(started.values()), {False}, f"a ready pull_request starts a guard full step for {paths}: {started}")
+        self.assertTrue(guard_slice_runs(ready), f"the guard Windows slice is off on a ready pull_request for {paths}: {ready}")
+
+    # Named failure (Nov 24 cut): a guard input leaves a guard shard off on the daily, or starts one on a ready pull_request. The two
     # .md cases are modified files: a new file under a landed dir turns code on whatever its type.
-    def test_each_guard_input_turns_the_guard_shards_on(self):
+    def test_each_guard_input_runs_the_guard_shards_on_the_daily_and_not_on_a_ready_pull_request(self):
         cases = [
             (["hooks/guard.py"], {}),
             (["hooks/probe_new.py"], {}),
@@ -2207,8 +2243,7 @@ class WindowsGuardShards(unittest.TestCase):
         ]
         for paths, kw in cases:
             with self.subTest(paths=paths, kw=kw):
-                shards = guard_shards_run(run(paths, **kw))
-                self.assertEqual(set(shards.values()), {True}, f"a guard shard is off for the guard input {paths}: {shards}")
+                self.assert_daily_and_ready_pull_request(paths, **kw)
 
     # Named failure: a diff with no guard input runs the guard shards anyway, so every code change pays for the guard suite.
     def test_a_diff_with_no_guard_input_keeps_the_guard_shards_off(self):
@@ -2228,14 +2263,12 @@ class WindowsGuardShards(unittest.TestCase):
     def test_a_gitattributes_or_green_head_change_turns_the_guard_shards_on(self):
         for paths in ([".gitattributes"], [".github/scripts/green-head.sh"]):
             with self.subTest(paths=paths):
-                shards = guard_shards_run(run(paths))
-                self.assertEqual(set(shards.values()), {True}, f"a guard shard is off for the fail-safe path {paths}: {shards}")
+                self.assert_daily_and_ready_pull_request(paths)
 
     # git quotes a name with non-ASCII bytes unless -z is given, so `"hooks/caf\303\251.py"` must still match hooks/*.
     # Named failure: a path with a non-ASCII name matches no glob, so the guard shards stay off for a guard input.
     def test_a_non_ascii_guard_input_name_turns_the_guard_shards_on(self):
-        shards = guard_shards_run(run(["hooks/café.py"]))
-        self.assertEqual(set(shards.values()), {True}, f"a guard shard is off for the non-ASCII guard input hooks/café.py: {shards}")
+        self.assert_daily_and_ready_pull_request(["hooks/café.py"])
 
     # An added file under a landed dir turns the shards on. The landed-dir pass reads the added names newline-separated, so git's
     # quoted non-ASCII name matches no landed dir. The ASCII file is the control; the two runs must differ on windows_guard alone.
@@ -2244,7 +2277,7 @@ class WindowsGuardShards(unittest.TestCase):
         plain = run(["bin/plain.sh"])
         cafe = run(["bin/café.sh"])
         with self.subTest("control: the ASCII name"):
-            self.assertEqual(set(guard_shards_run(plain).values()), {True}, f"a guard shard is off for bin/plain.sh: {plain}")
+            self.assert_daily_and_ready_pull_request(["bin/plain.sh"])
         with self.subTest("windows_guard for the non-ASCII name"):
             self.assertEqual(cafe.get("windows_guard"), "true", f"windows_guard is off for the added bin/café.sh: {cafe}")
         with self.subTest("the other flags, against the ASCII name"):
@@ -2261,22 +2294,18 @@ class WindowsGuardShards(unittest.TestCase):
                 self.assertEqual(set(shards.values()), {True}, f"a guard shard is off on {event}: {shards}")
 
     def test_an_unreadable_diff_turns_the_guard_shards_on(self):
-        shards = guard_shards_run(run(["docs/x.md"], base="0" * 40))
-        self.assertEqual(set(shards.values()), {True}, f"a guard shard is off for an unreadable diff: {shards}")
+        self.assert_daily_and_ready_pull_request(["docs/x.md"], base="0" * 40)
 
     def test_an_empty_diff_turns_the_guard_shards_on(self):
-        shards = guard_shards_run(run([]))
-        self.assertEqual(set(shards.values()), {True}, f"a guard shard is off for an empty diff: {shards}")
+        self.assert_daily_and_ready_pull_request([])
 
     # No list in the base: the list is unreadable. The gate fails safe, and the shards run for a docs-only diff.
     def test_an_unreadable_guard_list_turns_the_guard_shards_on(self):
-        shards = guard_shards_run(run(["docs/x.md"], guard_inputs=None))
-        self.assertEqual(set(shards.values()), {True}, f"a guard shard is off when the guard list is unreadable: {shards}")
+        self.assert_daily_and_ready_pull_request(["docs/x.md"], guard_inputs=None)
 
     # A list with no glob in it (comments only) reads as empty, and the gate fails safe the same way.
     def test_an_empty_guard_list_turns_the_guard_shards_on(self):
-        shards = guard_shards_run(run(["docs/x.md"], guard_inputs="# comments only\n\n"))
-        self.assertEqual(set(shards.values()), {True}, f"a guard shard is off when the guard list has no glob: {shards}")
+        self.assert_daily_and_ready_pull_request(["docs/x.md"], guard_inputs="# comments only\n\n")
 
     # A records-only push after a green head turns every flag off, the shards with them.
     def test_a_records_only_push_turns_the_guard_shards_off(self):
