@@ -1583,7 +1583,8 @@ def case_audit_marker_judged_like_the_home():
              "" if not os.path.isfile(audit_flag(c, SID)) else "the audit flag is still set after the bold Audit: spawn")
     finally:
         c.cleanup()
-    lower = dict(bold, prompt="audit: check the handoff against the repo.")
+    # The transcript path is named, so the path rule passes this brief and only the marker's case decides it.
+    lower = dict(bold, prompt="audit: check the handoff against the repo. Transcript: " + SESSION_TRANSCRIPT)
     d = Case("lower-audit")
     try:
         compact(d, SID)
