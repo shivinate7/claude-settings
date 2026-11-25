@@ -15,8 +15,8 @@ The contract these cases read:
   - The test command runs in a copy at <TMPDIR>/claude-settings-test-temp/<pid>-<uuid>. Each case sets TMPDIR to a
     folder beside its fixture repo, never inside it.
   - The output names the class of the run as one word: pass, assert, build, crash or timeout (mutate_shared classify_run).
-  - Exit 2 for a commit that does not exist, for a missing `--`, for a --replace whose old text is missing (STALE), and for
-    a test command that cannot start. That call prints one verdict line, and leaves no copy.
+  - Exit 2 for a commit that does not exist, for a missing `--`, for a --replace whose old text is missing (STALE), for
+    a test command that cannot start, and for an --add of a path with a newline in its name, which also names that path. That call prints one verdict line, and leaves no copy.
   - The exit codes of a pass and of a fail are not read here.
   - A signal to red-run (TERM, HUP or INT) removes the copy and stops the child.
 """
@@ -267,6 +267,18 @@ class RedRunBadCallCases(RedRunFixture):
         lines = verdict_classes(out)
         self.assertEqual(len(lines), 1, "a test command that cannot start printed %d verdict lines, want 1" % len(lines))
         self.assertEqual(self.run_folders(), [], "a test command that cannot start left a run folder")
+
+    def test_an_add_of_a_path_with_a_newline_exits_2_and_names_the_path(self):
+        path = os.path.join(self.repo, "src", "two\nlines.py")
+        try:
+            write(path, "x = 1\n")
+        except OSError as exc:
+            self.skipTest("the file system refuses a newline in a name: %s" % exc)
+        self.assertTrue(os.path.isfile(path), "the fixture wrote no file with a newline in its name")
+        rc, out = self.red_run(self.old, "--add", "src/two\nlines.py", "--", sys.executable, "-c", "pass")
+        self.assertEqual(rc, 2, "an --add of a path with a newline exited %d, want 2: %s" % (rc, out))
+        self.assertNotIn("Traceback (most recent call last)", out, "an --add of a path with a newline printed a traceback: %s" % out)
+        self.assertIn("src/two", out, "the refusal names no part of the path: %s" % out)
 
 
 @unittest.skipIf(os.name == "nt", "proc_fixture's waits and kills are POSIX only, and the signal cases need a POSIX child")
