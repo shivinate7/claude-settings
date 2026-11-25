@@ -26,7 +26,7 @@ Why: a copy that its run removes on exit cannot pile up. The retired routes left
 Cost: a copy per run, made by a tree export and removed when the run ends. The copy's size is unmeasured. The manifest adds a text file to each copy, with a line for each archived path, and no git call: its paths come from the archive stream the export reads anyway. No long-lived process, no log, no timer. Each run starts git child processes, then the test command.
 
 Limits:
-- `--add` lists each file it puts in the copy. `bin/red-run` calls `manifest_add`, which appends each path not already listed. A folder lists each file under it. No case pins a folder.
+- `--add` lists each file it puts in the copy. `bin/red-run` calls `manifest_add`, which appends each path not already listed. A folder lists each file under it, and `RedRunTrackedCopyCases` pins that.
 - A tracked path with a newline fails the export, and the error names the path. `manifest_add` raises on one too. No case pins that raise.
 - The `.sh` and `.ps1` helpers (`testing/tracked_tree.sh`, `testing/TrackedTree.ps1`) list with `git ls-files` only and have no manifest mode. In a copy with no `.git`, they fail.
 - Outside `lint/find_copies.py`, the claim that no checker trips on the manifest rests on a recorded run of eight checkers, not on a case.
@@ -34,4 +34,4 @@ Limits:
 
 Kind: process
 Home: bin/red-run
-Done check: `lint/test_red_run.py`. Its cases pin the copy's tree, the `--add` and `--replace` operations, the exit codes, and the removal of the copy on a pass, a fail, a crash, and on TERM, HUP and INT. The manifest cases are `ManifestCases` in `lint/test_tracked_tree.py`; `TreeExportManifestCases` and `TreeExportPathCases` in `hooks/test_tree_export.py` (the newline case); `RedRunTrackedCopyCases` in `lint/test_red_run.py` (the `--add` case); and `FindCopiesTest.test_a_child_holding_the_export_manifest_reads_the_same_as_one_without_it` in `lint/test_find_copies.py`.
+Done check: `lint/test_red_run.py`. Its cases pin the copy's tree, the `--add` and `--replace` operations, the exit codes, and the removal of the copy on a pass, a fail, a crash, and on TERM, HUP and INT. The manifest cases are `ManifestCases` in `lint/test_tracked_tree.py`; `TreeExportManifestCases` and `TreeExportPathCases` in `hooks/test_tree_export.py` (the newline case); `RedRunTrackedCopyCases` in `lint/test_red_run.py` (the `--add` file and folder cases); and `FindCopiesTest.test_a_child_holding_the_export_manifest_reads_the_same_as_one_without_it` in `lint/test_find_copies.py`.
