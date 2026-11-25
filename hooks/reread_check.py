@@ -22,7 +22,7 @@ Spec: docs/decisions/precompact-handoff.md, items 9 and 16. Three flag files per
   --pre-read (PreToolUse, Read)  records the lines read when file_path is the session's own
       handoff, spelled as a full path, with forward slashes, as a short or long Windows
       name, or as ~/.claude/..., and clears the flag when they cover every line. The flag file holds
-      JSON, {"ranges": [[first, last], ...], "agent": bool}; the old text `1` means no ranges.
+      JSON, {"ranges": [[first, last], ...]}; the text `1` means no ranges.
       Never refuses the read.
   unread_handoff(payload) (import, no flag)  the guard's PreToolUse check calls it. Returns the
       handoff path while the flag is set and the handoff exists, else "".
@@ -121,22 +121,32 @@ def too_big_estimate(result, path):
         return 0
 
 
-def read_flag(sid):
-    """(ranges, agent) from the session's re-read flag file: the line ranges read so far, and whether an agent's
-    rewrite set it. The old text `1`, or any file that is not that JSON, is no ranges and no agent."""
+def handoff_digest(lines):
+    """The sha256 of the handoff's text, from the lines `handoff_lines` returns. It names the text a flag's ranges
+    were read from."""
+    return hashlib.sha256(b"\n".join(lines)).hexdigest()
+
+
+def read_flag(sid, digest):
+    """The line ranges read so far of the handoff text `digest` names, from the session's re-read flag file. Ranges
+    stored for other text, or with no digest (the old file shape), are ranges for text never read: none. The text `1`,
+    or any file that is not that JSON, is no ranges."""
     try:
         with open(ph.reread_flag_path(sid), "r", encoding="utf-8") as f:
             data = json.loads(f.read())
-        return [(int(a), int(b)) for a, b in data["ranges"]], data.get("agent") is True
+        if data.get("digest") != digest:
+            return []
+        return [(int(a), int(b)) for a, b in data["ranges"]]
     except Exception:
-        return [], False
+        return []
 
 
-def write_flag(sid, ranges=(), agent=False):
+def write_flag(sid, digest, ranges=()):
+    """Write the flag file: {"ranges": [[first, last], ...], "digest": sha256 of the text they were read from}."""
     flag = ph.reread_flag_path(sid)
     os.makedirs(os.path.dirname(flag), exist_ok=True)
     with open(flag, "w", encoding="utf-8") as f:
-        f.write(json.dumps({"ranges": [list(r) for r in ranges], "agent": bool(agent)}))
+        f.write(json.dumps({"ranges": [list(r) for r in ranges], "digest": digest}))
 
 
 def handoff_lines(handoff):
@@ -186,30 +196,14 @@ def span_text(spans):
 
 
 def unread_note(payload):
-    """(agent, unread) for the guard's handoff-unread refusal: whether an agent's rewrite set the flag, and the lines
-    still unread as text such as `11-50` ("" when they cannot be worked out). It reads the flag and the handoff, so it
-    runs on a refusal only. Never raises."""
+    """The lines still unread, for the guard's handoff-unread refusal, as text such as `11-50` ("" when they cannot be
+    worked out). It reads the flag and the handoff, so it runs on a refusal only. Never raises."""
     try:
         sid = payload["session_id"]
-        ranges, agent = read_flag(sid)
-        return agent, span_text(unread_ranges(ranges, len(handoff_lines(ph.handoff_path(sid)))))
+        lines = handoff_lines(ph.handoff_path(sid))
+        return span_text(unread_ranges(read_flag(sid, handoff_digest(lines)), len(lines)))
     except Exception:
-        return False, ""
-
-
-def agent_rewrite(payload):
-    """Set the session's re-read flag, marked as an agent's rewrite, when an agent's Write, Edit or MultiEdit names the
-    session's handoff. The audit flag stays as it is. The main session's own write sets nothing. The guard calls this
-    once judge() has let the call through. Only a path compare runs on any other call. Never raises."""
-    try:
-        if ph is None or payload.get("tool_name") not in ("Write", "Edit", "MultiEdit") or not from_agent(payload):
-            return
-        sid = payload.get("session_id")
-        fp = (payload.get("tool_input") or {}).get("file_path")
-        if sid and isinstance(sid, str) and isinstance(fp, str) and fp and names_handoff(fp, sid):
-            write_flag(sid, (), True)
-    except Exception:
-        pass
+        return ""
 
 
 def names_handoff(file_path, session_id):
@@ -494,14 +488,15 @@ def note_read(sid, flag, tool_input):
     that cannot be read clears the flag: there is nothing left to read."""
     try:
         lines = handoff_lines(ph.handoff_path(sid))
-        ranges, agent = read_flag(sid)
+        digest = handoff_digest(lines)
+        ranges = read_flag(sid, digest)   # a rewrite changed the text: earlier reads count for none of it
         got = read_range(tool_input, lines)
         if got:
             ranges.append(got)
         if not unread_ranges(ranges, len(lines)):
             os.remove(flag)
-        elif got:
-            write_flag(sid, ranges, agent)
+        else:
+            write_flag(sid, digest, ranges)
     except OSError:
         if os.path.isfile(flag):
             os.remove(flag)

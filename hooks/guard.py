@@ -29,8 +29,7 @@ rule is the constant it emits. Its limits are in its decision, or in the comment
 Every tool the guard judges, first of the refusals (`judge`, after the Read and Grep exit,
 set_override_veto and session_home_keep):
   handoff-unread       deny. After compaction, a call from the main session while its handoff is
-                       unread, or an agent rewrote it (the main session's own write sets nothing; main() sets the flag
-                       through reread_check.agent_rewrite once judge() lets an agent's write through). The reason
+                       unread (a write of the handoff, by the main session or an agent, sets no flag). The reason
                        names the handoff, the lines still unread, and says to Read it in pages. A payload with
                        `agent_id` passes. An override lifts it. A failed import of reread_check, or of its sibling precompact_handoff, refuses as guard-crash at load.
                        (precompact-handoff, item 9)
@@ -835,7 +834,7 @@ while True:
             raise ImportError("reread_check has no unread_handoff")
         # The rest of what judge() and main() take from it: a stale copy that lacks one would raise mid-judge, and main()
         # fails open on a raise, so the refusal it was loaded for would turn into an allow.
-        _missing = [_name for _name in ("unread_note", "too_big_estimate", "agent_rewrite") if not callable(getattr(reread_check, _name, None))]
+        _missing = [_name for _name in ("unread_note", "too_big_estimate") if not callable(getattr(reread_check, _name, None))]
         _missing += [_name for _name in ("HANDOFF_MAX_TOKENS", "READ_CAP_TOKENS", "READ_MAX_LINES") if not isinstance(getattr(reread_check, _name, None), int)]
         _missing += [_name for _name in ("AUDIT_OWED", "AUDIT_REMEDY") if not isinstance(getattr(reread_check, _name, None), str)]
         if _missing:
@@ -1579,7 +1578,6 @@ HANDOFF_UNREAD_REASON = (
     "Then repeat the call."
 )
 HANDOFF_UNREAD_WHY = "context was compacted and this session has not read its handoff."
-HANDOFF_UNREAD_WHY_AGENT = "an agent rewrote this session's handoff and this session has not read the rewrite."
 
 HANDOFF_TOO_BIG_REASON = (
     "Rule (handoff-too-big): this write leaves the session handoff at an estimated %d tokens, over the limit of %d "
@@ -1592,10 +1590,10 @@ HANDOFF_TOO_BIG_REASON = (
 
 
 def handoff_unread_fields(path, payload):
-    """The fields of HANDOFF_UNREAD_REASON: the cause (compaction, or an agent's rewrite), the handoff path, and the
-    lines still unread. reread_check holds the flag and the counts."""
-    agent, unread = reread_check.unread_note(payload)
-    return {"why": HANDOFF_UNREAD_WHY_AGENT if agent else HANDOFF_UNREAD_WHY, "path": path,
+    """The fields of HANDOFF_UNREAD_REASON: the cause, the handoff path, and the lines still unread. reread_check
+    holds the flag and the counts."""
+    unread = reread_check.unread_note(payload)
+    return {"why": HANDOFF_UNREAD_WHY, "path": path,
             "span": " (lines still unread: %s)" % unread if unread else "",
             "lines": reread_check.READ_MAX_LINES, "cap": reread_check.READ_CAP_TOKENS}
 
@@ -8960,7 +8958,6 @@ def main() -> None:
     try:
         judge(payload)
         audit_flag_clear_after_allow(payload)
-        reread_check.agent_rewrite(payload)
     except SystemExit:
         raise
     except Exception as exc:
@@ -8968,7 +8965,6 @@ def main() -> None:
         record(str(payload.get("tool_name", "")), "crash", "guard-crash",
                cap_safe(type(exc).__name__ + ": " + str(exc), 200))
         audit_flag_clear_after_allow(payload)  # the failed-open spawn runs, so the audit it owed is sent
-        reread_check.agent_rewrite(payload)  # the failed-open write runs, so the main session owes a read of it
         sys.exit(0)  # fail open on a guard defect
     sys.exit(0)
 
