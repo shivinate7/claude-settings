@@ -2,7 +2,7 @@
 
 ## The ruling
 
-Rule `verification-trust-guard-after-red`: a guard counts as proven only after it goes red on the defect it guards. Its other half, rule `verification-cry-wolf-guard-is-spent`: a guard that fires when nothing is wrong is spent, because the reader stops reading it.
+Rule `verification-trust-guard-after-red`: a guard is proven only after it goes red on the defect it guards. Its other half, rule `verification-cry-wolf-guard-is-spent`: a guard that fires when nothing is wrong is spent, because the reader stops reading it.
 
 - A predicate that matches text is not a predicate on the act (`predicate-is-the-act`). Resolve the act instead. `hooks/guard.py` already does this with `split_segments`, `strip_heredoc_bodies` and `git_calls`. Import the resolver, do not re-derive a part of it.
 - Or check identity before content. `hooks/session_start.sh` compares `git remote get-url origin` in both trees before it reads either `CLAUDE.md`, so it warns only in a clone of the repository the pointer names.

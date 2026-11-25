@@ -26,8 +26,8 @@ In this order:
 - Records: each copy of a rule sentence in a record becomes a cite of the rule's id, with a short gloss. This change does it for the copies found on 2026-11-25.
 - Brief lines carry their id: each standing line in `hooks/agent_brief.py` shows the rule or decision it restates, as an inline cite.
 - Judges take the live rule sentence: a judge prompt reads the current sentence of each rule it names, by id, through the one reader in `lint/rule_audit.py`.
-- The check "Rules and records move together" reads ids in Python text, one direction only. A changed record or rule sentence asks the Python string that names it to be touched or confirmed. An edit to the string asks nothing.
-- Agent files, skills and templates: the check counts a backticked id as a cite, and each file gets its cite.
+- Planned: the check "Rules and records move together" (`lint/compliance_probes.py` `probe_aligned`) also reads ids in Python text, one direction only. A changed record or rule sentence asks the Python string that names it to be touched or confirmed. An edit to the string asks nothing.
+- Agent files, skills and templates: the same planned check (`lint/compliance_probes.py` `probe_aligned`) counts a backticked id as a cite. Each file gets its cite.
 
 What the cite-and-confirm check leaves open, so a reader knows the limit:
 
@@ -41,7 +41,7 @@ Open premise: whether every agent type, local and cloud, loads root `CLAUDE.md`.
 
 ## Cost
 
-Nothing runs on a tool call. No long-lived process starts. The check runs in the CI step that runs it today, with no new git call. The judge reader adds one read of `CLAUDE.md` per judged Stop, and the judge runs on one Stop in five (`hooks/reply_judge.py`).
+Nothing runs on a tool call. No long-lived process starts. The planned checks run in the CI step that runs the checks today, with no new git call. The planned judge reader adds a read of the root rule file inside the judge process, on each Stop the judge samples.
 
 ## Picks
 
@@ -49,7 +49,7 @@ Practice, not ruled; the owner may reverse them:
 
 - The brief lines show the cite in the text, not hidden.
 - The standing-rules record (decision `agents-get-standing-rules`) drops its line list for a cite of the constants.
-- The check reads ids in `.py` files in every repo, not only this one.
+- The planned check (`lint/compliance_probes.py` `probe_aligned`) reads ids in `.py` files in every repo, not only this one.
 - The gate turns on only after a replay of the last 50 merged pull requests shows no false alarms.
 
 Kind: process

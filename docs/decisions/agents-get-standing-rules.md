@@ -20,7 +20,7 @@ The type is the text after the last `:`, so `my-plugin:reviewer` counts as `revi
 
 Readers (the six read-only types above) get the six every-type lines, plus the note and cite lines when they apply. They never commit or push, so they get no push, trailer, record-path, diff, commit-evidence or server line. Writers and the general case get all twelve fixed lines, plus the note and cite lines when they apply.
 
-The hook is advisory. On an internal error it prints no context, writes one `agent_brief:` line to stderr, and exits 0. When the shared-tree module (`guard_shared_tree`) cannot be imported, the hook prints every other standing line and no reset line.
+The hook (`hooks/agent_brief.py` `main`) is advisory. On an internal error it prints no context, writes one `agent_brief:` line to stderr, and exits 0. When the shared-tree module (`guard_shared_tree`) cannot be imported, every other standing line still goes out (`hooks/agent_brief.py` `build`), and no reset line does.
 
 Why: a brief that forgot one line let an agent stash, or push in the wrong form. `additionalContext` on SubagentStart lands in the agent's context before its first prompt.
 
