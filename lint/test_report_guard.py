@@ -1920,6 +1920,91 @@ class UnstartedItemsTests(unittest.TestCase):
              "a sibling bullet's code need does not clear the wait above it"),
         ])
 
+    # Four right Unstarted lines that the wait check refuses. One line per case, one assert each.
+
+    def test_un_green_debt_checkin_cancel_on_merge_line_passes(self):
+        # Catches: "merge" in the lane name, beside "starts when", makes the line a PR wait with no checkable part.
+        line = ("checkin-cancel-on-merge: measured conflict in hooks/stall_watch.py with the stall-watch branch, "
+                "starts when that builder pushes; draft-against-draft line, pace reader from PR spans: not briefed yet")
+        out = self.verdict(self.DONE + "> **Next** Unstarted: " + line, [self.BUILDER])
+        self.assertIsNone(out, "the checkin-cancel-on-merge line is refused: %r" % (out,))
+
+    def test_un_green_debt_merge_tool_refactor_line_passes(self):
+        # Catches: "merge" in the lane name, beside "needs", makes an owner wait on a file a PR wait.
+        line = "merge-tool-refactor: needs the owner's pick (see bin/merge)"
+        out = self.verdict(self.DONE + "> **Next** Unstarted: " + line, [self.BUILDER])
+        self.assertIsNone(out, "the merge-tool-refactor line is refused: %r" % (out,))
+
+    def test_un_green_debt_pr_reader_line_passes(self):
+        # Catches: "pr" in the lane name, beside "starts when", makes a brief wait a PR wait with no checkable part.
+        line = "pr-reader (edits bin/pr.py): starts when the brief is ready"
+        out = self.verdict(self.DONE + "> **Next** Unstarted: " + line, [self.BUILDER])
+        self.assertIsNone(out, "the pr-reader line is refused: %r" % (out,))
+
+    def test_un_green_debt_none_then_pr_awaits_review_line_passes(self):
+        # Catches: a line that opens with "none" and then names a PR awaiting review, with no lane name, is refused.
+        line = "none; all lanes started, PR #3916 awaits review"
+        out = self.verdict(self.DONE + "> **Next** Unstarted: " + line, [self.BUILDER])
+        self.assertIsNone(out, "the none-then-PR-awaits-review line is refused: %r" % (out,))
+
+    def test_un_red_pr_wait_with_no_waiting_word_blocks(self):
+        # Catches: a PR wait with no waiting word passes the turn, since the check reads a PR word only beside one.
+        self.assert_refused_for_shared_file([
+            (self.DONE + "> **Next** Unstarted: lane-x: dependent on PR #3916",
+             "dependent on PR #3916, with no waiting word"),
+            (self.DONE + "> **Next** Unstarted: lint-stub starts at PR #3916's merge",
+             "starts at PR #3916's merge, with no waiting word"),
+        ])
+
+    def test_un_red_pr_wait_joined_to_a_code_need_blocks(self):
+        # Catches: a code need for another PR, joined to a wait on this PR, clears the wait and the turn passes. A code
+        # need covers only a wait on its own PR, so each row waits on #3679 and needs #3916's code.
+        self.assert_refused_for_shared_file([
+            (self.DONE + "> **Next** Unstarted: lint-stub waits on PR #3679 to merge, and needs PR #3916's code: "
+             "`reap_refs`", "and joins a code need to a PR wait"),
+            (self.DONE + "> **Next** Unstarted: lint-stub waits on PR #3679 to merge, it needs PR #3916's code: "
+             "`reap_refs`", "a pronoun clause joins a code need to a PR wait"),
+            (self.DONE + "> **Next** Unstarted: lint-stub waits on PR #3679 to merge; the sweep reap stub needs "
+             "PR #3916's code: `reap_refs`", "a lane name of more than three words joins a code need to a PR wait"),
+        ])
+
+    def test_un_green_conflicts_measured_in_a_file_passes(self):
+        # Catches: "conflicts measured in" a file, the word order the measured-conflict phrase lacks, is refused.
+        line = "lint-stub waits on PR #3679 to merge; conflicts measured in lint/report_guard.py"
+        out = self.verdict(self.DONE + "> **Next** Unstarted: " + line, [self.BUILDER])
+        self.assertIsNone(out, "conflicts measured in a file is refused: %r" % (out,))
+
+    def test_un_red_backticked_template_and_build_names_are_not_symbols(self):
+        # Catches: a backticked name ending .tmpl, .cmd, .vue or .mod is read as the code need's symbol, so the wait passes.
+        self.assert_refused_for_shared_file([
+            (self.DONE + "> **Next** Unstarted: lint-stub needs PR #3916's code: `page.tmpl`",
+             "a template file name as the symbol"),
+            (self.DONE + "> **Next** Unstarted: lint-stub needs PR #3916's code: `run.cmd`",
+             "a command file name as the symbol"),
+            (self.DONE + "> **Next** Unstarted: lint-stub needs PR #3916's code: `page.vue`",
+             "a Vue file name as the symbol"),
+            (self.DONE + "> **Next** Unstarted: lint-stub needs PR #3916's code: `model.mod`",
+             "a mod file name as the symbol"),
+        ])
+
+    def test_un_control_wait_naming_only_a_shared_file_stays_refused(self):
+        # Control: a wait that names only a shared file is not checkable, so it stays refused.
+        self.assert_refused_for_shared_file([
+            (self.DONE + "> **Next** Unstarted: lint-stub waits on PR #12 to merge, both touch lint/report_guard.py",
+             "control: a wait that names only a shared file"),
+        ])
+
+    def test_un_control_code_need_with_a_symbol_stays_green(self):
+        # Control: a code need that names its symbol is checkable, so it stays green.
+        out = self.verdict(self.DONE + "> **Next** Unstarted: lint-stub needs PR #12's code: `symbol`", [self.BUILDER])
+        self.assertIsNone(out, "control: a code need with a symbol is refused: %r" % (out,))
+
+    def test_un_control_measured_conflict_in_a_file_stays_green(self):
+        # Control: a measured conflict in a named file is checkable, so it stays green.
+        out = self.verdict(self.DONE + "> **Next** Unstarted: lint-stub waits on PR #12 to merge; "
+                           "measured conflict in lint/report_guard.py", [self.BUILDER])
+        self.assertIsNone(out, "control: a measured conflict in a file is refused: %r" % (out,))
+
 
 class NoResendTests(unittest.TestCase):
     """A report guard never makes a session send its whole report twice (roadmap c101)."""
