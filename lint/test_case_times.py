@@ -223,6 +223,29 @@ print("CHILDREN", len(starts))
 '''
 
 
+# The first case's row cannot be kept: record raises once, then the real record is back for the next case.
+ROW_BROKEN = '''import unittest
+
+import case_times
+
+
+class Broken(unittest.TestCase):
+    def test_a_row_cannot_be_kept(self):
+        real = case_times.record
+
+        def broken(*args, **kwargs):
+            case_times.record = real
+            raise OSError("disk full")
+
+        case_times.record = broken
+
+    def test_b_plain(self):
+        self.assertTrue(True)
+
+    def test_c_plain(self):
+        self.assertTrue(True)
+'''
+
 # The first case removes its own cwd. Each case must still run and record, as an unarmed run does.
 CWD_GONE = '''import os
 import unittest
@@ -563,6 +586,30 @@ class CwdChdir(unittest.TestCase):
         suites = sorted(set(row.get("suite") for row in rows))
         self.assertEqual(suites, ["fixture_away.py"],
                          "a test that chdired without restoring split its file's rows across suite names: %s" % suites)
+
+
+class RowFails(unittest.TestCase):
+    def test_a_row_that_cannot_be_kept_writes_one_stderr_line(self):
+        folder = case_folder(self)
+        write(folder, "fixture_broken.py", ROW_BROKEN)
+        unarmed = run_module(folder, "fixture_broken", armed=False, report=True)
+        self.assertEqual(result_line(unarmed), "RESULT ran=3 failures=0 errors=0 skipped=0",
+                         "the unarmed control run did not pass its three cases: %r" % unarmed.stderr[-300:])
+        armed = run_module(folder, "fixture_broken", report=True)
+        scope_ok(self, armed)
+        self.assertEqual(armed.returncode, 0,
+                         "the armed run exited %d, want 0: a row that could not be kept aborted the run; "
+                         "stderr tail: %s" % (armed.returncode, armed.stderr[-300:]))
+        self.assertEqual(result_line(armed), result_line(unarmed),
+                         "the armed run's outcome differs from the unarmed run's")
+        notes = [line for line in armed.stderr.splitlines() if line.startswith("case_times: no row for ")]
+        self.assertEqual(len(notes), 1,
+                         "a row that could not be kept wrote %d stderr lines, want one: %s" % (len(notes), notes))
+        rows = rows_of(folder)
+        self.assertIsNotNone(rows, "the armed run wrote no case-times file")
+        cases = sorted(row.get("case") for row in rows if (row.get("case") or "").startswith("Broken."))
+        self.assertEqual(cases, ["Broken.test_b_plain", "Broken.test_c_plain"],
+                         "the rows after the one that could not be kept are wrong: %s" % cases)
 
 
 if __name__ == "__main__":
