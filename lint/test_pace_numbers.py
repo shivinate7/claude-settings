@@ -5,13 +5,17 @@ Form under test: `python3 lint/pace_numbers.py --transcript FILE --between START
 - A span starts at an Agent (or Task) tool_use record's timestamp. A refused spawn (a tool_result with
   is_error and no toolUseResult.agentId) starts no span.
 - The agent's task-id is the agentId in its launch result (toolUseResult.agentId).
-- A span ends at the first task-notification with that task-id and status completed. A notice counts as
-  text in a user record's content or a queue-operation's content. Text in a tool_result, a blob copy
-  (no timestamp) or an attachment never counts.
+- A span ends at the first task-notification with that task-id and status completed, failed or killed. A
+  notice counts as text in a user record's content or a queue-operation's content. Text in a tool_result, a
+  blob copy (no timestamp) or an attachment never counts.
 - A notice whose task-id matches no spawn (a background shell command) is ignored.
 - A SendMessage to the agent's id, sent after its span closed, reopens the span at the send's time.
-  A send while the span is open changes nothing.
-- A span is clipped to the window. An agent with no end notice in the file runs to END.
+  A send while the span is open changes nothing. A send whose result failed (is_error, or toolUseResult
+  success false) reopens nothing.
+- A span is clipped to the window. An agent with no end notice in the file runs to END. An end notice
+  after END clips the span to END and does not make the agent still running.
+- A window time with no UTC offset exits 2 with an argument error that names the window time, and prints
+  no number.
 - Output: `agents run: N, most at once: M`, with ` (P still running)` appended when P > 0, then
   `minutes with no agent running: K`. N counts distinct agents. K is the floor of idle seconds / 60.
 - An unreadable file, an empty file, or a window with no record in it prints one `unknown: <reason>`
@@ -121,6 +125,23 @@ def notice(task_id, tool_use_id, status="completed"):
             "<summary>synthetic summary</summary>\n</task-notification>" % (task_id, tool_use_id, status_tag))
 
 
+def send_failed(ts, use_id):
+    """The cloud shape of a failed send: a tool_result with is_error, for the send's own tool_use id."""
+    return {"type": "user", "timestamp": ts, "isSidechain": False,
+            "message": {"role": "user", "content": [{
+                "type": "tool_result", "tool_use_id": use_id, "is_error": True,
+                "content": [{"type": "text", "text": "synthetic send failure: target not reachable"}]}]}}
+
+
+def send_failed_local(ts, use_id):
+    """The local shape of a failed SendMessage: no is_error, only toolUseResult.success false."""
+    return {"type": "user", "timestamp": ts, "isSidechain": False,
+            "message": {"role": "user", "content": [{
+                "type": "tool_result", "tool_use_id": use_id,
+                "content": [{"type": "text", "text": "synthetic send failure"}]}]},
+            "toolUseResult": {"success": False}}
+
+
 def queued(ts, text):
     return {"type": "queue-operation", "operation": "enqueue", "timestamp": ts, "content": text}
 
@@ -131,9 +152,9 @@ def user_text(ts, text):
             "message": {"role": "user", "content": text}}
 
 
-def end(queue_hm, copy_hm, aid, tool_use_id):
+def end(queue_hm, copy_hm, aid, tool_use_id, status="completed"):
     """One stop's notice as the transcript logs it: a queue-operation, then a user copy a minute later."""
-    text = notice(aid, tool_use_id)
+    text = notice(aid, tool_use_id, status)
     return [queued(at(queue_hm), text), user_text(at(copy_hm), text)]
 
 
@@ -168,11 +189,15 @@ def write_transcript(folder, records):
 
 
 def run_reader(transcript, start_hm, end_hm):
+    return run_reader_bounds(transcript, window_arg(start_hm), window_arg(end_hm))
+
+
+def run_reader_bounds(transcript, start_text, end_text):
+    """The reader with its two window bounds exactly as given, so a case can pass a bound with no offset."""
     # The answer must not depend on the machine's zone, so the run sets one that is not UTC.
     env = dict(os.environ, TZ="America/Chicago")
     return subprocess.run(
-        [sys.executable, SCRIPT, "--transcript", transcript,
-         "--between", window_arg(start_hm), window_arg(end_hm)],
+        [sys.executable, SCRIPT, "--transcript", transcript, "--between", start_text, end_text],
         capture_output=True, text=True, timeout=HANG_CAP, env=env)
 
 
@@ -297,6 +322,60 @@ class PaceNumbersTests(unittest.TestCase):
     def test_window_with_records_but_no_agent_prints_zero_agents_and_the_whole_window_idle(self):
         path = write_transcript(self.folder, [plain(at("10:00")), plain(at("10:50"))])
         self.expect(path, "10:00", "11:00", expected_lines(agents=0, most=0, idle=60))
+
+    def test_failed_notice_ends_a_span(self):
+        path = write_transcript(self.folder, flat(
+            spawn(at("10:00"), "t1"), launched(at("10:00"), "t1", agent_id(1)),
+            end("10:10", "10:11", agent_id(1), "t1", status="failed"),
+        ))
+        self.expect(path, "10:00", "10:30", expected_lines(agents=1, most=1, idle=20))
+
+    def test_killed_notice_ends_a_span(self):
+        path = write_transcript(self.folder, flat(
+            spawn(at("10:00"), "t1"), launched(at("10:00"), "t1", agent_id(1)),
+            end("10:10", "10:11", agent_id(1), "t1", status="killed"),
+        ))
+        self.expect(path, "10:00", "10:30", expected_lines(agents=1, most=1, idle=20))
+
+    def test_send_that_failed_with_is_error_does_not_reopen_a_span(self):
+        path = write_transcript(self.folder, flat(
+            spawn(at("10:00"), "t1"), launched(at("10:00"), "t1", agent_id(1)),
+            end("10:05", "10:06", agent_id(1), "t1"),
+            send(at("10:20"), agent_id(1), "s1"), send_failed(at("10:20"), "s1"),
+        ))
+        self.expect(path, "10:00", "10:30", expected_lines(agents=1, most=1, idle=25))
+
+    def test_send_that_failed_with_success_false_does_not_reopen_a_span(self):
+        path = write_transcript(self.folder, flat(
+            spawn(at("10:00"), "t1"), launched(at("10:00"), "t1", agent_id(1)),
+            end("10:05", "10:06", agent_id(1), "t1"),
+            send(at("10:20"), agent_id(1), "s1"), send_failed_local(at("10:20"), "s1"),
+        ))
+        self.expect(path, "10:00", "10:30", expected_lines(agents=1, most=1, idle=25))
+
+    def test_end_notice_after_end_clips_the_span_and_is_not_still_running(self):
+        path = write_transcript(self.folder, flat(
+            spawn(at("10:00"), "t1"), launched(at("10:00"), "t1", agent_id(1)),
+            end("10:40", "10:41", agent_id(1), "t1"),
+        ))
+        self.expect(path, "10:00", "10:30", expected_lines(agents=1, most=1, idle=0))
+
+    def test_idle_minutes_are_floored_not_rounded_up(self):
+        path = write_transcript(self.folder, flat(
+            spawn(at("10:00"), "t1"), launched(at("10:00"), "t1", agent_id(1)),
+            end("10:10:30", "10:11:30", agent_id(1), "t1"),
+        ))
+        # Window 1800 s, busy 630 s, idle 1170 s = 19.5 min: K is the floor, 19.
+        self.expect(path, "10:00", "10:30", expected_lines(agents=1, most=1, idle=19))
+
+    def test_window_time_without_a_utc_offset_exits_with_an_argument_error(self):
+        path = write_transcript(self.folder, [plain(at("10:00"))])
+        proc = run_reader_bounds(path, "%sT10:00:00" % DAY, window_arg("11:00"))
+        self.assertEqual(proc.returncode, 2, "a window time with no UTC offset exits 2, the argument-error code")
+        self.assertEqual(proc.stdout, "", "a window time with no UTC offset prints no number")
+        errors = [line for line in proc.stderr.splitlines() if ": error: " in line]
+        self.assertEqual(len(errors), 1, "one argument error line is printed")
+        self.assertIn("window time needs a UTC offset", errors[0], "the error names the window time")
 
 
 class PaceNumbersFixtureControlTests(unittest.TestCase):
