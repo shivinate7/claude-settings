@@ -3461,11 +3461,13 @@ def past_ruling_problem(asked, cwd, whole=None, session=None):
         return cannot_run(asked, "; ".join(unreadable))
     import call_judge  # the one home of item 8, its model and its time limit
     import decision_watch
+    units = relay_questions(whole or asked, asked)  # cut once: the judge reads them under labels, and the refusal counts them
     prompt = ("Review this text, which a session sends the owner and which asks him something:\n<<<\n" + asked
               + "\n>>>\nJudge only item 8 below. Answer {\"ok\": true} at once when no listed ruling settles what "
               "it asks.\n8. " + call_judge.PAST_RULING_ITEM + "\nReply JSON only: {\"ok\": true} or {\"ok\": false, "
-              "\"reason\": \"<the listed id, the ruling's date, and what it decides, one line>\"}."
-              + question_form.candidates_block(candidates, unknown))
+              "\"item\": 8, \"reason\": \"<the listed id, the ruling's date, and what it decides, one line>\", "
+              "\"questions\": [\"<label>\", ...]}."
+              + question_form.candidates_block(candidates, unknown, units))
     verdict, error = decision_watch.invoke_model(prompt, model=call_judge.PAST_RULING_MODEL,
                                                  timeout=call_judge.PAST_RULING_TIMEOUT,
                                                  shape=call_judge.OK_SHAPE, effort=None)
@@ -3478,9 +3480,9 @@ def past_ruling_problem(asked, cwd, whole=None, session=None):
     ids = question_form.candidate_ids(candidates)
     if question_form.ruling_cite(reason, ids, strict=True) != "cited":
         return cannot_run(asked, "the review cited a record that was not in the list")
-    # A listed ruling named in a Based on (ruling) line of the reply passes by code, whatever the judge answered.
-    text = question_form.past_ruling_text(reason, ids, candidates, relay_questions(whole or asked, asked),
-                                          verdict.get("question"))  # the number picks the one question judged
+    # A listed ruling named in a unit's own Based on (ruling) line passes that unit by code, whatever the judge answered;
+    # the judge's labels only narrow which units are refused.
+    text = question_form.past_ruling_text(reason, ids, candidates, units, verdict.get("questions"), whole or asked)
     if not text:
         return ""
     try:

@@ -138,8 +138,9 @@ PAST_RULING_ITEM = (
     "it was set so). A question whose `Based on (ruling): ...` line names that ruling (its id or slug) passes: "
     "a re-ask the ruling allows is fine. This item passes when no list follows. "
     "When you refuse, the reason names the listed id, such as decisions/<name>, and gives the ruling's date. "
-    "When the text asks more than one question, the answer also carries \"question\": the number of the question "
-    "the ruling covers, counting the questions from 1."
+    "The code labels the questions Q1, Q2, ... in the list that follows the rulings. When you refuse, the answer "
+    "also carries \"item\": 8, and \"questions\": the labels of every question the ruling covers, such as [\"Q2\"]. "
+    "Never count the questions yourself."
 )
 # The question-judge call of lint/report_guard.py (a Stop whose reply asks the owner something): Sonnet, 60 s.
 PAST_RULING_MODEL, PAST_RULING_TIMEOUT = SPAWN_MODEL, 60
@@ -153,8 +154,8 @@ JUDGE_ITEMS = (
     "6. Nothing points outside the box, such as an earlier message or an item number.\n"
     "7. One option is recommended.\n"
     "8. " + PAST_RULING_ITEM + "\n"
-    "Reply JSON only: {\"ok\": true} or {\"ok\": false, \"reason\": \"<the item that misses, and the fix, "
-    "one line>\"}."
+    "Reply JSON only: {\"ok\": true} or {\"ok\": false, \"item\": <the number of the item that misses, 1 to 8>, "
+    "\"reason\": \"<the item that misses, and the fix, one line>\"}. For item 8 also add \"questions\", as that item says."
 )
 QUESTION_PROMPT = (
     "Review this AskUserQuestion call: %s\nAnswer {\"ok\": true} at once for a question with one option "
@@ -375,6 +376,15 @@ def unvetted(payload, tool, args, rule, why, units):
 FORM_ITEM_REASON = re.compile(r"\W*(?:item\s*)?[1-7]\b", re.I)
 
 
+def form_refusal(verdict, reason) -> bool:
+    """Whether the judge's refusal is of a form item (1 to 7), not the past-ruling item. The verdict's own `item` field
+    decides when it is a whole number from 1 to 8; without one, the reason's opener does (FORM_ITEM_REASON)."""
+    item = verdict.get("item")
+    if isinstance(item, int) and not isinstance(item, bool) and 1 <= item <= 8:
+        return item <= 7
+    return bool(FORM_ITEM_REASON.match(reason))
+
+
 def past_ruling_context(payload, units):
     """(prompt tail, candidate ids, unreadable sources, candidates) for the questions in `units`. Prints the one stderr
     line for the sources not searched. The only process of a judged call besides the model runs here."""
@@ -383,7 +393,8 @@ def past_ruling_context(payload, units):
     candidates, unknown = question_form.past_rulings(" ".join(words for _, words in units),
                                                      question_form._git_root_of(cwd) or cwd or os.getcwd())
     print(question_form.unknown_line(unknown), file=sys.stderr)
-    return (question_form.candidates_block(candidates, unknown), question_form.candidate_ids(candidates),
+    return (question_form.candidates_block(candidates, unknown, [words for _, words in units]),
+            question_form.candidate_ids(candidates),
             question_form.unreadable_sources(unknown), candidates)
 
 
@@ -447,13 +458,14 @@ def main():
         cite = question_form.ruling_cite(reason, ids) if units else ""
         if cite == "bogus":  # the answer cites a record the model was not shown: no usable verdict
             return unvetted(payload, tool, args, rule, "the review cited a record that was not in the list", units)
-        # A reason that opens with item 1 to 7 is a form refusal: it keeps its rule and its text, whatever ids it names.
-        past = bool(cite) and not FORM_ITEM_REASON.match(reason)
+        # A form refusal (item 1 to 7) keeps its rule and its text, whatever ids it names.
+        past = bool(cite) and not form_refusal(verdict, reason)
         if past:
-            # A listed ruling named in a Based on (ruling) line passes by code, whatever the judge answered. The text
-            # holds none of the judge's words; its number only picks the question it judged.
-            reason = question_form.past_ruling_text(reason, ids, candidates, [words for _, words in units],
-                                                    verdict.get("question"))
+            # A listed ruling named in a unit's own Based on (ruling) line passes that unit by code, whatever the judge
+            # answered. The text holds none of the judge's words; its labels only narrow which units are refused.
+            texts = [words for _, words in units]
+            reason = question_form.past_ruling_text(reason, ids, candidates, texts, verdict.get("questions"),
+                                                    "\n".join(texts))
             if not reason:
                 return 0
         return refuse(payload, tool, args, question_form.PAST_RULING_RULE if past else rule, reason)
