@@ -3094,6 +3094,9 @@ class SessionStartToolPinsTests(SessionStartAgentWorktreeNoticeTests):
     fix. The hook runs the checker with `--behind` on the checkout. Fake tools and a python3 shim lead PATH, so each case reads
     what the hook ran, never the runner's own tools."""
 
+    # The 51-worktree case is the base class's; it builds 51 worktrees and this class does not repeat it (as SessionStartTierLineTests).
+    test_no_notice_at_fifty_and_one_notice_at_fifty_one = None
+
     def setUp(self):
         super().setUp()
         self.point_at()
