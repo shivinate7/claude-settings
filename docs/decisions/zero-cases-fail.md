@@ -4,7 +4,7 @@
 
 A suite run directly must exit 1 when it runs no case. A suite whose cases all skip still exits 0.
 
-- A hand runner with an empty case list prints `<runner> FAIL: no cases ran, so nothing was checked` and exits 1. The check comes before the case loop (`hooks/test_config_watch.py` `main`), so a filter inside the loop is not seen (see Limits). `run_cases` in `hooks/case_runner_test.py` does the same.
+- A hand runner with an empty case list prints `<runner> FAIL: no cases ran, so nothing was checked` and exits 1. In `hooks/test_config_watch.py` `main`, `MUTATE_ONLY` filters the cases before the check, so a value that names no case fails the same way. `run_cases` in `hooks/case_runner_test.py` does the same.
 - A skipped case counts as a case that ran. A run of skips exits 0.
 - A mods test collector exits 1 when its results list is empty. Its helper never skips: each result is a PASS or a FAIL.
 - A `test_*.py` file that defines a TestCase and calls neither `unittest.main` nor `run_class` is a problem. `lint/check_suites_have_main.py` reports it.
@@ -38,10 +38,12 @@ CI stays green while a suite tests nothing. CI runs most steps without `bin/verd
 ## Limits
 
 - No `checks.yml` step runs the checker, `hooks/test_case_runner.py`, `lint/test_suites_have_main.py` or `lint/test_zero_case_runs.py`. CiCoverage (`lint/test_windows_split.py`) flags the three test files for it. On a draft PR, `lane-touched-tests.yml` runs a touched `test_*.py` on Windows. The checker is not a `test_*.py`, so no workflow runs it.
-- A filter after the check. In `hooks/test_config_watch.py`, `MUTATE_ONLY` filters the case loop in `main()` after `no_cases_exit`. A value that names no case runs zero cases, skips the sweep check, prints `PASS: N of N cases right` and exits 0. `no_cases_exit` does not catch this.
+- `MUTATE_ONLY` in `hooks/test_config_watch.py` `main()` filters before `no_cases_exit`. A value that names no case exits 1 (probe: `MUTATE_ONLY=no_such_case_name_zz python3 hooks/test_config_watch.py` prints `test_config_watch FAIL: no cases ran, so nothing was checked`).
+- The exit-1-on-zero check covers the 11 hand runners, the four mods collectors, and the callers of `run_cases`. As of this commit, 49 `hooks/test_*.py` files lack a `no_cases_exit` call (`grep -L`); 5 of those call `run_cases`.
 - `RUNNERS` in `lint/test_zero_case_runs.py` is a hand list. A hand runner not in it is not checked there. The file's own comment names `hooks/test_guard.py` and `lint/check_guardset_lists.py` as left out.
 - The copy rewrites only code. It changes an import or export whose specifier starts `./` or `../`, a dynamic `import()` of one, `import.meta.url`, and an awaited `test(...)` statement. It does not change `require(...)`, a specifier without `./` or `../`, or a `test(` call that is not an awaited statement. A run with such a call still exits 1 when its own test fails, so the mods case would pass without a zero-test run.
 - The mods and rewriter cases need `tsc` and `node` on PATH, or they skip. The `CI` variable makes them run anyway, so a missing `tsc` fails there. `npm ci --ignore-scripts --prefix actions/code-check/tools` puts `tsc` on PATH (CI does this).
+- `lint/check_suites_have_main.py` flags a file that runs its class through `unittest.TextTestRunner` under `__main__`. That is a false alarm: `_calls_main` (lines 57-70) counts only `unittest.main` and `run_class`. `ALLOWED` clears it with a reason.
 - The checker reads the syntax tree, not the flow. A `unittest.main()` or `run_class` call anywhere in the file counts, even under `if False` or in an uncalled function. A base whose name ends in `TestCase` counts. A TestCase that comes from an imported base with another name is not seen.
 - Not this question: `bin/verdict` fails a zero-test run it reads (PR 3705). That record answers when verdict reads an exit-0 run as a failure. Its record, `decisions/verdict-reads-runner-markers.md`, was culled in commit 46eaf546d5.
 
