@@ -4466,7 +4466,7 @@ try:
             if S.get("state_read_fail"):
                 raise Refused(S["state_read_fail"])
             head = S.get("state_head") or head
-            merged = bool(S.get("oid"))
+            merged = bool(S.get("oid")) and not S.get("read_open_after_put")  # read_open_after_put: the merge landed on main, but the pull request still reads OPEN (the Nov 25 2026 incident)
             pr = pull(n, head, S.get("head_ref", "feat"), S.get("base", "main"), "closed" if merged else "open", merged, False, None if merged else True,
                       "unknown" if merged else "clean", S.get("body", ""), S["oid"] if merged else TEST_MERGE_SHA)
         else:  # the head read
@@ -4524,7 +4524,7 @@ try:
             raise Refused(api_error(409, "Head branch was modified. Review and try the merge again."))
         B = S.get("base", "main")
         git("fetch", "-q", "origin"); git("checkout", "-q", "-B", B, "origin/" + B)
-        git("merge", "-q", "--no-ff", "-m", "merge", sha or feat_head()); git("push", "-q", "origin", B)
+        git("merge", "-q", "--no-ff", "-m", "merge", S.get("lands_sha") or sha or feat_head()); git("push", "-q", "origin", B)  # lands_sha: the commit the merge puts on main, when a case names another commit of the branch
         S["oid"] = git("rev-parse", "HEAD"); save()
         if msg:
             finish(msg, code, include)
@@ -5623,6 +5623,62 @@ class GhHalf(Env):
         self.assertNotIn(merge.NET_PAUSE, self.paused)  # no network-retry pause
         self.assertTrue(self.reverted())
         self.assertFalse(self.lock_ref())
+
+    # ---- the Nov 25 2026 incident (PRs 3888 and 3909): the merge call answered 405 "Merge already in progress" or 502, the pull request read OPEN,
+    # and origin/main held the merge commit. Only a proven refusal reverts the claim (standing-merge-grant), so a reply with the PR OPEN is a refusal
+    # unless main holds this head's merge.
+
+    def merge_reply_with_pr_open(self, reply, lands, **kw):
+        """The merge call answers `reply`; the merge lands on main when `lands`; the pull request reads OPEN after the call. -> (rc, out)."""
+        self.set(merge_replies=[[reply, lands]], read_open_after_put=True, **kw)
+        return self.go()
+
+    def assert_merged_and_carries_on(self, rc, out):
+        """The merge landed on main at this head: the run reads it as merged, prints the merged-as line, cuts the branch, and keeps the claim."""
+        self.assertEqual(rc, 0, "a merge that landed on main at this head was not read as merged\n" + out)
+        self.assertNotIn("reverted on", out, "the claim was reverted though main holds this head's merge\n" + out)
+        self.assertIn("merge: #7 merged as ", out, "no merged-as line: the run did not read the merge as landed\n" + out)
+        self.assertEqual(self.calls().count(MERGE_CALL), 1, "the merge that landed on main was sent again")
+        self.assertNotIn("refs/heads/feat", self.refs(), "the after-merge step did not cut the branch")
+        self.assertEqual(self.claims("main"), 1, "the claim is not on main")
+        self.assertFalse(self.lock_ref(), "the merge lock was not released")
+
+    def test_a_405_merge_in_progress_with_the_pr_open_and_main_holding_the_head_merge_reads_merged_and_carries_on(self):
+        rc, out = self.merge_reply_with_pr_open(rest_err(405, "Merge already in progress"), True)
+        self.assert_merged_and_carries_on(rc, out)
+
+    def test_a_502_merge_reply_with_the_pr_open_and_main_holding_the_head_merge_reads_merged_and_is_not_resent(self):
+        rc, out = self.merge_reply_with_pr_open(rest_err(502, "Server Error"), True)
+        self.assert_merged_and_carries_on(rc, out)
+
+    def test_a_405_merge_in_progress_with_the_pr_open_and_main_without_the_head_stays_a_refusal(self):  # control: green now and after
+        rc, out = self.merge_reply_with_pr_open(rest_err(405, "Merge already in progress"), False)
+        self.assertEqual(rc, 1, out)
+        self.assertIn("reverted on feat", out)
+        self.assertEqual(self.calls().count(MERGE_CALL), 1, out)  # a refusal is not retried
+        self.assertTrue(self.reverted())
+        self.assertFalse(self.lock_ref())
+
+    def test_a_405_merge_in_progress_whose_main_holds_another_commit_of_the_branch_stays_a_refusal(self):  # control: green now and after
+        before = self.head()  # the branch head before the claim push: a commit of this branch that is not the proven head
+        rc, out = self.merge_reply_with_pr_open(rest_err(405, "Merge already in progress"), True, lands_sha=before)
+        self.assertEqual(rc, 1, out)
+        self.assertIn("reverted on feat", out)
+        self.assertTrue(self.reverted())
+        self.assertFalse(self.lock_ref())
+
+    def test_a_405_merge_in_progress_whose_read_of_main_fails_is_unknown_and_never_reads_merged(self):  # control: green now and after
+        self.set(merge_replies=[[rest_err(405, "Merge already in progress"), True]], read_open_after_put=True)  # the merge landed on main
+        real_git = merge.git
+        def git_fails_after_the_merge_call(cwd, *a, input=None):  # the read of main after the merge call cannot run
+            if MERGE_CALL in self.calls() and a[:1] == ("fetch",):
+                return 1, "fatal: could not read origin: the object store is unreadable"
+            return real_git(cwd, *a, input=input)
+        with unittest.mock.patch.object(merge, "git", git_fails_after_the_merge_call):
+            rc, out = self.go()
+        self.assertNotEqual(rc, 0, out)  # an unknown read refuses
+        self.assertNotIn("merge: #7 merged as ", out, "a failed read of main was read as a merge")
+        self.assertNotIn("Traceback", out, "the run crashed rather than refused")
 
     def test_a_red_check_named_http_500_is_a_refusal_before_the_claim(self):
         # the head's one checks read is red; its name carries "HTTP 500". A red head is refused before any claim, so nothing is reverted
