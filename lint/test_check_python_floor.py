@@ -904,5 +904,59 @@ class FloatMember(unittest.TestCase):
                         "no line for hooks/floor_mixed.py names the 3.10 iglob: %r" % out)
 
 
+# An int receiver that no name carries: an expression, a walrus, or a default value. vermin reports each as 3.10.
+INT_RECEIVER_FORMS = (
+    ("hooks/int_and.py", "def f(x):\n    return (x & 0xFF).bit_count()\n"),
+    ("hooks/int_shift.py", "def f(x):\n    return (x >> 1).bit_count()\n"),
+    ("hooks/int_add.py", "def f(x):\n    return (x + 1).bit_count()\n"),
+    ("hooks/int_neg.py", "VALUE = (-5).bit_count()\n"),
+    ("hooks/int_walrus.py", "def f():\n    return (n := 5).bit_count()\n"),
+    ("hooks/int_default.py", "def g(x=(5).bit_count()):\n    return x\n"),
+)
+# A loop target and an int default parameter. vermin reads each as int only because another function binds the same
+# name to an int (vermin keeps one name table per file), so its 3.10 line is there for the check to keep.
+INT_ELSEWHERE_N = "def count():\n    n = 0\n    return n\n"
+SHADOWED_INT_FORMS = (
+    ("hooks/int_loop.py", INT_ELSEWHERE_N + "\n\ndef h():\n    for n in range(3):\n        n.bit_count()\n"),
+    ("hooks/int_param.py", INT_ELSEWHERE_N + "\n\ndef f(n=0):\n    return n.bit_count()\n"),
+)
+FLOAT_DIVIDE = "def is_whole(x):\n    return (x / 2.0).is_integer()\n"
+
+
+def int_bit_count_lines(out, rel):
+    return [line for line in naming(out, rel) if "int.bit_count" in line]
+
+
+class IntMemberReceiver(unittest.TestCase):
+    def run_beside_scope(self, files):
+        """Runs the check on `files` with a 3.10 call beside them. -> the output. The scope control must be named."""
+        files = dict(files)
+        files["hooks/glob_use.py"] = IGLOB
+        code, out = run_check(tree(files))
+        self.assertTrue(naming(out, "glob_use.py"),
+                        "scope control: the 3.10 call in hooks/glob_use.py was not named: %r" % out)
+        return out
+
+    def test_int_member_on_an_expression_or_default_receiver_is_flagged(self):
+        out = self.run_beside_scope(dict(INT_RECEIVER_FORMS))
+        for rel, _text in INT_RECEIVER_FORMS:
+            with self.subTest(file=rel):
+                self.assertTrue(int_bit_count_lines(out, rel),
+                                "%s: an int receiver's bit_count (3.10) was not flagged: %r" % (rel, out))
+
+    def test_loop_target_and_int_default_parameter_are_flagged_when_another_function_binds_int(self):
+        out = self.run_beside_scope(dict(SHADOWED_INT_FORMS))
+        for rel, _text in SHADOWED_INT_FORMS:
+            with self.subTest(file=rel):
+                self.assertTrue(int_bit_count_lines(out, rel),
+                                "%s: a name bound to int by range or a default (3.10 bit_count) was not flagged: %r"
+                                % (rel, out))
+
+    def test_float_quotient_is_integer_is_not_flagged(self):
+        out = self.run_beside_scope({"hooks/float_div.py": FLOAT_DIVIDE})
+        self.assertEqual(naming(out, "float_div.py"), [],
+                         "(x / 2.0).is_integer() on a float was flagged as int.is_integer: %r" % out)
+
+
 if __name__ == "__main__":
     unittest.main()
