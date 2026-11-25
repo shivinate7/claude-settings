@@ -23,7 +23,7 @@ Mistake, 2026-11-24: a test-author could not get a red-first proof for a case th
 
 Why: a copy that its run removes on exit cannot pile up. The retired routes left a folder that each agent had to remove by hand, and 69 of them stayed in the scratchpad. The manifest lets a case that lists tracked files run in its copy.
 
-Cost: a copy per run, made by a tree export and removed when the run ends. The copy's size is unmeasured. The manifest adds one text file per copy, one line per archived path, and no git call: its paths come from the archive stream the export reads anyway. No long-lived process, no log, no timer. Each run starts git child processes, then the test command.
+Cost: a copy per run, made by a tree export and removed when the run ends. The copy's size is unmeasured. The manifest adds a text file to each copy, with a line for each archived path, and no git call: its paths come from the archive stream the export reads anyway. No long-lived process, no log, no timer. Each run starts git child processes, then the test command.
 
 Limits:
 - Files that `--add` puts in the copy are not in the manifest. `--add` copies them after the export.
