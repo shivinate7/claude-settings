@@ -3242,6 +3242,48 @@ class CostTests(unittest.TestCase):
                         "a granted plain override writes its grant file; got %r" % (run["files"],))
 
 
+def case_raising_case_does_not_stop_the_run():
+    """A case that raises does not stop the run: the case after it still runs, and main returns 1 with a summary."""
+    g = globals()
+    names = [n for n, v in g.items() if n.startswith("case_") and callable(v)]
+    saved = {n: g[n] for n in names}
+    saved_failed, saved_root = g["FAILED"], g["ROOT"]
+    saved_run_class = cost_probe.run_class
+    marker, out, raised, rc = [], io.StringIO(), "", None
+
+    def quiet():
+        return None
+
+    def raiser():
+        raise RuntimeError("stub case raised on purpose")
+
+    def record():
+        marker.append(True)
+
+    stubs = dict.fromkeys(names, quiet)
+    stubs["case_pointer_constant"] = raiser  # the second case in main's sequence
+    stubs["case_real_clock"] = record        # the third
+    g.update(stubs)
+    g["FAILED"] = []
+    g["ROOT"] = os.path.join(saved_root, "stub_run")
+    os.makedirs(g["ROOT"], exist_ok=True)
+    cost_probe.run_class = lambda case_class: True
+    try:
+        with contextlib.redirect_stdout(out):
+            rc = g["main"]()
+    except Exception as e:
+        raised = "%s: %s" % (type(e).__name__, e)
+    finally:
+        g.update(saved)
+        g["FAILED"], g["ROOT"] = saved_failed, saved_root
+        cost_probe.run_class = saved_run_class
+    check("a raising case does not stop the run: the case after it still runs", bool(marker),
+          "the third case did not run; main raised %s" % (raised or "nothing"))
+    check("a run with a raising case returns 1 and prints the summary",
+          rc == 1 and "1 failed" in out.getvalue(),
+          "main returned %r; main raised %s" % (rc, raised or "nothing"))
+
+
 def main():
     try:
         case_table_in_process()
@@ -3369,6 +3411,7 @@ def main():
         case_override_ask_plain_one_act_logs_its_words_once()
         case_override_ask_off_in_the_reason_grants_once()
         case_override_ask_judge_kill_keeps_the_inbox_capture()
+        case_raising_case_does_not_stop_the_run()
         if not cost_probe.run_class(CostTests):
             FAILED.append("CostTests")
     finally:
