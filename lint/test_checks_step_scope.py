@@ -1076,6 +1076,36 @@ class TransitiveWalkFixtures(unittest.TestCase):
         self.assertEqual([m for m, _, _ in self.walk(files, entry="a/entry.sh")[0]], ["skills/impeccable/SKILL.md"],
                          "a read in a shell line is not seen")
 
+    def test_an_absolute_python_path_is_a_read(self):
+        files = {"a/entry.sh": "/usr/bin/python3 hooks/test_guard.py\n"}
+        self.assertIn("test_guard.py", [m for m, _, _ in self.walk(files, entry="a/entry.sh")[0]],
+                      "a python3 run under an absolute path is not seen")
+
+    def test_an_absolute_bash_path_is_a_read(self):
+        files = {"a/entry.sh": "/bin/bash hooks/test_guard.py\n"}
+        self.assertIn("test_guard.py", [m for m, _, _ in self.walk(files, entry="a/entry.sh")[0]],
+                      "a bash run under an absolute path is not seen")
+
+    def test_a_versioned_python_name_is_a_read(self):
+        files = {"a/entry.sh": "python3.11 hooks/test_guard.py\n"}
+        self.assertIn("test_guard.py", [m for m, _, _ in self.walk(files, entry="a/entry.sh")[0]],
+                      "a versioned python3 name is not seen")
+
+    def test_an_absolute_cat_path_is_a_read(self):
+        files = {"a/entry.sh": "/bin/cat skills/impeccable/SKILL.md\n"}
+        self.assertIn("skills/impeccable/SKILL.md", [m for m, _, _ in self.walk(files, entry="a/entry.sh")[0]],
+                      "a cat under an absolute path is not seen")
+
+    def test_a_read_file_sync_method_call_in_a_mjs_file_is_a_read(self):
+        files = {"a/entry.mjs": 'const s = fs.readFileSync("skills/impeccable/SKILL.md")\n'}
+        self.assertIn("skills/impeccable/SKILL.md", [m for m, _, _ in self.walk(files, entry="a/entry.mjs")[0]],
+                      "a readFileSync method call is not seen")
+
+    def test_an_absolute_bash_run_of_a_shell_file_follows_that_file(self):
+        files = {"a/entry.sh": "/bin/bash lint/helper.sh\n", "lint/helper.sh": "cat skills/impeccable/SKILL.md\n"}
+        self.assertIn(("skills/impeccable/SKILL.md", "lint/helper.sh"), [(m, rel) for m, rel, _ in self.walk(files, entry="a/entry.sh")[0]],
+                      "a bash run under an absolute path does not follow the shell file it runs")
+
     def test_an_empty_file_reaches_and_reads_nothing(self):
         self.assertEqual(self.walk({"a/entry.py": ""}), ([], False))
 
