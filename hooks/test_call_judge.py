@@ -1853,6 +1853,38 @@ def case_past_ruling_two_questions_name_one_of_them():
           "one of the questions" in r.reason(), detail(r))
 
 
+# Two questions in one box. Each question's own Based on (ruling) line is read, so a line in one question does not pass
+# its unnamed neighbour. The second question is about the apps too and names no ruling; RENOVATE_WORDS are its first words.
+RENOVATE_GOAL = "Goal: confirm whether Renovate keeps access to claude-settings"
+RENOVATE_PROBLEM = "Problem (risk): Renovate can reach the repo, so keeping or removing it needs your word"
+RENOVATE_WORDS = "Goal: confirm whether Renovate"
+
+
+def names_second_question(reason):
+    """True when the refusal names the second question, by its first words or as the second question."""
+    low = reason.lower()
+    return RENOVATE_WORDS in reason or "second question" in low or "question 2" in low
+
+
+def case_past_ruling_unnamed_question_beside_a_named_one_is_refused():
+    first = good_box(goal=APPS_GOAL, problem=APPS_PROBLEM, based=APPS_CITED, options=APPS_OPTIONS)
+    second = good_box(goal=RENOVATE_GOAL, problem=RENOVATE_PROBLEM, based=APPS_BASED, options=CAPS_OPTIONS)
+    r = judge_refusal_run(APPS_REASON, box={"questions": first["questions"] + second["questions"]})
+    check("past ruling named beside unnamed: the second question, which names no ruling, is refused though the first names it",
+          (r.deny() or {}).get("permissionDecision") == "deny", detail(r))
+    check("past ruling named beside unnamed: the refusal names the second question by its first words or its number",
+          names_second_question(r.reason()), detail(r))
+
+
+def case_past_ruling_each_covered_question_naming_the_ruling_passes():
+    # Control: when each covered question names the ruling, the box passes though the judge refuses.
+    first = good_box(goal=APPS_GOAL, problem=APPS_PROBLEM, based=APPS_CITED, options=APPS_OPTIONS)
+    second = good_box(goal=RENOVATE_GOAL, problem=RENOVATE_PROBLEM, based=APPS_CITED, options=CAPS_OPTIONS)
+    r = judge_refusal_run(APPS_REASON, box={"questions": first["questions"] + second["questions"]})
+    check("past ruling control: a box whose covered questions each name the ruling passes, though the judge refuses",
+          r.code == 0 and r.out == "" and "\tdeny\t" not in r.log, detail(r))
+
+
 def case_past_ruling_unnamed_covered_question_is_refused():
     r = judge_refusal_run(APPS_REASON)
     check("past ruling control: a covered question with no Based on (ruling) line is refused",
@@ -2052,6 +2084,8 @@ def main():
                  case_past_ruling_undated_ruling_says_time_unknown, case_past_ruling_two_questions_name_one_of_them,
                  case_past_ruling_unnamed_covered_question_is_refused, case_past_ruling_id_outside_a_based_on_line_is_refused,
                  case_past_ruling_remedy_line_passes_the_question_once_added,
+                 case_past_ruling_unnamed_question_beside_a_named_one_is_refused,
+                 case_past_ruling_each_covered_question_naming_the_ruling_passes,
                  case_unknown_names_the_claude_settings_records, case_cite_of_a_shown_record_is_not_bogus,
                  case_page_task_gets_item_8_and_is_refused, case_mid_reason_unlisted_id_is_a_plain_refusal,
                  case_page_relative_file_path_reaches_the_review, case_page_relative_file_path_passing_item_passes,
