@@ -5692,14 +5692,16 @@ class GhHalf(Env):
             top = sh(self.other, "git", "commit-tree", tree, "-p", top, "-p", second, "-m", f"merge {i} onto main")
         sh(self.other, "git", "push", "-q", "origin", f"{top}:refs/heads/main")
 
-    def after_the_merge_call(self, action):
-        """A patch of merge.git: the first git fetch after the merge call runs `action` first, so that fetch reads main as `action` left it. -> the patch, a context manager."""
+    def after_the_merge_call(self, action, nth=1):
+        """A patch of merge.git: the nth fetch of main after the merge call runs `action` first, so that fetch reads main as `action` left it. nth=1 is the
+        first read of main, the one the tool makes after a 405 or 502 reply. -> the patch, a context manager."""
         real_git = merge.git
-        done = []
+        reads = []
         def git_after_the_merge_call(cwd, *a, input=None):
-            if MERGE_CALL in self.calls() and a[:1] == ("fetch",) and not done:
-                done.append(True)
-                action()
+            if MERGE_CALL in self.calls() and a[:1] == ("fetch",) and merge.branch_refspec("main") in a:
+                reads.append(True)
+                if len(reads) == nth:
+                    action()
             return real_git(cwd, *a, input=input)
         return unittest.mock.patch.object(merge, "git", git_after_the_merge_call)
 
@@ -5810,6 +5812,63 @@ class GhHalf(Env):
             stack.enter_context(self.head_missing_after_the_merge_call())
             rc, out = self.go()
         self.assert_a_refusal_off_a_full_window(rc, out)
+
+    def record_step(self, name, real, seen):
+        """A post-merge step that records its arguments in seen[name], then calls the real step."""
+        def step(*a, **k):
+            seen[name] = a
+            return real(*a, **k)
+        return step
+
+    def spy_post_merge_steps(self):
+        """Patches the three post-merge steps that read the base range, each recording its arguments. -> (the patches, a context manager; the
+        recorded arguments of each step by its name)."""
+        seen, patches = {}, contextlib.ExitStack()
+        for name in ("prose_judge_plan", "where_else_plan", "idle_lanes_after_merge"):
+            patches.enter_context(unittest.mock.patch.object(merge, name, self.record_step(name, getattr(merge, name), seen)))
+        return patches, seen
+
+    def assert_post_merge_steps_read_the_pr(self, seen, out):
+        """Each post-merge step that reads the base range got a base that still lacks the PR head, so its range shows the PR's own diff and commits."""
+        for name in ("prose_judge_plan", "where_else_plan", "idle_lanes_after_merge"):
+            self.assertIn(name, seen, f"{name} did not run after the merge\n{out}")
+        sha = seen["prose_judge_plan"][1]  # the PR head the run merged
+        for name in ("prose_judge_plan", "where_else_plan"):
+            base = seen[name][2]
+            self.assertTrue(base, f"{name} got no base, so its range cannot be read\n{out}")
+            files = sh(self.co, "git", "diff", "--name-only", f"{base}...{sha}").splitlines()
+            self.assertIn("docs/decisions/second.md", files, f"{name} got base {base[:9]}, whose range to the PR head lists {files}: the base already holds the head, "
+                                                             "so the range is empty and the step reads no diff\n" + out)
+        before, commit = seen["idle_lanes_after_merge"][5], seen["idle_lanes_after_merge"][1]
+        self.assertTrue(before, "idle_lanes_after_merge got no base tip before the merge, so its range cannot be read\n" + out)
+        commits = sh(self.co, "git", "rev-list", f"{before}..{commit}").split()
+        self.assertIn(sha, commits, f"idle_lanes_after_merge read {before[:9]}..{commit[:9]}, which lacks the PR head: its base already holds the merge\n" + out)
+
+    def test_a_405_merge_that_landed_leaves_the_post_merge_steps_a_base_whose_range_shows_the_pr(self):
+        # The merge call answers 405 and the merge lands on main. The pull request reads OPEN, so the tool reads main, and that read moves origin/main
+        # onto the merge. The base the post-merge steps get must still be the tip before the merge, so their range shows the PR's own diff.
+        patches, seen = self.spy_post_merge_steps()
+        with patches:
+            rc, out = self.merge_reply_with_pr_open(rest_err(405, "Merge already in progress"), True)
+        self.assertEqual(rc, 0, "the merge that landed on main was not read as merged, so the post-merge steps are not under test\n" + out)
+        self.assert_post_merge_steps_read_the_pr(seen, out)
+
+    def test_a_merge_the_pull_request_reads_as_merged_leaves_the_post_merge_steps_a_base_whose_range_shows_the_pr(self):  # control: green now and after
+        # A merge the pull request reads as merged at once never reads main, so no fetch moves origin/main before the post-merge steps read their base.
+        patches, seen = self.spy_post_merge_steps()
+        with patches:
+            rc, out = self.go()
+        self.assertEqual(rc, 0, out)
+        self.assert_post_merge_steps_read_the_pr(seen, out)
+
+    def test_a_405_merge_in_progress_whose_main_holds_the_merge_only_on_a_second_read_is_not_reverted_on_the_first(self):
+        # The merge call answers 405 "Merge already in progress", and the pull request reads OPEN. The merge reaches main only a moment after the first
+        # read of main, so the second read holds it. A first read with no merge is not a refusal: the tool must read main again before it reverts.
+        self.set(merge_replies=[[rest_err(405, "Merge already in progress"), False]], read_open_after_put=True)
+        with self.after_the_merge_call(lambda: self.merge_onto_main(1, second=self.head()), nth=2):
+            rc, out = self.go()
+        self.assertNotIn("reverted on", out, "the claim was reverted on the first read of main, which had not yet the merge: main was not read again before the refusal\n" + out)
+        self.assert_merged_and_carries_on(rc, out)
 
     def test_a_red_check_named_http_500_is_a_refusal_before_the_claim(self):
         # the head's one checks read is red; its name carries "HTTP 500". A red head is refused before any claim, so nothing is reverted
