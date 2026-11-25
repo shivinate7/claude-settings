@@ -1696,9 +1696,10 @@ class DoneNamesModelsTests(unittest.TestCase):
         self.assertGreaterEqual(counted.low, last,
                                 "records_since_report read record %s, before the last report at %d" % (counted.low, last))
 
-    # A reviewer named by a fix verifier marker, or by the word fix verifier, is named by its phrase, not by a role word
-    # before its model. The model check reads no name for it. The window check needs one named model that a window spawn
-    # ran, so Done naming the window's haiku passes; Done naming only an earlier run's haiku is refused.
+    # The phrases "fix check" and "fix verifier" name a reviewer: a model after either one is that reviewer's name, so
+    # the missing-role check sees it. The window check needs one named reviewer model that a window spawn ran, so Done
+    # naming the window's haiku passes; Done naming only a model no window spawn ran, such as an earlier run's haiku,
+    # is refused.
     REVIEWER_HAIKU_ROUND1 = {"subagent_type": "reviewer", "model": "haiku", "prompt": "Round 1 of 3"}
     # The marker's bare phrase is the input here. A string in a test file is a fixture, which the glossary lint does not read.
     REVIEWER_FIX_VERIFIER_MARKER = {"subagent_type": "reviewer", "model": "sonnet", "prompt": "fix check"}
@@ -1723,8 +1724,8 @@ class DoneNamesModelsTests(unittest.TestCase):
 
     def test_dm_false_alarm_fix_verifier_marker_names_window_sonnet_passes(self):
         # A reviewer ran haiku before the last report. The window's reviewer ran sonnet, named by the marker phrase,
-        # beside a builder. Done names the earlier haiku run and the window's sonnet marker reviewer. The marker phrase
-        # names no model, so the window's sonnet goes unnamed and the haiku name is refused against it. The reply is allowed.
+        # beside a builder. The phrase names a reviewer, so the window's sonnet is named. The haiku name passes: the
+        # haiku run is in the transcript, and the window's sonnet is one named reviewer model that a window spawn ran.
         records = self.turn_records(earlier=[self.REVIEWER_HAIKU_ROUND1],
                                     window=[self.BUILDER_SONNET, self.REVIEWER_FIX_VERIFIER_MARKER],
                                     report=self.PRIOR_BUILDER_REPORT)
@@ -1734,7 +1735,8 @@ class DoneNamesModelsTests(unittest.TestCase):
         self.assertIsNone(out, out and out["reason"])
 
     def test_dm_false_alarm_fix_verifier_names_window_sonnet_passes(self):
-        # As above, with the window's sonnet reviewer named "fix verifier". The phrase reads as no reviewer name here too.
+        # As above, with the window's sonnet reviewer named "fix verifier". The phrase names a reviewer too, so the same
+        # check passes.
         records = self.turn_records(earlier=[self.REVIEWER_HAIKU_ROUND1],
                                     window=[self.BUILDER_SONNET, self.REVIEWER_FIX_VERIFIER],
                                     report=self.PRIOR_BUILDER_REPORT)
