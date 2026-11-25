@@ -88,9 +88,9 @@ add("floor step-up: reviewer Round 2 of 3 on claude-sonnet-5-5 is allowed", "all
     subagent_type="reviewer")
 add("floor step-up: builder Try 3 of 3 on sonnet is allowed (its row is sonnet, item 893)", "allow",
     tool="Agent", prompt="Try 3 of 3. Finish the fix.", model="sonnet", subagent_type="builder")
-add("floor step-up: builder Try 3 of 3 on opus is allowed (standing grant)", "allow",
-    tool="Agent", prompt="Try 3 of 3. Finish the fix.", model="opus", subagent_type="builder")
-add("floor step-up: builder Try 1 of 3 on opus is denied (only try 3 is a standing grant)", "deny",
+add("floor step-up: builder Try 3 of 3 on opus is denied under agent-model-cap (no builder row takes Opus)", "deny",
+    "agent-model-cap", tool="Agent", prompt="Try 3 of 3. Finish the fix.", model="opus", subagent_type="builder")
+add("floor step-up: builder Try 1 of 3 on opus is denied under agent-model-cap", "deny",
     "agent-model-cap", tool="Agent", prompt="Try 1 of 3. Start the fix.", model="opus",
     subagent_type="builder")
 add("floor step-up: reviewer Round 1 of 3 on haiku with prose round 2 and round 3 is allowed",
@@ -118,11 +118,11 @@ add("floor step-up: builder Round 3 of 3 on sonnet is allowed (its row is sonnet
     tool="Agent", prompt="Round 3 of 3. Finish the fix.", model="sonnet", subagent_type="builder")
 add("floor step-up: builder Round 3 of 3 with no model is allowed (the pin runs sonnet, item 893)", "allow",
     tool="Agent", prompt="Round 3 of 3. Finish the fix.", subagent_type="builder")
-add("floor step-up: builder Round 3 of 3 on opus is allowed (standing grant)", "allow",
-    tool="Agent", prompt="Round 3 of 3. Finish the fix.", model="opus", subagent_type="builder")
+add("floor step-up: builder Round 3 of 3 on opus is denied under agent-model-cap (no builder row takes Opus)", "deny",
+    "agent-model-cap", tool="Agent", prompt="Round 3 of 3. Finish the fix.", model="opus", subagent_type="builder")
 add("floor step-up: builder Round 2 of 3 on sonnet is allowed", "allow",
     tool="Agent", prompt="Round 2 of 3. Continue the fix.", model="sonnet", subagent_type="builder")
-add("floor step-up: builder Round 1 of 3 on opus is denied (only round 3 is a standing grant)", "deny",
+add("floor step-up: builder Round 1 of 3 on opus is denied under agent-model-cap", "deny",
     "agent-model-cap", tool="Agent", prompt="Round 1 of 3. Start the fix.", model="opus",
     subagent_type="builder")
 # ---- Step-up, a fix verifier (decision agent-model-cap, the reviewer row). A reviewer whose brief's first non-blank
@@ -206,16 +206,10 @@ for _name, _verdict, _script in (
          _step_flow("'Round 3 of 3. Re-check.'", "agentType: 'reviewer', model: 'haiku'")),
         ("builder Try 3 on sonnet, its own row", "allow",
          _step_flow('"Try 3 of 3. Finish the fix."', 'agentType: "builder", model: "sonnet"')),
-        ("builder Try 3 on opus", "allow",
-         _step_flow('"Try 3 of 3. Finish the fix."', 'agentType: "builder", model: "opus"')),
         ("builder Round 3 on sonnet, its own row", "allow",
          _step_flow('"Round 3 of 3. Finish the fix."', 'agentType: "builder", model: "sonnet"')),
-        ("builder Round 3 on opus", "allow",
-         _step_flow('"Round 3 of 3. Finish the fix."', 'agentType: "builder", model: "opus"')),
         ("builder Round 3 after a role word on line one, on sonnet", "allow",
          _step_flow("'Builder, Round 3 of 3. Finish the fix.'", "agentType: 'builder', model: 'sonnet'")),
-        ("builder Round 3 after a role word on line one, on opus", "allow",
-         _step_flow("'Builder, Round 3 of 3. Finish the fix.'", "agentType: 'builder', model: 'opus'")),
         ("builder Round 3 as a prompt key on sonnet", "allow",
          "await agent({prompt: 'Round 3 of 3. Finish.', agentType: 'builder', model: 'sonnet'})"),
         ("builder Round 2 on sonnet", "allow",
@@ -258,6 +252,17 @@ for _name, _verdict, _script in (
 add("floor step-up: Workflow reviewer Round 3 on opus is denied under agent-model-cap", "deny",
     "agent-model-cap", tool="Workflow",
     script=_step_flow("'Round 3 of 3. Re-check.'", "agentType: 'reviewer', model: 'opus'"))
+# A builder's third try on Opus has no grant (ruling own-round3-builder-sonnet, owner 00:04 CST 2026-11-16): the
+# Workflow call is refused as any builder on Opus is. Each brief form keeps its own case.
+add("floor step-up: Workflow builder Try 3 on opus is denied under agent-model-cap", "deny",
+    "agent-model-cap", tool="Workflow",
+    script=_step_flow('"Try 3 of 3. Finish the fix."', 'agentType: "builder", model: "opus"'))
+add("floor step-up: Workflow builder Round 3 on opus is denied under agent-model-cap", "deny",
+    "agent-model-cap", tool="Workflow",
+    script=_step_flow('"Round 3 of 3. Finish the fix."', 'agentType: "builder", model: "opus"'))
+add("floor step-up: Workflow builder Round 3 after a role word on line one, on opus, is denied under agent-model-cap",
+    "deny", "agent-model-cap", tool="Workflow",
+    script=_step_flow("'Builder, Round 3 of 3. Finish the fix.'", "agentType: 'builder', model: 'opus'"))
 # A literal fix verifier on a Workflow reviewer. The step-up judges a call that names no model (decision agent-model-cap),
 # so the literal form with no model is refused, as the round-2 form is. A brief, a model or an options object the scan
 # cannot read is skipped, so those forms pass.
@@ -318,9 +323,9 @@ add("floor step-up: reviewer with Round 2 of 3 and the guard marker, no model, k
     carries=("Reviewer round 2 runs on Sonnet.",), lacks=(GUARD_REASON,))
 
 # ---- Rule 9, the Opus ceiling (decision agent-model-cap). An Agent or Task spawn that sets model opus is
-# refused under `agent-model-cap`, unless a standing grant covers it: Plan, the designer, the design reviewer, a
-# builder's third-round marker line, and an Explore whose brief carries the Audit: marker. An owner override
-# lifts the refusal. A reviewer's last step-up is a per-spawn word, so it is refused too. The floor and the step-up
+# refused under `agent-model-cap`, unless a standing grant covers it: Plan, the designer, the design reviewer, and an
+# Explore whose brief carries the Audit: marker. A builder has no grant at any round, so a Round or Try marker never
+# earns Opus (ruling own-round3-builder-sonnet, owner 00:04 CST 2026-11-16). An owner override lifts the refusal. A reviewer's last step-up is a per-spawn word, so it is refused too. The floor and the step-up
 # deny first, so the middle step-up on opus above stays a deny. The deny cases stay in the floor and step-up blocks,
 # and the sonnet and haiku controls sit there too: floor_hit and step_up_hit judge them as before.
 # Failure classes: a false allow (an Opus spawn of any spelling or role passes unasked, or a marker
@@ -350,16 +355,15 @@ for _role in ("designer", "design-reviewer"):
 for _role in ("design", "designers", "design-review", "Designer"):
     add("ceiling: Agent %s on opus is denied (no standing grant)" % _role, "deny", CEILING,
         tool="Agent", prompt="Draw the mockup.", model="opus", subagent_type=_role)
-add("ceiling: Agent builder Try 3 of 3 on the full opus id is allowed (standing grant)", "allow",
-    tool="Agent", prompt="Try 3 of 3. Finish the fix.", model="claude-opus-5-5",
+add("ceiling: Agent builder Try 3 of 3 on the full opus id is denied under agent-model-cap (no builder grant)", "deny",
+    CEILING, tool="Agent", prompt="Try 3 of 3. Finish the fix.", model="claude-opus-5-5",
     subagent_type="builder")
-# The marker is a line of its own, as step_up_hit reads it. A lone quote and comment openers in the
-# lines above it hide nothing.
-add("ceiling: Agent builder Round 3 of 3 on the full opus id is allowed (standing grant)", "allow",
-    tool="Agent", prompt="Round 3 of 3. Finish the fix.", model="claude-opus-5-5",
+# A lone quote and comment openers in the lines above a marker hide nothing from the refusal, which holds on any line.
+add("ceiling: Agent builder Round 3 of 3 on the full opus id is denied under agent-model-cap (no builder grant)", "deny",
+    CEILING, tool="Agent", prompt="Round 3 of 3. Finish the fix.", model="claude-opus-5-5",
     subagent_type="builder")
-add("ceiling: Agent builder Try 3 of 3 on line two after a lone quote and comment openers is allowed",
-    "allow", tool="Agent", prompt="Don't skip /* the // check # now.\nTry 3 of 3. Finish the fix.",
+add("ceiling: Agent builder Try 3 of 3 on line two after a lone quote and comment openers is denied under agent-model-cap",
+    "deny", CEILING, tool="Agent", prompt="Don't skip /* the // check # now.\nTry 3 of 3. Finish the fix.",
     model="opus", subagent_type="builder")
 # A marker the role does not own, or one that is only prose, earns no grant.
 for _role, _brief in (
@@ -373,27 +377,25 @@ for _role, _brief in (
         ("builder", "Plan: Try 3 of 3 later, after the review.")):
     add("ceiling: Agent %s on opus with the brief %r is denied" % (_role, _brief[:24]), "deny", CEILING,
         tool="Agent", prompt=_brief, model="opus", subagent_type=_role)
-# A brief may open with a role word before the marker, or wrap the marker in markup. The first
-# non-blank line counts when it holds the marker anywhere, word-bounded. A later line counts only
-# when it starts with the marker. Failure classes: a false refusal (a third-try builder on opus is refused
-# because a word or markup sits before the marker), a false allow (a middle-step marker, a near-miss
-# like "of 30", or the marker in later prose earns the grant; a reviewer behind a role word dodges
-# its step-up).
+# A brief may open with a role word before the marker, wrap the marker in markup, or put it on a later line. A builder
+# on Opus is refused in every one of these forms, since no builder marker grants Opus (ruling own-round3-builder-sonnet,
+# owner 00:04 CST 2026-11-16). The reviewer step-up cases keep the marker scan under test. Failure class: a false allow
+# (a builder on Opus passes because a role word, markup or a line position reads as a grant).
 FIRST_LINE_BRIEF = "Builder, Round 3 of 3. Lane c204 fix the marker scan.\nFiles: hooks/guard.py."
-add("first-line marker: builder on opus with a role word before Round 3 of 3 on line one is allowed",
-    "allow", tool="Agent", prompt=FIRST_LINE_BRIEF, model="opus", subagent_type="builder")
-add("first-line marker: builder on opus with blank lines ahead of that first line is allowed",
-    "allow", tool="Agent", prompt="\n \t\n" + FIRST_LINE_BRIEF, model="opus", subagent_type="builder")
+add("first-line marker: builder on opus with a role word before Round 3 of 3 on line one is denied under agent-model-cap",
+    "deny", CEILING, tool="Agent", prompt=FIRST_LINE_BRIEF, model="opus", subagent_type="builder")
+add("first-line marker: builder on opus with blank lines ahead of that first line is denied under agent-model-cap",
+    "deny", CEILING, tool="Agent", prompt="\n \t\n" + FIRST_LINE_BRIEF, model="opus", subagent_type="builder")
 add("first-line marker: the same brief on sonnet is allowed (its row is sonnet, item 893)", "allow",
     tool="Agent", prompt=FIRST_LINE_BRIEF, model="sonnet", subagent_type="builder")
 for _label, _first in (("a role word and a dash", "Builder — Round 3 of 3"),
                        ("bold markup", "**Round 3 of 3**"),
                        ("a heading mark", "## Round 3 of 3")):
-    add("first-line marker: builder on opus whose first line is %s around the marker is allowed" % _label,
-        "allow", tool="Agent", prompt=_first + "\nLane c204 fix the marker scan.", model="opus",
+    add("first-line marker: builder on opus whose first line is %s around the marker is denied under agent-model-cap"
+        % _label, "deny", CEILING, tool="Agent", prompt=_first + "\nLane c204 fix the marker scan.", model="opus",
         subagent_type="builder")
-add("first-line marker: builder on opus with the marker on its own line two is allowed", "allow",
-    tool="Agent", prompt="Builder, lane c204: don't skip the scan.\nRound 3 of 3\nFiles: hooks/guard.py.",
+add("first-line marker: builder on opus with the marker on its own line two is denied under agent-model-cap", "deny",
+    CEILING, tool="Agent", prompt="Builder, lane c204: don't skip the scan.\nRound 3 of 3\nFiles: hooks/guard.py.",
     model="opus", subagent_type="builder")
 add("first-line marker: builder on opus with Round 2 of 3 on line one is denied", "deny", CEILING,
     tool="Agent", prompt="Builder, Round 2 of 3. Lane c204 continue the fix.", model="opus",
@@ -406,10 +408,12 @@ for _label, _first in (("a longer total", "Builder, Round 3 of 30. Lane c204 fix
                        ("a longer word before it", "Builder, Subround 3 of 3. Lane c204 fix the marker scan.")):
     add("first-line marker: builder on opus with %s on line one is denied" % _label, "deny", CEILING,
         tool="Agent", prompt=_first, model="opus", subagent_type="builder")
-add("first-line marker: builder on opus with no marker in the brief is denied, and says what was missing",
+# A refusal names no round marker as a way past a builder's Opus row: no marker grants it, so the reason must not
+# tell the builder that one would.
+add("first-line marker: builder on opus with no marker in the brief is denied, and names no round marker as a grant",
     "deny", CEILING, tool="Agent", prompt="Builder. Lane c204 fix the marker scan.\nFiles: hooks/guard.py.",
     model="opus", subagent_type="builder",
-    carries=("Round 3 of 3", ("first line", "first non-blank line")))
+    lacks=("Round 3 of 3", "first non-blank line"))
 add("first-line marker: reviewer with no model and Round 2 of 3 after a role word on line one is denied",
     "deny", STEP_UP, tool="Agent", prompt="Reviewer, Round 2 of 3. Lane c204 re-check the diff.",
     subagent_type="reviewer")
