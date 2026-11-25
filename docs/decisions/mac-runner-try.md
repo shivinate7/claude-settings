@@ -13,13 +13,13 @@ The try: the macOS leg of `lane-touched-tests.yml` (the `run` job) may run on th
 
 ## What the workflow does
 
-At head `e684473c18`, pull request 3950:
-
 - The `run` job's `runs-on` reads `MAC_RUNS_ON` for a same-repository pull request. The macOS leg runs on the label that the variable holds.
 - Unset or empty means hosted: the macOS leg runs on `macos-latest`.
 - The Windows leg never reads the variable. The `touched` job runs on Linux.
+- Before `On`, read the Actions setting that guards fork pull requests: `gh api repos/shivinate7/claude-settings/actions/permissions/fork-pr-contributor-approval`. Expect `all_external_contributors`.
 - On: `gh variable set MAC_RUNS_ON --body <label>`. Off: `gh variable delete MAC_RUNS_ON`.
 - Set the value to the runner's own label, which is `claude-settings-mac`. Note `mac-runs-on-bare-self-hosted` says why a bare label is wrong.
+- Before a maintainer lets a held fork run go, read the fork's workflow diff. That run goes to the Mac if the fork's copy names it.
 
 ## The expression is not the guard against fork code
 
@@ -34,7 +34,9 @@ This risk existed before this change. The runner was already registered on a pub
 - At 14:05 CST Nov 25 2026 the runner was online and idle. Its labels: `self-hosted`, `macOS`, `ARM64`, `claude-settings-mac`.
 - One Mac runs one job at a time.
 - A job sent to an offline runner queues. GitHub's time before it gives up is unverified. Clear the variable when the Mac is off.
-- The leg is not in `all-jobs-passed` and is not a required check. Under `merge.requiredChecks` "first-proof", which main pins (decision `merge-needs-current-base`), the lane lint reads no draft run. So a queued leg blocks no merge.
+- The leg is not in `all-jobs-passed` and is not a required check. Under `merge.requiredChecks` "first-proof", which main pins (decision `merge-needs-current-base`), the lane lint reads no draft run, and the merge tool's confirm drops a pending run of a workflow with no required job (`required_only`, merge/merge.py). So a queued leg blocks no lane lint and no confirm.
+- The guard's head check, `head_read` in merge/merge.py (wrapped by `merge_check` in hooks/guard_merge.py, refused in hooks/guard.py), counts any unfinished run as pending. So a merge outside the merge tool, a raw `gh pr merge` or the GitHub MCP merge, is refused while the leg is queued. Remedy: the merge tool.
+- A red leg blocks the merge tool on that head. The merge tool reads it as red (`head_state`), and a lane-lint PASS lifts only pending. The guard refuses it too. It clears on a push, or when a newer run of the same workflow passes (the newest run per name counts; the GitHub re-run path is unverified).
 - The Mac may lack Python 3.15, node and npm. Not checked.
 - Code from a same-repository pull request runs on the Mac as the guest account. Its files persist across jobs. Debt `mac-runner-state-persists` covers this.
 
