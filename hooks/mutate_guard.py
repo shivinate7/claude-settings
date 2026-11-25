@@ -3511,7 +3511,8 @@ MUTATIONS = [
      '                "unread_note": staticmethod(lambda payload: ""), "too_big_estimate": staticmethod(lambda result, path: 0),\n'
      '                "agent_rewrite": staticmethod(lambda payload: None),\n'
      '                "HANDOFF_MAX_TOKENS": 10000, "READ_CAP_TOKENS": 25000, "READ_MAX_LINES": 2000,\n'
-     '                "AUDIT_OWED": "", "AUDIT_REMEDY": ""})\n',
+     '                "AUDIT_OWED": "", "AUDIT_REMEDY": "", "AUDIT_HELPER_HEAD": "",\n'
+     '                "audit_helper_command": staticmethod(lambda payload: "")})\n',
      "guard", "a guard copy without reread_check.py refuses as guard-crash"),
     ("handoff-unread: a reread_check without its precompact_handoff sibling is let load again",
      '        if reread_check.ph is None:',
