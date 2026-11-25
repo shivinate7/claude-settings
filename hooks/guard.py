@@ -5808,15 +5808,20 @@ FABLE_SPAWN_REASON = (
 )
 
 
-def opus_spawn_hit(tool: str, tool_input) -> tuple:
+def opus_spawn_hit(tool: str, tool_input, hold=None) -> tuple:
     """(model, role, brief_unread) of the first spawn in an Agent, Task or Workflow call that sets Opus with no standing grant,
     or sets Fable, else ("", "", False). `role` is the role the spawn names, "" for none. `brief_unread` is the spawn's BRIEF_UNREAD.
     A standing grant
     is the role Plan, designer, design-reviewer or refuter, or an Explore whose brief's first non-blank line carries EXPLORE_AUDIT_MARKER (decision agent-model-cap).
-    It is an Opus grant: a spawn on Fable has none (opus_without_grant).
+    It is an Opus grant: a spawn on Fable has none (opus_without_grant). `hold` is the session's live model hold
+    (held_model): a judged Fable hold that covers the spawn's role (hold_covers_role) passes a spawn on Fable silently, as the
+    role row passes a spawn within a hold's ceiling (role_hold_verdict); no other hold passes one.
     Any other spawn above its role's model is refused (decision agent-model-cap), a reviewer on Opus too. The refusal is liftable by an override, so never_lifted does not read it."""
     for spawn in spawn_inputs(tool, tool_input):
         if opus_without_grant(spawn):
+            if (hold and hold.get("judged") and hold["model"] == "fable" and "fable" in str(spawn.get("model")).lower()
+                    and hold_covers_role(hold, spawn.get("subagent_type"))):
+                continue
             return str(spawn.get("model")), str(spawn.get("subagent_type") or ""), bool(spawn.get(BRIEF_UNREAD))
     return "", "", False
 
@@ -8709,8 +8714,8 @@ def judge(payload) -> None:
 
     # 9d. The Opus ceiling: a spawn on Opus with no standing grant, or on Fable, is refused (decision agent-model-cap).
     # An override lifts it; so does a pass file on the spawn's own model for its role (`opus 2h` for Opus, the owner's held
-    # Fable for Fable) and, for Opus only, a step grant. A spawn with no role runs general-purpose.
-    opus_model, opus_role, opus_unread = opus_spawn_hit(tool, tool_input)
+    # Fable for Fable, which opus_spawn_hit passes) and, for Opus only, a step grant. A spawn with no role runs general-purpose.
+    opus_model, opus_role, opus_unread = opus_spawn_hit(tool, tool_input, hold)
     if opus_model:
         refuse(tool, "deny", "agent-model-cap",
                (FABLE_SPAWN_REASON if "fable" in opus_model.lower() else OPUS_SPAWN_REASON)
