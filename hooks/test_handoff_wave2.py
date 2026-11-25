@@ -1799,6 +1799,126 @@ def case_stop_remedy_spawn_clears_unpatched_home():
     spawn_from_remedy(UNPATCHED, "stop")
 
 
+# The audit helper's command is the one the compaction-audit refusal prints (AUDIT_REMEDY in hooks/reread_check.py,
+# carried by COMPACTION_AUDIT_REASON in hooks/guard.py). The cases read it from the refusal text, never copy it here.
+HELPER_NAME = "precompact_handoff.py"
+
+
+def remedy_commands(text):
+    """The backticked spans in a remedy that run the audit helper, with the handoff path already filled in."""
+    return [span for span in re.findall(r"`([^`\n]+)`", text or "") if HELPER_NAME in span]
+
+
+def case_f1_printed_helper_command_passes_while_owed():
+    """Red on the old code: with the audit owed, the audit helper command that the compaction-audit refusal prints is
+    allowed by the guard. The old guard refuses that command as compaction-audit, so the printed remedy cannot run.
+    A remedy that names no helper command has nothing to run, so the case then checks nothing."""
+    c = Case("f1-cmd")
+    try:
+        post, rd = compact(c, SID)
+        if not step("--post-compact and the Read exit 0", exit_why(post) or exit_why(rd)):
+            return
+        refusal = guard_call(c, SID, "Bash", BASH)
+        if not step("after the read, a Bash call is refused by compaction-audit", refused_by(refusal, AUDIT_RULE)):
+            return
+        for cmd in remedy_commands(refusal[1]):
+            if not step("with the audit owed, the guard allows the helper command the refusal prints",
+                        allowed_why(guard_call(c, SID, "Bash", {"command": cmd}))):
+                return
+    finally:
+        c.cleanup()
+
+
+def case_f1_refusal_names_session_transcript_while_owed():
+    """Red on the old code: the compaction-audit refusal holds the session's transcript path, so a hand-written
+    `Audit:` brief can name it. audit_spawn clears the audit only for a brief that names that path. The old refusal
+    holds the handoff path and no transcript path."""
+    c = Case("f1-transcript")
+    try:
+        post, rd = compact(c, SID)
+        if not step("--post-compact and the Read exit 0", exit_why(post) or exit_why(rd)):
+            return
+        refusal = guard_call(c, SID, "Bash", BASH)
+        if not step("after the read, a Bash call is refused by compaction-audit", refused_by(refusal, AUDIT_RULE)):
+            return
+        step("the refusal holds the session's transcript path, which an Audit: brief must name",
+             "" if SESSION_TRANSCRIPT in refusal[1] else "the refusal holds no %s" % SESSION_TRANSCRIPT)
+    finally:
+        c.cleanup()
+
+
+def case_f1_other_commands_stay_refused_while_owed():
+    """Green control: while the audit is owed, a Bash call that is not the helper command stays refused by
+    compaction-audit. So do a look-alike that chains a command after the helper, and the helper under another path."""
+    c = Case("f1-control")
+    try:
+        post, rd = compact(c, SID)
+        if not step("--post-compact and the Read exit 0", exit_why(post) or exit_why(rd)):
+            return
+        brief = ' --audit-brief --handoff "%s"' % c.handoff(SID)
+        helper = 'python3 "%s"' % os.path.realpath(PRECOMPACT)
+        copies = c.dir("copies")
+        other = os.path.join(copies, HELPER_NAME)
+        shutil.copy(PRECOMPACT, other)
+        other_form = 'python3 "%s"' % other + brief
+        cases = (("an ordinary Bash call", BASH),
+                 ("the helper command with a chained rm", {"command": helper + brief + "; rm -rf x"}),
+                 ("the helper copied under another path", {"command": other_form}))
+        for label, tool_input in cases:
+            step("while the audit is owed, %s stays refused by compaction-audit" % label,
+                 refused_by(guard_call(c, SID, "Bash", tool_input), AUDIT_RULE))
+    finally:
+        c.cleanup()
+
+
+def parse_audit_of(c, text):
+    """reread_check.parse_audit of `text`, run in a scratch folder that holds copies of the hook's modules:
+    (the parsed lists or None, why), where `why` names a failed run."""
+    d = c.dir("parse")
+    shutil.copy(READ_CHECK, os.path.join(d, "reread_check.py"))
+    shutil.copy(PRECOMPACT, os.path.join(d, "precompact_handoff.py"))
+    shutil.copy(os.path.join(HERE, "shared_names.py"), os.path.join(d, "shared_names.py"))
+    code = "import json, sys; import reread_check as r; print(json.dumps(r.parse_audit(sys.stdin.read())))"
+    proc = subprocess.run([sys.executable, "-c", code], input=text, capture_output=True, text=True, cwd=d,
+                          env=c.env(), timeout=120)
+    if proc.returncode != 0:
+        return None, "rc=%r err=%r" % (proc.returncode, tail(proc.stderr))
+    try:
+        return json.loads(proc.stdout), ""
+    except ValueError:
+        return None, "parse_audit printed no JSON: %r" % tail(proc.stdout)
+
+
+def case_f2_missing_item_with_two_spans_requires_first_only():
+    """Red on the old code: a MISSING item with two backticked spans requires only its first token. The audit brief asks
+    for exactly one backticked token per item, so a second span is no required token. The old parse_audit takes both."""
+    c = Case("f2-two-spans")
+    try:
+        lists, why = parse_audit_of(c, "MISSING\n- `#412` blocks on `fb-1130-2`\n")
+        if not step("parse_audit reads a MISSING list from the reply",
+                    why or ("" if lists and "MISSING" in lists else "no MISSING list in %r" % (lists,))):
+            return
+        step("a MISSING item with two spans requires only its first token",
+             "" if lists["MISSING"] == ["#412"] else "required tokens %r, want ['#412']" % (lists["MISSING"],))
+    finally:
+        c.cleanup()
+
+
+def case_f2_missing_items_each_require_their_own_token():
+    """Green control: two MISSING items, each with one backticked token, require one token each, in order."""
+    c = Case("f2-two-items")
+    try:
+        lists, why = parse_audit_of(c, "MISSING\n- `#412`\n- `fb-1130-2`\n")
+        if not step("parse_audit reads a MISSING list from the reply",
+                    why or ("" if lists and "MISSING" in lists else "no MISSING list in %r" % (lists,))):
+            return
+        step("two MISSING items each require their own token",
+             "" if lists["MISSING"] == ["#412", "fb-1130-2"] else "required tokens %r, want ['#412', 'fb-1130-2']"
+             % (lists["MISSING"],))
+    finally:
+        c.cleanup()
+
+
 # --------------------------------------------------------------------------- part 5
 # Owed state is per session: PostCompact writes <session_id>.reread and <session_id>.audit under state/handoff/.
 # An agent shares its parent's session_id and carries agent_id, so an agent's compaction must not owe its
@@ -3418,6 +3538,11 @@ def main() -> int:
     case_refusal_remedy_spawn_clears_probe_home()
     case_refusal_remedy_spawn_clears_unpatched_home()
     case_stop_remedy_spawn_clears_unpatched_home()
+    case_f1_printed_helper_command_passes_while_owed()
+    case_f1_refusal_names_session_transcript_while_owed()
+    case_f1_other_commands_stay_refused_while_owed()
+    case_f2_missing_item_with_two_spans_requires_first_only()
+    case_f2_missing_items_each_require_their_own_token()
 
     print("Part 5: owed state is per session, and an agent's compaction owes its parent nothing (hooks/reread_check.py)")
     case_other_session_compaction_owes_nothing()
