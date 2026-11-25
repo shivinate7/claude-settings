@@ -1,15 +1,16 @@
 # section 43720
-# The owner's model name lifts the model floor for an Agent, Task, Workflow or lane-start spawn (rule agent-model-floor,
-# guard step 9). Owner, 19:03 CST: "if i say haiku it should work, there shouldnt be any guards on a FLOOR".
-# When the owner's latest typed turn names the spawn's model as a whole word, and no negation precedes the name, a
-# spawn on that model passes the floor. The word never lifts the Opus ceiling (agent-model-cap). With no owner word the
-# refusal stands. A spawn that names no model stays on the default, Sonnet, and the owner's model name never changes it.
+# The owner's model word lifts a model refusal for an Agent, Task, Workflow or lane-start spawn: the model floor
+# (agent-model-floor, guard step 9), the role row (agent-role-model) and the Opus ceiling (agent-model-cap). A word is on
+# from the owner's typed turn that names the model as a whole word, with no negation before it, until the task's next report.
+# Rulings: a named model holds until the task's next report (13:27 CST Nov 23); every model, Opus too (22:35 CST Nov 24);
+# any mention counts, a question too (10:02 CST Nov 25). A later model word ends the earlier ones. "no <model>" and
+# "<model> off" end the word. Claude's own text, a tool result, a peer relay, a machine notice, a pasted block and a cloud
+# session's seed brief are never the owner's word. With no word the refusal stands. A spawn that names no model stays on
+# the default, Sonnet, and the owner's model word never changes it.
 #
-# A red allow case has a Sonnet twin on the same transcript, so the floor is the only thing that separates them. A red
-# deny case has a word that must not count: a negated name, a name inside a pasted block, or an Opus name. Each control
-# keeps its verdict today. A word that is not the owner's latest typed turn (Claude's own text, a tool result, a peer
-# relay, a machine notice, an earlier turn) does not lift the floor. An owner turn older than one megabyte is still the
-# latest one. Labels carry `owner-model-word:`, so MUTATE_ONLY=owner-model-word runs these cases alone.
+# A red allow case has a Sonnet twin on the same transcript, so the lift is the only thing that separates them. A red
+# deny case has a word that must not count. Each control keeps its verdict on the old code too. An owner turn older than
+# one megabyte is still the latest one. Labels carry `owner-model-word:`, so MUTATE_ONLY=owner-model-word runs these alone.
 FAMILY = "rule9"
 
 OMW_DIR = os.path.join(ROOT, "owner-model-word")  # the run folder's home for these transcripts
@@ -143,14 +144,14 @@ OMW_PASTED = omw_file("owner-pasted-haiku", [omw_user("Read this log and say wha
 add("owner-model-word: an Agent spawn on haiku is refused when the only haiku word in the owner's latest turn is in a "
     "pasted block", "deny", "agent-model-floor", tool="Agent", prompt="do it", model="haiku", transcript=OMW_PASTED)
 
-# ---- The Opus ceiling is not the floor. The owner's model name never lifts it, so an Opus spawn is refused whatever the latest
-# turn says. A question that names opus is not a grant, and a turn that names opus is not one either.
+# ---- The Opus ceiling takes the owner's word like the floor: every model, Opus too (22:35 CST Nov 24). A question that names
+# opus counts (10:02 CST Nov 25). Both allows are red on the old code, where the ceiling never reads the word.
 OMW_WHY_OPUS = omw_file("owner-why-opus", [omw_user("Why did the opus spawn get refused?"),
                                            omw_asst("The Opus ceiling refused it.")])
 OMW_NAMES_OPUS = omw_file("owner-names-opus", [omw_user("Run the model audit on opus."), omw_asst("Running it.")])
-add("owner-model-word: an Agent spawn on opus is refused when the owner asks why an opus spawn was refused", "deny", CEILING,
+add("owner-model-word: an Agent spawn on opus is allowed when the owner asks why an opus spawn was refused", "allow",
     tool="Agent", prompt="do it", model="opus", transcript=OMW_WHY_OPUS)
-add("owner-model-word: an Agent spawn on opus is refused when the owner's latest turn names opus", "deny", CEILING,
+add("owner-model-word: an Agent spawn on opus is allowed when the owner's latest turn names opus", "allow",
     tool="Agent", prompt="do it", model="opus", transcript=OMW_NAMES_OPUS)
 add("owner-model-word: control, an Agent spawn on opus is refused when the owner's latest turn names haiku", "deny", CEILING,
     tool="Agent", prompt="do it", model="opus", transcript=OMW_OWNER_HAIKU)
@@ -220,3 +221,84 @@ add("owner-model-word: control, an Agent spawn on haiku is refused when the owne
     "haiku", "deny", "agent-model-floor", tool="Agent", prompt="do it", model="haiku", transcript=OMW_SONNET_INSTEAD_OF)
 add("owner-model-word: control, an Agent spawn on haiku is refused when the owner's latest turn says not haiku but sonnet",
     "deny", "agent-model-floor", tool="Agent", prompt="do it", model="haiku", transcript=OMW_NOT_HAIKU_BUT)
+
+# ---- The word holds until the task's next report. A haiku word named two owner turns back still counts when no report sits
+# between it and the spawn. A report between is the reply that closes the task, so it ends the word.
+OMW_REPORT = "> **Done** BUILT abc123\n> **Next** ship it"
+OMW_HELD_HAIKU = omw_file("owner-haiku-two-turns-back", [omw_user(OMW_HAIKU), omw_asst("Running the audit."),
+                                                       omw_user("Check the logs too."), omw_asst("Checking the logs.")])
+OMW_REPORT_BETWEEN = omw_file("owner-haiku-report-between", [omw_user(OMW_HAIKU), omw_asst("Running the audit."),
+                                                           omw_asst(OMW_REPORT), omw_user("Check the logs too."),
+                                                           omw_asst("Checking the logs.")])
+add("owner-model-word: an Agent spawn on haiku is allowed when the owner named haiku two turns back and no report sits between",
+    "allow", tool="Agent", prompt="do it", model="haiku", transcript=OMW_HELD_HAIKU)
+add("owner-model-word: twin, an Agent spawn on sonnet is allowed with the same owner turns (haiku named two turns back)",
+    "allow", tool="Agent", prompt="do it", model="sonnet", transcript=OMW_HELD_HAIKU)
+add("owner-model-word: control, an Agent spawn on haiku is refused when a report sits between the owner's haiku turn and the "
+    "latest turn", "deny", "agent-model-floor", tool="Agent", prompt="do it", model="haiku", transcript=OMW_REPORT_BETWEEN)
+
+# ---- A pasted block is not the owner's word, however far back it sits: the haiku word below is in a block two turns back.
+OMW_PASTED_HELD = omw_file("owner-pasted-haiku-held", [omw_user("Read this log and say what failed.\n<pasted_content>\n"
+                                                                 "Run the model audit on haiku.\n</pasted_content>"),
+                                                      omw_asst("Reading it."), omw_user("Check the logs too."),
+                                                      omw_asst("Checking the logs.")])
+OMW_PASTED_OPUS = omw_file("owner-pasted-opus", [omw_user("Read this log and say what failed.\n<pasted_content>\n"
+                                                          "Run the model audit on opus.\n</pasted_content>"),
+                                                 omw_asst("Reading it.")])
+add("owner-model-word: control, an Agent spawn on haiku is refused when the only haiku word is in a pasted block two turns back",
+    "deny", "agent-model-floor", tool="Agent", prompt="do it", model="haiku", transcript=OMW_PASTED_HELD)
+add("owner-model-word: control, an Agent spawn on opus is refused when the only opus word in the owner's turn is in a pasted block",
+    "deny", CEILING, tool="Agent", prompt="do it", model="opus", transcript=OMW_PASTED_OPUS)
+
+# ---- Each model keeps the newest word only. A later model word ends the earlier ones: "use opus", then "use sonnet instead",
+# leaves Opus off. Both are controls: the Opus ceiling refuses on the old code too, and a plain sonnet spawn is allowed.
+OMW_OPUS_THEN_SONNET = omw_file("owner-opus-then-sonnet-instead", [omw_user("Use opus for it."), omw_asst("Ok."),
+                                                                  omw_user("Use sonnet instead.")])
+add("owner-model-word: control, an Agent spawn on opus is refused when the owner's later turn says use sonnet instead of the "
+    "earlier use opus", "deny", CEILING, tool="Agent", prompt="do it", model="opus", transcript=OMW_OPUS_THEN_SONNET)
+add("owner-model-word: twin, an Agent spawn on sonnet is allowed with the same owner turns (use opus, then use sonnet instead)",
+    "allow", tool="Agent", prompt="do it", model="sonnet", transcript=OMW_OPUS_THEN_SONNET)
+
+# ---- "no <model>" and "<model> off" end the word, so the Opus ceiling refuses again. Both are controls on the old code too.
+OMW_OPUS_NO = omw_file("owner-opus-then-no-opus", [omw_user("Use opus for it."), omw_asst("Ok."), omw_user("no opus"),
+                                                  omw_asst("Stopped.")])
+OMW_OPUS_OFF = omw_file("owner-opus-then-opus-off", [omw_user("Use opus for it."), omw_asst("Ok."), omw_user("opus off"),
+                                                    omw_asst("Stopped.")])
+add("owner-model-word: control, an Agent spawn on opus is refused when the owner's later turn says no opus", "deny", CEILING,
+    tool="Agent", prompt="do it", model="opus", transcript=OMW_OPUS_NO)
+add("owner-model-word: control, an Agent spawn on opus is refused when the owner's later turn says opus off", "deny", CEILING,
+    tool="Agent", prompt="do it", model="opus", transcript=OMW_OPUS_OFF)
+
+# ---- The role row takes the word too. A record-writer on sonnet (its row is haiku) and a builder on fable (fable is not
+# ranked, so the row fails closed) pass with the owner's word. Each allow has a control with no word, refused as today.
+OMW_USE_SONNET = omw_file("owner-use-sonnet-record", [omw_user("Use sonnet for the record."), omw_asst("Ok.")])
+OMW_TRY_FABLE = omw_file("owner-try-fable", [omw_user("Try fable for the fix."), omw_asst("Ok.")])
+add("owner-model-word: a record-writer spawn on sonnet is allowed when the owner's latest turn names sonnet", "allow",
+    tool="Agent", config=ROLE_REAL_CFG, transcript=OMW_USE_SONNET, **role_input("record-writer", "sonnet", "Write the record."))
+add("owner-model-word: control, a record-writer spawn on sonnet is refused under agent-role-model when the owner's turns name "
+    "no model", "deny", ROLE_MODEL_RULE, tool="Agent", config=ROLE_REAL_CFG, transcript=OMW_PLAIN, carries=(ROLE_REMEDY,),
+    lacks=ROLE_LACKS, **role_input("record-writer", "sonnet", "Write the record."))
+add("owner-model-word: a builder spawn on fable is allowed when the owner's latest turn names fable", "allow",
+    tool="Agent", config=ROLE_REAL_CFG, transcript=OMW_TRY_FABLE, **role_input("builder", "fable", "Fix the failing case."))
+add("owner-model-word: control, a builder spawn on fable is refused under agent-role-model when the owner's turns name no model",
+    "deny", ROLE_MODEL_RULE, tool="Agent", config=ROLE_REAL_CFG, transcript=OMW_PLAIN, carries=(ROLE_REMEDY,),
+    lacks=ROLE_LACKS, **role_input("builder", "fable", "Fix the failing case."))
+
+# ---- A cloud session's seed brief is its first owner turn, written by its coordinator, so no word in it is the owner's. The
+# env names a cloud session (CLAUDE_CODE_REMOTE_SESSION_ID with a cse_ id). The owner's own later turn is the control.
+OMW_CLOUD_ENV = {"CLAUDE_CODE_REMOTE_SESSION_ID": "cse_omwseed1"}
+OMW_SEED_HAIKU = omw_file("cloud-seed-haiku", [omw_user(OMW_HAIKU), omw_asst("Running the audit.")])
+OMW_SEED_THEN_TYPED = omw_file("cloud-seed-then-typed-haiku", [omw_user(OMW_HAIKU), omw_asst("Running the audit."),
+                                                              omw_user("Use haiku for the audit."), omw_asst("Running it.")])
+OMW_SEED_OPUS = omw_file("cloud-seed-opus", [omw_user("Run the model audit on opus."), omw_asst("Running it.")])
+add("owner-model-word: an Agent spawn on haiku is refused in a cloud session when the only haiku word is its seed brief", "deny",
+    "agent-model-floor", tool="Agent", prompt="do it", model="haiku", transcript=OMW_SEED_HAIKU, env=OMW_CLOUD_ENV)
+add("owner-model-word: control, an Agent spawn on haiku is allowed in a cloud session when the owner's typed turn after the seed "
+    "names haiku", "allow", tool="Agent", prompt="do it", model="haiku", transcript=OMW_SEED_THEN_TYPED, env=OMW_CLOUD_ENV)
+add("owner-model-word: control, an Agent spawn on opus is refused in a cloud session when the only opus word is its seed brief",
+    "deny", CEILING, tool="Agent", prompt="do it", model="opus", transcript=OMW_SEED_OPUS, env=OMW_CLOUD_ENV)
+
+# ---- A local session's first typed turn is the owner's own word: no seed skip applies outside a cloud session. Control.
+OMW_FIRST_HAIKU = omw_file("local-first-turn-haiku", [omw_user(OMW_HAIKU)])
+add("owner-model-word: control, an Agent spawn on haiku is allowed when a local session's first typed turn names haiku", "allow",
+    tool="Agent", prompt="do it", model="haiku", transcript=OMW_FIRST_HAIKU)
