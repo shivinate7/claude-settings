@@ -441,23 +441,23 @@ class PushGroup(unittest.TestCase):
         self.assertIsNotNone(self.cancel, "checks.yml's top-level concurrency: block has no cancel-in-progress key")
 
     def test_two_push_runs_of_main_share_one_group(self):
-        """Red on origin/main: each push run has a group of its own (the run id), so a newer push run never replaces a pending one."""
+        """Each push run has a group of its own (the run id), so a newer push run never replaces a pending one."""
         first = render(self.group, run_context("push", 101, "refs/heads/main"))
         second = render(self.group, run_context("push", 102, "refs/heads/main"))
         self.assertEqual(first, second, "two push runs of main are in different groups, so a newer push run never replaces a pending one")
 
     def test_control_two_pull_request_runs_of_one_ref_share_one_group(self):
-        """Control, green on origin/main: pull request runs of one ref and draft state still share a group, so a new push cancels the old run."""
+        """Control: pull request runs of one ref and draft state still share a group, so a new push cancels the old run."""
         first = render(self.group, run_context("pull_request", 201, "refs/pull/7/merge", False))
         second = render(self.group, run_context("pull_request", 202, "refs/pull/7/merge", False))
         self.assertEqual(first, second, "two pull request runs of one ref are in different groups")
 
     def test_control_a_push_run_never_cancels_the_run_in_progress(self):
-        """Control, green on origin/main: a push run keeps cancel-in-progress false, so a running job is never cancelled."""
+        """Control: a push run keeps cancel-in-progress false, so a running job is never cancelled."""
         self.assertEqual(render(self.cancel, run_context("push", 101, "refs/heads/main")), "false", "a push run cancels the run in progress")
 
     def test_control_a_pull_request_run_cancels_the_older_run_of_its_ref(self):
-        """Control, green on origin/main: pull request runs keep cancel-in-progress true."""
+        """Control: pull request runs keep cancel-in-progress true."""
         self.assertEqual(render(self.cancel, run_context("pull_request", 201, "refs/pull/7/merge", False)), "true",
                          "a pull request run does not cancel the older run in progress")
 

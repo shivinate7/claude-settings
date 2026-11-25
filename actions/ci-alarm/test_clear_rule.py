@@ -554,7 +554,7 @@ class RedMainJudge(unittest.TestCase):
     # started is superseded when a newer run of its file and group is on the page, in any status. The judge steps over it, as it steps over
     # an empty run. Shape assumed by these cases, unmeasured on GitHub: a replaced run has no job rows; a job that started has started_at.
     def test_the_superseded_test_has_one_home_in_clear_rule(self):
-        """One home for "superseded": the judge, push-skip's base walk and `merge --main-run` all ask clear_rule.superseded_run. Red on origin/main: no home yet."""
+        """One home for "superseded": the judge, push-skip's base walk and `merge --main-run` all ask clear_rule.superseded_run. The test fails until that home exists."""
         self.assertTrue(callable(getattr(clear_rule, "superseded_run", None)),
                         "clear_rule has no superseded_run: each reader still judges a cancelled run alone")
 
