@@ -30,7 +30,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `roles-each-layer-proves-once` | Each layer proves a change once. | [`CLAUDE.md`](../CLAUDE.md) |
 | `roles-review-cap-three` | A change gets at most three review rounds. | [`CLAUDE.md`](../CLAUDE.md) |
 | `roles-findings-are-debts-or-notes` | A known gap is a debt only if Claude is likely to hit it in normal work. | [`CLAUDE.md`](../CLAUDE.md) |
-| `roles-third-round-steps-up` | Third try: Sonnet, high effort (owner item 893); an Opus third try stays allowed. | [`CLAUDE.md`](../CLAUDE.md) |
+| `roles-third-round-steps-up` | Third try: Sonnet, high effort (owner item 893). | [`CLAUDE.md`](../CLAUDE.md) |
 | `roles-resume-by-name` | Resume a dead agent by name, never fresh. | [`CLAUDE.md`](../CLAUDE.md) |
 | `parallelism-each-own-checkout` | Fan tasks out to agents now, each in its own checkout. | [`CLAUDE.md`](../CLAUDE.md) |
 | `parallelism-own-lane-orchestrator` | A read-only workflow agent shares the caller's checkout. | [`CLAUDE.md`](../CLAUDE.md) |
@@ -412,7 +412,6 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `cant-claim-reachable-passes` | "I can't check whether the host is reachable." and "I can't verify whether the token works." pass with no try, because a `whether` clause reads as a fact. | [`docs/debts/cant-claim-reachable-passes.md`](../docs/debts/cant-claim-reachable-passes.md) |
 | `carry-source-words` | `SOURCE_RE` accepts only the words git, page and digest as the source of a Recovered item. | [`docs/debts/carry-source-words.md`](../docs/debts/carry-source-words.md) |
 | `catalog-old-was-colon-flagged` | The overruled-text check in `lint/hook_catalog.py` flags `was:` when the word `old` comes earlier in the same block. | [`docs/debts/catalog-old-was-colon-flagged.md`](../docs/debts/catalog-old-was-colon-flagged.md) |
-| `checkin-before-crossing-ignored` | `checked_in` counts a check-in only when it was made at or after the agent's crossing of 30 minutes (`when >= crossed`). | [`docs/debts/checkin-before-crossing-ignored.md`](../docs/debts/checkin-before-crossing-ignored.md) |
 | `ci-hygiene-snippet-no-push-base` | The push snippet in `skills/ci-hygiene/snippets.md` (section 20) runs the push-skip action but never reads its `base=` output or passes it to the scope step. | [`docs/debts/ci-hygiene-snippet-no-push-base.md`](../docs/debts/ci-hygiene-snippet-no-push-base.md) |
 | `ci-job-pass-cache-ignores-index` | The pass cache key in the CI job runner `bin/ci-job` is `tree_key`, a `git add -A` on a temp copy of the index. | [`docs/debts/ci-job-pass-cache-ignores-index.md`](../docs/debts/ci-job-pass-cache-ignores-index.md) |
 | `ci-job-writes-pip-cache` | A full run of `lint/test_ci_job.py` rewrites an entry in `~/.cache/pip/http-v2`. | [`docs/debts/ci-job-writes-pip-cache.md`](../docs/debts/ci-job-writes-pip-cache.md) |
@@ -623,6 +622,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `windows-merge-dead-pid-trees` | On Windows the merge tool keeps a dead run's merge checkout, so it is never removed. | [`docs/debts/windows-merge-dead-pid-trees.md`](../docs/debts/windows-merge-dead-pid-trees.md) |
 | `windows-shards-outgrow-caps` | The Windows guard suite runs in 5 shards, each at the 75 min stopgap cap: shard 1 in job `checks-windows-guard`, which a ready pull request runs as its Windows slice, and shards 2 to 5 on a daily schedule and a manual dispatch only (decision `windows-prs-run-marked-tests`). | [`docs/debts/windows-shards-outgrow-caps.md`](../docs/debts/windows-shards-outgrow-caps.md) |
 | `windows-slice-marks-incomplete` | A ready pull request runs only the marked Windows tests in the guard and merge slices. | [`docs/debts/windows-slice-marks-incomplete.md`](../docs/debts/windows-slice-marks-incomplete.md) |
+| `workflow-variable-model-unjudged` | `spawn_inputs` in `hooks/guard.py` drops a Workflow `agent()` call whose `model` or `agentType` the scan cannot read, such as a variable or a constant that holds the model. | [`docs/debts/workflow-variable-model-unjudged.md`](../docs/debts/workflow-variable-model-unjudged.md) |
 | `wp-batch-reads-installed-copy` | `stale_pages.py` batch mode (no `--page`) compares each live page with the `page.html` installed at session start, not with claude-settings main. | [`docs/debts/wp-batch-reads-installed-copy.md`](../docs/debts/wp-batch-reads-installed-copy.md) |
 
 ## Plans
