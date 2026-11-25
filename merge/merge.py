@@ -459,7 +459,9 @@ def shared_deadline(seconds):
     finally:
         _READ_DEADLINE = prior
 
-def sh(args, cwd=None, input=None, env=None, timeout=None, live_stderr=False, raw=False):
+def sh(args, cwd=None, input=None, env=None, timeout=None, live_stderr=False, raw=False, stdout_only=False):
+    """-> (code, output): stdout and stderr joined. `stdout_only`: a call that exits 0 gives stdout alone, so a caller that parses the output never reads a
+    stderr hint (gh 2.105 prints one with exit 0 in an agent session). A failed call keeps both streams, so a refusal shows the tool's own text."""
     args = [resolve_program(args[0], env), *args[1:]]
     limits = [t for t in (SH_TIMEOUT, timeout) if t is not None]
     timeout = max(0.05, _READ_DEADLINE - time.monotonic()) if _READ_DEADLINE is not None else min(limits) if limits else None
@@ -470,6 +472,8 @@ def sh(args, cwd=None, input=None, env=None, timeout=None, live_stderr=False, ra
         r = _nowindow.run(args, cwd=cwd, input=input, env=env, capture_output=True, timeout=timeout)
         return r.returncode, r.stdout
     r =_nowindow.run(args, cwd=cwd, input=input, env=env, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout)
+    if stdout_only and r.returncode == 0:
+        return 0, r.stdout.strip()
     return r.returncode, (r.stdout + r.stderr).strip()
 
 def git(cwd, *a, input=None):
@@ -1111,7 +1115,7 @@ class GhLock(Lock):
         ponytail: no retry inside `shared_deadline`, as in Host.gh. Before the lock is held, a rate wait follows the ladder: 60 + 300 + 900 s = 21 minutes per call at most, and the lock is not yet ours to extend."""
         path = next((x for x in a if x.startswith("repos/")), " ".join(a))
         retries = NET_RETRIES if _READ_DEADLINE is None and not once else 0
-        c, out, _ = retry_net(lambda: sh(["gh", "api", "-i", *a], cwd=self.cwd), self.pause, retries, f"the lock call {path}", self.now, self.extend_for, net_method(a), idempotent, landed)
+        c, out, _ = retry_net(lambda: sh(["gh", "api", "-i", *a], cwd=self.cwd, stdout_only=True), self.pause, retries, f"the lock call {path}", self.now, self.extend_for, net_method(a), idempotent, landed)
         return c, out
 
     def read(self, b):
@@ -1282,7 +1286,7 @@ class Host:
         raw = []
 
         def call():
-            c, out = sh(["gh", *args], cwd=cwd)
+            c, out = sh(["gh", *args], cwd=cwd, stdout_only=True)
             raw[:] = [out]
             return c, out
         c, out, self.net_retries = retry_net(call, self.pause, NET_RETRIES if _READ_DEADLINE is None else 0, f"`gh {' '.join(args[:2])}`", self.now, self.before_wait, net_method(args), idempotent, landed)
@@ -2744,7 +2748,7 @@ MERGE_FIELDS = set(MERGE_DEFAULTS) | {"deleteBranch", "ignoreChecks", "keepBranc
 
 def host_default_branch(root):
     # time.sleep is looked up at call time, so a test's patch of it holds. No retry inside `shared_deadline`, as in Host.gh.
-    c, out, n = retry_net(lambda: sh(["gh", "api", "repos/{owner}/{repo}", "-X", "GET"], cwd=root), lambda s: time.sleep(s), NET_RETRIES if _READ_DEADLINE is None else 0, "`gh api repos`")
+    c, out, n = retry_net(lambda: sh(["gh", "api", "repos/{owner}/{repo}", "-X", "GET"], cwd=root, stdout_only=True), lambda s: time.sleep(s), NET_RETRIES if _READ_DEADLINE is None else 0, "`gh api repos`")
     if is_net(c, out):
         raise NetStop(f"network error from `gh api repos`, still failing after {n} retries. Run again.\n{out}")
     try:

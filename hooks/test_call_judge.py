@@ -86,6 +86,7 @@ import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (the
 import cost_probe  # noqa: E402  the shared cost counters (testing/cost_probe.py)
 sys.path.insert(0, os.path.join(REPO, "tests"))
 import lift_line  # noqa: E402  the one reader of the lift line (tests/lift_line.py)
+from shared_names import SETTINGS_REPO  # noqa: E402  the one home of the settings repo's name (hooks/shared_names.py)
 ROOT = _test_temp.run_folder()
 atexit.register(shutil.rmtree, ROOT, ignore_errors=True)
 STUB_DIR = os.path.join(ROOT, "stub")
@@ -1446,6 +1447,50 @@ def case_widening_rule_says_widening_is_a_form_that_passes_one_repos_variant():
           sentences or prompt[:200])
 
 
+# The settings repo is the shared tool's home, so a change that names only it is never widening. One sentence of the
+# widening slot says so with the repo's name, and the sentence that defines widening names the repo as the one other
+# than which a repo's differing form passes.
+def case_widening_rule_never_flags_a_change_that_names_only_the_settings_repo():
+    r = run_hook(page_input("set", good_page_item()), answer=ALLOW)
+    prompt = r.calls[0]["prompt"] if r.calls else ""
+    sentences = widening_sentences(prompt)
+    check("widening slot: the judged prompt carries the widening slot after the question-format prompt",
+          bool(sentences), prompt[:200])
+    check("widening: one sentence holds the settings repo value and a never-flag word ('never flag' or 'not widen')",
+          widening_pin(sentences, ("never flag", "not widen"), (SETTINGS_REPO.lower(),)),
+          "missing words in one sentence: 'never flag' or 'not widen', with %r; widening sentences: %s"
+          % (SETTINGS_REPO.lower(), sentences))
+
+
+def case_widening_rule_defines_widening_as_other_than_the_settings_repo():
+    r = run_hook(page_input("set", good_page_item()), answer=ALLOW)
+    prompt = r.calls[0]["prompt"] if r.calls else ""
+    sentences = widening_sentences(prompt)
+    check("widening slot: the judged prompt carries the widening slot after the question-format prompt",
+          bool(sentences), prompt[:200])
+    check("widening: the sentence defining widening holds 'other than' and the settings repo value",
+          widening_pin(sentences, ("widen",), ("other than",), (SETTINGS_REPO.lower(),)),
+          "missing words in one sentence: 'widen', 'other than', with %r; widening sentences: %s"
+          % (SETTINGS_REPO.lower(), sentences))
+
+
+def case_widening_rule_bounds_the_settings_repo_never_flag():
+    # The never-flag sentence for the settings repo is bounded: one sentence holds the repo value, a never-flag word,
+    # 'unless' and 'other than', so a change that lets another repo's differing form pass is still flagged.
+    r = run_hook(page_input("set", good_page_item()), answer=ALLOW)
+    prompt = r.calls[0]["prompt"] if r.calls else ""
+    sentences = widening_sentences(prompt)
+    check("widening slot: the judged prompt carries the widening slot after the question-format prompt",
+          bool(sentences), prompt[:200])
+    holds = [s for s in sentences if ("never flag" in s or "not widen" in s) and SETTINGS_REPO.lower() in s]
+    closest = max(holds or [""], key=lambda s: sum(w in s for w in ("unless", "other than")))
+    missing = [w for w in ("unless", "other than") if w not in closest]
+    check("widening: one sentence holds the settings repo value, 'never flag' or 'not widen', 'unless' and 'other than'",
+          widening_pin(sentences, ("never flag", "not widen"), (SETTINGS_REPO.lower(),), ("unless",), ("other than",)),
+          "missing words in the never-flag sentence for the settings repo: %s; widening sentences: %s"
+          % (", ".join(repr(w) for w in missing) or "none, the words are in two sentences", sentences))
+
+
 def case_fail_open():
     for label, inp, kwargs in (
         ("a model failure on a spawn", spawn_input("builder", model="sonnet"), {"model_fail": True}),
@@ -1879,6 +1924,9 @@ def main():
                  case_widening_fair_option_passes_code_path, case_widening_rule_names_the_mark,
                  case_widening_rule_spares_a_tool_wide_change_with_no_repo_named,
                  case_widening_rule_says_widening_is_a_form_that_passes_one_repos_variant,
+                 case_widening_rule_never_flags_a_change_that_names_only_the_settings_repo,
+                 case_widening_rule_defines_widening_as_other_than_the_settings_repo,
+                 case_widening_rule_bounds_the_settings_repo_never_flag,
                  case_fail_open, case_settings_row, case_past_ruling_replay_item_145,
                  case_past_ruling_replay_item_133, case_past_ruling_cited_passes,
                  case_past_ruling_explained_premise, case_past_ruling_unknown_is_named,
