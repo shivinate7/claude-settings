@@ -238,5 +238,20 @@ class TreeExportManifestCases(unittest.TestCase):
         self.assertEqual(got, sorted(want), "manifest_add left the copy's manifest as %s, want the export's paths and lint/zz_new.py" % (got,))
 
 
+class TreeExportPathCases(unittest.TestCase):
+    """A tracked path the one-path-per-line manifest cannot hold fails the export, and the error names the path."""
+
+    def test_a_path_with_a_newline_fails_the_export_and_names_the_path(self):
+        try:
+            repo, sha = make_fixture(os.path.join(ROOT, "newline"), files={"docs/two\nlines.md": "a\n"})
+        except (OSError, subprocess.CalledProcessError) as exc:
+            self.skipTest("the file system or git refuses a newline in a name: %s" % exc)
+        dest = os.path.join(ROOT, "newline-export")
+        os.makedirs(dest)
+        error = tree_export.export_tree(repo, sha, dest)
+        self.assertIsNotNone(error, "the export returned None for a path with a newline, so the copy drops the file with no error")
+        self.assertIn("docs/two", error, "the export's error names no path: %s" % error)
+
+
 if __name__ == "__main__":
     unittest.main()
