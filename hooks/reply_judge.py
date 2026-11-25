@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""At Stop, a model (Haiku) judges the final reply against eleven rules. It runs on every fifth Stop and on every Stop whose reply carries an Input Needed label, the words "blocked on", a Markdown table, a GitHub search total, a cost ranking or a claim about main, and never refuses. A finding comes back as a note on the next turn and writes one guard.log line.
+"""At Stop, a model (Haiku) reads every reply with text. It judges the reply against thirteen rules on every fifth Stop and on every Stop whose reply carries an Input Needed label, the words "blocked on", a Markdown table, a GitHub search total, a cost ranking or a claim about main, and against two rules on every other Stop. It never refuses. A finding on one of the eleven older rules comes back as a note on the next turn and writes one guard.log line; a finding on one of the two newer rules writes the line and prints nothing.
 
 It is a command hook, not a `type: prompt` hook, because a prompt hook cannot exit on a field
 in code. This hook does: `stop_hook_active` true means this Stop is already a rewrite, so it
@@ -9,8 +9,14 @@ The model call is `decision_watch.invoke_model`, the one home for it: Haiku at e
 `--safe-mode`, no tools, and an empty config dir and scratch cwd, so the child cannot fire this
 hook again. This file passes its own accepted answer, `{"ok": true|false}`.
 
-Sampling: the judge runs on Stop n of a session (counting only Stops that carry a reply) when (n - 1) % 5 == 0. A skipped Stop returns
-at once with no model call and no output. The count is a file per session under the state folder.
+Sampling: the older rules run on Stop n of a session (counting only Stops that carry a reply) when (n - 1) % 5 == 0, or when
+a trigger below holds. Every other Stop with a reply still makes its one model call, with a prompt that holds only the two
+newer rules (roles-finding-has-a-home, parallelism-wait-names-its-event). A Stop makes one call whichever prompt it sends,
+never two. An empty reply makes no call. The count is a file per session under the state folder.
+
+Log only: a finding on a newer rule appends one guard.log line and prints no note, so the owner reads the log before the
+rules interrupt a turn. Cost: one model call per Stop, one log append per finding, no new process beyond that call, no timer.
+The log's named reader is the owner at his review.
 
 Input Needed: a reply with an Input Needed item is judged on every Stop, besides the sample, so
 each handed-off step is checked for its reason and the check. It is also checked for a pick that can
@@ -36,18 +42,19 @@ match: it cannot see a count worded with no digit or count word, and a quote pas
 clip may be dropped from the prompt. The prompt tells the model not to flag a count read from REST. A
 search that only finds candidates is exempt only when the reply says REST confirms each one; a search
 count with no REST confirmation is flagged. Cost: no new process start, no new file; the match is one regex
-over the reply and runs before the model module loads, and only a Stop that holds the trigger words
-reaches the model beyond the one-in-five sample.
+over the reply and runs before the model module loads; a Stop that holds the trigger words sends the older
+rules' prompt, and every other Stop sends the two newer rules' prompt.
 
 A finding writes one line to guard.log through `guard_core.record` (decision `noted`; rule = the
 first judged rule id the reason names, else `reply-judge`; matched = `stop=<n> <reason>`). The
-advisor reads these at each cull. guard_core loads on a finding, and on a judged Stop whose Why yours line
+advisor reads the older rules' lines at each cull; the owner reads the two newer rules' lines at his review.
+guard_core loads on a finding, and on a judged Stop whose Why yours line
 cites a route id a row holds (route_match.surface reads it). A failed write is swallowed.
 
 Fail open. Any model error, timeout or odd answer prints one line on stderr, exits 0, and
-refuses nothing. A finding never refuses: the hook runs async, and a finding prints
+refuses nothing. A finding never refuses: the hook runs async, and a finding on an older rule prints
 `{"hookSpecificOutput": {"hookEventName": "Stop", "additionalContext": NOTE}}` on stdout, which the
-session reads as a note on the next turn.
+session reads as a note on the next turn. A finding on a newer rule prints nothing.
 """
 import hashlib
 import json
@@ -122,7 +129,10 @@ JUDGED_RULES = ("output-start-with-point", "style-cut-narration",
                 "style-table-gold-column", "questions-go-to-owner",
                 "style-limits-kept-silently", "style-question-form",
                 "verification-counts-from-rest", "measure-before-priority",
-                "verification-report-unknown-reads")
+                "verification-report-unknown-reads",
+                "roles-finding-has-a-home", "parallelism-wait-names-its-event")
+NEW_RULES = JUDGED_RULES[-2:]  # judged on every Stop; a finding is a log line and no note
+OLDER_RULES = JUDGED_RULES[:-2]
 JUDGE_RULE = "reply-judge"  # the guard.log rule when the reason names none of JUDGED_RULES
 REPLY_MAX = 12000  # the prompt rides stdin, so no argv cap; the clip bounds cost and latency only (unmeasured)
 
@@ -132,8 +142,7 @@ GH_SWITCH_SENTENCE = ("A block that hands the owner a gh command starts, after a
                       "and switches to %s only for a repo %s cannot reach; flag a block with no such switch. "
                       % (GH_DEFAULT_LOGIN, GH_FALLBACK_LOGIN, GH_DEFAULT_LOGIN))
 
-INSTRUCTIONS = (
-    "Judge the final reply below against eleven rules. "
+INSTRUCTIONS_OLDER = (
     "output-start-with-point: the first sentence is the point, not a preamble. "
     "style-cut-narration: cut narration and recaps; narration means lines like \"I will now...\" or \"Let me...\"; "
     "a Done/Deviations/Input Needed/Next report is never narration. "
@@ -203,9 +212,29 @@ INSTRUCTIONS = (
     "verification-report-unknown-reads: flag a reply that says a change matches main, is main's own, or is no worse than main "
     "(no regression) without citing a read of origin/main, a path:line on main or a main screenshot. "
     "Never flag such a claim that cites such a read: a path:line on main, a main screenshot or a read of origin/main. "
+)
+
+INSTRUCTIONS_NEW = (
+    NEW_RULES[0] + ": flag a reply that names a finding it made, such as a gap, a defect, a false alarm or a risk, "
+    "and leaves it with no home: no record slug, debt, note file, PR or queued step that holds it, "
+    "and no agent started for it; the fix is to file it as a debt or a note, or to start an agent for it. "
+    + NEW_RULES[1] + ": flag a reply that says it waits, holds or pauses and names nothing it waits for, "
+    "such as an agent, a run, a review or a reply; the fix is to name the event the wait ends on. "
+    "Never flag a finding or a wait that an Unstarted or Next line lists, since that line is its home. "
+    "Never flag quoted or negated finding words, such as \"no false alarm\" or a rule's text in quotes. "
+    "Never flag a reviewer's or auditor's own report of its findings; that report is the home of its findings. "
+    "Never flag a wait on named agents or background work the reply says it started. "
+)
+
+INSTRUCTIONS_TAIL = (
     "Flag only on a clear breach; when unsure answer {\"ok\": true}. "
     "Reply JSON only: {\"ok\": true} or {\"ok\": false, \"reason\": \"<rule id and the fix, one line>\"}."
 )
+
+# The prompt of a Stop that runs the older rules, and the prompt of a Stop that runs only the newer two.
+INSTRUCTIONS = ("Judge the final reply below against thirteen rules. " + INSTRUCTIONS_OLDER + INSTRUCTIONS_NEW
+                + INSTRUCTIONS_TAIL)
+INSTRUCTIONS_NEW_ONLY = "Judge the final reply below against two rules. " + INSTRUCTIONS_NEW + INSTRUCTIONS_TAIL
 
 
 ROUTE_ROWS_MAX = 30  # bounds the prompt when one act holds many rows (unmeasured)
@@ -274,12 +303,14 @@ def route_rows_block(reply):
         return ""
 
 
-def build_prompt(reply):
-    block = route_rows_block(reply)
+def build_prompt(reply, older=True):
+    """The prompt for one Stop. `older` False sends the newer two rules only, with no route rows, which only the
+    older rule output-never-hand-off-doable-step reads."""
+    block = route_rows_block(reply) if older else ""
     if len(reply) > REPLY_MAX:
         half = REPLY_MAX // 2
         reply = reply[:half] + "\n[middle of the reply cut for length]\n" + reply[-half:]
-    prompt = "%s\n\nReply:\n%s" % (INSTRUCTIONS, reply)
+    prompt = "%s\n\nReply:\n%s" % (INSTRUCTIONS if older else INSTRUCTIONS_NEW_ONLY, reply)
     return "%s\n\n%s" % (prompt, block) if block else prompt
 
 
@@ -369,14 +400,15 @@ def main():
         if not isinstance(reply, str) or not reply.strip():
             return 0
         stop_n = count_this_stop(hook.get("session_id"))
-        if (stop_n - 1) % SAMPLE_EVERY and not TABLE_SEPARATOR.search(reply) \
-                and not BLOCKED_ON.search(reply) and not SEARCH_TOTAL.search(reply) \
-                and not has_cost_rank(reply) and not has_main_claim(reply) \
-                and not has_input_needed(reply):
-            return 0
+        older = not (stop_n - 1) % SAMPLE_EVERY or bool(
+            TABLE_SEPARATOR.search(reply) or BLOCKED_ON.search(reply) or SEARCH_TOTAL.search(reply)
+            or has_cost_rank(reply) or has_main_claim(reply) or has_input_needed(reply))
         import decision_watch
+        # Cost of this call: one model call per Stop, whichever prompt it sends and never a second one; one
+        # guard.log append per finding; no process beyond the call; no timer. The log's named reader is the
+        # owner, at his review of the two newer rules' lines.
         verdict, error = decision_watch.invoke_model(
-            build_prompt(reply), timeout=MODEL_TIMEOUT, shape=OK_SHAPE)
+            build_prompt(reply, older), timeout=MODEL_TIMEOUT, shape=OK_SHAPE)
     except Exception as exc:
         error, verdict = "%s: %s" % (type(exc).__name__, exc), None
     if error:
@@ -387,6 +419,10 @@ def main():
         if not isinstance(reason, str) or not reason.strip():
             reason = "reply judge: the reply breaks a style rule."
         log_finding(hook.get("session_id"), stop_n, reason)
+        # A finding on a newer rule is log only. A Stop with the older prompt still prints its note when the
+        # reason names an older rule, or names no judged rule.
+        if not older or (any(r in reason for r in NEW_RULES) and not any(r in reason for r in OLDER_RULES)):
+            return 0
         print(json.dumps({"hookSpecificOutput": {"hookEventName": "Stop", "additionalContext": reason}}))
     return 0
 
