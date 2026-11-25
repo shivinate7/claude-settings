@@ -186,7 +186,7 @@ MODEL_ROLES = ASK_ROLES + ("Explore",)
 MODEL_ROLE_WORDS = {word: role for role in MODEL_ROLES for word in (role.lower(), role.lower() + "s")}
 MODEL_ROLE_WORDS.update({"explorer": "Explore", "explorers": "Explore"})
 FLOOR_RULE, ROLE_RULE = "agent-model-floor", "agent-role-model"
-HOLD_ONLY_RULES = (FLOOR_RULE, ROLE_RULE)  # the rules a held model lifts besides OPUS_RULE (and only for its own model)
+HOLD_ONLY_RULES = (FLOOR_RULE, ROLE_RULE)  # the rules take() reads a held model for; their refusals pass no spawn model, so it never lifts them
 LOG_REASON_MAX = 300
 ID_CHAR = r"[\w.-]"  # the characters of a session id, for a reader that finds one inside other text
 SESSION_ID = re.compile(ID_CHAR + "{1,128}")  # the id names a file: no separator, no leading dot
@@ -1139,9 +1139,10 @@ def take(session_id, agent_id, at, rule=None, spawn_role=None, cwd=None, transcr
     creates its claim marker wins. For the Opus spawn refusal (rule OPUS_RULE with a spawn_role) the Opus
     override is read first, then the step grant (STEP_LIFTED or STEP_UNREAD), so a lift either one covers
     spends no one-act override. `cwd` is the call's directory, where the step grant is read.
-    The session's pass file also lifts the model floor and the role row (HOLD_ONLY_RULES), and only for a spawn on the
-    model it holds and a role it covers: `model` is the spawn's model, `transcript` the session's, where a hold that
-    ends at the report is read."""
+    For the model floor and the role row (HOLD_ONLY_RULES) it reads the pass file for a spawn on `model`, but those
+    refusals pass no spawn model, so the file never matches and a held model lifts neither (the floor reads the owner's
+    word, `owner_names_model`; the row reads the hold, `role_hold_verdict`, both in the guard). `transcript` is the
+    session's, where a hold that ends at the report is read."""
     opus = _take_opus(session_id, spawn_role, at, transcript, model) if rule == OPUS_RULE and spawn_role is not None else None
     if rule in HOLD_ONLY_RULES:
         opus = _take_opus(session_id, spawn_role, at, transcript, model or "")

@@ -2375,7 +2375,8 @@ def refuse(tool: str, decision: str, rule: str, reason: str, matched: str, spawn
     owner-override). A lifted act prints one context line and no decision, so the normal permission flow runs. The
     veto runs before the override is taken, so a call that also holds a never-lifted act spends no override.
     spawn_role is set only on the Opus spawn refusal, the one refusal an Opus override may lift.
-    spawn_model is the model of the spawn a model refusal is about, so the session's held model lifts it only for that model.
+    spawn_model is the model of the spawn the refusal is about. Only the Opus spawn refusal passes it (rule 9d); the model
+    floor and the role row pass none, so a held model lifts neither (the guard judges the hold itself).
     on_lift, when set, runs once when an override lifts the act, so a rule may keep state only for an act that lands.
     continue_on_lift makes a lifted act return True instead of exiting, so the caller can judge the next rule of a
     group (the lane start's rules); any other outcome exits as before.
