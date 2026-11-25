@@ -634,6 +634,24 @@ class RedMainJudge(unittest.TestCase):
         blamed = clear_rule.judge(page, FLOWS, set(), {}, lambda r: jobs.get(r["id"]), lambda r: CHECKS_TEXT).blamed
         self.assertEqual(blamed, [page[0]["head_sha"]], "the blame names a commit beyond the red run's own, with the green run next to it")
 
+    def test_fixed_a_replaced_run_above_the_breaking_run_is_not_blamed(self):
+        """Red on the old code: run 4 was replaced by run 5 and sits above breaking run 3, so it is outside 3's span (green run 2 up to run 3). The blame
+        names run 3's commit alone; the walk from the newest red run 5 names run 4's commit too."""
+        page = [page_run(5, "failure", attempt=2), page_run(4, "cancelled"), page_run(3, "failure", attempt=2), page_run(2, "success")]
+        jobs = {5: [job_row("scope", "success"), job_row("checks", "failure")], 4: [], 3: [job_row("scope", "success"), job_row("checks", "failure")],
+                2: [job_row("scope", "success"), job_row("checks", "success")]}
+        blamed = clear_rule.judge(page, FLOWS, set(), {}, lambda r: jobs.get(r["id"]), lambda r: CHECKS_TEXT).blamed
+        self.assertEqual(blamed, [page[2]["head_sha"]], "the blame names a commit above the breaking run: a replaced run newer than it is outside its span")
+
+    def test_control_a_replaced_run_below_the_breaking_run_stays_blamed_under_a_newer_red_run(self):
+        """Control, green on the old code: run 2 was replaced by run 3 and sits between green run 1 and breaking run 3, so its commit stays in the span,
+        though a newer red run 5 sits above the breaking run."""
+        page = [page_run(5, "failure", attempt=2), page_run(3, "failure", attempt=2), page_run(2, "cancelled"), page_run(1, "success")]
+        jobs = {5: [job_row("scope", "success"), job_row("checks", "failure")], 3: [job_row("scope", "success"), job_row("checks", "failure")],
+                2: [], 1: [job_row("scope", "success"), job_row("checks", "success")]}
+        blamed = clear_rule.judge(page, FLOWS, set(), {}, lambda r: jobs.get(r["id"]), lambda r: CHECKS_TEXT).blamed
+        self.assertEqual(blamed, [page[1]["head_sha"], page[2]["head_sha"]], "a replaced run between the green run and the breaking run is not blamed")
+
     def test_control_the_scripted_host_reads_a_red_job_red_through_base_state(self):
         """Control, green on the old code: the cases above compare with base_state, so base_state must show a red job red on this host."""
         verdict, red = base_judgment([page_run(2, "failure")], {2: [job_row("checks", "failure")]})
