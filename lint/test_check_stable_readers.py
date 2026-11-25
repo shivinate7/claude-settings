@@ -50,6 +50,12 @@ OLD_FIRST_PROOF = [
     (MERGE, 'rc in PINNED_STRINGS or isinstance(rc, list)', 'rc in ("none", FIRST_PROOF) or isinstance(rc, list)'),
 ]
 OLD_READY_JOB_PREFIX = (MERGE, r're.compile(r"^([a-z][a-z0-9_-]*):(.+)$")', r're.compile(r"^([a-z][a-z0-9_-]*):(\w+)$")')
+READY = ["STE lint", "checks-rest:Cost line pins"]  # a job:step name the older regex groups under "checks"
+CI_REF_VARS = ("GITHUB_BASE_REF", "GITHUB_REF")  # read by hook_catalog.py --check, so no verdict may depend on the caller's shell
+PAGE = "docs/records.md"  # the records page, in git's forward slashes
+HAND_LINE = "\nA line by hand: the generator never writes this.\n"
+BROKEN_MERGE = (MERGE, "#!/usr/bin/env python3",
+                '#!/usr/bin/env python3\nraise RuntimeError("fixture: this merge tool does not load")')
 
 
 def put(path, text):
@@ -101,10 +107,19 @@ def case_dir():
     return tempfile.mkdtemp(prefix="case-", dir=RUN)
 
 
-def run_step(stable, head):
-    """The step's script on the two trees: (exit code, its output)."""
-    r = subprocess.run([sys.executable, SCRIPT, "--stable-tree", stable, "--head-tree", head],
-                       capture_output=True, text=True, cwd=REPO)
+def child_env():
+    """The caller's environment minus the runner's ref variables, and no bytecode written into a fixture tree."""
+    env = {k: v for k, v in os.environ.items() if k not in CI_REF_VARS}
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
+    return env
+
+
+def run_step(stable, head, base_ref=None):
+    """The step's script on the two trees, judging the records page against `base_ref` when given: (exit code, its output)."""
+    cmd = [sys.executable, SCRIPT, "--stable-tree", stable, "--head-tree", head]
+    if base_ref:
+        cmd += ["--base-ref", base_ref]
+    r = subprocess.run(cmd, capture_output=True, text=True, cwd=REPO, env=child_env())
     return r.returncode, r.stdout + r.stderr
 
 
@@ -114,6 +129,50 @@ def load_merge(tree, name):
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def generated_head(root):
+    """A head tree whose records page is the generator's own page, committed as a base for a pull request."""
+    head = build_tree(root, records=True)
+    gen = subprocess.run([sys.executable, os.path.join("lint", "hook_catalog.py"), "--records-only", "--root", head],
+                         capture_output=True, text=True, cwd=head, env=child_env())
+    assert gen.returncode == 0, gen.stdout + gen.stderr
+    assert os.path.isfile(os.path.join(head, *PAGE.split("/"))), "fixture: the generator wrote no records page"
+    commit_all(head, "records page from the generator")
+    return head
+
+
+def commit_pr(root, edits):
+    """Commit `edits` ({path: text}, git's forward slashes) on top of the tree at `root` as one pull request commit. -> the base sha."""
+    base = git(root, "rev-parse", "HEAD")
+    for rel, text in edits.items():
+        put(os.path.join(root, *rel.split("/")), text)
+    commit_all(root, "pull request")
+    return base
+
+
+def changed_paths(root, base):
+    """The paths the tree at `root` changes against `base`, sorted."""
+    return sorted(git(root, "diff", "--name-only", base, "HEAD").split())
+
+
+def reader_edit(root):
+    """The edits of a pull request that changes only a reader: one comment line added to merge/merge.py."""
+    with open(os.path.join(root, "merge", "merge.py"), encoding="utf-8") as f:
+        return {"merge/merge.py": f.read() + "# a reader-only pull request\n"}
+
+
+def page_edit(root):
+    """The edits of a pull request that adds one line to the records page by hand."""
+    with open(os.path.join(root, *PAGE.split("/")), encoding="utf-8") as f:
+        return {PAGE: f.read() + HAND_LINE}
+
+
+def hand_edited_head(root):
+    """A head tree whose records page is the generator's page with one line added by hand, as a pull request's commit."""
+    head = generated_head(root)
+    commit_pr(head, page_edit(head))
+    return head
 
 
 class EqualTrees(unittest.TestCase):
@@ -166,23 +225,9 @@ class StableRefuses(unittest.TestCase):
         self.assertIn("checks-rest", new)
         self.assertNotEqual(old, new)
 
-    def hand_edited_head(self, root):
-        """A head tree whose records page is the generator's page with one line added by hand, committed."""
-        head = build_tree(root, records=True)
-        gen = subprocess.run([sys.executable, os.path.join("lint", "hook_catalog.py"), "--records-only", "--root", head],
-                             capture_output=True, text=True, cwd=head)
-        self.assertEqual(gen.returncode, 0, gen.stdout + gen.stderr)
-        page = os.path.join(head, "docs", "records.md")
-        self.assertTrue(os.path.isfile(page), "fixture: the generator wrote no records page")
-        with open(page, encoding="utf-8") as f:
-            text = f.read()
-        put(page, text + "\nA line by hand: the generator never writes this.\n")
-        commit_all(head, "records page edited by hand")
-        return head
-
     def test_4_hand_edited_records_page_names_page_is_generated(self):
         d = case_dir()
-        head = self.hand_edited_head(os.path.join(d, "head"))
+        head = hand_edited_head(os.path.join(d, "head"))
         stable = build_tree(os.path.join(d, "stable"))
         rc, out = run_step(stable, head)
         self.assertEqual(rc, 1, out)
@@ -190,7 +235,7 @@ class StableRefuses(unittest.TestCase):
 
     def test_4_control_hand_edited_page_is_not_generated(self):
         d = case_dir()
-        head = self.hand_edited_head(os.path.join(d, "head"))
+        head = hand_edited_head(os.path.join(d, "head"))
         mod = load_merge(head, "head_merge_control_4")
         self.assertIs(mod.page_is_generated(head, git(head, "rev-parse", "HEAD")), False)
 
@@ -239,6 +284,87 @@ class StepInWorkflow(unittest.TestCase):
         self.assertNotIn("github.event_name == 'push'", cond, f"step {STEP!r} in job {job!r} also runs on push")
         self.assertIn(job, needs_of(job_block(self.text, "all-jobs-passed")),
                       f"job {job!r} holding {STEP!r} is not in all-jobs-passed's needs")
+
+
+class UnloadableHead(unittest.TestCase):
+    def test_7_head_merge_tool_that_does_not_load_is_unknown_naming_merge_py(self):
+        d = case_dir()
+        stable = build_tree(os.path.join(d, "stable"))
+        head = build_tree(os.path.join(d, "head"), patches=[BROKEN_MERGE])
+        rc, out = run_step(stable, head)
+        self.assertNotEqual(rc, 0, out)
+        self.assertTrue(any("merge.py" in line and "unknown" in line for line in out.splitlines()), out)
+
+    def test_7_control_head_merge_tool_raises_when_loaded(self):
+        d = case_dir()
+        head = build_tree(os.path.join(d, "head"), patches=[BROKEN_MERGE])
+        with self.assertRaises(Exception):
+            load_merge(head, "head_merge_control_7")
+
+
+class ReaderOnlyPullRequest(unittest.TestCase):
+    def test_8_reader_only_pull_request_waives_difference_on_unchanged_data(self):
+        d = case_dir()
+        stable = build_tree(os.path.join(d, "stable"), patches=[OLD_READY_JOB_PREFIX])
+        head = build_tree(os.path.join(d, "head"), config=config_with(readyChecks=READY))
+        base = commit_pr(head, reader_edit(head))
+        self.assertEqual(changed_paths(head, base), ["merge/merge.py"], "fixture: the pull request changes more than its reader")
+        rc, out = run_step(stable, head, base)
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(sum("merge.readyChecks" in line for line in out.splitlines()), 1, out)
+
+    def test_8_control_changed_ready_checks_is_still_refused(self):
+        d = case_dir()
+        stable = build_tree(os.path.join(d, "stable"), patches=[OLD_READY_JOB_PREFIX])
+        head = build_tree(os.path.join(d, "head"), config=config_with(readyChecks=["STE lint"]))
+        base = commit_pr(head, {".github/stamp.json": json.dumps(config_with(readyChecks=READY), indent=1)})
+        self.assertEqual(changed_paths(head, base), [".github/stamp.json"], "fixture: the pull request changes more than the config")
+        rc, out = run_step(stable, head, base)
+        self.assertEqual(rc, 1, out)
+        self.assertIn("ready_job_groups", out, out)
+
+    def test_8_control_data_file_change_gets_no_waiver(self):
+        d = case_dir()
+        stable = build_tree(os.path.join(d, "stable"), patches=[OLD_READY_JOB_PREFIX])
+        head = build_tree(os.path.join(d, "head"), config=config_with(readyChecks=READY))
+        base = commit_pr(head, {".github/stamp.json": json.dumps(config_with(readyChecks=READY, deadlineMinutes=90), indent=1)})
+        self.assertEqual(changed_paths(head, base), [".github/stamp.json"], "fixture: the pull request changes more than the config")
+        rc, out = run_step(stable, head, base)
+        self.assertEqual(rc, 1, out)
+        self.assertIn("ready_job_groups", out, out)
+
+
+class RecordsPageUnderBase(unittest.TestCase):
+    def test_9_records_page_the_base_already_holds_is_not_judged(self):
+        d = case_dir()
+        stable = build_tree(os.path.join(d, "stable"))
+        head = hand_edited_head(os.path.join(d, "head"))
+        base = git(head, "rev-parse", "HEAD")
+        commit_pr(head, reader_edit(head))
+        self.assertEqual(changed_paths(head, base), ["merge/merge.py"], "fixture: the pull request changes the records page")
+        rc, out = run_step(stable, head, base)
+        self.assertIn(rc, (0, 1), out)
+        self.assertIn("stable readers", out, out)
+        self.assertNotIn("page_is_generated", out, out)
+
+    def test_9_control_records_page_without_base_ref_is_judged(self):
+        d = case_dir()
+        stable = build_tree(os.path.join(d, "stable"))
+        head = hand_edited_head(os.path.join(d, "head"))
+        rc, out = run_step(stable, head)
+        self.assertEqual(rc, 1, out)
+        self.assertIn("page_is_generated", out, out)
+
+    def test_9_records_page_the_pull_request_changes_is_judged(self):
+        d = case_dir()
+        stable = build_tree(os.path.join(d, "stable"))
+        head = generated_head(os.path.join(d, "head"))
+        base = git(head, "rev-parse", "HEAD")
+        commit_pr(head, page_edit(head))
+        self.assertEqual(changed_paths(head, base), [PAGE], "fixture: the pull request does not change the records page")
+        rc, out = run_step(stable, head, base)
+        self.assertEqual(rc, 1, out)
+        self.assertIn("page_is_generated", out, out)
 
 
 if __name__ == "__main__":
