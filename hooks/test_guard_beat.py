@@ -459,8 +459,15 @@ class GuardLoaderCount(unittest.TestCase):
         cls.root = tempfile.mkdtemp(dir=RUN_FOLDER)
         cls.cache = os.path.join(cls.root, "pyc")
         probe = probe_folder(cls.root)
-        cls.logs = [os.path.join(cls.root, "cold.log"), os.path.join(cls.root, "warm.log")]
-        cls.runs = [loader_run(loader_env(cache=cls.cache, probe=probe, log=log)) for log in cls.logs]
+        cls.logs = [os.path.join(cls.root, "cold.log"), os.path.join(cls.root, "warm.log"),
+                    os.path.join(cls.root, "host.log")]
+        cls.runs = [loader_run(loader_env(cache=cls.cache, probe=probe, log=cls.logs[0])),
+                    loader_run(loader_env(cache=cls.cache, probe=probe, log=cls.logs[1]))]
+        # The host's own setting: this session's shell sets PYTHONDONTWRITEBYTECODE=1, and the guard children inherit
+        # it. A cold run under it writes no cache, so the count here is the loader's real gain on this host.
+        host_env = loader_env(cache=os.path.join(cls.root, "host-pyc"), probe=probe, log=cls.logs[2])
+        host_env["PYTHONDONTWRITEBYTECODE"] = "1"
+        cls.runs.append(loader_run(host_env))
 
     def test_cold_start_compiles_the_guard_once(self):
         loader_clean(self, self.runs[0], "the cold-cache run")
@@ -475,6 +482,15 @@ class GuardLoaderCount(unittest.TestCase):
         self.assertEqual(compiles, 0,
                          "guard.py was compiled from source %d times in a warm-cache run of %s; a cached start "
                          "compiles nothing" % (compiles, LOADER_FAMILY))
+
+    def test_host_env_cold_start_compiles_the_guard_once(self):
+        # Under PYTHONDONTWRITEBYTECODE=1 a cache is not written unless the loader writes it anyway. Whether it should is
+        # the owner's call (it overrides the user's setting), so this case is red until that call is made.
+        loader_clean(self, self.runs[2], "the cold-cache run under PYTHONDONTWRITEBYTECODE=1")
+        compiles = compiles_of(self.logs[2], GUARD)
+        self.assertEqual(compiles, 1,
+                         "guard.py was compiled from source %d times in a cold run of %s under "
+                         "PYTHONDONTWRITEBYTECODE=1; a cached start compiles it once" % (compiles, LOADER_FAMILY))
 
     def test_probe_counts_one_compile_per_script_start_and_one_per_module_cache_fill(self):
         # The instrument's own control: a script compiles on every start, a cached import compiles once. Green on
