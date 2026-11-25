@@ -3186,6 +3186,43 @@ class CitedExcerptTests(unittest.TestCase):
         self.assertIn("def alpha():", shown, "alpha's def is not in the excerpt of `read pkg/mod.py alpha, the second route's denial`")
         self.assertNotIn("def the(", shown, "`the`, followed by lower-case prose, is taken as a name: def the shows")
 
+    def test_a_name_before_its_path_starts_at_its_def(self):
+        # `read NAME in PATH` names the same def as `read PATH NAME`, so it gives the same rows.
+        expected = self.stale.cited_excerpt("read lint/widget.py deep", self.DEEP)
+        shown = self.stale.cited_excerpt("read deep in lint/widget.py", self.DEEP)
+        self.assertEqual(shown, expected, "a name before its path gives rows from %r, not the rows from its def %r"
+                         % (shown.split("\n")[0], expected.split("\n")[0]))
+
+    def test_two_names_before_one_path_each_show_their_definition(self):
+        # `read NAME and NAME in PATH` gives the rows that `read PATH NAME, NAME` gives: both defs are shown.
+        text = self.FILL_ROWS + "\n\ndef alpha():\n" + self.BODY_ROWS + "\n\ndef beta():\n    return 2\n"
+        expected = self.stale.cited_excerpt("read lint/mod.py alpha, beta", text)
+        shown = self.stale.cited_excerpt("read alpha and beta in lint/mod.py", text)
+        self.assertEqual(shown, expected, "two names before one path give rows from %r, not the rows of the path-first cite from %r"
+                         % (shown.split("\n")[0], expected.split("\n")[0]))
+
+    def test_a_name_before_a_path_stays_with_an_earlier_path_that_owns_it(self):
+        # Control: lint/a.py owns `alpha`, so the second cite's `alpha` does not move to lint/b.py, where the def sits past row 40.
+        a = "def alpha():\n    return 1\n"
+        b = self.FILL_ROWS + "\n\ndef alpha():\n    return 2\n"
+        shown = self.stale.cited_excerpt("read lint/a.py alpha; alpha in lint/b.py", {"lint/a.py": a, "lint/b.py": b})
+        self.assertIn("1: def alpha():", shown, "the earlier path lint/a.py does not show its own def of alpha: %r" % shown)
+        self.assertIn("== lint/b.py", shown, "the cite gives no block for lint/b.py: %r" % shown)
+        block_b = shown.split("== lint/b.py\n", 1)[1]
+        self.assertNotIn("63: def alpha():", block_b, "alpha, owned by lint/a.py, moved to lint/b.py: its block shows alpha's def")
+
+    def test_a_plain_word_before_a_path_with_no_such_symbol_gives_the_file_top(self):
+        # Control: `overview` is no name that lint/widget.py defines, so the excerpt is the file head, as it is today.
+        shown = self.stale.cited_excerpt("read overview in lint/widget.py", self.DEEP)
+        self.assertEqual(shown.split("\n")[0], "1: x0 = 0",
+                         "a plain word before its path starts at %r, not the file head" % shown.split("\n")[0])
+
+    def test_a_path_first_name_cite_is_unchanged_control(self):
+        # Control: `read PATH NAME` still gives the rows from the def of its name.
+        shown = self.stale.cited_excerpt("read lint/widget.py deep", self.DEEP)
+        self.assertEqual(shown.split("\n")[:2], ["63: def deep():", "64:     return 1"],
+                         "read PATH NAME gives %r, not the rows from deep's def" % shown.split("\n")[:2])
+
 
 CONFIG = "hooks/config.py"  # the Python file the value cites name
 LIMIT_BASE = "LIMIT = 4\n\n\ndef keep():\n    return 1\n"
