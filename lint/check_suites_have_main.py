@@ -17,8 +17,13 @@ A file another runner imports and runs is still a problem, unless ALLOWED names 
 
 Skips .git, node_modules and any `worktrees` folder under .claude (other checkouts, not this tree).
 
-Exits 0 and prints nothing when clean. Exits 1 and prints one line per file:
-"<path>: defines a TestCase but never calls unittest.main". An unparseable file is a problem too, since an
+A test_*.py file whose __main__ path calls run_cases (bare name or attribute) as a statement of its own
+is a problem too: run_cases returns the number of failed cases, and a dropped value exits 0 on a failure.
+Assigning it, passing it to sys.exit, or returning it is clean.
+
+Exits 0 and prints nothing when clean. Exits 1 and prints one line per finding:
+"<path>: defines a TestCase but never calls unittest.main", or
+"<path>: calls run_cases as a bare statement: its return value is dropped ...". An unparseable file is a problem too, since an
 unread file is never clean.
 """
 import ast
@@ -30,6 +35,8 @@ ALLOWED = {}
 
 SKIP_DIRS = {".git", "node_modules", "__pycache__"}
 RUN_CLASS = "run_class"  # testing/cost_probe.py run_class(case_class), the one home of running one TestCase class
+RUN_CASES = "run_cases"  # hooks/case_runner_test.py run_cases(cases): returns the number of failed cases
+DROPPED = "calls run_cases as a bare statement: its return value is dropped, so a failed case still exits 0"
 SUFFIX = "defines a TestCase but never calls unittest.main"
 
 
@@ -92,22 +99,37 @@ def _is_runner_call(func, bare):
     return isinstance(func, ast.Name) and func.id in bare | {RUN_CLASS}
 
 
-def _calls_main(tree):
-    """True when the `if __name__ == "__main__":` block runs a unittest runner: directly, or through a
-    module-level function that block calls, or names without calling (a case list handed to a runner). A
-    function nothing calls or names, or `if False:`, never runs."""
-    bare = _unittest_main_names(tree)
+def _main_path_nodes(tree):
+    """Every node the `if __name__ == "__main__":` block reaches: its own statements, and the body of each
+    module-level function it calls or names (a case list handed to a runner). A function nothing calls or
+    names, or `if False:`, never runs."""
     functions = {n.name: n for n in tree.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))}
     bodies = [[stmt for n in tree.body if _is_main_guard(n) for stmt in n.body]]
     seen = set()
     for body in bodies:  # bodies grows as called or named functions are found
         for node in _reached_nodes(body):
-            if isinstance(node, ast.Call) and _is_runner_call(node.func, bare):
-                return True
+            yield node
             if isinstance(node, ast.Name) and node.id in functions and node.id not in seen:
                 seen.add(node.id)
                 bodies.append(functions[node.id].body)
-    return False
+
+
+def _calls_main(tree):
+    """True when the __main__ path runs a unittest runner."""
+    bare = _unittest_main_names(tree)
+    return any(isinstance(n, ast.Call) and _is_runner_call(n.func, bare) for n in _main_path_nodes(tree))
+
+
+def _is_run_cases_call(node):
+    func = node.func
+    return (isinstance(func, ast.Name) and func.id == RUN_CASES) or (isinstance(func, ast.Attribute) and func.attr == RUN_CASES)
+
+
+def _drops_run_cases_result(tree):
+    """True when the __main__ path calls run_cases as a statement of its own: the failure count it returns is
+    dropped, so a failed case or "no cases ran" still exits 0."""
+    return any(isinstance(n, ast.Expr) and isinstance(n.value, ast.Call) and _is_run_cases_call(n.value)
+               for n in _main_path_nodes(tree))
 
 
 def _test_files(root):
@@ -134,6 +156,8 @@ def problems(root):
             continue
         if _has_testcase(tree) and not _calls_main(tree):
             found.append("%s: %s" % (rel, SUFFIX))
+        if _drops_run_cases_result(tree):
+            found.append("%s: %s" % (rel, DROPPED))
     return found
 
 
