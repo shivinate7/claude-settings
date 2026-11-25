@@ -1598,10 +1598,10 @@ LOG_FAMILY["GUARD_SHARD: the shards are disjoint and hold every case"] = "misc"
 FIXTURELESS_CHECKS.add(shard_split_check)
 
 
-# GUARD_RULE_EXACT=exact must fail a case whose printed reason leads with another rule. The check below runs this runner
+# The runner must fail a case whose printed reason leads with another rule. The check below runs this runner
 # in a child on the real section files plus one probe section. The probe's two cases name a stand-in guard (add's `guard`),
 # a script that prints `records-page-ready: x` for the wrong-rule probe and `records-page: x` for the control. The child
-# runs only the two probes (MUTATE_ONLY). The check joins the log checks only under exact mode, so a default run keeps its lines.
+# runs only the two probes (MUTATE_ONLY). The check is a log check in every run, beside shard_split_check.
 RULE_EXACT_PROBE = "rule-exact probe"
 RULE_EXACT_WRONG = RULE_EXACT_PROBE + ": a reason that leads with records-page-ready fails a case that wants records-page"
 RULE_EXACT_CONTROL = RULE_EXACT_PROBE + " control: a reason that leads with records-page passes"
@@ -1625,7 +1625,7 @@ RULE_EXACT_LABEL = "GUARD_RULE_EXACT: exact fails a case whose reason leads with
 
 
 def rule_exact_selftest_check():
-    """GUARD_RULE_EXACT=exact: the wrong-rule probe must FAIL, and the control must PASS. The child reads the real sections
+    """Exact matching: the wrong-rule probe must FAIL, and the control must PASS. The child reads the real sections
     and the probe section, and the stand-in answers. Before the verdicts are read, the stand-in must have judged the
     wrong-rule probe deny, and the report must name its mismatch, so a red here is the exact gap and nothing else."""
     folder = tempfile.mkdtemp(dir=ROOT)
@@ -1658,10 +1658,9 @@ def rule_exact_selftest_check():
     return True, "exact fails the wrong-rule probe, passes the control, and the report names the mismatch"
 
 
-if RULE_EXACT == "exact":
-    LOG_CHECKS_EXTRA.append((RULE_EXACT_LABEL, rule_exact_selftest_check))
-    LOG_FAMILY[RULE_EXACT_LABEL] = "misc"
-    FIXTURELESS_CHECKS.add(rule_exact_selftest_check)
+LOG_CHECKS_EXTRA.append((RULE_EXACT_LABEL, rule_exact_selftest_check))
+LOG_FAMILY[RULE_EXACT_LABEL] = "misc"
+FIXTURELESS_CHECKS.add(rule_exact_selftest_check)
 
 
 # =========================================================================== agent role model
