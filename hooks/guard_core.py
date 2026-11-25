@@ -2036,7 +2036,8 @@ def worktree_remove_subject(args, where: str):
         return None
     if locked:
         return False
-    live = worktree_live_session(target)
+    # The dirty and lock keeps above guard this removal, so a record whose folder is gone stands in no tree.
+    live = worktree_live_session(target, absent_is_out=True)
     if live is None:
         return None
     if live:
