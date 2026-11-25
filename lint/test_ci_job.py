@@ -5264,18 +5264,20 @@ class CarryUnmappedDelta(unittest.TestCase):
 class ToolPinsLane(Job):
     """Under --lint, a checkout with a root .tool-versions gets one run of its checker with --local (decision tool-pins). A
     mismatch or an unknown read prints one line that starts unknown and names the tool, and the run is no pass. Matching tools
-    print no extra line. A checkout with no .tool-versions starts no checker, and --step (the ready run) starts nothing new.
+    print no extra line. A checkout whose .tool-versions or checker is missing prints one `unknown tool pins:` line naming the
+    missing file (never silent), starts no checker, and is no pass. --step (the ready run) starts nothing new.
     The checker in the checkout is the real one behind a line that logs each run's arguments, so a case counts the runs."""
 
     LOG_RUN = "import sys\nopen('checker-runs.txt', 'a', encoding='utf-8').write(' '.join(sys.argv[1:]) + '\\n')\n"
     LINT_STEP = step("lint", "python3 lint/check_a.py")
     ARGS = ("--lint", "--base", "HEAD")
 
-    def checkout(self, pins):
-        """A committed checkout: one lint script, the checker behind its run log, and the pin file when `pins` is not None."""
-        with open(os.path.join(HERE, "check_tool_pins.py"), encoding="utf-8") as f:
-            checker = self.LOG_RUN + f.read()
-        files = {"lint/check_a.py": "print('lint ok')\n", "lint/check_tool_pins.py": checker}
+    def checkout(self, pins, checker=True):
+        """A committed checkout: one lint script, the checker behind its run log when `checker` is true, and the pin file when `pins` is not None."""
+        files = {"lint/check_a.py": "print('lint ok')\n"}
+        if checker:
+            with open(os.path.join(HERE, "check_tool_pins.py"), encoding="utf-8") as f:
+                files["lint/check_tool_pins.py"] = self.LOG_RUN + f.read()
         if pins is not None:
             files[".tool-versions"] = pins
         for rel, text in files.items():
@@ -5299,6 +5301,10 @@ class ToolPinsLane(Job):
 
     def lines_naming(self, lines, word, tool):
         return [ln for ln in lines if ln.startswith(word) and tool in ln]
+
+    def missing_file_lines(self, lines, name):
+        """The `unknown tool pins:` lines that name `name`."""
+        return [ln for ln in lines if ln.startswith("unknown") and "tool pins:" in ln and name in ln]
 
     def test_a_checkout_with_pins_runs_the_checker_once_with_local(self):
         self.checkout("pinprobe 4.2\n")
@@ -5328,11 +5334,20 @@ class ToolPinsLane(Job):
                          "an unknown read must print one line that starts unknown and names the tool: %s" % out)
         self.assertNotEqual(rc, 0, "an unknown read is no proof, so the run must not exit 0: %s" % out)
 
-    def test_a_checkout_with_no_tool_versions_starts_no_checker(self):
+    def test_a_checkout_with_no_tool_versions_prints_one_unknown_line_naming_it_and_starts_no_checker(self):
         self.checkout(None)
         rc, lines, out = self.run_job(self.LINT_STEP, args=self.ARGS)
+        self.assertEqual(len(self.missing_file_lines(lines, ".tool-versions")), 1,
+                         "a checkout with the checker and no .tool-versions must print one `unknown tool pins:` line naming .tool-versions, never silence: %s" % out)
         self.assertEqual(self.file_lines("checker-runs.txt"), [], "with no .tool-versions no checker may start: %s" % out)
-        self.assertEqual(rc, 0, out)
+        self.assertNotEqual(rc, 0, "a missing pin file is no proof, so the run must not exit 0: %s" % out)
+
+    def test_a_checkout_with_no_checker_prints_one_unknown_line_naming_it_and_is_no_pass(self):
+        self.checkout("pinprobe 4.2\n", checker=False)
+        rc, lines, out = self.run_job(self.LINT_STEP, args=self.ARGS)
+        self.assertEqual(len(self.missing_file_lines(lines, "check_tool_pins.py")), 1,
+                         "a checkout with pins and no lint/check_tool_pins.py must print one `unknown tool pins:` line naming the checker: %s" % out)
+        self.assertNotEqual(rc, 0, "a missing checker is no proof, so the run must not exit 0: %s" % out)
 
     def test_the_ready_run_with_step_starts_no_checker(self):
         self.checkout("pinprobe 4.2\n")
