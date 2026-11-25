@@ -4,7 +4,8 @@
     python3 lint/test_check_tool_pins.py
 
 A root `.tool-versions` file holds one line per tool: `<tool> <version>`. The check runs each tool's version
-command and compares the first dotted number in its output to the pin, at the precision the pin states.
+command and compares the version in its output to the pin, at the precision the pin states. A dotted number inside
+a path is never the version; a `# match:` line names the version when the output leads with another number.
 A pin's comment sits on its own line. `# read: <tool> = <command>` names a version command other than
 `<tool> --version`. Each repo owns its own file; with no `--file`, the check reads the root of the repo it runs in.
 
@@ -270,6 +271,200 @@ class CostTests(ToolPinsCase):
         self.assertEqual(rc, 0, "three pins that match must pass: exit %d: %s" % (rc, out))
         self.assertEqual(sorted(self.invoked()), ["git", "node", "python3"],
                          "each pin's version command must run exactly once, and nothing else: %s" % self.invoked())
+
+
+class EmptyPinFileTests(ToolPinsCase):
+    """A pin file with no pin line is refused, never read as a clear run."""
+
+    def test_an_empty_pin_file_exits_one_and_says_no_pin_was_read(self):
+        local = self.write("")
+        rc, out = self.run_check("--file", local)
+        self.assertEqual(rc, 1, "an empty pin file must exit 1, not read as clear: exit %d: %s" % (rc, out))
+        self.assertIn("no pin was read", out.lower(), "the refusal must say no pin was read: %s" % out)
+
+    def test_a_pin_file_of_blank_lines_exits_one_and_says_no_pin_was_read(self):
+        local = self.write("\n   \n\n")
+        rc, out = self.run_check("--file", local)
+        self.assertEqual(rc, 1, "a pin file of blank lines must exit 1, not read as clear: exit %d: %s" % (rc, out))
+        self.assertIn("no pin was read", out.lower(), "the refusal must say no pin was read: %s" % out)
+
+    def test_a_pin_file_of_comments_only_exits_one_and_says_no_pin_was_read(self):
+        local = self.write("# The tools this repo runs on.\n# None is pinned yet.\n")
+        rc, out = self.run_check("--file", local)
+        self.assertEqual(rc, 1, "a pin file of comments only must exit 1, not read as clear: exit %d: %s" % (rc, out))
+        self.assertIn("no pin was read", out.lower(), "the refusal must say no pin was read: %s" % out)
+
+
+class VersionReadTests(ToolPinsCase):
+    """The version is the number the tool prints, never a dotted number inside a path. A match line can name it."""
+
+    def test_a_dotted_number_in_a_unix_path_is_never_the_version(self):
+        self.fake("tooly", "/opt/python3.15/bin/tooly version 3.14.2")
+        local = self.write("tooly 3.15\n")
+        rc, out = self.run_check("--file", local)
+        self.assertEqual(rc, 1, "tooly 3.15 must fail against 3.14.2: a 3.15 inside a path is not the version: exit %d: %s" % (rc, out))
+        self.assertIn("tool-pins: tooly pinned 3.15, found 3.14.2; move the pin or the tool", out.splitlines(),
+                      "the mismatch must name the version the tool printed: %s" % out)
+
+    def test_a_dotted_number_in_a_windows_path_is_never_the_version(self):
+        self.fake("pytool", "C:\\Dev\\Sdk\\py3.15\\Pytool.exe version 3.14.2")
+        local = self.write("pytool 3.15\n")
+        rc, out = self.run_check("--file", local)
+        self.assertEqual(rc, 1, "pytool 3.15 must fail against 3.14.2: a 3.15 inside a path is not the version: exit %d: %s" % (rc, out))
+        self.assertIn("tool-pins: pytool pinned 3.15, found 3.14.2; move the pin or the tool", out.splitlines(),
+                      "the mismatch must name the version the tool printed: %s" % out)
+
+    def test_a_match_line_names_the_version_when_the_output_leads_with_another_number(self):
+        self.fake("swift-driver", "swift-driver version: 1.168.6 Apple Swift version 6.4.2")
+        local = self.write("# read: swift = swift-driver --version\n# match: swift = Swift version (\\S+)\nswift 6.4\n")
+        rc, out = self.run_check("--file", local)
+        self.assertEqual(rc, 0, "the match line must take 6.4.2 as the version, so swift 6.4 passes: exit %d: %s" % (rc, out))
+
+    def test_without_a_match_line_the_leading_number_is_the_version_read(self):
+        self.fake("swift-driver", "swift-driver version: 1.168.6 Apple Swift version 6.4.2")
+        local = self.write("# read: swift = swift-driver --version\nswift 6.4\n")
+        rc, out = self.run_check("--file", local)
+        self.assertEqual(rc, 1, "with no match line, swift 6.4 must fail against the first number 1.168.6: exit %d: %s" % (rc, out))
+        self.assertIn("tool-pins: swift pinned 6.4, found 1.168.6; move the pin or the tool", out.splitlines(),
+                      "the mismatch must name the number found: %s" % out)
+
+    def test_a_match_line_with_no_group_exits_one_with_a_plain_message(self):
+        self.fake("swift-driver", "Apple Swift version 6.4.2")
+        local = self.write("# read: swift = swift-driver --version\n# match: swift = Swift version \\S+\nswift 6.4\n")
+        rc, out = self.run_check("--file", local)
+        self.assertEqual(rc, 1, "a match regex with no group must exit 1: exit %d: %s" % (rc, out))
+        self.assertNotIn("Traceback", out, "a match regex with no group must not crash the checker: %s" % out)
+        self.assertIn("match", out.lower(), "the refusal must name the match line: %s" % out)
+
+    def test_a_match_regex_that_does_not_compile_exits_one_with_a_plain_message(self):
+        self.fake("swift-driver", "Apple Swift version 6.4.2")
+        local = self.write("# read: swift = swift-driver --version\n# match: swift = Swift version (\\S+\nswift 6.4\n")
+        rc, out = self.run_check("--file", local)
+        self.assertEqual(rc, 1, "a match regex that does not compile must exit 1: exit %d: %s" % (rc, out))
+        self.assertNotIn("Traceback", out, "a match regex that does not compile must not crash the checker: %s" % out)
+        self.assertIn("match", out.lower(), "the refusal must name the match line: %s" % out)
+
+    def test_a_hash_inside_a_match_regex_is_not_a_trailing_comment(self):
+        self.fake("swift-driver", "swift-driver version: 1.168.6 Swift#version 6.4.2")
+        local = self.write("# read: swift = swift-driver --version\n# match: swift = Swift#version (\\S+)\nswift 6.4\n")
+        rc, out = self.run_check("--file", local)
+        self.assertEqual(rc, 0, "a # inside a match regex must stay part of the regex, so swift 6.4 passes: exit %d: %s" % (rc, out))
+
+
+class PreReleaseTests(ToolPinsCase):
+    """A pre-release is a version of its own: a pin that does not state it never matches it."""
+
+    def test_a_release_candidate_does_not_match_a_minor_pin(self):
+        self.fake("python", "Python 3.15.0rc1")
+        local = self.write("python 3.15\n")
+        rc, out = self.run_check("--file", local)
+        self.assertEqual(rc, 1, "python 3.15 must not accept 3.15.0rc1: exit %d: %s" % (rc, out))
+        self.assertIn("found 3.15.0rc1", out, "the mismatch must name the pre-release it read: %s" % out)
+
+    def test_an_alpha_does_not_match_a_patch_pin(self):
+        self.fake("python", "Python 3.15.0a2")
+        local = self.write("python 3.15.0\n")
+        rc, out = self.run_check("--file", local)
+        self.assertEqual(rc, 1, "python 3.15.0 must not accept 3.15.0a2: exit %d: %s" % (rc, out))
+        self.assertIn("found 3.15.0a2", out, "the mismatch must name the pre-release it read: %s" % out)
+
+    def test_a_dev_build_does_not_match_a_patch_pin(self):
+        self.fake("python", "Python 3.15.0.dev1")
+        local = self.write("python 3.15.0\n")
+        rc, out = self.run_check("--file", local)
+        self.assertEqual(rc, 1, "python 3.15.0 must not accept 3.15.0.dev1: exit %d: %s" % (rc, out))
+        self.assertIn("found 3.15.0.dev1", out, "the mismatch must name the dev build it read: %s" % out)
+
+    def test_a_pin_that_states_a_pre_release_matches_it(self):
+        self.fake("python", "Python 3.15.0rc1")
+        local = self.write("python 3.15.0rc1\n")
+        rc, out = self.run_check("--file", local)
+        self.assertEqual(rc, 0, "python 3.15.0rc1 must accept 3.15.0rc1: exit %d: %s" % (rc, out))
+
+
+class DirectiveCaseTests(ToolPinsCase):
+    """`# Read:`, `# READ:`, `# Match:` and `# MATCH:` work as `# read:` and `# match:` do."""
+
+    def test_a_capitalised_read_line_runs_its_command(self):
+        self.fake("python", "Python 2.7.18")
+        self.fake("python3", "Python 3.15.2")
+        local = self.write("# Read: python = python3 --version\npython 3.15\n")
+        rc, out = self.run_check("--file", local)
+        self.assertEqual(rc, 0, "# Read: must run python3 --version, as # read: does: exit %d: %s" % (rc, out))
+        self.assertNotIn("python", self.invoked(), "# Read: must replace the default python --version: log %s" % self.invoked())
+
+    def test_an_upper_case_read_line_runs_its_command(self):
+        self.fake("python", "Python 2.7.18")
+        self.fake("python3", "Python 3.15.2")
+        local = self.write("# READ: python = python3 --version\npython 3.15\n")
+        rc, out = self.run_check("--file", local)
+        self.assertEqual(rc, 0, "# READ: must run python3 --version, as # read: does: exit %d: %s" % (rc, out))
+        self.assertNotIn("python", self.invoked(), "# READ: must replace the default python --version: log %s" % self.invoked())
+
+    def test_a_capitalised_match_line_takes_the_version_as_match_does(self):
+        self.fake("swift-driver", "swift-driver version: 1.168.6 Apple Swift version 6.4.2")
+        local = self.write("# read: swift = swift-driver --version\n# Match: swift = Swift version (\\S+)\nswift 6.4\n")
+        rc, out = self.run_check("--file", local)
+        self.assertEqual(rc, 0, "# Match: must take 6.4.2 as the version, as # match: does: exit %d: %s" % (rc, out))
+
+    def test_an_upper_case_match_line_takes_the_version_as_match_does(self):
+        self.fake("swift-driver", "swift-driver version: 1.168.6 Apple Swift version 6.4.2")
+        local = self.write("# read: swift = swift-driver --version\n# MATCH: swift = Swift version (\\S+)\nswift 6.4\n")
+        rc, out = self.run_check("--file", local)
+        self.assertEqual(rc, 0, "# MATCH: must take 6.4.2 as the version, as # match: does: exit %d: %s" % (rc, out))
+
+
+class EncodingTests(ToolPinsCase):
+    """A pin file that is not UTF-8 is refused in one line. A UTF-8 byte-order mark at the start is ignored."""
+
+    def test_a_pin_file_that_is_not_utf8_exits_one_with_one_line(self):
+        self.fake("python", "Python 3.15.2")
+        path = os.path.join(self.dir, ".tool-versions")
+        with open(path, "wb") as f:
+            f.write(b"python 3.15\n# caf\xe9\n")
+        rc, out = self.run_check("--file", path)
+        self.assertEqual(rc, 1, "a pin file that is not UTF-8 must exit 1: exit %d: %s" % (rc, out))
+        self.assertNotIn("Traceback", out, "a pin file that is not UTF-8 must not crash the checker: %s" % out)
+        self.assertEqual(len(out.strip().splitlines()), 1, "the refusal must be one line: %s" % out)
+
+    def test_a_read_command_holding_a_nul_exits_one_with_one_line(self):
+        local = self.write("# read: python = python3\x00 --version\npython 3.15\n")
+        rc, out = self.run_check("--file", local)
+        self.assertEqual(rc, 1, "a read command holding a NUL must exit 1: exit %d: %s" % (rc, out))
+        self.assertNotIn("Traceback", out, "a read command holding a NUL must not crash the checker: %s" % out)
+        self.assertEqual(len(out.strip().splitlines()), 1, "the refusal must be one line: %s" % out)
+
+    def test_a_utf8_byte_order_mark_at_the_file_start_is_ignored(self):
+        self.fake("python", "Python 3.15.2")
+        path = os.path.join(self.dir, ".tool-versions")
+        with open(path, "wb") as f:
+            f.write(b"\xef\xbb\xbfpython 3.15\n")
+        rc, out = self.run_check("--file", path)
+        self.assertEqual(rc, 0, "a UTF-8 BOM at the file start must not hide the python pin: exit %d: %s" % (rc, out))
+
+
+class MajorOnlyPinTests(ToolPinsCase):
+    """A pin that states only a major accepts any minor and patch under it, and nothing above it."""
+
+    def test_a_major_only_pin_accepts_a_patch_release(self):
+        self.fake("tint", "tint 3.2.1")
+        local = self.write("tint 3\n")
+        rc, out = self.run_check("--file", local)
+        self.assertEqual(rc, 0, "tint 3 must accept 3.2.1: exit %d: %s" % (rc, out))
+
+    def test_a_major_only_pin_accepts_a_bare_major(self):
+        self.fake("tint", "tint 3")
+        local = self.write("tint 3\n")
+        rc, out = self.run_check("--file", local)
+        self.assertEqual(rc, 0, "tint 3 must accept output `tint 3`: exit %d: %s" % (rc, out))
+
+    def test_a_major_only_pin_fails_on_the_next_major(self):
+        self.fake("tint", "tint 4.0")
+        local = self.write("tint 3\n")
+        rc, out = self.run_check("--file", local)
+        self.assertEqual(rc, 1, "tint 3 must fail against 4.0: exit %d: %s" % (rc, out))
+        self.assertIn("tool-pins: tint pinned 3, found 4.0; move the pin or the tool", out.splitlines(),
+                      "the mismatch must name the major found: %s" % out)
 
 
 if __name__ == "__main__":
