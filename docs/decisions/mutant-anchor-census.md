@@ -9,7 +9,7 @@ slug: mutant-anchor-census
 
 A mutant in `MUTATIONS` of `hooks/mutate_guard.py` names an anchor: the exact text it replaces. The census, `lint/check_mutant_anchors.py`, fails when an anchor is gone, sits more than once, or names an unknown target.
 
-- It imports the table and keeps no copy.
+- It imports the table and keeps no copy. The table is the literal rows plus each row file in `hooks/mutants/` (decision `mutants-one-file-per-rule`).
 - A "guard" or "audit" mutant is found across the guard modules by `find_anchor` in `hooks/mutate_shared.py`. No match is stale. Two or more are ambiguous.
 - Any other target is read in its own file (`TARGETS`). The anchor must occur there once.
 - It prints one `FAIL` line for each bad mutant. The line names the label and the target. It also names the file or folder searched, when it searched one. The run then exits 1. With no bad mutant it prints `PASS mutant anchor census: N mutants` and exits 0.
