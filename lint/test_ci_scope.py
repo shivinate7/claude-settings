@@ -2358,8 +2358,8 @@ class MutationReport(unittest.TestCase):
 # case states what the workflow does with the scope outputs, not the value of one output. Cost: parses checks.yml once per call.
 GUARD_SHARDS = split.WINDOWS_GUARD_JOBS  # the family's count, one home: SHARD_COUNTS in lint/test_windows_split.py
 # Flags the old script sets true for SNAPSHOT_DIFFS, each run() with its default arguments. windows_guard is left out of the
-# comparison: it is the one output the gate adds. Recorded on the script before the gate existed. The SKILL.md row also holds `guard`,
-# which the guard-read rule added later (decision guard-reads-turn-guard-on).
+# comparison: it is the one output the gate adds. Recorded on the script before the gate existed. The SKILL.md row also holds `guard` and
+# `checks_guard`, which the guard-read rules added later (decision guard-reads-turn-guard-on).
 SNAPSHOT_DIFFS = [
     (["docs/x.md"], {}, ["doc_any", "doc_other"]),
     (["README.md"], {}, ["doc_any", "doc_glossary"]),
@@ -2379,8 +2379,10 @@ SNAPSHOT_DIFFS = [
     (["agents/builder.md"], {"existing": ["agents/builder.md"]}, ["doc_agents", "doc_any"]),
     (["docs/decisions/agent-model-cap.md"], {"existing": ["docs/decisions/agent-model-cap.md"]},
      ["doc_any", "doc_decisions", "lint_ruling_kind"]),
-    # guard: hooks/mutate_guard.py reads this file (decision guard-reads-turn-guard-on), so a prose edit turns the guard mutation job on.
-    (["skills/impeccable/SKILL.md"], {"existing": ["skills/impeccable/SKILL.md"]}, ["doc_any", "doc_skills", "guard"]),
+    # guard, checks_guard: the guard suite reads this file (decision guard-reads-turn-guard-on). A prose edit sets no code, and the fixture
+    # shards need code and guard, so this file sets checks_guard itself.
+    (["skills/impeccable/SKILL.md"], {"existing": ["skills/impeccable/SKILL.md"]},
+     ["doc_any", "doc_skills", "guard", "checks_guard"]),
 ]
 
 
