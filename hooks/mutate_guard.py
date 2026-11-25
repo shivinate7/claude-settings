@@ -2854,15 +2854,23 @@ MUTATIONS = [
      'NPM_DRY_RUN_WRITERS = set()',
      "guard", 'linked-nm: refuse npm rebuild --dry-run (Bash) in a linked folder'),
     # ---- the Stop check's long-agent rule (hooks/stall_watch.py, decision stall-watch). An agent that has run
-    # AGENT_LONG seconds is due one check-in; these two cross the age test and the check-in time test.
+    # AGENT_LONG seconds is due one check-in; these four cross the age test, the check-in fire time and its ahead bound.
     ("stall: the long-agent age test admits the limit one step late, so an agent exactly AGENT_LONG old is not yet due",
-     "now - began >= long_age and not checked_in(job, began + long_age, sent)",
-     "now - began > long_age and not checked_in(job, began + long_age, sent)", "stall",
+     "now - began >= long_age and not checked_in(job, began + long_age, sent, now)",
+     "now - began > long_age and not checked_in(job, began + long_age, sent, now)", "stall",
      "A11f."),
     ("stall: a check-in made before the crossing counts, so a check-in older than the crossing clears the block",
-     "return any(when is not None and when >= crossed and pat.search(text) for when, text in sent)",
-     "return any(when is not None and when <= crossed and pat.search(text) for when, text in sent)", "stall",
+     "if fire >= crossed and fire - now <= AGENT_CHECKIN_AHEAD * 60:",
+     "if fire <= crossed and fire - now <= AGENT_CHECKIN_AHEAD * 60:", "stall",
      "A13b."),
+    ("stall: a check-in's fire time ignores its delay, so a check-in made before the crossing that fires after it does not count",
+     "fire = when + (checkin_minutes_ahead(when, text) or 0) * 60",
+     "fire = when", "stall",
+     "A13c."),
+    ("stall: the ahead bound is dropped, so a check-in set far ahead of the Stop clears the block",
+     "fire >= crossed and fire - now <= AGENT_CHECKIN_AHEAD * 60",
+     "fire >= crossed", "stall",
+     "A13e."),
     # ---- the always-silent stub. A hook whose main() exits 0 with no output passes every
     # "nothing printed" case on its own. Each suite pairs that silence with a known-bad input in
     # the same case (`known-bad pair`), and these mutants are the stub itself.
