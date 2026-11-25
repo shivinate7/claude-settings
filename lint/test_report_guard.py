@@ -2084,6 +2084,68 @@ class UnstartedItemsTests(unittest.TestCase):
         self.assertNotRegex(out["reason"], r"#\d|\b[\w-]+\.[A-Za-z]{1,9}\b|/",
                             "the refusal names a real PR or file: %r" % (out["reason"],))
 
+    def test_un_red_passive_and_other_verb_pr_waits_block(self):
+        # Catches: a PR wait worded in the passive, or with a verb other than "merge", names no file, and the turn passes.
+        self.assert_refused_for_shared_file([
+            (self.DONE + "> **Next** Unstarted: PR #3916 must be merged first", "must be merged first"),
+            (self.DONE + "> **Next** Unstarted: PR #3916 should be merged before it", "should be merged before it"),
+            (self.DONE + "> **Next** Unstarted: PR #3916 has to go first", "has to go first"),
+            (self.DONE + "> **Next** Unstarted: PR #3916 goes in first", "goes in first"),
+            (self.DONE + "> **Next** Unstarted: PR #3916 is queued ahead", "is queued ahead"),
+            (self.DONE + "> **Next** Unstarted: PR #3916's merge must come first", "the merge must come first"),
+        ])
+
+    def test_un_red_pr_wait_with_no_pr_number_blocks(self):
+        # Catches: a wait on a PR named by its lane or role, with no number, names no file, and the turn passes.
+        self.assert_refused_for_shared_file([
+            (self.DONE + "> **Next** Unstarted: " + line, line) for line in (
+                "queued behind the stamp PR",
+                "blocked by the stamp PR",
+                "waits on the sweep PR",
+                "waits for the stamp lane's PR",
+                "queued behind the PR",
+            )
+        ])
+
+    def test_un_red_grant_words_do_not_exempt_a_pr_wait_block(self):
+        # Catches: an owner word in a wait on a PR's merge is read as an owner wait, so the turn passes.
+        self.assert_refused_for_shared_file([
+            (self.DONE + "> **Next** Unstarted: waits until the owner merges #3916",
+             "waits until the owner merges #3916"),
+            (self.DONE + "> **Next** Unstarted: waits for the owner to merge PR #3916",
+             "waits for the owner to merge PR #3916"),
+            (self.DONE + "> **Next** Unstarted: waits for the grant lane PR #3916",
+             "waits for the grant lane PR #3916"),
+            (self.DONE + "> **Next** Unstarted: waits until owner-page PR #3916 merges",
+             "waits until owner-page PR #3916 merges"),
+        ])
+
+    def test_un_green_pr_word_and_owner_controls_pass(self):
+        # Control: a `pr-reader` tool name with no wait word, a "none" after the PR word, and an owner's answer or
+        # ruling with no PR, name no waiting item, so they stay green.
+        self.assert_passes_unstarted([
+            (self.DONE + "> **Next** Unstarted: the `pr-reader` check runs on the report; ready now",
+             "control: pr-reader as a tool name with no wait word"),
+            (self.DONE + "> **Next** Unstarted: PRs merged today: none", "control: none after the PR word"),
+            (self.DONE + "> **Next** Unstarted: waits on the owner's answer to QAO",
+             "control: waits on the owner's answer to QAO"),
+            (self.DONE + "> **Next** Unstarted: waits on the owner's ruling", "control: waits on the owner's ruling"),
+        ])
+
+    def test_un_green_pr_forecast_brake_and_symbol_need_pass(self):
+        # Catches: a PR named for a forecast, a PR that blocks nothing, a brake wait with a merged PR in brackets, or a
+        # symbol need with the symbol before "from PR", is read as an unchecked PR wait, so the turn is refused.
+        self.assert_passes_unstarted([
+            (self.DONE + "> **Next** Unstarted: PR #3916 will merge today; next is the record",
+             "a PR that will merge today is a forecast, not a wait"),
+            (self.DONE + "> **Next** Unstarted: PR #3916 blocks nothing here; not briefed yet",
+             "a PR that blocks nothing here is no wait"),
+            (self.DONE + "> **Next** Unstarted: waits on the load brake (PR #3916 merged at 13:02)",
+             "a brake wait with a merged PR in brackets"),
+            (self.DONE + "> **Next** Unstarted: needs `merge_head` from PR #3916",
+             "a symbol need with the symbol before from PR #3916"),
+        ])
+
 
 class NoResendTests(unittest.TestCase):
     """A report guard never makes a session send its whole report twice (roadmap c101)."""
