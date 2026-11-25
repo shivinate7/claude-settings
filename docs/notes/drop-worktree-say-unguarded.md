@@ -1,1 +1,1 @@
-- drop-worktree-say-unguarded: `say` in `drop_worktree` is unguarded, so a closed stdout in a `finally` can skip a lock release until the lock expires.
+- drop-worktree-say-unguarded: `say` in `drop_worktree` is unguarded, so a closed stdout in a `finally` can skip a lock release until the lock expires. Seen: 2026-11-25 x1
