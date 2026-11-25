@@ -26,6 +26,7 @@ import hashlib
 import io
 import json
 import os
+import random
 import shlex
 import shutil
 import signal
@@ -1339,6 +1340,100 @@ class WorktreeDecisionTests(unittest.TestCase):
             os.environ["PATH"] = old_path
         self.assertEqual(decision["action"], "keep")
         self.assertEqual(decision["reason"], "unreadable-subject")
+
+
+class StaleCwdRecordTests(unittest.TestCase):
+    """A session record whose folder is gone stands in no tree, for a removal that the dirty, locked and unmerged keeps
+    also guard (owner, 20:53 CST 11-24, 2026). Only the removal verdicts opt in. The orphan-process reap and
+    `trash_verdict` have no dirty check and act at once, so beside such a record they keep their old answer. This class
+    has its own config folder, so its record reaches no other class's read."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.base = tempfile.mkdtemp(prefix="stale-cwd-", dir=_test_temp.run_folder())
+        cls.cfg = os.path.join(cls.base, "cfg")
+        cls.env = mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": cls.cfg})
+        cls.env.start()
+        cls.root = os.path.join(cls.base, "stale-repo")
+        make_repo(cls.root, {"f.txt": "base\n"})
+        give_remote(cls.root)
+        cls.removable = os.path.join(cls.base, "wt-stale-removable")
+        run_vcs(cls.root, "worktree", "add", "-q", cls.removable, "-b", "lane-stale-removable")
+        # The record's cwd: its leaf is removed under a folder that stays, so the session's folder is gone.
+        cls.gone = os.path.join(cls.base, "gone-session", "wt")
+        os.makedirs(cls.gone)
+        os.rmdir(cls.gone)
+        # A LIVE record: this test process's own pid and its real start time. Only its folder is gone.
+        write(os.path.join(cls.cfg, "sessions", "stale-cwd-record.json"),
+              json.dumps({"pid": os.getpid(), "startedAt": this_process_start_ms(), "cwd": cls.gone}))
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.env.stop()
+        shutil.rmtree(cls.base, ignore_errors=True)
+
+    def entry_for(self, path):
+        entries = sweep.parse_worktree_list(self.root)
+        self.assertTrue(entries, "worktree list must not be empty")
+        target = os.path.normcase(os.path.realpath(path))
+        for entry in entries:
+            if os.path.normcase(os.path.realpath(entry["path"])) == target:
+                return entry
+        self.fail("no worktree-list entry found for %r" % path)
+
+    def assert_record_stands_nowhere(self):
+        """Scope first: the record's folder is absent, so a verdict can only come from the record."""
+        self.assertFalse(os.path.exists(self.gone), "scope: the record's folder must be absent")
+        self.assertTrue(os.path.isdir(self.removable), "scope: the clean tree must be a folder")
+
+    def test_clean_merged_tree_is_reaped_beside_a_record_whose_folder_is_gone(self):
+        self.assert_record_stands_nowhere()
+        decision = sweep.decide_worktree(self.root, self.entry_for(self.removable), attended=True)
+        self.assertEqual(decision["reason"], "removable",
+                         "a clean merged tree was kept, so a record whose folder is gone still stands in it")
+        self.assertEqual(decision["action"], "reap")
+
+    def test_orphaned_listener_stays_kept_beside_such_a_record(self):
+        """The orphan-process reap stops a process and has no dirty check. Both its orphan and its owner reads say yes,
+        so only the session read can keep it: a removed folder must not reach that read."""
+        self.assert_record_stands_nowhere()
+        entry = {"pid": os.getpid(), "port": 1, "cwd": self.removable, "checkout": self.removable}
+        with mock.patch.object(sweep, "is_orphan", return_value=True), \
+                mock.patch.object(sweep, "is_current_user_process", return_value=True):
+            decision = sweep.decide_listener(entry)
+        self.assertEqual(decision["reason"], "unreadable-subject",
+                         "the orphan reap opted in to a record whose folder is gone; it must keep the listener")
+        self.assertEqual(decision["action"], "keep")
+
+    def test_trash_folder_stays_kept_beside_such_a_record(self):
+        """`trash_verdict` deletes a folder with no dirty check. Beside a record whose folder is gone it keeps the
+        folder as unreadable, as before."""
+        self.assert_record_stands_nowhere()
+        folder = os.path.join(self.base, "trash-leftover")
+        os.makedirs(folder)
+        delete, reason = sweep.trash_verdict(folder)
+        self.assertEqual(reason, "unreadable-subject",
+                         "trash_verdict opted in to a record whose folder is gone; it must keep the folder")
+        self.assertFalse(delete)
+
+    def test_clean_merged_tree_is_kept_beside_a_record_whose_parent_folder_is_gone(self):
+        """A record whose cwd sits under a folder that is gone too may be a moved or unmounted folder. It reads
+        unknown, not gone, so the clean merged tree is kept as unreadable-subject. Its own config folder keeps the
+        class's shared record out of this read."""
+        parent = os.path.join(self.base, "gone-parent")
+        os.makedirs(parent)
+        os.rmdir(parent)
+        self.assertFalse(os.path.exists(parent), "scope: the record's parent folder must be absent")
+        self.assertTrue(os.path.isdir(self.removable), "scope: the clean tree must be a folder")
+        cfg = os.path.join(self.base, "cfg-parent-gone")
+        write(os.path.join(cfg, "sessions", "parent-gone-record.json"),
+              json.dumps({"pid": os.getpid(), "startedAt": this_process_start_ms(),
+                          "cwd": os.path.join(parent, "wt")}))
+        with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": cfg}):
+            decision = sweep.decide_worktree(self.root, self.entry_for(self.removable), attended=True)
+        self.assertEqual(decision["reason"], "unreadable-subject",
+                         "a clean merged tree was reaped beside a record whose parent folder is gone; it must be kept")
+        self.assertEqual(decision["action"], "keep")
 
 
 class StaleAgentLockTests(unittest.TestCase):
@@ -3725,6 +3820,120 @@ class ParallelPreviewTests(unittest.TestCase):
         finally:
             undo()
         return state["peak"]
+
+
+class _StepClock:
+    """A `time.time` stand-in. Each read returns the current value, then moves on by STEP, so the
+    gap between two reads is STEP. A frozen clock has STEP 0."""
+
+    def __init__(self, start, step):
+        self.now = start
+        self.step = step
+
+    def __call__(self):
+        value = self.now
+        self.now += self.step
+        return value
+
+
+class SweepOrderTests(unittest.TestCase):
+    """`_oldest_idle_first` ranks trees by idle time, and each tree's idle is read off the clock
+    during the ranking. Trees that tie, or sit less than a second apart, must come back in one
+    order, whichever tree is read first and whatever the clock does between the reads. Fixed
+    mtimes and a stepping clock make every idle exact, so no case reads the real time."""
+
+    FIXED = 1900000000.0  # an absolute epoch: every mtime and every clock value counts from it
+
+    def setUp(self):
+        self.run = _test_temp.run_folder()
+        self.addCleanup(shutil.rmtree, self.run, True)
+
+    def _tree(self, name, idle):
+        """A real repository whose git admin files were last touched IDLE seconds before FIXED."""
+        path = os.path.join(self.run, name)
+        make_repo(path, {"f.txt": name + "\n"})
+        _age_admin_files(path, idle, at=self.FIXED)
+        return path
+
+    def _assert_idles(self, paths, expected):
+        """Scope: the fixture's idle reads, at the fixed clock, are the ones a case assumes."""
+        for path, want in zip(paths, expected):
+            got = sweep.worktree_idle_seconds(path, now=self.FIXED)
+            self.assertIsNotNone(got, "scope: %s has no idle read" % os.path.basename(path))
+            self.assertAlmostEqual(got, want, places=5,
+                                   msg="scope: %s idles %s, not %s" % (os.path.basename(path), got, want))
+
+    def _order(self, paths, clock):
+        """Names, in the order `_oldest_idle_first` gives PATHS while `time.time` is CLOCK."""
+        with mock.patch("time.time", clock):
+            out = sweep._oldest_idle_first([{"path": path} for path in paths])
+        return tuple(os.path.basename(entry["path"]) for entry in out)
+
+    def test_equal_idle_trees_come_back_in_path_order_for_every_input_order(self):
+        names = ["tie-c", "tie-a", "tie-d", "tie-b"]
+        paths = [self._tree(name, 3600) for name in names]
+        self._assert_idles(paths, [3600] * len(paths))
+        inputs, outputs = set(), set()
+        for seed in range(20):
+            shuffled = list(paths)
+            random.Random(seed).shuffle(shuffled)
+            inputs.add(tuple(os.path.basename(path) for path in shuffled))
+            outputs.add(self._order(shuffled, _StepClock(self.FIXED, 0)))
+        self.assertGreater(len(inputs), 1, "scope: the 20 shuffles gave one input order, so no tie was tested")
+        self.assertEqual(outputs, {tuple(sorted(names))},
+                         "trees with equal idle did not come back in path order: %d orders, for example %s"
+                         % (len(outputs), sorted(outputs)[0]))
+
+    def test_trees_less_than_a_second_apart_come_back_in_one_order(self):
+        splits = []
+        for number, gap in enumerate((0, 0.001, 0.06, 0.4)):
+            a = self._tree("gap%d-a" % number, 3600)
+            b = self._tree("gap%d-b" % number, 3600 - gap)
+            self._assert_idles([a, b], [3600, 3600 - gap])
+            first_seen = {}  # each order, with the first clock step and read that gave it
+            for step in (0, 0.001, -0.001, 0.25, 0.8, -0.8):
+                for read in ((a, b), (b, a)):
+                    order = self._order(read, _StepClock(self.FIXED, step))
+                    first_seen.setdefault(order, "clock step %s, %s read first"
+                                          % (step, os.path.basename(read[0])))
+            if len(first_seen) > 1:
+                splits.append("gap %s s: " % gap + "; ".join(
+                    "%s first at %s" % (" then ".join(order), where) for order, where in first_seen.items()))
+        self.assertEqual(splits, [],
+                         "trees less than a second apart came back in more than one order: " + " | ".join(splits))
+
+    def test_control_tree_idle_ten_minutes_sorts_before_one_idle_one_minute(self):
+        one = self._tree("ctl-one-minute", 60)
+        ten = self._tree("ctl-ten-minutes", 600)
+        self._assert_idles([one, ten], [60, 600])
+        self.assertEqual(self._order([one, ten], _StepClock(self.FIXED, 0)),
+                         ("ctl-ten-minutes", "ctl-one-minute"),
+                         "the longer-idle tree did not sort first")
+
+    def test_control_tree_with_unreadable_idle_sorts_last(self):
+        known = self._tree("ctl-known", 600)
+        plain = os.path.join(self.run, "ctl-not-a-repo")
+        os.makedirs(plain)
+        self.assertIsNone(sweep.worktree_idle_seconds(plain, now=self.FIXED),
+                          "scope: a folder that is not a repository reads an idle")
+        self.assertEqual(self._order([plain, known], _StepClock(self.FIXED, 0)),
+                         ("ctl-known", "ctl-not-a-repo"),
+                         "the tree with no readable idle did not sort last")
+
+    def test_an_unreadable_idle_sorts_last_past_a_fresh_tree_with_a_smaller_path(self):
+        fresh = self._tree("ctl-fresh", 0)
+        plain = os.path.join(self.run, "a-not-a-repo")
+        os.makedirs(plain)
+        self._assert_idles([fresh], [0])
+        self.assertIsNone(sweep.worktree_idle_seconds(plain, now=self.FIXED),
+                          "scope: a folder that is not a repository reads an idle")
+        self.assertEqual(self._order([plain, fresh], _StepClock(self.FIXED, 0)),
+                         ("ctl-fresh", "a-not-a-repo"),
+                         "the tree with no readable idle sorted ahead of a fresh tree with a smaller path")
+
+    def test_control_no_trees_gives_an_empty_order(self):
+        self.assertEqual(list(sweep._oldest_idle_first([])), [],
+                         "an empty input did not give an empty order")
 
 
 # --------------------------------------------------------------------------- the purge
@@ -7734,10 +7943,11 @@ def _norm_path(path):
     return os.path.normcase(os.path.realpath(path))
 
 
-def _age_admin_files(path, seconds):
-    """Make a worktree's own git admin files `seconds` old, so the strict idle rule reads it quiet."""
+def _age_admin_files(path, seconds, at=None):
+    """Make a worktree's own git admin files `seconds` old, so the strict idle rule reads it quiet.
+    AT is the epoch the age counts back from. None counts from the real clock now."""
     admin = run_vcs(path, "rev-parse", "--absolute-git-dir").stdout.strip()
-    then = time.time() - seconds
+    then = (time.time() if at is None else at) - seconds
     for name in ("index", "HEAD", os.path.join("logs", "HEAD")):
         target = os.path.join(admin, name)
         if os.path.exists(target):

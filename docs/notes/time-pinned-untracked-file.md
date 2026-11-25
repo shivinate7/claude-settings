@@ -1,0 +1,1 @@
+- time-pinned-untracked-file: `--check --base` in a local run does not see a new test file until it is committed, because the finder lists tracked files only (lint/find_time_pinned.py `list_files`, `git ls-files`). CI reads committed files, so the gate holds there. Seen: 2026-11-24 x1

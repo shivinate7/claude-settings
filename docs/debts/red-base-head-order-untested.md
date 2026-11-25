@@ -1,6 +1,6 @@
 # The red-main walk has no test for head-group order
 
 - **What.** No test pins that `base_state` walks the push and dispatch group (the head group) first. A mutant that sorts runs by age alone keeps every `RedMainBrake` case green (measured at 105 cases; the class has 167 on 2026-11-20). When a first-red nightly run is newer than a first-red push run, the gap matters. The red line then names the nightly's re-run id, not the push run's. Harm: one wasted re-run, no wrong revert. Likelihood in normal work: low. A nightly red over a push red is the case PR #2889 (blame each red group's breaking run) targets.
-- **Where.** `merge/merge.py`, `base_state` (the sort that puts the head group first). `merge/test_merge.py`, class `RedMainBrake`.
+- **Where.** `actions/ci-alarm/clear_rule.py`, `judge` (the sort into `order` that puts the head group first), which `merge/merge.py` `base_state` calls. `merge/test_merge.py`, class `RedMainBrake`.
 - **Decision.** `no-merge-onto-red-main` (a PR may merge onto a red main; UNKNOWN still refuses). It is the closest decision. It does not name this gap.
 - **Retire.** A new case in `merge/test_merge.py`, class `RedMainBrake`. It fails under an age-only sort and passes on the current code. It sets a first-red nightly run newer than a first-red push run. It asserts that the red line names the push run's re-run id.

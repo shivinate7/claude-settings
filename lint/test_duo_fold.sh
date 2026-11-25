@@ -27,13 +27,16 @@ UDID=7F6A2C1E-3B4D-4E5F-8A9B-0C1D2E3F4A5B
 # Inherited settings never reach a case. Each case sets what it needs, and these names start unset.
 unset HINGE DUO_FOLD_LOG DUO_FOLD_WORK DUO_FOLD_HINGE_REPO DUO_FOLD_HINGE_SHA
 base_path=$PATH
+# The caller's HOME. A case's fake HOME sits inside the folders cleanup deletes, and the rm shim refuses a delete of a
+# parent of HOME, so cleanup puts this HOME back first.
+real_home=$HOME
 pass_n=0; fail_n=0; failed=; why=
 rc=0; out=; err=; cdir=; pin_repo=; pin_sha=
 
 # The run folder: one per run, under the one temp root (lint/_test_temp.py). Teardown removes it.
 work=$(python3 -I -c 'import sys; sys.path.insert(0, sys.argv[1]); import _test_temp; print(_test_temp.run_folder())' "$root/lint") || exit 1
 [ -n "$work" ] || exit 1
-trap 'rm -rf "$work"' EXIT
+trap 'export HOME=$real_home; rm -rf "$work"' EXIT
 stubs=$work/stubs
 mkdir -p "$stubs" || exit 1
 
@@ -86,6 +89,7 @@ need() { local msg=$1; shift; [ -n "$why" ] && return 0; "$@" || why=$msg; }
 # hinge stub, uname says arm64, the fetch folder is in the case folder, and no fault is set. A case sets only what it tests.
 setup() {
   cdir=$work/case
+  export HOME=$real_home
   rm -rf "$cdir"
   mkdir -p "$cdir/home" "$cdir/work" || exit 1
   : > "$cdir/hinge.log"

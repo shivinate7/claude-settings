@@ -838,10 +838,10 @@ sh("per-file deny: cd lane; git -C . restore f.txt; cd shared; the same -C . res
    "cd " + slash(GITWT) + "; " + VCS + " -C . restore f.txt; cd " + slash(GITMAIN) + "; "
    + VCS + " -C . restore f.txt", "deny", "shared-tree", cwd=NOGIT)
 # A discard or force push chained with another command used to be held as an ask and denied as a
-# chained ask command (ask-alone). With no ask to hold, it denies by its own rule, so the rule is not
-# pinned here: the chain must still deny, and its reason must not name ask-alone.
+# chained ask command (ask-alone). With no ask to hold, it denies by its own rule, shared-tree for a discard.
+# That rule is pinned here: the chain must still deny by it, and its reason must not name ask-alone.
 def own_refuse(name, command, **kw):
-    sh(name, command, "deny", None, lacks=(CHAIN_ASK,), **kw)
+    sh(name, command, "deny", "shared-tree", lacks=(CHAIN_ASK,), **kw)
 
 
 # CONTROL. Both calls stay in the lane, so the repeat stays an allow.
@@ -1048,6 +1048,9 @@ sh("agent worktree: a textual .claude/worktrees/.. that resolves back outside st
 if SYMWT_MADE:
     sh("agent worktree: a symlink into .claude/worktrees/ aliasing an outside worktree still denies",
        VCS + " reset --hard", "deny", "shared-tree", cwd=SYMWT)
+else:
+    skip_case("agent worktree: a symlink into .claude/worktrees/ aliasing an outside worktree still denies",
+              NO_LINK_HERE)
 sh("agent worktree: the main checkout nested under its own .claude/worktrees/-shaped path "
    "still denies", VCS + " reset --hard", "deny", "shared-tree", cwd=DECOYMAIN)
 sh("agent worktree: a stash push there still denies, the stack is clone-wide",

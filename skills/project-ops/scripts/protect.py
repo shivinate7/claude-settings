@@ -4,14 +4,14 @@
     python3 protect.py --repo <owner>/<name> --check all-jobs-passed [--branch main] [--confirm]
 
 The check this tool sets is the all-jobs-passed rollup (decision same-check-kinds), the constant REQUIRED_CHECK; any other --check name is refused.
-This is the form for an adopting repo. Main's own merge.requiredChecks is "none" and requires no check (decision main-branch-protection).
+This is the form for an adopting repo. Main's own merge.requiredChecks is "first-proof" and requires no check (a repo with no CI sets "none") (decision main-branch-protection).
 The ruleset follows decision main-branch-protection: active, on the named branch,
 the rollup as its one required check, deletion and force-push blocked, and the repository Admin role as its one bypass actor, on pull requests only.
 It sets no strict policy of its own and no pull-request rule: those are planned, not ruled.
 Without --confirm it only reads the repo's rulesets and prints what it would set. With --confirm it writes: a branch with no ruleset gets one
 (POST); a branch whose ruleset differs from the ruled form is updated in place (PUT, its other rules, its conditions and its strict setting kept);
 a ruleset already in the form is left alone. The classic branch protection is never read or written here: its removal is a later act.
-Under merge.requiredChecks "protection", merge/merge.py reads the required checks from the ruleset first, so this is their one home. Under "none" it reads none.
+Under merge.requiredChecks "protection", merge/merge.py reads the required checks from the ruleset first, so this is their one home. Under "none" or "first-proof" it reads none.
 Exit 0 done or previewed, 1 a gh call failed, 2 a bad argument or a check other than REQUIRED_CHECK.
 """
 import argparse
@@ -37,6 +37,8 @@ def run_gh(args, body=None):
     """-> (code, output) of `gh api`, with `body` as its JSON input."""
     p = _nowindow.run(["gh", "api", *args] + (["--input", "-"] if body is not None else []),
                        input=json.dumps(body) if body is not None else None, capture_output=True, text=True)
+    if p.returncode == 0:  # gh 2.105 prints a hint on stderr with exit 0: the caller parses JSON, so a success gives stdout alone
+        return 0, p.stdout.strip()
     return p.returncode, (p.stdout + p.stderr).strip()
 
 

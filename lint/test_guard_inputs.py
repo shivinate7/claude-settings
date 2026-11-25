@@ -51,6 +51,7 @@ IMPORT_DIRS = ("hooks", "lint", "merge", "janitor", "testing", "skills/waiting-p
 # repo paths, with __pycache__, .git and directories left out. Kept beside its only reader. Case (a) reads it.
 TRACED_READS = (
     ".claude/layout-extras.json",
+    "actions/ci-alarm/clear_rule.py",
     "actions/ci-alarm/events.json",
     "agents/builder.md",
     "agents/claude-code-guide.md",

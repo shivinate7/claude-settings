@@ -38,8 +38,9 @@ env:
 
 jobs:
   # The daily run's skip job (R61, owner pick b, Nov 12; owner page item 880, 11:53 CST Nov 15; decisions test-strategy-reset and
-  # push-skip-on-proven-tree). It says skip when the newest completed daily is green and every push run since it was proven by the push
-  # skip, the newest at this head (.github/scripts/nightly-skip.py). It prints the range the daily covers, to the log and the step
+  # push-skip-on-proven-tree). It says skip only on a day main did not move (owner, 13:44 CST Nov 23, answer a to Q5): the newest
+  # completed daily is green, no push run came after it, and it ran at this head. Any push run after the green daily, proven by the push
+  # skip or not, runs everything, since a push never runs the Windows shards (.github/scripts/nightly-skip.py). It prints the range the daily covers, to the log and the step
   # summary. Scope waits on it, so a skip reaches every job through needs and the run is a visible success: nothing is cancelled,
   # since a cancelled run reads UNKNOWN and blocks merges. A failed read, or another daily still going, says skip=false: unknown runs
   # everything. The job itself starts on every event and its steps run on a schedule only: a job-level `if` would leave it skipped,
@@ -218,7 +219,7 @@ jobs:
 
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
         with:
-          python-version: "3.11"
+          python-version: "3.15"
 
       - name: Workflow supply-chain audit (zizmor)
         if: ${{ !cancelled() }}
@@ -343,6 +344,10 @@ jobs:
       - name: Guard log report fixture suite
         if: ${{ !cancelled() && (needs.scope.outputs.code == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_guard_log_report.py
+
+      - name: Pace numbers fixture suite
+        if: ${{ !cancelled() && (needs.scope.outputs.code == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
+        run: python3 lint/test_pace_numbers.py
 
       - name: Guard outcome claims fixture suite
         if: ${{ !cancelled() && (needs.scope.outputs.code == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
@@ -476,6 +481,22 @@ jobs:
         if: ${{ !cancelled() && (needs.scope.outputs.code == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_check_hook_dup_names.py
 
+      - name: Stand-in signature fixture suite
+        if: ${{ !cancelled() && (needs.scope.outputs.code == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
+        run: python3 lint/test_standin_signatures.py
+
+      - name: Test temp helper fixture suite
+        if: ${{ !cancelled() && (needs.scope.outputs.code == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
+        run: python3 lint/test_test_temp.py
+
+      - name: Tests set config fixture suite
+        if: ${{ !cancelled() && (needs.scope.outputs.code == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
+        run: python3 lint/test_tests_set_config.py
+
+      - name: Tests set config check
+        if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}
+        run: python3 lint/check_tests_set_config.py
+
       - name: Record slug fixture suite
         if: ${{ !cancelled() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_check_record_slugs.py
@@ -503,6 +524,13 @@ jobs:
       - name: Time-pinned finder fixture suite
         if: ${{ !cancelled() && (needs.scope.outputs.code == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_find_time_pinned.py
+
+      # Pull requests only, as the comment narration check: the range is base..HEAD. It reads every non-.md path, a superset of the test files this reads, so it shares that scope flag.
+      - name: Time-pinned new-finding check
+        if: ${{ !cancelled() && github.event_name == 'pull_request' && needs.scope.outputs.lint_comment_narration == 'true' }}
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: python3 lint/find_time_pinned.py . --check --base "origin/$BASE_REF"
 
       - name: Mod version fixture suite
         if: ${{ !cancelled() && needs.scope.outputs.records_only_skip != 'true' }}
@@ -535,8 +563,9 @@ jobs:
         if: ${{ !cancelled() && (needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_any == 'true') }}
         run: python3 lint/check_cost_pins.py
 
-      # A static read of the mutant table: each anchor of hooks/mutate_guard.py sits once where its entry says. It reads every anchor in one
-      # pass, in about a second, and names each bad one. The mutation run's own pre-check covers ambiguity only for guard and audit targets.
+      # A static read of the mutant tables of hooks/mutate_guard.py and janitor/mutate_sweep.py: each anchor sits once where its entry says.
+      # It reads every anchor in one pass, in about a second, and names each bad one. The mutation run's own pre-check covers ambiguity only
+      # for guard and audit targets.
       - name: Mutant anchor census
         if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}
         run: python3 lint/check_mutant_anchors.py
@@ -861,7 +890,7 @@ jobs:
 
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
         with:
-          python-version: "3.11"
+          python-version: "3.15"
 
       # A step below that has a scope condition and reads no .md file skips a docs-only pull request (`code` is false,
       # ci-scope.sh). A step that reads a .md file also runs when its doc groups change. Every suite step reads the records-only
@@ -1052,6 +1081,10 @@ jobs:
         if: ${{ (needs.scope.outputs.code == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_start_check.py
 
+      - name: Lease file suite
+        if: ${{ (needs.scope.outputs.code == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
+        run: python3 hooks/test_lease.py
+
       - name: Session role file suite
         if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_session_role.py
@@ -1098,7 +1131,7 @@ jobs:
 
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
         with:
-          python-version: "3.11"
+          python-version: "3.15"
 
       - name: Janitor sweep fixture suite
         if: ${{ (needs.scope.outputs.code == 'true' && needs.scope.outputs.sweep == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
@@ -1251,7 +1284,7 @@ jobs:
 
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
         with:
-          python-version: "3.11"
+          python-version: "3.15"
 
       - name: Janitor triggers fixture suite (SessionEnd hook + launchd installer)
         if: ${{ needs.scope.outputs.code == 'true' }}
@@ -1358,7 +1391,7 @@ jobs:
 
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
         with:
-          python-version: "3.11"
+          python-version: "3.15"
 
       - name: install.sh checkout-detection suite (shard 1 of 3)
         if: ${{ needs.scope.outputs.code == 'true' }}
@@ -1393,7 +1426,7 @@ jobs:
 
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
         with:
-          python-version: "3.11"
+          python-version: "3.15"
 
       - name: install.sh checkout-detection suite (shard 2 of 3)
         if: ${{ needs.scope.outputs.code == 'true' }}
@@ -1428,7 +1461,7 @@ jobs:
 
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
         with:
-          python-version: "3.11"
+          python-version: "3.15"
 
       - name: install.sh checkout-detection suite (shard 3 of 3)
         if: ${{ needs.scope.outputs.code == 'true' }}
@@ -1464,7 +1497,7 @@ jobs:
 
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
         with:
-          python-version: "3.11"
+          python-version: "3.15"
 
       - name: Merge tool git-half fixture suite
         if: ${{ needs.scope.outputs.code == 'true' }}
@@ -1507,7 +1540,7 @@ jobs:
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
         if: ${{ needs.scope.outputs.checks_guard == 'true' }}
         with:
-          python-version: "3.11"
+          python-version: "3.15"
 
       # The deny cases of rule page-item-design render a page through hooks/guard.py's checker, which needs
       # Playwright and Chromium. The same pinned copy checks-shoot installs; NODE_PATH below lets the guard's node find it.
@@ -1562,7 +1595,7 @@ jobs:
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
         if: ${{ needs.scope.outputs.checks_guard == 'true' }}
         with:
-          python-version: "3.11"
+          python-version: "3.15"
 
       # The deny cases of rule page-item-design render a page through hooks/guard.py's checker, which needs
       # Playwright and Chromium. The same pinned copy checks-shoot installs; NODE_PATH below lets the guard's node find it.
@@ -1620,7 +1653,7 @@ jobs:
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
         if: ${{ needs.scope.outputs.checks_guard == 'true' }}
         with:
-          python-version: "3.11"
+          python-version: "3.15"
 
       # The deny cases of rule page-item-design render a page through hooks/guard.py's checker, which needs
       # Playwright and Chromium. The same pinned copy checks-shoot installs; NODE_PATH below lets the guard's node find it.
@@ -1674,7 +1707,7 @@ jobs:
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
         if: ${{ needs.scope.outputs.checks_guard == 'true' }}
         with:
-          python-version: "3.11"
+          python-version: "3.15"
 
       # The deny cases of rule page-item-design render a page through hooks/guard.py's checker, which needs
       # Playwright and Chromium. The same pinned copy checks-shoot installs; NODE_PATH below lets the guard's node find it.
@@ -1723,7 +1756,7 @@ jobs:
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
         if: ${{ needs.scope.outputs.shoot == 'true' }}
         with:
-          python-version: "3.11"
+          python-version: "3.15"
 
       - name: Install the pinned Playwright and Chromium, no apt step
         if: ${{ needs.scope.outputs.shoot == 'true' }}
@@ -1955,7 +1988,7 @@ jobs:
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
         if: ${{ needs.scope.outputs.checks_macos == 'true' || needs.scope.outputs.sweep == 'true' || github.event_name != 'pull_request' }}
         with:
-          python-version: "3.11"
+          python-version: "3.15"
 
       # The mac-tagged slice of the guard suite, on every event that runs macOS (R61, owner pick b, Nov 12): the full guard suite
       # runs on Linux and Windows, and on macOS only this slice. No step cap: bin/verdict stops the step only on a hang (decision hang-stop); the job cap stays as the net. The slice runs far shorter than the shard
@@ -2212,7 +2245,7 @@ jobs:
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
         if: ${{ needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request' }}
         with:
-          python-version: "3.11"
+          python-version: "3.15"
 
       - name: CI wake-up fixture suite
         if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
@@ -2292,7 +2325,7 @@ jobs:
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
         if: ${{ needs.scope.outputs.checks_windows == 'true' || github.event_name != 'pull_request' }}
         with:
-          python-version: "3.11"
+          python-version: "3.15"
 
       - name: Report the Windows environment
         if: ${{ (needs.scope.outputs.checks_windows == 'true' || github.event_name != 'pull_request') && !cancelled() }}
@@ -2417,13 +2450,42 @@ jobs:
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
         if: ${{ needs.scope.outputs.guard == 'true' }}
         with:
-          python-version: "3.11"
+          python-version: "3.15"
+
+      # The per-mutant verdicts stay across a rerun of this run (decision hang-stop: a stopped run resumes). The shard step writes one
+      # verdict file per mutant into this folder (hooks/mutate_shared.py reads MUTATE_VERDICT_DIR; a verdict from other code is ruled out
+      # by its digest, hooks/mutate_guard.py verdict_digest). The restore step finds the save of an earlier attempt of this run id by the
+      # restore-keys prefix, since a cache key matches only exactly; a new push has a new run id and restores nothing. The save step runs
+      # after a red or failed shard step too, so a rerun of the run reuses what that attempt judged. A save that cannot reserve its key
+      # or finds nothing to save warns and never fails the job.
+      - name: Make the mutation verdict folder
+        if: ${{ needs.scope.outputs.guard == 'true' }}
+        env:
+          MUTATE_VERDICT_DIR: ${{ runner.temp }}/mutate-verdicts
+        run: mkdir -p "$MUTATE_VERDICT_DIR"
+
+      - name: Restore the mutation verdicts of an earlier attempt
+        if: ${{ needs.scope.outputs.guard == 'true' }}
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/mutate-verdicts
+          key: mutate-verdicts-${{ github.job }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            mutate-verdicts-${{ github.job }}-${{ github.run_id }}-
 
       - name: Guard mutation test, shard 1/3
         if: ${{ needs.scope.outputs.guard == 'true' }}
         env:
           MUTATE_SHARD: 1/3
+          MUTATE_VERDICT_DIR: ${{ runner.temp }}/mutate-verdicts
         run: python3 hooks/mutate_guard.py
+
+      - name: Save the mutation verdicts
+        if: ${{ always() && needs.scope.outputs.guard == 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/mutate-verdicts
+          key: mutate-verdicts-${{ github.job }}-${{ github.run_id }}-${{ github.run_attempt }}
 
       # The progress beat of hooks/test_guard.py (decision stall-watch). Runs in this job, not in the guard suite, which runs in the
       # sibling shards (checks-guard is split in four, decision ci-job-caps); this job is projected at about 16 min, 21% of its 75 min cap, and this step adds 101 s locally (16 tests, about 1.7 min,
@@ -2460,13 +2522,42 @@ jobs:
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
         if: ${{ needs.scope.outputs.guard == 'true' }}
         with:
-          python-version: "3.11"
+          python-version: "3.15"
+
+      # The per-mutant verdicts stay across a rerun of this run (decision hang-stop: a stopped run resumes). The shard step writes one
+      # verdict file per mutant into this folder (hooks/mutate_shared.py reads MUTATE_VERDICT_DIR; a verdict from other code is ruled out
+      # by its digest, hooks/mutate_guard.py verdict_digest). The restore step finds the save of an earlier attempt of this run id by the
+      # restore-keys prefix, since a cache key matches only exactly; a new push has a new run id and restores nothing. The save step runs
+      # after a red or failed shard step too, so a rerun of the run reuses what that attempt judged. A save that cannot reserve its key
+      # or finds nothing to save warns and never fails the job.
+      - name: Make the mutation verdict folder
+        if: ${{ needs.scope.outputs.guard == 'true' }}
+        env:
+          MUTATE_VERDICT_DIR: ${{ runner.temp }}/mutate-verdicts
+        run: mkdir -p "$MUTATE_VERDICT_DIR"
+
+      - name: Restore the mutation verdicts of an earlier attempt
+        if: ${{ needs.scope.outputs.guard == 'true' }}
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/mutate-verdicts
+          key: mutate-verdicts-${{ github.job }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            mutate-verdicts-${{ github.job }}-${{ github.run_id }}-
 
       - name: Guard mutation test, shard 2/3
         if: ${{ needs.scope.outputs.guard == 'true' }}
         env:
           MUTATE_SHARD: 2/3
+          MUTATE_VERDICT_DIR: ${{ runner.temp }}/mutate-verdicts
         run: python3 hooks/mutate_guard.py
+
+      - name: Save the mutation verdicts
+        if: ${{ always() && needs.scope.outputs.guard == 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/mutate-verdicts
+          key: mutate-verdicts-${{ github.job }}-${{ github.run_id }}-${{ github.run_attempt }}
 
       # A red job wakes the watching session at once; ci-done names any the step could not.
       - name: Wake the batch runner (red job)
@@ -2494,13 +2585,42 @@ jobs:
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
         if: ${{ needs.scope.outputs.guard == 'true' }}
         with:
-          python-version: "3.11"
+          python-version: "3.15"
+
+      # The per-mutant verdicts stay across a rerun of this run (decision hang-stop: a stopped run resumes). The shard step writes one
+      # verdict file per mutant into this folder (hooks/mutate_shared.py reads MUTATE_VERDICT_DIR; a verdict from other code is ruled out
+      # by its digest, hooks/mutate_guard.py verdict_digest). The restore step finds the save of an earlier attempt of this run id by the
+      # restore-keys prefix, since a cache key matches only exactly; a new push has a new run id and restores nothing. The save step runs
+      # after a red or failed shard step too, so a rerun of the run reuses what that attempt judged. A save that cannot reserve its key
+      # or finds nothing to save warns and never fails the job.
+      - name: Make the mutation verdict folder
+        if: ${{ needs.scope.outputs.guard == 'true' }}
+        env:
+          MUTATE_VERDICT_DIR: ${{ runner.temp }}/mutate-verdicts
+        run: mkdir -p "$MUTATE_VERDICT_DIR"
+
+      - name: Restore the mutation verdicts of an earlier attempt
+        if: ${{ needs.scope.outputs.guard == 'true' }}
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/mutate-verdicts
+          key: mutate-verdicts-${{ github.job }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            mutate-verdicts-${{ github.job }}-${{ github.run_id }}-
 
       - name: Guard mutation test, shard 3/3
         if: ${{ needs.scope.outputs.guard == 'true' }}
         env:
           MUTATE_SHARD: 3/3
+          MUTATE_VERDICT_DIR: ${{ runner.temp }}/mutate-verdicts
         run: python3 hooks/mutate_guard.py
+
+      - name: Save the mutation verdicts
+        if: ${{ always() && needs.scope.outputs.guard == 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/mutate-verdicts
+          key: mutate-verdicts-${{ github.job }}-${{ github.run_id }}-${{ github.run_attempt }}
 
       # A red job wakes the watching session at once; ci-done names any the step could not.
       - name: Wake the batch runner (red job)
@@ -2543,7 +2663,7 @@ jobs:
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
         if: ${{ needs.scope.outputs.mutation_report == 'true' }}
         with:
-          python-version: "3.11"
+          python-version: "3.15"
 
       - name: Mutation report and known defects
         if: ${{ needs.scope.outputs.mutation_report == 'true' }}
@@ -2558,17 +2678,17 @@ jobs:
         with:
           job: mutation-report
 
-  # The guard fixture suite on Windows, split off checks-windows by cut F. Every run, a ready pull_request included (R62, owner
-  # 15:55 CST Nov 12: the integration PR run carries the full guard so the push to main can skip it), runs the full suite in shards:
+  # The guard fixture suite on Windows, split off checks-windows by cut F. A schedule and a dispatch run the full suite in shards; a ready
+  # pull_request runs only the Windows-marked cases, one slice step here (owner, 21:19 CST Nov 24 2026, over R62's full shards on a ready PR):
   # shard 1 here, the rest in checks-windows-guard-<i> (the shard switch in hooks/test_guard.py; lint/test_windows_split.py proves each
-  # case runs once). A ready pull_request runs every step of the Windows guard jobs (the draft test stands in for scope there, which skips on a draft),
+  # case runs once). A ready pull_request runs every step of these two base jobs (the draft test stands in for scope there, which skips on a draft),
   # and a merge or rest suite step only with its job's own scope flag set (checks_windows_merge, checks_windows_rest, checks_windows_rest_2). The records-only skip (records_only_skip, from .github/scripts/ci-scope.sh) is a change to
   # docs/records.md or a comment-only .py or .sh file alone after a fully green head, on a pull request or a push. Every job but
   # scope, nightly-skip, push-skip and all-jobs-passed starts nothing then, except the checks job on a comment-only delta, which its lints read (it ends its
   # job-level `if` in the delta clause, and every suite step reads the skip): each job-level `if` reads it
   # (lint/all_jobs_passed_rules.py allows that condition and no wider one on a needed job, but the checks job's named delta clause), and all-jobs-passed passes the skips (actions/all-jobs-passed/check.sh). The macOS jobs never start on a pull
   # request or a push. A step-level `if` still starts a runner, so the skip sits on the job. R62 ("each suite runs once per batch, on
-  # the batch PR"; "Part 3 keeps the full shards once per batch") puts the full suites on every ready pull_request; own-830-c, widened by
+  # the batch PR"; "Part 3 keeps the full shards once per batch") put the full suites on a ready pull_request until the Nov 24 cut above; own-830-c, widened by
   # owner item 857 pick b (19:48 CST Nov 15), narrows that: the green head's run already proved what a records-only change moves.
   # A schedule and a dispatch run them whole. The five guard shards also read windows_guard (ci-scope.sh, .github/guard-inputs.txt): a pull
   # request whose diff touches no file the guard suite reads runs no guard shard, since the suite cannot change its verdict on such a diff.
@@ -2576,7 +2696,7 @@ jobs:
     runs-on: windows-latest
     needs: scope
     if: ${{ (github.event_name != 'push') && needs.scope.outputs.records_only_skip != 'true' }}
-    # Full guard suite in 5 shards, on a ready pull_request too since R62 (the figures below are push runs, measured under the 3-shard split). A 2-shard split ran 19:31 and past 20:00 (cancelled) under the old
+    # Full guard suite in 5 shards, on a schedule and a dispatch only since the Nov 24 cut (the figures below are push runs, measured under the 3-shard split). A 2-shard split ran 19:31 and past 20:00 (cancelled) under the old
     # 20 min cap (runs 42406480975, 42408558620), so each of 5 shards takes a fifth of the cases. Under that cap, 11 main push
     # runs from 42700538152 to 43038567637 (Nov 9 to Nov 11) cut a shard at 20.05 to 20.08 min with no red test; green shards took
     # 15.27 to 19.98 min. Stopgap cap 75 min (owner 12:11 CST Nov 10, decision ci-job-caps).
@@ -2594,12 +2714,18 @@ jobs:
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
         if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
         with:
-          python-version: "3.11"
+          python-version: "3.15"
 
       - name: Guard fixture suite (shard 1 of 5)
-        if: ${{ ((github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() && (needs.scope.outputs.code == 'true' || github.event_name == 'pull_request') && needs.scope.outputs.windows_guard == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
+        if: ${{ ((github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() && github.event_name != 'pull_request' && (needs.scope.outputs.code == 'true' || github.event_name == 'pull_request') && needs.scope.outputs.windows_guard == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
         env:
           GUARD_SHARD: 1/5
+        run: python hooks/test_guard.py
+
+      - name: Guard fixture suite (Windows slice)
+        if: ${{ ((github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() && github.event_name == 'pull_request' && (needs.scope.outputs.code == 'true' || github.event_name == 'pull_request') && needs.scope.outputs.windows_guard == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
+        env:
+          GUARD_TESTS: windows-slice
         run: python hooks/test_guard.py
 
       # A red job wakes the watching session at once; ci-done names any the step could not.
@@ -2612,7 +2738,7 @@ jobs:
   checks-windows-guard-2:
     runs-on: windows-latest
     needs: scope
-    if: ${{ (github.event_name != 'push' && (github.event_name != 'pull_request' || !github.event.pull_request.draft)) && needs.scope.outputs.records_only_skip != 'true' }}
+    if: ${{ (github.event_name != 'pull_request' && github.event_name != 'push') && needs.scope.outputs.records_only_skip != 'true' }}
     # A shard of checks-windows-guard: its figures and cap are there.
     timeout-minutes: 75
     permissions:
@@ -2628,7 +2754,7 @@ jobs:
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
         if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
         with:
-          python-version: "3.11"
+          python-version: "3.15"
 
       - name: Guard fixture suite (shard 2 of 5)
         if: ${{ ((github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() && (needs.scope.outputs.code == 'true' || github.event_name == 'pull_request') && needs.scope.outputs.windows_guard == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
@@ -2646,7 +2772,7 @@ jobs:
   checks-windows-guard-3:
     runs-on: windows-latest
     needs: scope
-    if: ${{ (github.event_name != 'push' && (github.event_name != 'pull_request' || !github.event.pull_request.draft)) && needs.scope.outputs.records_only_skip != 'true' }}
+    if: ${{ (github.event_name != 'pull_request' && github.event_name != 'push') && needs.scope.outputs.records_only_skip != 'true' }}
     # A shard of checks-windows-guard: its figures and cap are there.
     timeout-minutes: 75
     permissions:
@@ -2662,7 +2788,7 @@ jobs:
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
         if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
         with:
-          python-version: "3.11"
+          python-version: "3.15"
 
       - name: Guard fixture suite (shard 3 of 5)
         if: ${{ ((github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() && (needs.scope.outputs.code == 'true' || github.event_name == 'pull_request') && needs.scope.outputs.windows_guard == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
@@ -2680,7 +2806,7 @@ jobs:
   checks-windows-guard-4:
     runs-on: windows-latest
     needs: scope
-    if: ${{ (github.event_name != 'push' && (github.event_name != 'pull_request' || !github.event.pull_request.draft)) && needs.scope.outputs.records_only_skip != 'true' }}
+    if: ${{ (github.event_name != 'pull_request' && github.event_name != 'push') && needs.scope.outputs.records_only_skip != 'true' }}
     # A shard of checks-windows-guard: its figures and cap are there.
     timeout-minutes: 75
     permissions:
@@ -2696,7 +2822,7 @@ jobs:
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
         if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
         with:
-          python-version: "3.11"
+          python-version: "3.15"
 
       - name: Guard fixture suite (shard 4 of 5)
         if: ${{ ((github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() && (needs.scope.outputs.code == 'true' || github.event_name == 'pull_request') && needs.scope.outputs.windows_guard == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
@@ -2714,7 +2840,7 @@ jobs:
   checks-windows-guard-5:
     runs-on: windows-latest
     needs: scope
-    if: ${{ (github.event_name != 'push' && (github.event_name != 'pull_request' || !github.event.pull_request.draft)) && needs.scope.outputs.records_only_skip != 'true' }}
+    if: ${{ (github.event_name != 'pull_request' && github.event_name != 'push') && needs.scope.outputs.records_only_skip != 'true' }}
     # A shard of checks-windows-guard: its figures and cap are there.
     timeout-minutes: 75
     permissions:
@@ -2730,7 +2856,7 @@ jobs:
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
         if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
         with:
-          python-version: "3.11"
+          python-version: "3.15"
 
       - name: Guard fixture suite (shard 5 of 5)
         if: ${{ ((github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() && (needs.scope.outputs.code == 'true' || github.event_name == 'pull_request') && needs.scope.outputs.windows_guard == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
@@ -2746,12 +2872,12 @@ jobs:
           job: checks-windows-guard-5
 
   # The merge suites on Windows. The full git-half suite runs in shards, shard 1 here and the rest in checks-windows-merge-<i> (the shard
-  # switch in merge/test_merge.py). A ready pull_request runs a step only when checks_windows_merge is set; the scheduled and dispatched runs run them all (a push skips every Windows shard).
+  # switch in merge/test_merge.py). A ready pull_request runs a step only when checks_windows_merge is set, and runs the Windows slice here in place of the full shard 1; the scheduled and dispatched runs run every shard (a push or a pull_request skips shards 2 to 10).
   checks-windows-merge:
     runs-on: windows-latest
     needs: scope
     if: ${{ (github.event_name != 'push') && needs.scope.outputs.records_only_skip != 'true' }}
-    # Push figures; a ready PR run carries the full suite when checks_windows_merge is set, unmeasured. 75 (interim, stopgap, owner 12:11 CST Nov 10; decision ci-job-caps). The newest 29 completed push runs on main, latest attempt of each (run 42522167511 to run 43206612905):
+    # Push figures; a ready PR run carries the Windows slice when checks_windows_merge is set, unmeasured. 75 (interim, stopgap, owner 12:11 CST Nov 10; decision ci-job-caps). The newest 29 completed push runs on main, latest attempt of each (run 42522167511 to run 43206612905):
     # 29 green, median 17.6, slowest 21.2 min (run 43155288101), measured under the 5-shard split. All 10 merge shards share cap 75. The stopgap ends with roadmap step time-pinned-tests-go.
     timeout-minutes: 75
     permissions:
@@ -2768,16 +2894,22 @@ jobs:
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
         if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
         with:
-          python-version: "3.11"
+          python-version: "3.15"
 
       - name: Merge launcher fixture suite
         if: ${{ ((github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() && (needs.scope.outputs.code == 'true' || github.event_name == 'pull_request') && (needs.scope.outputs.checks_windows_merge == 'true' || github.event_name != 'pull_request')) && needs.scope.outputs.records_only_skip != 'true' }}
         run: python merge/test_launch.py
 
       - name: Merge tool git-half fixture suite (shard 1 of 10)
-        if: ${{ ((github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() && (needs.scope.outputs.code == 'true' || github.event_name == 'pull_request') && (needs.scope.outputs.checks_windows_merge == 'true' || github.event_name != 'pull_request')) && needs.scope.outputs.records_only_skip != 'true' }}
+        if: ${{ ((github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() && github.event_name != 'pull_request' && (needs.scope.outputs.code == 'true' || github.event_name == 'pull_request') && (needs.scope.outputs.checks_windows_merge == 'true' || github.event_name != 'pull_request')) && needs.scope.outputs.records_only_skip != 'true' }}
         env:
           MERGE_SHARD: 1/10
+        run: python merge/test_merge.py
+
+      - name: Merge tool git-half fixture suite (Windows slice)
+        if: ${{ ((github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() && github.event_name == 'pull_request' && (needs.scope.outputs.code == 'true' || github.event_name == 'pull_request') && (needs.scope.outputs.checks_windows_merge == 'true' || github.event_name != 'pull_request')) && needs.scope.outputs.records_only_skip != 'true' }}
+        env:
+          MERGE_TESTS: windows-slice
         run: python merge/test_merge.py
 
       - name: Merge launcher fixture suite (merge.cmd)
@@ -2794,7 +2926,7 @@ jobs:
   checks-windows-merge-2:
     runs-on: windows-latest
     needs: scope
-    if: ${{ (github.event_name != 'push' && (github.event_name != 'pull_request' || !github.event.pull_request.draft)) && needs.scope.outputs.records_only_skip != 'true' }}
+    if: ${{ (github.event_name != 'pull_request' && github.event_name != 'push') && needs.scope.outputs.records_only_skip != 'true' }}
     # A shard of checks-windows-merge, with the same cap.
     # Cap 75 is shared by the 10 shards (interim, stopgap, owner 12:11 CST Nov 10; decision ci-job-caps).
     timeout-minutes: 75
@@ -2811,7 +2943,7 @@ jobs:
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
         if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
         with:
-          python-version: "3.11"
+          python-version: "3.15"
 
       - name: Merge tool git-half fixture suite (shard 2 of 10)
         if: ${{ ((github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() && (needs.scope.outputs.code == 'true' || github.event_name == 'pull_request') && (needs.scope.outputs.checks_windows_merge == 'true' || github.event_name != 'pull_request')) && needs.scope.outputs.records_only_skip != 'true' }}
@@ -2829,7 +2961,7 @@ jobs:
   checks-windows-merge-3:
     runs-on: windows-latest
     needs: scope
-    if: ${{ (github.event_name != 'push' && (github.event_name != 'pull_request' || !github.event.pull_request.draft)) && needs.scope.outputs.records_only_skip != 'true' }}
+    if: ${{ (github.event_name != 'pull_request' && github.event_name != 'push') && needs.scope.outputs.records_only_skip != 'true' }}
     # A shard of checks-windows-merge, with the same cap.
     # Cap 75 is shared by the 10 shards (interim, stopgap, owner 12:11 CST Nov 10; decision ci-job-caps).
     timeout-minutes: 75
@@ -2846,7 +2978,7 @@ jobs:
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
         if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
         with:
-          python-version: "3.11"
+          python-version: "3.15"
 
       - name: Merge tool git-half fixture suite (shard 3 of 10)
         if: ${{ ((github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() && (needs.scope.outputs.code == 'true' || github.event_name == 'pull_request') && (needs.scope.outputs.checks_windows_merge == 'true' || github.event_name != 'pull_request')) && needs.scope.outputs.records_only_skip != 'true' }}
@@ -2864,7 +2996,7 @@ jobs:
   checks-windows-merge-4:
     runs-on: windows-latest
     needs: scope
-    if: ${{ (github.event_name != 'push' && (github.event_name != 'pull_request' || !github.event.pull_request.draft)) && needs.scope.outputs.records_only_skip != 'true' }}
+    if: ${{ (github.event_name != 'pull_request' && github.event_name != 'push') && needs.scope.outputs.records_only_skip != 'true' }}
     # A shard of checks-windows-merge, with the same cap.
     # Cap 75 is shared by the 10 shards (interim, stopgap, owner 12:11 CST Nov 10; decision ci-job-caps).
     timeout-minutes: 75
@@ -2881,7 +3013,7 @@ jobs:
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
         if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
         with:
-          python-version: "3.11"
+          python-version: "3.15"
 
       - name: Merge tool git-half fixture suite (shard 4 of 10)
         if: ${{ ((github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() && (needs.scope.outputs.code == 'true' || github.event_name == 'pull_request') && (needs.scope.outputs.checks_windows_merge == 'true' || github.event_name != 'pull_request')) && needs.scope.outputs.records_only_skip != 'true' }}
@@ -2899,7 +3031,7 @@ jobs:
   checks-windows-merge-5:
     runs-on: windows-latest
     needs: scope
-    if: ${{ (github.event_name != 'push' && (github.event_name != 'pull_request' || !github.event.pull_request.draft)) && needs.scope.outputs.records_only_skip != 'true' }}
+    if: ${{ (github.event_name != 'pull_request' && github.event_name != 'push') && needs.scope.outputs.records_only_skip != 'true' }}
     # A shard of checks-windows-merge, with the same cap.
     # Cap 75 is shared by the 10 shards (interim, stopgap, owner 12:11 CST Nov 10; decision ci-job-caps).
     timeout-minutes: 75
@@ -2916,7 +3048,7 @@ jobs:
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
         if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
         with:
-          python-version: "3.11"
+          python-version: "3.15"
 
       - name: Merge tool git-half fixture suite (shard 5 of 10)
         if: ${{ ((github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() && (needs.scope.outputs.code == 'true' || github.event_name == 'pull_request') && (needs.scope.outputs.checks_windows_merge == 'true' || github.event_name != 'pull_request')) && needs.scope.outputs.records_only_skip != 'true' }}
@@ -2934,7 +3066,7 @@ jobs:
   checks-windows-merge-6:
     runs-on: windows-latest
     needs: scope
-    if: ${{ (github.event_name != 'push' && (github.event_name != 'pull_request' || !github.event.pull_request.draft)) && needs.scope.outputs.records_only_skip != 'true' }}
+    if: ${{ (github.event_name != 'pull_request' && github.event_name != 'push') && needs.scope.outputs.records_only_skip != 'true' }}
     # A shard of checks-windows-merge, with the same cap.
     # Cap 75 is shared by the 10 shards (interim, stopgap, owner 12:11 CST Nov 10; decision ci-job-caps).
     timeout-minutes: 75
@@ -2951,7 +3083,7 @@ jobs:
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
         if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
         with:
-          python-version: "3.11"
+          python-version: "3.15"
 
       - name: Merge tool git-half fixture suite (shard 6 of 10)
         if: ${{ ((github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() && (needs.scope.outputs.code == 'true' || github.event_name == 'pull_request') && (needs.scope.outputs.checks_windows_merge == 'true' || github.event_name != 'pull_request')) && needs.scope.outputs.records_only_skip != 'true' }}
@@ -2969,7 +3101,7 @@ jobs:
   checks-windows-merge-7:
     runs-on: windows-latest
     needs: scope
-    if: ${{ (github.event_name != 'push' && (github.event_name != 'pull_request' || !github.event.pull_request.draft)) && needs.scope.outputs.records_only_skip != 'true' }}
+    if: ${{ (github.event_name != 'pull_request' && github.event_name != 'push') && needs.scope.outputs.records_only_skip != 'true' }}
     # A shard of checks-windows-merge, with the same cap.
     # Cap 75 is shared by the 10 shards (interim, stopgap, owner 12:11 CST Nov 10; decision ci-job-caps).
     timeout-minutes: 75
@@ -2986,7 +3118,7 @@ jobs:
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
         if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
         with:
-          python-version: "3.11"
+          python-version: "3.15"
 
       - name: Merge tool git-half fixture suite (shard 7 of 10)
         if: ${{ ((github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() && (needs.scope.outputs.code == 'true' || github.event_name == 'pull_request') && (needs.scope.outputs.checks_windows_merge == 'true' || github.event_name != 'pull_request')) && needs.scope.outputs.records_only_skip != 'true' }}
@@ -3004,7 +3136,7 @@ jobs:
   checks-windows-merge-8:
     runs-on: windows-latest
     needs: scope
-    if: ${{ (github.event_name != 'push' && (github.event_name != 'pull_request' || !github.event.pull_request.draft)) && needs.scope.outputs.records_only_skip != 'true' }}
+    if: ${{ (github.event_name != 'pull_request' && github.event_name != 'push') && needs.scope.outputs.records_only_skip != 'true' }}
     # A shard of checks-windows-merge, with the same cap.
     # Cap 75 is shared by the 10 shards (interim, stopgap, owner 12:11 CST Nov 10; decision ci-job-caps).
     timeout-minutes: 75
@@ -3021,7 +3153,7 @@ jobs:
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
         if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
         with:
-          python-version: "3.11"
+          python-version: "3.15"
 
       - name: Merge tool git-half fixture suite (shard 8 of 10)
         if: ${{ ((github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() && (needs.scope.outputs.code == 'true' || github.event_name == 'pull_request') && (needs.scope.outputs.checks_windows_merge == 'true' || github.event_name != 'pull_request')) && needs.scope.outputs.records_only_skip != 'true' }}
@@ -3039,7 +3171,7 @@ jobs:
   checks-windows-merge-9:
     runs-on: windows-latest
     needs: scope
-    if: ${{ (github.event_name != 'push' && (github.event_name != 'pull_request' || !github.event.pull_request.draft)) && needs.scope.outputs.records_only_skip != 'true' }}
+    if: ${{ (github.event_name != 'pull_request' && github.event_name != 'push') && needs.scope.outputs.records_only_skip != 'true' }}
     # A shard of checks-windows-merge, with the same cap.
     # Cap 75 is shared by the 10 shards (interim, stopgap, owner 12:11 CST Nov 10; decision ci-job-caps).
     timeout-minutes: 75
@@ -3056,7 +3188,7 @@ jobs:
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
         if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
         with:
-          python-version: "3.11"
+          python-version: "3.15"
 
       - name: Merge tool git-half fixture suite (shard 9 of 10)
         if: ${{ ((github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() && (needs.scope.outputs.code == 'true' || github.event_name == 'pull_request') && (needs.scope.outputs.checks_windows_merge == 'true' || github.event_name != 'pull_request')) && needs.scope.outputs.records_only_skip != 'true' }}
@@ -3074,7 +3206,7 @@ jobs:
   checks-windows-merge-10:
     runs-on: windows-latest
     needs: scope
-    if: ${{ (github.event_name != 'push' && (github.event_name != 'pull_request' || !github.event.pull_request.draft)) && needs.scope.outputs.records_only_skip != 'true' }}
+    if: ${{ (github.event_name != 'pull_request' && github.event_name != 'push') && needs.scope.outputs.records_only_skip != 'true' }}
     # A shard of checks-windows-merge, with the same cap.
     # Cap 75 is shared by the 10 shards (interim, stopgap, owner 12:11 CST Nov 10; decision ci-job-caps).
     timeout-minutes: 75
@@ -3091,7 +3223,7 @@ jobs:
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
         if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
         with:
-          python-version: "3.11"
+          python-version: "3.15"
 
       - name: Merge tool git-half fixture suite (shard 10 of 10)
         if: ${{ ((github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() && (needs.scope.outputs.code == 'true' || github.event_name == 'pull_request') && (needs.scope.outputs.checks_windows_merge == 'true' || github.event_name != 'pull_request')) && needs.scope.outputs.records_only_skip != 'true' }}
@@ -3127,7 +3259,7 @@ jobs:
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
         if: ${{ needs.scope.outputs.checks_windows_sweep == 'true' || needs.scope.outputs.sweep == 'true' || github.event_name != 'pull_request' }}
         with:
-          python-version: "3.11"
+          python-version: "3.15"
 
       - name: Janitor sweep fixture suite
         if: ${{ (needs.scope.outputs.checks_windows_sweep == 'true' || github.event_name != 'pull_request') && !cancelled() && needs.scope.outputs.code == 'true' }}
@@ -3167,7 +3299,7 @@ jobs:
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
         if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
         with:
-          python-version: "3.11"
+          python-version: "3.15"
 
       - name: Config watch fixture suite
         if: ${{ ((github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() && (needs.scope.outputs.checks_windows_rest == 'true' || github.event_name != 'pull_request')) && needs.scope.outputs.records_only_skip != 'true' }}
@@ -3317,7 +3449,7 @@ jobs:
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
         if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
         with:
-          python-version: "3.11"
+          python-version: "3.15"
 
       - name: Guard wrappers fixture suite
         if: ${{ ((github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() && (needs.scope.outputs.checks_windows_rest_2 == 'true' || github.event_name != 'pull_request')) && needs.scope.outputs.records_only_skip != 'true' }}
@@ -3428,9 +3560,10 @@ jobs:
           job: checks-windows-rest-2
 
   # The rollup check. Main requires no check (merge.requiredChecks "none"); a repo set up with protect.py requires this one. It fails on a needed job that failed, was cancelled or was
-  # skipped, so every needed job runs on a ready PR and puts its scope condition on its steps, never on the job. There are two
+  # skipped, so every needed job runs on a ready PR and puts its scope condition on its steps, never on the job. There are three
   # exceptions. The three macOS jobs start on a dispatch and a daily that runs only (owner, 01:33 CST Nov 16), so a PR skips
-  # them and this job does not need them. The second is the job-level `if: needs.scope.outputs.records_only_skip != 'true'` on the
+  # them and this job does not need them. The 13 Windows shard jobs (guard 2 to 5, merge 2 to 10) are the same: they start on a
+  # schedule and a dispatch only (Nov 24 cut), so ci-done needs them and this job does not. The third is the job-level `if: needs.scope.outputs.records_only_skip != 'true'` on the
   # suite jobs: a records-only run skips them, and the rollup reads that all-skipped run as green only when scope's
   # records_only_skip output is true.
   # It runs on a ready pull_request only: on a push or a schedule it would read green over a red shard job it does not need.
@@ -3461,20 +3594,7 @@ jobs:
       - checks-mutate-guard-c
       - mutation-report
       - checks-windows-guard
-      - checks-windows-guard-2
-      - checks-windows-guard-3
-      - checks-windows-guard-4
-      - checks-windows-guard-5
       - checks-windows-merge
-      - checks-windows-merge-2
-      - checks-windows-merge-3
-      - checks-windows-merge-4
-      - checks-windows-merge-5
-      - checks-windows-merge-6
-      - checks-windows-merge-7
-      - checks-windows-merge-8
-      - checks-windows-merge-9
-      - checks-windows-merge-10
       - checks-windows-rest
       - checks-windows-rest-2
       - checks-windows-sweep

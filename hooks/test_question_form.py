@@ -90,6 +90,7 @@ import route_match  # noqa: E402  the rows-file reader; the task-why cases count
 import test_refusal_note as hook_base  # noqa: E402  the route-row fixture (one home), with its own run folder
 atexit.register(shutil.rmtree, hook_base.RUN, ignore_errors=True)  # that folder is not this module's, so it goes here
 from precompact_handoff import PREMISE_KINDS  # noqa: E402  the one home of the premise kinds
+from shared_names import SETTINGS_REPO  # noqa: E402  the one home of the settings repo's name (hooks/shared_names.py)
 
 try:
     import question_form
@@ -2976,15 +2977,6 @@ def case_press_link_label_is_a_string():
 
 
 # ------------------------------------------------------------------ a press link that is not a list; a partial edit of the Why yours line
-#
-# Each case below is also a pytest test (the test_ wrappers after it). A check the case records as failed fails
-# its test, by the check's name, so one runner and main() judge the same cases.
-
-def _judged(case):
-    """Run one case under pytest: each check it records as failed fails the test, by the check's name."""
-    before = len(FAILED)
-    case()
-    assert len(FAILED) == before, "; ".join(FAILED[before:])
 
 
 def case_press_link_links_not_a_list_on_a_step():
@@ -3040,34 +3032,6 @@ def case_task_str_replace_prose_label_passes():
     page('a str_replace that changes prose the "Why yours:" label to the label passes', "str_replace",
          {"collection": "items", "doc_id": DOC, "field": "context",
           "old_str": 'the "Why yours:" label', "new_str": "the label"}, None)
-
-
-def test_press_link_links_true_or_a_number_on_a_step_is_no_link():
-    _judged(case_press_link_links_not_a_list_on_a_step)
-
-
-def test_press_link_links_true_or_a_number_on_an_option_is_no_link():
-    _judged(case_press_link_links_not_a_list_on_an_option)
-
-
-def test_task_str_replace_removing_only_the_label_is_refused():
-    _judged(case_task_str_replace_removes_only_the_label)
-
-
-def test_str_replace_blank_prose_line_in_a_decision_passes():
-    _judged(case_str_replace_blank_prose_line_passes)
-
-
-def test_task_str_replace_rewording_the_reason_passes():
-    _judged(case_task_str_replace_rewords_the_reason)
-
-
-def test_task_str_replace_renaming_the_label_is_refused():
-    _judged(case_task_str_replace_renames_the_label)
-
-
-def test_task_str_replace_prose_label_mention_passes():
-    _judged(case_task_str_replace_prose_label_passes)
 
 
 def case_item_stray_field_refused_from_a_record_branch_checkout():
@@ -4014,8 +3978,306 @@ def case_widens_reason_no_longer_leaves_recommended_out():
           "does not widen" in flat.lower(), flat)
 
 
+def case_widens_reasons_name_the_settings_repo_as_other_than_widening():
+    # The settings repo is the shared tool's home: a change that names only it is not widening. Each refusal reason
+    # says so: a repo's differing form widens the tool only for a repo other than the settings repo.
+    for name in ("WIDENS_REASON", "CHAT_WIDENS_REASON"):
+        text = getattr(question_form, name, None)
+        if text is None:
+            check("widens reasons: question_form.%s is there" % name, False, MISSING)
+            continue
+        flat = re.sub(r"\s+", " ", text).lower()
+        missing = [word for word in ("other than", SETTINGS_REPO.lower()) if word not in flat]
+        check("widens reasons: question_form.%s holds 'other than' and the settings repo value" % name,
+              not missing, "missing words: %s" % ", ".join(repr(word) for word in missing))
+
+
+def case_widens_reasons_bound_the_settings_repo_never_widens():
+    # A change that names only the settings repo does not widen, unless it lets the differing form of a repo other than
+    # the settings repo pass. Each refusal reason says so in one sentence: 'does not widen', the repo value, 'unless'
+    # and 'other than'.
+    for name in ("WIDENS_REASON", "CHAT_WIDENS_REASON"):
+        text = getattr(question_form, name, None)
+        if text is None:
+            check("widens bounds: question_form.%s is there" % name, False, MISSING)
+            continue
+        sentences = [s for s in re.split(r"[.]", re.sub(r"\s+", " ", text).lower()) if s.strip()]
+        holds = [s for s in sentences if "does not widen" in s and SETTINGS_REPO.lower() in s]
+        closest = max(holds or [""], key=lambda s: sum(w in s for w in ("unless", "other than")))
+        missing = [word for word in ("unless", "other than") if word not in closest]
+        cause = ("no sentence holds 'does not widen' and the settings repo value" if not holds else
+                 "missing words in the 'does not widen' sentence: %s"
+                 % (", ".join(repr(word) for word in missing) or "none, the words are in two sentences"))
+        check("widens bounds: question_form.%s has one sentence with 'does not widen', the settings repo value, "
+              "'unless' and 'other than'" % name, bool(holds) and not missing, cause)
+
+
+# ------------------------------------------------------------------ the named rulings of a Based on (ruling) line
+#
+# named_rulings(text, ids) -> list. `ids` are the candidate ruling ids (`decisions/<slug>`, `ruled:<id>`). The result holds
+# each id in `ids`, in the order of `ids` and once, that a `Based on (ruling):` line of `text` names, by its full id or by
+# its slug (the part after the last "/"). A name inside a longer word or path is no name. A Based on line of another kind,
+# and a Problem line, name nothing. When the function is not built, each case reads the sentinel, so it fails by its name.
+NAMED_MISSING = ("MISSING", "hooks/question_form.py has no named_rulings(text, ids) yet")
+RULING_IDS = ["decisions/github-apps-keep-access", "decisions/ci-job-caps"]
+NAMED_RULED_ID = "ruled:own-goal-dont-wait-on-me"
+APPS_RULING_LINE = "Based on (ruling): decisions/github-apps-keep-access (2026-10-28) says revisit only if the apps get bloated."
+CAPS_RULING_LINE = "Based on (ruling): decisions/ci-job-caps (2026-10-27) says the caps are a stopgap."
+
+
+def named_of(text, ids):
+    """named_rulings(text, ids) when the build has it, else the sentinel, so the case fails by its name."""
+    fn = getattr(question_form, "named_rulings", None) if question_form is not None else None
+    return fn(text, ids) if fn is not None else NAMED_MISSING
+
+
+def case_named_rulings_full_id():
+    got = named_of(APPS_RULING_LINE, RULING_IDS)
+    check("named rulings: a Based on (ruling) line that names a full id returns that id",
+          got == ["decisions/github-apps-keep-access"], got)
+
+
+def case_named_rulings_bare_slug():
+    line = "Based on (ruling): github-apps-keep-access says revisit only if the apps get bloated."
+    got = named_of(line, RULING_IDS)
+    check("named rulings: a Based on (ruling) line that names only the slug returns the id it names",
+          got == ["decisions/github-apps-keep-access"], got)
+
+
+def case_named_rulings_ruled_store_id():
+    line = "Based on (ruling): ruled:own-goal-dont-wait-on-me, 2026-11-24 10:36 CST: the owner ruled it."
+    got = named_of(line, [NAMED_RULED_ID, "decisions/ci-job-caps"])
+    check("named rulings: a ruled: id named by a Based on (ruling) line returns that id",
+          got == [NAMED_RULED_ID], got)
+
+
+def case_named_rulings_several_lines_name_two_ids():
+    text = "\n".join((APPS_RULING_LINE, CAPS_RULING_LINE, "Based on (read): hooks/guard.py:120 holds the merge check."))
+    got = named_of(text, RULING_IDS)
+    check("named rulings: two Based on (ruling) lines name two ids, returned in the order of the candidates",
+          got == RULING_IDS, got)
+
+
+def case_named_rulings_code_line_yields_none():
+    text = "Based on (code): decisions/github-apps-keep-access is the file that holds the check."
+    got = named_of(text, RULING_IDS)
+    check("named rulings: a Based on (code) line that names an id yields none", got == [], got)
+
+
+def case_named_rulings_problem_line_yields_none():
+    text = ("Problem (risk): decisions/github-apps-keep-access leaves the apps' access open, so it needs your word.\n"
+            "Based on (read): hooks/guard.py:120 holds the merge check.")
+    got = named_of(text, RULING_IDS)
+    check("named rulings: an id named in the Problem line, and in no Based on (ruling) line, yields none",
+          got == [], got)
+
+
+def case_named_rulings_longer_word_is_no_name():
+    line = "Based on (ruling): github-apps-keep-access-old says revisit only if the apps get bloated."
+    got = named_of(line, RULING_IDS)
+    check("named rulings: a slug inside a longer word is no name", got == [], got)
+
+
+def case_named_rulings_empty_text_names_nothing():
+    got = named_of("", RULING_IDS)
+    check("named rulings: text with no Based on (ruling) line names nothing", got == [], got)
+
+
+def case_based_on_ruling_kind_still_reads():
+    # Control: the Based on line parser still reads a ruling line as its kind, which the named-ruling reader relies on.
+    kinds = [m.group(1).strip().lower() for m in question_form.BASED_LINE.finditer(APPS_RULING_LINE)]
+    check("named rulings control: BASED_LINE still reads a (ruling) line as kind ruling", kinds == ["ruling"], kinds)
+
+
+def case_named_rulings_bulleted_line_is_read():
+    # A Based on (ruling) line written as a list item names its id, as the plain line does.
+    line = "- Based on (ruling): github-apps-keep-access says revisit only if the apps get bloated."
+    got = named_of(line, RULING_IDS)
+    check("named rulings: a bulleted Based on (ruling) line names its id, as the plain line does",
+          got == ["decisions/github-apps-keep-access"], got)
+
+
+def case_named_rulings_ruled_id_by_bare_slug():
+    # A ruled: id is named by its bare slug, the part after "ruled:".
+    line = "Based on (ruling): own-goal-dont-wait-on-me, 2026-11-14: the owner ruled it."
+    got = named_of(line, [NAMED_RULED_ID, "decisions/ci-job-caps"])
+    check("named rulings: a ruled: id named by its bare slug in a Based on (ruling) line returns that id",
+          got == [NAMED_RULED_ID], got)
+
+
+def case_named_rulings_ruled_id_by_prefixed_slug():
+    # Control: a ruled: id named as "ruled:<slug>" already reads.
+    line = "Based on (ruling): ruled:own-goal-dont-wait-on-me, 2026-11-14: the owner ruled it."
+    got = named_of(line, [NAMED_RULED_ID, "decisions/ci-job-caps"])
+    check("named rulings control: a ruled: id named as ruled:<slug> returns that id", got == [NAMED_RULED_ID], got)
+
+
+def case_named_rulings_other_slug_names_none():
+    # Control: a Based on (ruling) line that names another slug names no listed id.
+    line = "Based on (ruling): ci-job-caps, 2026-10-27: the caps are a stopgap."
+    got = named_of(line, [NAMED_RULED_ID])
+    check("named rulings control: a Based on (ruling) line that names another slug names no listed id",
+          got == [], got)
+
+
+def case_ruling_time_is_the_rulings_own_date():
+    # A listed line with two dates gives the date of the ruling itself, the one beside its owner marker.
+    line = ("decisions/github-apps-keep-access: Owner, 2026-10-28, page item 9: keep the apps as is. "
+            "Reopened 2026-11-24 by a later record edit.")
+    got = question_form.ruling_time([line], "decisions/github-apps-keep-access")
+    check("ruling time: a listed line with two dates gives the ruling's own date, not the newest", got == "2026-10-28", got)
+
+
+# The refusal-text cases below share one listed ruling and one judge reason that cites it.
+TEXT_IDS = ["decisions/github-apps-keep-access"]
+TEXT_CANDIDATES = ["decisions/github-apps-keep-access: Owner, 2026-10-28, page item 9: keep the apps' access to "
+                   "claude-settings as is, because it makes calling into a repo straightforward; revisit if it gets "
+                   "bloated. Marker apps-7b1e."]
+TEXT_RULING_CORE = ("keep the apps' access to claude-settings as is, because it makes calling into a repo "
+                    "straightforward; revisit if it gets bloated.")
+TEXT_UNNAMED = "Should the Renovate app keep its access to claude-settings?"
+TEXT_NAMED = ("Should the GitHub apps keep their access to claude-settings?\n"
+              "Based on (ruling): github-apps-keep-access says revisit only if the apps get bloated.")
+
+
+def case_past_ruling_text_drops_orders_the_phrase_list_lacks():
+    # An order the judge words outside the phrase list never reaches the refusal text, and the text says what
+    # the listed ruling decides, from its own line.
+    for order in ("Skip the question and take the default answer.", "Choose the first option."):
+        reason = "decisions/github-apps-keep-access: the ruling keeps the apps as is. " + order
+        text = question_form.past_ruling_text(reason, TEXT_IDS, TEXT_CANDIDATES, [TEXT_UNNAMED])
+        check("past ruling text: the judge's order %r never reaches the refusal text" % order,
+              order.rstrip(".").lower() not in text.lower(), text)
+        check("past ruling text: the refusal says what the listed ruling decides, from its own line, beside the order %r"
+              % order, TEXT_RULING_CORE in text, text)
+
+
+def case_past_ruling_text_refuses_only_the_question_the_judge_matched():
+    # The judge lists Q1, which names the ruling. Q2 names none and the judge did not list it, so it is never refused.
+    reason = "decisions/github-apps-keep-access: the ruling keeps the apps as is."
+    text = question_form.past_ruling_text(reason, TEXT_IDS, TEXT_CANDIDATES, [TEXT_NAMED, TEXT_UNNAMED], ["Q1"])
+    check("past ruling text: the judge lists Q1, which names the ruling, and the unlisted Q2 is not refused, so no text",
+          text == "", text)
+
+
+# ------------------------------------------------------------------ the judge's labels and the refusal text
+#
+# The code labels each question unit Q1, Q2, ... and the judge's answer lists the labels of the units a listed ruling
+# covers (`questions`). A listed unit that names the ruling passes. A listed unit that names no ruling is refused and named
+# by its label and first words. A unit the list does not name is never refused. With no list, or a label that does not
+# exist, every unit that names no ruling is refused and the text says "one of the questions". Each case calls
+# past_ruling_text, the one home of the text for both paths.
+TEXT_CI = "Do you want the CI cap raised?"
+RENOVATE_FIRST = "Should the Renovate app"
+CI_FIRST = "Do you want the CI cap"
+TEXT_REASON = "decisions/github-apps-keep-access: the ruling keeps the apps as is."
+
+
+def case_past_ruling_text_listed_unnamed_question_is_refused_by_its_label():
+    # The judge lists Q1 (it names the ruling) and Q2 (it names none): Q2 is refused, named by label and first words.
+    text = question_form.past_ruling_text(TEXT_REASON, TEXT_IDS, TEXT_CANDIDATES, [TEXT_NAMED, TEXT_UNNAMED], ["Q1", "Q2"])
+    check("past ruling text: a listed unit that names no ruling is refused, named by its label Q2 and its first words",
+          "Q2" in text and RENOVATE_FIRST in text, text)
+    check("past ruling text: the listed unit that names the ruling is not named in the refusal",
+          "Q1" not in text and "Should the GitHub apps" not in text, text)
+
+
+def case_past_ruling_text_unlisted_unit_is_never_refused():
+    # Three units, and the judge lists Q2 only. Q3 names no ruling but is not listed, so it is never refused.
+    text = question_form.past_ruling_text(TEXT_REASON, TEXT_IDS, TEXT_CANDIDATES, [TEXT_NAMED, TEXT_UNNAMED, TEXT_CI],
+                                          ["Q2"])
+    check("past ruling text: the listed Q2 is refused, named by its label and its first words", "Q2" in text
+          and RENOVATE_FIRST in text, text)
+    check("past ruling text: the unlisted Q3 is never refused, so the text does not say one of the questions",
+          "one of the questions" not in text and CI_FIRST not in text, text)
+
+
+def case_past_ruling_text_fallback_without_a_list_names_no_question():
+    # No list, or a label that names no unit: every unit that names no ruling is refused, and the text names none of them.
+    for listed in (None, ["Q9"]):
+        text = question_form.past_ruling_text(TEXT_REASON, TEXT_IDS, TEXT_CANDIDATES, [TEXT_NAMED, TEXT_UNNAMED], listed)
+        check("past ruling text: with the list %r the refusal says one of the questions and names no label" % (listed,),
+              "one of the questions" in text and "Q2" not in text, text)
+
+
+def case_past_ruling_text_a_listed_unit_that_names_the_ruling_passes():
+    # Control: each listed unit names the ruling, so no unit is refused and the text is empty.
+    text = question_form.past_ruling_text(TEXT_REASON, TEXT_IDS, TEXT_CANDIDATES, [TEXT_NAMED, TEXT_NAMED], ["Q1", "Q2"])
+    check("past ruling text control: each listed unit names the ruling, so the text is empty", text == "", text)
+
+
+QUOTED_IDS = ["decisions/quoted-rule"]
+QUOTED_CANDIDATE = ['decisions/quoted-rule: Owner, 2026-10-28: "Keep the apps as is." is the owner\'s words. Later note.']
+PLAIN_IDS = ["decisions/plain-rule"]
+PLAIN_CANDIDATE = ["decisions/plain-rule: Owner, 2026-10-28: keep the apps as is. Later note."]
+
+
+def case_past_ruling_text_decides_stops_at_a_quote_end():
+    # The sentence that says what the ruling decides stops at its closing quote; the words after it never reach the text.
+    text = question_form.past_ruling_text("decisions/quoted-rule: the ruling keeps the apps as is.", QUOTED_IDS,
+                                          QUOTED_CANDIDATE, [TEXT_UNNAMED], None)
+    check("past ruling text: the sentence of what the ruling decides stops at its closing quote",
+          "Keep the apps as is." in text and "owner's words" not in text and "Later note" not in text, text)
+
+
+def case_past_ruling_text_decides_stops_at_the_first_sentence_end():
+    # Control: a plain sentence end already stops the sentence.
+    text = question_form.past_ruling_text("decisions/plain-rule: the ruling keeps the apps as is.", PLAIN_IDS,
+                                          PLAIN_CANDIDATE, [TEXT_UNNAMED], None)
+    check("past ruling text control: the sentence stops at its first sentence end",
+          "keep the apps as is." in text and "Later note" not in text, text)
+
+
+def case_past_ruling_text_unchecked_ruled_entry_keeps_its_mark():
+    # A ruled entry that is unchecked keeps its (unchecked, not law) mark; a decision record never gains one.
+    ruled = ("ruled:own-goal-dont-wait-on-me: Do not wait on me for a pick: the owner decides. (owner 2026-11-14 20:18; "
+             "open, not on main; supersedes none) (unchecked, not law)")
+    text = question_form.past_ruling_text("ruled:own-goal-dont-wait-on-me: the ruling says do not wait.",
+                                          ["ruled:own-goal-dont-wait-on-me"], [ruled], [TEXT_UNNAMED], None)
+    check("past ruling text: an unchecked ruled entry keeps its (unchecked, not law) mark", "unchecked, not law" in text,
+          text)
+    plain = question_form.past_ruling_text(TEXT_REASON, TEXT_IDS, TEXT_CANDIDATES, [TEXT_UNNAMED], None)
+    check("past ruling text control: a decision record's refusal carries no unchecked mark",
+          "unchecked" not in plain, plain)
+
+
+def case_past_ruling_text_record_with_several_rulings_shows_its_first():
+    # Control: a record that holds two owner rulings shows the first one's date and sentence, the record's own first.
+    many = ["decisions/many-rulings: Owner, 2026-10-28: keep the apps as is. Owner, 2026-11-24: drop the apps."]
+    text = question_form.past_ruling_text("decisions/many-rulings: the ruling keeps the apps as is.",
+                                          ["decisions/many-rulings"], many, [TEXT_UNNAMED], None)
+    check("past ruling text control: a record with several rulings shows the first ruling's date and sentence",
+          "2026-10-28" in text and "keep the apps as is" in text and "2026-11-24" not in text
+          and "drop the apps" not in text, text)
+
+
+def case_past_ruling_text_two_unnamed_questions_without_a_number_name_neither():
+    # Control: two unnamed questions and no number from the judge: the text says one of the questions.
+    reason = "decisions/github-apps-keep-access: the ruling keeps the apps as is."
+    text = question_form.past_ruling_text(reason, TEXT_IDS, TEXT_CANDIDATES, [TEXT_UNNAMED, TEXT_UNNAMED])
+    check("past ruling text control: two unnamed questions and no number say one of the questions",
+          "one of the questions" in text, text)
+
+
 def main():
-    for case in (case_recommend_base_passes, case_recommend_missing_or_unknown_is_refused,
+    for case in (case_named_rulings_bulleted_line_is_read, case_named_rulings_ruled_id_by_bare_slug,
+                 case_named_rulings_ruled_id_by_prefixed_slug, case_named_rulings_other_slug_names_none,
+                 case_ruling_time_is_the_rulings_own_date, case_past_ruling_text_drops_orders_the_phrase_list_lacks,
+                 case_past_ruling_text_refuses_only_the_question_the_judge_matched,
+                 case_past_ruling_text_two_unnamed_questions_without_a_number_name_neither,
+                 case_past_ruling_text_listed_unnamed_question_is_refused_by_its_label,
+                 case_past_ruling_text_unlisted_unit_is_never_refused,
+                 case_past_ruling_text_fallback_without_a_list_names_no_question,
+                 case_past_ruling_text_a_listed_unit_that_names_the_ruling_passes,
+                 case_past_ruling_text_decides_stops_at_a_quote_end,
+                 case_past_ruling_text_decides_stops_at_the_first_sentence_end,
+                 case_past_ruling_text_unchecked_ruled_entry_keeps_its_mark,
+                 case_past_ruling_text_record_with_several_rulings_shows_its_first,
+                 case_named_rulings_full_id, case_named_rulings_bare_slug, case_named_rulings_ruled_store_id,
+                 case_named_rulings_several_lines_name_two_ids, case_named_rulings_code_line_yields_none,
+                 case_named_rulings_problem_line_yields_none, case_named_rulings_longer_word_is_no_name,
+                 case_named_rulings_empty_text_names_nothing, case_based_on_ruling_kind_still_reads,
+                 case_recommend_base_passes, case_recommend_missing_or_unknown_is_refused,
                  case_legacy_pick_is_the_recommendation, case_why_is_required, case_waiting_on_line_is_required,
                  case_update_judges_only_the_fields_it_carries, case_str_replace_keeps_the_waiting_line,
                  case_kindless_update_with_a_goal_line_needs_the_waiting_line,
@@ -4024,6 +4286,8 @@ def main():
                  case_recommended_list_is_the_multi_form, case_recommend_exemptions_pass,
                  case_recommend_applies_to_a_port_and_a_set_without_kind, case_five_real_forms,
                  case_five_real_forms_as_written, case_widens_reason_no_longer_leaves_recommended_out,
+                 case_widens_reasons_name_the_settings_repo_as_other_than_widening,
+                 case_widens_reasons_bound_the_settings_repo_never_widens,
                  case_item_92, case_item_51_stray_field, case_item_n_text_is_refused,
                  case_item_n_other_non_numbers_are_refused, case_item_n_number_passes, case_item_n_absent,
                  case_item_n_batch_and_file_path, case_item_n_posted_text_names_the_item,

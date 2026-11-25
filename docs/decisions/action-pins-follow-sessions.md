@@ -30,3 +30,5 @@ Outcome protected: a lane never loses a CI run, or its place in the batch, to a 
 
 Kind: process
 Home: bin/ste-changed
+
+Interpreter pins: decision `ci-pins-newest-interpreter`.

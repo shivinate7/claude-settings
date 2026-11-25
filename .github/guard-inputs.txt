@@ -21,6 +21,7 @@ bin/lane-start
 bin/sim-lease
 bin/sim-test
 actions/ci-alarm/events.json
+actions/ci-alarm/clear_rule.py
 .github/stamp.json
 .claude/layout-extras.json
 package-lock.json

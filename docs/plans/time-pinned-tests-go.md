@@ -122,7 +122,7 @@ Work in this order. Each fix goes red first.
 
 1. Re-measure each job per decision `ci-job-caps`, section "How to measure again". The steps:
    - Take the newest 30 green runs per job.
-   - Read `job_minutes` and `job_caps` in `merge/merge.py`. Do not write a second reader.
+   - Read `job_minutes` in `actions/ci-alarm/clear_rule.py` and `job_caps` in `merge/merge.py`. Do not write a second reader.
    - Count a cap end as a run that reached its cap, ended cancelled or failed, with no failed test step.
    - Read per-step times from the GitHub API.
    - A new job takes a provisional 60 min until it has 5 green runs.

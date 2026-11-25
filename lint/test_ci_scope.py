@@ -24,6 +24,7 @@ import shutil
 import subprocess
 import tempfile
 import unittest
+from unittest import mock
 
 import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -62,6 +63,81 @@ def git(cwd, *a):
 
 GUARD_INPUTS_REL = ".github/guard-inputs.txt"  # the one list of guard inputs (ci-scope.sh's windows_guard reads it)
 REAL_GUARD_INPUTS = "real"  # run()'s guard_inputs default: the repo's own list is copied into the base when the repo has one
+
+
+# hooks/mutate_guard.py names the files the guard suite reads beside its hooks folder (GUARD_READ_FILES). The case that checks
+# them reads that list from the module with ast, never a copy: importing the module loads the guard family.
+MUTATE_GUARD = os.path.join(HERE, "..", "hooks", "mutate_guard.py")
+
+
+GUARD_READS = "GUARD_READ_FILES"
+# The list methods that change a list, and the dunder names that do the same when called by name. A call to any other method
+# (.index, .count) reads the list and changes nothing.
+GUARD_MUTATORS = frozenset(("append", "extend", "insert", "remove", "pop", "clear", "sort", "reverse",
+                            "__setitem__", "__delitem__", "__iadd__"))
+
+
+def _is_guard_name(node):
+    return isinstance(node, ast.Name) and node.id == GUARD_READS
+
+
+def _guard_reads_binds(stmt):
+    """True when the top-level statement `stmt` is the one plain assignment of GUARD_READ_FILES."""
+    return isinstance(stmt, ast.Assign) and len(stmt.targets) == 1 and _is_guard_name(stmt.targets[0])
+
+
+def _guard_reads_change(stmt):
+    """-> how the top-level statement `stmt` rebinds or mutates GUARD_READ_FILES, or '' when it does neither. A def or class
+    body counts too: a later call can rebind the name through it."""
+    for node in ast.walk(stmt):
+        if isinstance(node, ast.AugAssign) and _is_guard_name(node.target):
+            return "changed by +="
+        if isinstance(node, ast.AnnAssign) and _is_guard_name(node.target):
+            return "annotated"
+        if _is_guard_name(node) and not isinstance(node.ctx, ast.Load):
+            return "rebound"
+        if isinstance(node, ast.Subscript) and not isinstance(node.ctx, ast.Load) and _is_guard_name(node.value):
+            return "changed by an item store"
+        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and _is_guard_name(node.func.value)
+                and node.func.attr in GUARD_MUTATORS):
+            return "mutated by .%s()" % node.func.attr
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and node.name == GUARD_READS:
+            return "rebound by a def or class"
+        if isinstance(node, ast.alias) and (node.asname or node.name).split(".")[0] == GUARD_READS:
+            return "rebound by an import"
+    return ""
+
+
+def guard_read_files():
+    """-> the paths GUARD_READ_FILES names in hooks/mutate_guard.py, as git names them ('/' between parts). The reader reads the
+    name whole or fails, and each failure names its line: one plain assignment of a non-empty tuple or list of os.path.join
+    calls on string literals, and no other top-level statement that rebinds or mutates the name."""
+    with open(MUTATE_GUARD, encoding="utf-8") as f:
+        tree = ast.parse(f.read(), filename=MUTATE_GUARD)
+    bound = None
+    for stmt in tree.body:
+        if _guard_reads_binds(stmt):
+            if bound is not None:
+                raise AssertionError(f"{MUTATE_GUARD} line {stmt.lineno}: GUARD_READ_FILES is assigned a second time, "
+                                     "so the reader cannot read it whole")
+            bound = stmt
+            continue
+        how = _guard_reads_change(stmt)
+        if how:
+            raise AssertionError(f"{MUTATE_GUARD} line {stmt.lineno}: GUARD_READ_FILES is {how}, "
+                                 "so the reader cannot read it whole")
+    if bound is None:
+        raise AssertionError(f"{MUTATE_GUARD}: no plain assignment of GUARD_READ_FILES")
+    if not isinstance(bound.value, (ast.Tuple, ast.List)) or not bound.value.elts:
+        raise AssertionError(f"{MUTATE_GUARD} line {bound.lineno}: GUARD_READ_FILES is not a non-empty tuple or list literal")
+    paths = []
+    for elt in bound.value.elts:
+        parts = [a.value for a in getattr(elt, "args", []) if isinstance(a, ast.Constant) and isinstance(a.value, str)]
+        if not (isinstance(elt, ast.Call) and parts and len(parts) == len(elt.args)):
+            raise AssertionError(f"{MUTATE_GUARD} line {elt.lineno}: GUARD_READ_FILES entry is not os.path.join of string "
+                                 f"literals: {ast.unparse(elt)}")
+        paths.append("/".join(parts))
+    return paths
 
 
 def run(paths, event="pull_request", base="auto", existing=(), landed=None, head_ref="", green=None,
@@ -307,6 +383,19 @@ class Scope(FlagAsserts, unittest.TestCase):
         for p in ("hooks/test_guard.py", "hooks/mutate_guard.py"):
             with self.subTest(path=p):
                 self.assertFlags(run([p]), want_true=["guard"])
+
+    # Every file the guard suite reads beside its hooks folder (GUARD_READ_FILES, hooks/mutate_guard.py) turns `guard` on, so an
+    # edit to it runs the guard suite. Each path is an edit (`existing`): a new file under a landed dir sets `guard` through
+    # the landed-dirs rule, which would pass for the wrong reason. Named failure: a listed path sets no `guard`, so the suite
+    # that reads it skips the change.
+    def test_every_guard_read_file_turns_on_the_guard_suite(self):
+        paths = guard_read_files()
+        self.assertTrue(paths, "GUARD_READ_FILES: no path read from hooks/mutate_guard.py")
+        for p in paths:
+            self.assertTrue(os.path.isfile(os.path.join(HERE, "..", p)), f"GUARD_READ_FILES names {p}, which is not a file")
+        for p in paths:
+            with self.subTest(path=p):
+                self.assertFlags(run([p], existing=[p]), want_true=["guard"])
 
     def test_a_merge_change_leaves_a_job_that_never_runs_merge_suites_off(self):
         got = run(["merge/merge.py"])
@@ -593,11 +682,18 @@ class Scope(FlagAsserts, unittest.TestCase):
                 self.assertEqual(self.true_set(run([p], existing=[p])), {"shell_macos", "code"})
 
     # bin/sim-test and its suite run in the shell-macos job only, like bin/ios-ship. The suite runs the real bin/sim-lease
-    # beside the script, so an edit to bin/sim-lease turns the same job on.
+    # beside the script, so an edit to bin/sim-lease turns the same job on. bin/sim-lease is also a guard input, pinned apart
+    # below, so these two keep the exact set.
     def test_sim_test_edit_turns_on_only_the_macos_shell_job(self):
-        for p in ("bin/sim-test", "lint/test_sim_test.sh", "bin/sim-lease"):
+        for p in ("bin/sim-test", "lint/test_sim_test.sh"):
             with self.subTest(path=p):
                 self.assertEqual(self.true_set(run([p], existing=[p])), {"shell_macos", "code"})
+
+    # bin/sim-lease is in GUARD_READ_FILES, so the guard suite reads it and an edit also sets `guard`. Otherwise the flags
+    # of the two paths above. Named failure: without the guard arm the set lacks `guard`, and the guard suite skips a change
+    # to the lease it reads.
+    def test_sim_lease_edit_turns_on_the_macos_shell_job_and_guard(self):
+        self.assertEqual(self.true_set(run(["bin/sim-lease"], existing=["bin/sim-lease"])), {"shell_macos", "code", "guard"})
 
     # bin/duo-fold and its suite run in the shell-macos job only, like bin/sim-test (bash 3.2 on macOS).
     # Named failure: without the arm, bin/duo-fold turns every flag on, and the suite turns on `code` alone.
@@ -701,6 +797,79 @@ class Scope(FlagAsserts, unittest.TestCase):
         self.assertFlags(got, want_false=["code", "shoot"])
         self.assertIn("checks_guard", got, got)
         self.assertEqual(got["checks_guard"], "false", f"checks_guard: {got}")
+
+
+# guard_read_files reads GUARD_READ_FILES whole or fails. Each source is written to the run folder and read through
+# MUTATE_GUARD, the path the reader opens by default. A source passed as an argument would be a TypeError on a reader
+# that takes none: a crash, not the assert these cases name.
+class GuardReadsReader(unittest.TestCase):
+    OK = [
+        ("tuple", 'GUARD_READ_FILES = (os.path.join("bin", "sim-lease"),)\n', ["bin/sim-lease"]),
+        ("list", 'GUARD_READ_FILES = [os.path.join("merge", "merge.py")]\n', ["merge/merge.py"]),
+        ("four entries", "GUARD_READ_FILES = (\n"
+         '    os.path.join("bin", "sim-lease"),\n'
+         '    os.path.join("merge", "merge.py"),\n'
+         '    os.path.join("actions", "ci-alarm", "events.json"),\n'
+         '    os.path.join("actions", "ci-alarm", "clear_rule.py"),\n)\n',
+         ["bin/sim-lease", "merge/merge.py", "actions/ci-alarm/events.json", "actions/ci-alarm/clear_rule.py"]),
+    ]
+    # (form, source, the line the failure names or None). The reader cannot read each of these whole, so it must raise.
+    FAIL = [
+        ("augmented assignment", 'GUARD_READ_FILES = (os.path.join("bin", "sim-lease"),)\n'
+         'GUARD_READ_FILES += (os.path.join("janitor", "sweep.py"),)\n', 2),
+        ("second assignment", 'GUARD_READ_FILES = (os.path.join("bin", "sim-lease"),)\n'
+         'GUARD_READ_FILES = (os.path.join("janitor", "sweep.py"),)\n', 2),
+        ("annotated assignment", 'GUARD_READ_FILES: tuple = (os.path.join("bin", "sim-lease"),)\n', 1),
+        ("append call", 'GUARD_READ_FILES = [os.path.join("bin", "sim-lease")]\n'
+         'GUARD_READ_FILES.append(os.path.join("janitor", "sweep.py"))\n', 2),
+        ("extend call", 'GUARD_READ_FILES = [os.path.join("bin", "sim-lease")]\n'
+         'GUARD_READ_FILES.extend([os.path.join("janitor", "sweep.py")])\n', 2),
+        ("extend in a def body", 'GUARD_READ_FILES = [os.path.join("bin", "sim-lease")]\n'
+         'def add_sweep():\n    GUARD_READ_FILES.extend([os.path.join("janitor", "sweep.py")])\n', 2),
+        ("rebind in an if", 'GUARD_READ_FILES = (os.path.join("bin", "sim-lease"),)\n'
+         'if True:\n    GUARD_READ_FILES = (os.path.join("janitor", "sweep.py"),)\n', 2),
+        ("item store", 'GUARD_READ_FILES = [os.path.join("bin", "sim-lease")]\n'
+         'GUARD_READ_FILES[0] = os.path.join("janitor", "sweep.py")\n', 2),
+        ("empty tuple", "GUARD_READ_FILES = ()\n", 1),
+        ("empty list", "GUARD_READ_FILES = []\n", 1),
+        ("no assignment", "OTHER = 1\n", None),
+    ]
+
+    def reads_of(self, form, text):
+        """-> guard_read_files() on `text`, which is written to the run folder and read through MUTATE_GUARD."""
+        path = os.path.join(RUN_DIR, form.replace(" ", "-") + ".py")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(text)
+        with mock.patch.object(sys.modules[__name__], "MUTATE_GUARD", path):
+            return guard_read_files()
+
+    def test_a_tuple_or_list_reads_whole(self):
+        for form, text, want in self.OK:
+            with self.subTest(form=form):
+                self.assertEqual(self.reads_of(form, text), want)
+
+    def test_every_other_form_fails_and_names_its_line(self):
+        for form, text, line in self.FAIL:
+            with self.subTest(form=form):
+                try:
+                    got = self.reads_of(form, text)
+                except AssertionError as e:
+                    if line is not None:
+                        self.assertIn(" line %d: " % line, str(e))
+                else:
+                    self.fail("%s: the reader read %s and did not fail" % (form, got))
+
+    def test_a_read_only_call_reads_whole_and_a_mutating_call_fails(self):
+        # .index and .count read the list and change nothing, so the reader reads it whole. .append changes it, so it fails.
+        for name in ("index", "count"):
+            with self.subTest(call=name):
+                text = ('GUARD_READ_FILES = [os.path.join("bin", "sim-lease")]\n'
+                        'GUARD_READ_FILES.%s(os.path.join("bin", "sim-lease"))\n' % name)
+                self.assertEqual(self.reads_of("read only " + name, text), ["bin/sim-lease"])
+        with self.assertRaises(AssertionError) as cm:
+            self.reads_of("append call", 'GUARD_READ_FILES = [os.path.join("bin", "sim-lease")]\n'
+                          'GUARD_READ_FILES.append(os.path.join("janitor", "sweep.py"))\n')
+        self.assertIn(" line 2: ", str(cm.exception))
 
 
 # A records-only push after a fully green head. GREEN_HEAD names the
@@ -1824,11 +1993,11 @@ class ModTestsRunsEveryCheck(unittest.TestCase):
 # lint runs only when a file it reads changed. The flags stay out of ALL, as DERIVED_FLAGS does, so the exact-set cases
 # above stay about the base flags.
 LINT_FLAGS = ("lint_red_run", "lint_plan_refuter", "lint_ruling_kind", "lint_comment_narration")
-LINT_STEPS = {  # flag -> the `name:` of the step it controls in checks.yml
-    "lint_red_run": "Red-run trailer",
-    "lint_plan_refuter": "Plan refuter line",
-    "lint_ruling_kind": "Ruling kind check",
-    "lint_comment_narration": "Comment narration check",
+LINT_STEPS = {  # flag -> the `name:` of each step it controls in checks.yml
+    "lint_red_run": ("Red-run trailer",),
+    "lint_plan_refuter": ("Plan refuter line",),
+    "lint_ruling_kind": ("Ruling kind check",),
+    "lint_comment_narration": ("Comment narration check", "Time-pinned new-finding check"),
 }
 
 
@@ -1953,11 +2122,12 @@ class LintStepWorkflow(unittest.TestCase):
         self.fail(f"the checks job has no step named {name!r}")
 
     def test_each_lint_step_names_its_flag_and_the_pull_request_condition(self):
-        for flag, name in LINT_STEPS.items():
-            with self.subTest(step=name):
-                raw = self.step_if(name)
-                self.assertEqual(conjuncts(raw), {f"needs.scope.outputs.{flag} == 'true'", "github.event_name == 'pull_request'"},
-                                 f"{name} must run on {flag} and on a pull request; its if: is {raw!r}")
+        for flag, names in LINT_STEPS.items():
+            for name in names:
+                with self.subTest(step=name):
+                    raw = self.step_if(name)
+                    self.assertEqual(conjuncts(raw), {f"needs.scope.outputs.{flag} == 'true'", "github.event_name == 'pull_request'"},
+                                     f"{name} must run on {flag} and on a pull request; its if: is {raw!r}")
 
     def test_the_scope_job_declares_each_lint_flag(self):
         self.assertIsNotNone(self.scope, "checks.yml has no scope job")
@@ -2144,8 +2314,8 @@ class MutationReport(unittest.TestCase):
         self.assertEqual(push["mutation_report"], "true", f"a push: {push}")
 
 
-# The guard-inputs gate. The Windows guard shards (checks-windows-guard and its -2 to -n copies) run only when a diff touches a guard input:
-# windows_guard in ci-scope.sh, read from .github/guard-inputs.txt. The gate is read from checks.yml's own step condition, so each
+# The guard-inputs gate. The daily runs the Windows guard shards (checks-windows-guard and its -2 to -n copies) when a diff touches a guard
+# input, and a ready pull_request runs the guard Windows slice instead (owner, 21:19 CST Nov 24 2026). The gate is windows_guard in ci-scope.sh, read from .github/guard-inputs.txt. The gate is read from checks.yml's own step condition, so each
 # case states what the workflow does with the scope outputs, not the value of one output. Cost: parses checks.yml once per call.
 GUARD_SHARDS = split.WINDOWS_GUARD_JOBS  # the family's count, one home: SHARD_COUNTS in lint/test_windows_split.py
 # Flags the old script sets true for SNAPSHOT_DIFFS, each run() with its default arguments. windows_guard is left out of the
@@ -2186,13 +2356,49 @@ def guard_shards_run(got, event="pull_request"):
     return out
 
 
+def guard_job_starts(name, got, event):
+    """-> bool: whether job `name`'s own job-level if: lets it start for `event`, with run()'s dict `got`. A job with no if: starts."""
+    with open(split.CHECKS, encoding="utf-8") as f:
+        job = split.windows_jobs(f.read())[name]
+    return job["if"] is None or split.eval_with(job["if"], event, got)
+
+
+def guard_full_starts(got, event):
+    """-> {job: bool}: whether each Windows guard shard's full step starts for `event`, its job-level if and its step's own if both read.
+    guard_shards_run reads only the step. The Nov 24 cut (owner, 21:19 CST Nov 24 2026) gates the shards at the job level on a ready pull_request."""
+    steps = guard_shards_run(got, event)
+    return {name: steps[name] and guard_job_starts(name, got, event) for name in GUARD_SHARDS}
+
+
+def guard_slice_runs(got):
+    """-> bool: whether checks-windows-guard's Windows slice step (split.GUARD_SLICE) runs on a ready pull_request for `got`. The slice is
+    the one guard step a ready pull_request runs, and windows_guard gates it. Exactly one slice step must exist, or the case fails by name."""
+    with open(split.CHECKS, encoding="utf-8") as f:
+        jobs = split.windows_jobs(f.read())
+    steps = [st for st in jobs[split.GUARD_JOB]["steps"] if split.key(st) == split.GUARD_SLICE]
+    assert len(steps) == 1, f"{split.GUARD_JOB} holds {len(steps)} Windows slice steps, want 1"
+    return steps[0].get("if") is None or split.eval_with(steps[0]["if"], "pull_request", got)
+
+
 @unittest.skipUnless(BASH, "bash not on PATH")
 class WindowsGuardShards(unittest.TestCase):
-    """The guard-inputs gate: the Windows guard shards run when a diff touches a guard input, and stay off for any other diff."""
+    """The guard-inputs gate. The daily (a schedule) runs every guard shard when a diff touches a guard input. A ready pull_request starts
+    none of the shards and runs the guard Windows slice in their place, gated the same way (owner, 21:19 CST Nov 24 2026)."""
 
-    # Named failure: a diff that touches a guard input runs no guard shard, so the guard suite goes unrun on it. The two
+    def assert_daily_and_ready_pull_request(self, paths, **kw):
+        """The daily runs every guard full step for the diff `paths`, and a ready pull_request starts none of them. The guard slice runs on
+        that ready pull_request. Named failure: a guard shard or a full guard step starts on a ready pull_request, or the daily leaves one off."""
+        daily = run(paths, event="schedule", **kw)
+        self.assertEqual(set(guard_full_starts(daily, "schedule").values()), {True},
+                         f"the daily run leaves a guard shard off for {paths}: {daily}")
+        ready = run(paths, **kw)
+        started = guard_full_starts(ready, "pull_request")
+        self.assertEqual(set(started.values()), {False}, f"a ready pull_request starts a guard full step for {paths}: {started}")
+        self.assertTrue(guard_slice_runs(ready), f"the guard Windows slice is off on a ready pull_request for {paths}: {ready}")
+
+    # Named failure (Nov 24 cut): a guard input leaves a guard shard off on the daily, or starts one on a ready pull_request. The two
     # .md cases are modified files: a new file under a landed dir turns code on whatever its type.
-    def test_each_guard_input_turns_the_guard_shards_on(self):
+    def test_each_guard_input_runs_the_guard_shards_on_the_daily_and_not_on_a_ready_pull_request(self):
         cases = [
             (["hooks/guard.py"], {}),
             (["hooks/probe_new.py"], {}),
@@ -2207,8 +2413,7 @@ class WindowsGuardShards(unittest.TestCase):
         ]
         for paths, kw in cases:
             with self.subTest(paths=paths, kw=kw):
-                shards = guard_shards_run(run(paths, **kw))
-                self.assertEqual(set(shards.values()), {True}, f"a guard shard is off for the guard input {paths}: {shards}")
+                self.assert_daily_and_ready_pull_request(paths, **kw)
 
     # Named failure: a diff with no guard input runs the guard shards anyway, so every code change pays for the guard suite.
     def test_a_diff_with_no_guard_input_keeps_the_guard_shards_off(self):
@@ -2228,14 +2433,12 @@ class WindowsGuardShards(unittest.TestCase):
     def test_a_gitattributes_or_green_head_change_turns_the_guard_shards_on(self):
         for paths in ([".gitattributes"], [".github/scripts/green-head.sh"]):
             with self.subTest(paths=paths):
-                shards = guard_shards_run(run(paths))
-                self.assertEqual(set(shards.values()), {True}, f"a guard shard is off for the fail-safe path {paths}: {shards}")
+                self.assert_daily_and_ready_pull_request(paths)
 
     # git quotes a name with non-ASCII bytes unless -z is given, so `"hooks/caf\303\251.py"` must still match hooks/*.
     # Named failure: a path with a non-ASCII name matches no glob, so the guard shards stay off for a guard input.
     def test_a_non_ascii_guard_input_name_turns_the_guard_shards_on(self):
-        shards = guard_shards_run(run(["hooks/café.py"]))
-        self.assertEqual(set(shards.values()), {True}, f"a guard shard is off for the non-ASCII guard input hooks/café.py: {shards}")
+        self.assert_daily_and_ready_pull_request(["hooks/café.py"])
 
     # An added file under a landed dir turns the shards on. The landed-dir pass reads the added names newline-separated, so git's
     # quoted non-ASCII name matches no landed dir. The ASCII file is the control; the two runs must differ on windows_guard alone.
@@ -2244,7 +2447,7 @@ class WindowsGuardShards(unittest.TestCase):
         plain = run(["bin/plain.sh"])
         cafe = run(["bin/café.sh"])
         with self.subTest("control: the ASCII name"):
-            self.assertEqual(set(guard_shards_run(plain).values()), {True}, f"a guard shard is off for bin/plain.sh: {plain}")
+            self.assert_daily_and_ready_pull_request(["bin/plain.sh"])
         with self.subTest("windows_guard for the non-ASCII name"):
             self.assertEqual(cafe.get("windows_guard"), "true", f"windows_guard is off for the added bin/café.sh: {cafe}")
         with self.subTest("the other flags, against the ASCII name"):
@@ -2261,22 +2464,18 @@ class WindowsGuardShards(unittest.TestCase):
                 self.assertEqual(set(shards.values()), {True}, f"a guard shard is off on {event}: {shards}")
 
     def test_an_unreadable_diff_turns_the_guard_shards_on(self):
-        shards = guard_shards_run(run(["docs/x.md"], base="0" * 40))
-        self.assertEqual(set(shards.values()), {True}, f"a guard shard is off for an unreadable diff: {shards}")
+        self.assert_daily_and_ready_pull_request(["docs/x.md"], base="0" * 40)
 
     def test_an_empty_diff_turns_the_guard_shards_on(self):
-        shards = guard_shards_run(run([]))
-        self.assertEqual(set(shards.values()), {True}, f"a guard shard is off for an empty diff: {shards}")
+        self.assert_daily_and_ready_pull_request([])
 
     # No list in the base: the list is unreadable. The gate fails safe, and the shards run for a docs-only diff.
     def test_an_unreadable_guard_list_turns_the_guard_shards_on(self):
-        shards = guard_shards_run(run(["docs/x.md"], guard_inputs=None))
-        self.assertEqual(set(shards.values()), {True}, f"a guard shard is off when the guard list is unreadable: {shards}")
+        self.assert_daily_and_ready_pull_request(["docs/x.md"], guard_inputs=None)
 
     # A list with no glob in it (comments only) reads as empty, and the gate fails safe the same way.
     def test_an_empty_guard_list_turns_the_guard_shards_on(self):
-        shards = guard_shards_run(run(["docs/x.md"], guard_inputs="# comments only\n\n"))
-        self.assertEqual(set(shards.values()), {True}, f"a guard shard is off when the guard list has no glob: {shards}")
+        self.assert_daily_and_ready_pull_request(["docs/x.md"], guard_inputs="# comments only\n\n")
 
     # A records-only push after a green head turns every flag off, the shards with them.
     def test_a_records_only_push_turns_the_guard_shards_off(self):

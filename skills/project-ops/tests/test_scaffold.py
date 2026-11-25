@@ -19,6 +19,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import unittest.mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SKILL = os.path.dirname(HERE)
@@ -700,6 +701,26 @@ class Protect(unittest.TestCase):
 
     def test_the_required_check_is_the_rollup(self):
         self.assertEqual(protect.REQUIRED_CHECK, "all-jobs-passed")  # the one literal of the name in this file
+
+    def gh_reply(self, code, stdout, stderr):
+        """run_gh with _nowindow.run stubbed to give one reply: gh's stdout and stderr as the child process would have them."""
+        reply = subprocess.CompletedProcess(["gh"], code, stdout, stderr)
+        with unittest.mock.patch.object(protect._nowindow, "run", return_value=reply):
+            return protect.run_gh(["repos/acme/widgets/rulesets"])
+
+    def test_run_gh_gives_the_json_reply_alone_when_gh_exits_0_with_stderr_text(self):
+        code, out = self.gh_reply(0, '{"id": 7}', "hint: gh is running in an agent session\n")
+        self.assertEqual(code, 0)
+        self.assertEqual(out, '{"id": 7}', "run_gh gave gh's stderr text after its JSON reply, so the JSON parse of the caller fails")
+
+    def test_run_gh_gives_the_json_reply_when_stderr_is_empty(self):  # control: green on the old code
+        code, out = self.gh_reply(0, '{"id": 7}', "")
+        self.assertEqual((code, out), (0, '{"id": 7}'))
+
+    def test_run_gh_keeps_the_stderr_text_of_a_failed_call(self):  # control: green on the old code, and must stay green
+        code, out = self.gh_reply(1, "", "HTTP 404: Not Found")
+        self.assertEqual(code, 1)
+        self.assertIn("HTTP 404: Not Found", out, "a failed run_gh dropped the stderr text its caller shows")
 
     def test_preview_changes_nothing_and_names_the_call(self):
         code, out, calls = self.run_protect("--repo", "acme/widgets", "--check", self.required())

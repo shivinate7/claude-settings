@@ -12,12 +12,21 @@ the hook prints one JSON object on stdout and exits 0:
 - additionalContext holds the standing rules: a scope line that follows `agent_type` from the hook
   input (builder, test-author, reviewer, Explore, record-writer, designer, design-reviewer, refuter), the general scope
   line for any other or missing type, and fewer than 20 lines in all. Each scope line is pinned in full.
+  The two standing git lines are pinned in full, and they are the same for every type. One bans git stash, with no
+  worktree condition. The other bans git reset with one of the discard flags in RESET_DISCARD_FLAGS (guard_shared_tree),
+  git checkout of a path and git restore, only outside the agent's own worktree: a folder under .claude/worktrees
+  (guard.agent_owned_worktree). The guard allows those discarding acts in such a worktree. In a hand-made worktree it
+  refuses a whole-tree discard and allows a checkout or restore of named files. The main checkout refuses them all
+  (decision agent-worktree-discard-is-noted). A plain, soft or mixed reset is not named.
 - The push line, the commit-trailer line and the record-path line appear for builder,
   test-author, record-writer, designer and any other type; never for reviewer, Explore, Plan,
   claude-code-guide, design-reviewer or refuter, which only read.
 - The staged-diff line holds `git diff --cached --stat`. It appears once for each type that
   commits (builder, test-author, record-writer, designer and any other type) and never for a
   read-only type. Decision lanes-start-in-tool-worktrees.
+- The commit-evidence line (`Commit the test evidence ...`) appears once, word for word, in the brief of each writer
+  role: builder, test-author, record-writer and designer, and of a general or missing type, which the hook treats
+  as a writer. No read-only type gets it.
 - A plugin-namespaced type (`my-plugin:builder`) gets the scope of its bare name. The match ignores
   case: `Builder` and `explore` get the scope and the line set of their role.
 - When the payload's cwd holds a .github/stamp.json whose cite.form is set, one brief line
@@ -37,6 +46,7 @@ Override the module under test with the env var AGENT_BRIEF_UNDER_TEST.
 import json
 import os
 import importlib.util
+import re
 import shutil
 import subprocess
 import sys
@@ -47,6 +57,7 @@ HOOK = os.environ.get("AGENT_BRIEF_UNDER_TEST") or os.path.join(HERE, "agent_bri
 sys.path.insert(0, HERE)
 import guard  # noqa: E402  the one reader of agent frontmatter keys (guard.frontmatter_keys), not a copy of it here
 import guard_core  # noqa: E402  the one home of the refuter role's name (REFUTER_ROLE), read below and never typed here
+import guard_shared_tree  # noqa: E402  the one home of the discard flags (RESET_DISCARD_FLAGS), read below and never typed here
 from tool_lists_test import tokens, unread_list  # noqa: E402  the one reader of tool lists (hooks/tool_lists_test.py)
 sys.path.append(os.path.join(os.path.dirname(HERE), "lint"))  # appended: a module already in sys.modules wins
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
@@ -75,7 +86,18 @@ SCOPE_LINE = {
 GENERAL_LINE = ("- Scope: do only what your brief names. A builder never edits tests; "
                 "a test-author never edits product code; a reviewer and Explore never edit; "
                 "a record-writer edits Markdown only.")
-STASH_LINE = "- Never run git stash, git reset, git checkout <path>, or git restore."
+
+
+def standing_git_lines(flags):
+    """The two standing git lines for the discard flags `flags`. The stash ban holds for every type. The reset ban,
+    with a checkout of a path and a restore, holds only outside the agent's own worktree, a folder under .claude/worktrees."""
+    return [
+        "- Never run git stash.",
+        "- Outside your own agent worktree (a folder under .claude/worktrees), never run git reset with one of the flags %s, git checkout of a path, or git restore." % "/".join(flags),
+    ]
+
+
+STASH_LINE, RESET_LINE = standing_git_lines(guard_shared_tree.RESET_DISCARD_FLAGS)  # the flags come from the constant, never typed here
 STAGED_KEY = "git diff --cached --stat"  # the stable fragment of the staged-diff line; the wording may change
 # Non-scope lines in hook order, after the scope line. Builder, test-author, record-writer, designer and any
 # unknown type commit and push; reviewer, Explore, Plan, claude-code-guide and design-reviewer do not, so they
@@ -83,6 +105,7 @@ STAGED_KEY = "git diff --cached --stat"  # the stable fragment of the staged-dif
 WRITER_RULES = [
     "Standing rules for this agent:",
     STASH_LINE,
+    RESET_LINE,
     "- Push only with: git push origin HEAD:<branch>.",
     "- Make no gh call unless your brief names it.",
     "- Report in 25 lines or fewer unless the brief sets a cap. Order: Done, Deviations, Input Needed, Next.",
@@ -93,9 +116,26 @@ WRITER_RULES = [
 READER_RULES = [
     "Standing rules for this agent:",
     STASH_LINE,
+    RESET_LINE,
     "- Make no gh call unless your brief names it.",
     "- Report in 25 lines or fewer unless the brief sets a cap. Order: Done, Deviations, Input Needed, Next.",
 ]
+# The commit-evidence line goes to every writer: the four writer roles, and a general or missing type, which the hook
+# treats as a writer. Its place in the brief is not pinned here: line_set_check leaves it out, and the commit-evidence
+# cases below pin its text and its readers.
+COMMIT_EVIDENCE_LINE = ("- Commit the test evidence your work made this round (a test-result bundle) in your worktree. "
+                        "Never leave it untracked there. If your scope does not cover the file, report its path instead.")
+EVIDENCE_KEYS = ("Commit the test evidence", "Never leave it untracked")  # stable fragments: a line of any wording that holds one counts
+# (label, agent type) for each writer. A missing type is MISSING: payload() then leaves agent_type out of the JSON.
+EVIDENCE_WRITERS = [
+    ("builder", "builder"),
+    ("test-author", "test-author"),
+    ("record-writer", "record-writer"),
+    ("designer", "designer"),
+    ("a general (unknown) type", "some-new-agent"),
+    ("a missing agent type", MISSING),
+]
+EVIDENCE_NONWRITERS = ["reviewer", "Explore", "Plan", "claude-code-guide", "design-reviewer", REFUTER]
 PUSH_KEY = "Push only with"
 TRAILER_KEY = "End each commit message with"
 RECORD_KEY = "Name no record path"
@@ -308,8 +348,11 @@ def dispatch(case):
 
 # RULES: each standing rule is in the context. The rule lines are the same for every type.
 RULES = [
-    ("rule: no git stash, git reset, git checkout <path>, or git restore",
-     ("Never run", "git stash", "git reset", "git checkout <path>", "git restore")),
+    ("rule: never git stash, with no worktree condition",
+     ("Never run git stash.",)),
+    ("rule: outside the agent's own worktree (a folder under .claude/worktrees), never git reset with a discard flag, git checkout of a path, or git restore",
+     ("Outside your own agent worktree (a folder under .claude/worktrees), never run git reset with one of the flags",
+      "/".join(guard_shared_tree.RESET_DISCARD_FLAGS), "git checkout of a path", "git restore")),
     ("rule: push only with git push origin HEAD:<branch>",
      ("Push only with", "git push origin HEAD:<branch>")),
     ("rule: no gh call unless the brief names it",
@@ -332,12 +375,15 @@ def line_set_check(expected, staged=False):
         rules = [line for line in text.split("\n") if not line.startswith("- Scope")]
         if staged:
             rules = [line for line in rules if STAGED_KEY not in line]
+        rules = [line for line in rules if not any(key in line for key in EVIDENCE_KEYS)]  # its own cases: commit evidence
         noted = rendered_rules()  # the note rules have their own cases below, so a line that holds one is left out here
         rules = [line for line in rules if not any(rule in line for rule in noted)]
         if rules == expected:
             return None
         if len(rules) != len(expected):
-            return "%d non-scope lines, want %d" % (len(rules), len(expected))
+            missing = [want for want in expected if want not in rules]  # names the first pinned line the context lacks
+            named = "; no line is %r" % missing[0][:90] if missing else ""
+            return "%d non-scope lines, want %d%s" % (len(rules), len(expected), named)
         for got, want in zip(rules, expected):
             if got != want:
                 return "line is %r, want %r" % (got[:90], want[:90])
@@ -353,30 +399,195 @@ add("line set: a general (unknown) type gets the writer set", "context",
 add("line set: a missing agent type gets the writer set", "context", payload(),
     line_set_check(WRITER_RULES, staged=True))
 for _t in ["reviewer", "Explore", "Plan", "claude-code-guide", "design-reviewer"]:
-    add("line set: %s gets the five-line set" % _t, "context", payload(_t),
+    add("line set: %s gets the six-line set" % _t, "context", payload(_t),
         line_set_check(READER_RULES))
-# The refuter is read-only, so it gets the five-line set: no push, trailer, record-path or staged-diff line
+# The refuter is read-only, so it gets the six-line set: no push, trailer, record-path or staged-diff line
 # (decision plan-refuter). Failure class: a read-only role given the writer set.
-add("line set: refuter gets the five-line set", "context", payload(REFUTER), line_set_check(READER_RULES))
+add("line set: refuter gets the six-line set", "context", payload(REFUTER), line_set_check(READER_RULES))
 # Plugin-prefixed read-only types take the reader set too (the prefix split must reach them).
 for _t in ["my-plugin:reviewer", "ns:Explore"]:
-    add("line set: plugin-prefixed %s gets the five-line set" % _t, "context", payload(_t),
+    add("line set: plugin-prefixed %s gets the six-line set" % _t, "context", payload(_t),
         line_set_check(READER_RULES))
+
+
+# COMMIT EVIDENCE: a writer commits the test evidence its work made in its own worktree and never leaves it untracked
+# there. The line goes to every writer once per brief. A read-only role never commits, so it never gets the line.
+def evidence_lines(text):
+    """The lines of the brief that hold a commit-evidence fragment, whatever their wording."""
+    return [line for line in text.split("\n") if any(key in line for key in EVIDENCE_KEYS)]
+
+
+def evidence_word_check(agent_type):
+    """Build a check: the brief for `agent_type` holds COMMIT_EVIDENCE_LINE word for word, as one whole line."""
+    def check():
+        text, problem = context_for(payload(agent_type))
+        if problem:
+            return problem
+        if COMMIT_EVIDENCE_LINE not in text.split("\n"):
+            return "no line is the commit-evidence line %r" % COMMIT_EVIDENCE_LINE[:90]
+        return None
+    return check
+
+
+def evidence_once_check(agent_type):
+    """Build a check: exactly one line of the brief holds a commit-evidence fragment, so the line is not repeated."""
+    def check():
+        text, problem = context_for(payload(agent_type))
+        if problem:
+            return problem
+        hits = evidence_lines(text)
+        if len(hits) != 1:
+            return "want one line that holds a commit-evidence fragment, got %d" % len(hits)
+        return None
+    return check
+
+
+def evidence_absent_check(agent_type):
+    """Build a check: no line of the brief holds a commit-evidence fragment. Used for each role that never commits."""
+    def check():
+        text, problem = context_for(payload(agent_type))
+        if problem:
+            return problem
+        hits = evidence_lines(text)
+        if hits:
+            return "a role that never commits gets a commit-evidence line: %r" % hits[0][:90]
+        return None
+    return check
+
+
+def standing_rules_check():
+    """Every role still gets the standing rules line, whether or not it gets the commit-evidence line."""
+    for agent_type in TYPES + ["Plan", "claude-code-guide", "some-new-agent", MISSING]:
+        text, problem = context_for(payload(agent_type))
+        if problem:
+            return problem
+        if WRITER_RULES[0] not in text.split("\n"):
+            return "agent type %r holds no %r line" % (agent_type, WRITER_RULES[0])
+    return None
+
+
+for _name, _t in EVIDENCE_WRITERS:
+    add("commit evidence: %s gets the line word for word" % _name, "custom", fn=evidence_word_check(_t))
+for _name, _t in EVIDENCE_WRITERS:
+    add("commit evidence: %s gets the line once per brief" % _name, "custom", fn=evidence_once_check(_t))
+for _t in EVIDENCE_NONWRITERS:
+    add("commit evidence control: %s gets no commit-evidence line" % _t, "custom", fn=evidence_absent_check(_t))
+add("commit evidence control: every role still gets the standing rules line", "custom", fn=standing_rules_check)
+
+
+def git_line_check(want):
+    """Build a check: the standing git line `want` is in the context exactly, for every agent type."""
+    def check():
+        for agent_type in TYPES + ["Plan", MISSING]:
+            text, problem = context_for(payload(agent_type))
+            if problem:
+                return problem
+            lines = text.split("\n")
+            if want not in lines:
+                held = [line[:90] for line in lines if "Never run" in line or "Outside your own agent worktree" in line]
+                return "agent type %r holds %r, want %r" % (agent_type, held, want)
+        return None
+    return check
+
+
+add("rules: the standing stash line is exactly %r for every agent type" % STASH_LINE, "custom",
+    fn=git_line_check(STASH_LINE))
+add("rules: the standing reset line is exactly %r for every agent type" % RESET_LINE, "custom",
+    fn=git_line_check(RESET_LINE))
 
 
 def stash_check():
-    """The stash line is exact, for every agent type."""
+    """No line of any agent type's context names git stash except the pinned stash line, so the stash ban has no
+    worktree condition."""
     for agent_type in TYPES + ["Plan", MISSING]:
         text, problem = context_for(payload(agent_type))
         if problem:
             return problem
-        if STASH_LINE not in text.split("\n"):
-            return "agent type %r lacks the exact stash line" % (agent_type,)
+        for line in text.split("\n"):
+            if "git stash" in line and line != STASH_LINE:
+                return "agent type %r holds a git stash line other than %r: %r" % (agent_type, STASH_LINE, line[:90])
     return None
 
 
-add("rules: the stash line is exactly 'Never run git stash, git reset, git checkout <path>, "
-    "or git restore' for every agent type", "custom", fn=stash_check)
+add("rules: the stash ban has no worktree condition: no other line names git stash", "custom", fn=stash_check)
+
+
+RESET_VERB = re.compile(r"\breset\b", re.IGNORECASE)  # every use of the verb, bare or with a flag
+RESET_SENTENCE = "- Outside your own agent worktree (a folder under .claude/worktrees),"  # the one sentence that may hold the reset verb
+
+
+def discard_flag_after(line, pos):
+    """The discard flag that appears in `line` after position `pos`, or None when none does."""
+    for flag in guard_shared_tree.RESET_DISCARD_FLAGS:
+        if re.search(re.escape(flag) + r"(?![\w-])", line[pos:]):
+            return flag
+    return None
+
+
+def reset_check():
+    """Every agent type's context holds the reset verb only in the sentence that starts with RESET_SENTENCE, and a
+    discard flag follows it in that sentence. No line bans a bare reset."""
+    for agent_type in TYPES + ["Plan", MISSING]:
+        text, problem = context_for(payload(agent_type))
+        if problem:
+            return problem
+        hits = [(line, hit) for line in text.split("\n") for hit in RESET_VERB.finditer(line)]
+        if not hits:
+            return "agent type %r holds no reset verb: the standing line %r is missing" % (agent_type, RESET_LINE)
+        for line, hit in hits:
+            if not line.startswith(RESET_SENTENCE):
+                return "agent type %r holds the reset verb outside the sentence %r: %r" % (
+                    agent_type, RESET_SENTENCE, line[:90])
+            if discard_flag_after(line, hit.end()) is None:
+                return "agent type %r holds a reset verb with no discard flag after it: %r" % (agent_type, line[:90])
+    return None
+
+
+add("rules: the reset verb holds only in the outside-worktree sentence, with a discard flag after it",
+    "custom", fn=reset_check)
+
+# A stand-in flag set. A context rebuilt with it must name it, which only holds when the hook reads the constant.
+PATCHED_FLAGS = ("--patched-flag",)
+
+
+def load_hook_fresh():
+    """The hook module, loaded again from HOOK, so it reads RESET_DISCARD_FLAGS as it is now. Returns
+    (module, None), or (None, problem) when the hook does not load."""
+    try:
+        spec = importlib.util.spec_from_file_location("agent_brief_fresh", HOOK)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod, None
+    except (Exception, SystemExit) as e:
+        return None, "the hook does not load: %s" % (e,)
+
+
+def patched_flags_check():
+    """With RESET_DISCARD_FLAGS patched, a context rebuilt for every agent type names the patched reset line, not the real one."""
+    want = standing_git_lines(PATCHED_FLAGS)[1]
+    saved = guard_shared_tree.RESET_DISCARD_FLAGS
+    guard_shared_tree.RESET_DISCARD_FLAGS = PATCHED_FLAGS
+    try:
+        hook, problem = load_hook_fresh()
+        if problem:
+            return problem
+        for agent_type in TYPES + ["Plan", None]:
+            try:
+                got = hook.build(agent_type)
+            except Exception as e:
+                return "building the context for agent type %r raised: %s" % (agent_type, e)
+            lines = got.split("\n")
+            if want not in lines:
+                return "with the constant patched, agent type %r lacks the line %r" % (agent_type, want)
+            if RESET_LINE in lines:
+                return "with the constant patched, agent type %r still names the real line %r" % (agent_type, RESET_LINE)
+        return None
+    finally:
+        guard_shared_tree.RESET_DISCARD_FLAGS = saved
+
+
+add("rules: with RESET_DISCARD_FLAGS patched, a rebuilt context names the patched flags for every type",
+    "custom", fn=patched_flags_check)
 
 
 def length_check():
@@ -426,7 +637,7 @@ add("general: %d odd-input rows each get the general scope line" % len(GENERAL_C
 # Explore scope, so it gets none of the push, trailer and record-path lines.
 add("case: Builder gets the builder scope line", "context", payload("Builder"), scope_check("builder"))
 add("case: explore gets the Explore scope line", "context", payload("explore"), scope_check("Explore"))
-add("case: explore gets the five-line set", "context", payload("explore"), line_set_check(READER_RULES))
+add("case: explore gets the six-line set", "context", payload("explore"), line_set_check(READER_RULES))
 
 # The push, trailer and record-path lines are for the write-capable types and the general
 # case, and never for reviewer or Explore.
@@ -529,7 +740,7 @@ add("error: a guard_core that fails on import gives no stdout, one agent_brief: 
 
 def guard_core_control_check():
     """The control for the case above: with guard_core working, the same child runner gives the refuter the
-    five-line read-only set. Green here and red above means the broken import is the cause, not the runner."""
+    six-line read-only set. Green here and red above means the broken import is the cause, not the runner."""
     if not os.path.exists(HOOK):
         return "the hook file is missing: %s" % HOOK
     result = run_hook_after("", payload(REFUTER))
@@ -541,8 +752,66 @@ def guard_core_control_check():
     return line_set_check(READER_RULES)(text)
 
 
-add("control: with guard_core working, the refuter gets the five-line set through the same runner", "custom",
+add("control: with guard_core working, the refuter gets the six-line set through the same runner", "custom",
     fn=guard_core_control_check)
+
+# SHARED-TREE FAILS ON IMPORT: the hook imports guard_shared_tree in its own try block, so a failed import drops only
+# the reset line. A None entry in sys.modules makes the import raise ImportError, as a module that fails to load does.
+BROKEN_SHARED_TREE = "import sys\nsys.modules['guard_shared_tree'] = None\n"
+
+
+def shared_tree_fails_check():
+    """A guard_shared_tree that fails on import: the hook still prints the scope line and every other standing line,
+    the stash line included, and prints no reset line. Exit 0, one JSON object on stdout."""
+    if not os.path.exists(HOOK):
+        return "the hook file is missing: %s" % HOOK
+    result = run_hook_after(BROKEN_SHARED_TREE, payload("builder"))
+    if result.returncode != 0:
+        return "exit %d when guard_shared_tree fails on import, want 0: %s" % (result.returncode, last_stderr_line(result))
+    if not result.stdout.strip():
+        return "with guard_shared_tree failing on import, the hook prints no context: every standing line is dropped"
+    text, problem = context_of(result.stdout)
+    if problem:
+        return problem
+    scope = scope_check("builder")(text)
+    if scope:
+        return "with guard_shared_tree failing on import, %s" % scope
+    lines = text.split("\n")
+    for want in WRITER_RULES:
+        if want != RESET_LINE and want not in lines:
+            return "with guard_shared_tree failing on import, no line is %r" % want[:90]
+    for line in lines:
+        if RESET_VERB.search(line):
+            return "with guard_shared_tree failing on import, a line still names the reset verb: %r" % line[:90]
+    return None
+
+
+add("error: a guard_shared_tree that fails on import keeps the stash line and every other standing line, and no reset line",
+    "custom", fn=shared_tree_fails_check)
+
+
+def shared_tree_control_check():
+    """The control for the case above: with guard_shared_tree working, the same child runner gives the builder the
+    stash line and a reset line. Green here and red above means the broken import is the cause, not the runner.
+    The reset line is found by its verb: its wording is pinned by the rules cases, not here."""
+    if not os.path.exists(HOOK):
+        return "the hook file is missing: %s" % HOOK
+    result = run_hook_after("", payload("builder"))
+    if result.returncode != 0:
+        return "exit %d with guard_shared_tree working, want 0: %s" % (result.returncode, last_stderr_line(result))
+    text, problem = context_of(result.stdout)
+    if problem:
+        return problem
+    lines = text.split("\n")
+    if STASH_LINE not in lines:
+        return "with guard_shared_tree working, no line is %r" % STASH_LINE[:90]
+    if not any(RESET_VERB.search(line) for line in lines):
+        return "with guard_shared_tree working, no line names the reset verb"
+    return None
+
+
+add("control: with guard_shared_tree working, the builder gets the stash line and a reset line through the same runner",
+    "custom", fn=shared_tree_control_check)
 
 # SILENT: junk or empty stdin gives no stdout, exit 0, and at most one stderr line that starts
 # `agent_brief:`.

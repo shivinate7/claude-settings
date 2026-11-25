@@ -20,6 +20,8 @@ Pinned here:
   9. the five long steps the hang stop wraps (HangStopWrap): each runs its command through bin/verdict, sets its hang seconds and its
      full-log switch to 1, drops its step cap and keeps its job cap; the six short caps, the Windows jobs and the mutation jobs stay as
      they are.
+  10. each mutation shard job (MutateVerdictCache) keeps its saved verdicts across a rerun of the same run: a restore step before
+     its shard step and a save step after it, on the folder the shard step names under runner.temp.
 
 Steps are read by lint/workflow_steps.py. The `if:` evaluator is eval_if in lint/test_windows_split.py.
 Item 5 reads the entry file only. Item 7 reads each name as md_names_reached reads it: a whole path, or the constant
@@ -50,6 +52,7 @@ from test_windows_split import (  # noqa: E402  the one home of the `if:` evalua
     run_lines, suite_names, unwrap, LINUX_SUITES, RECORDS_ONLY_CONDITION)
 from test_windows_split import PUSH_RULING, top_level_conjuncts, top_level_disjuncts, yaml_scalar  # noqa: E402  the one home of the splitters, the scalar reader and the ruling
 from test_windows_split import INSTALL_CMD, INSTALL_SHARD_VAR, MACOS_GUARD, MACOS_SLICE_ENV, VERDICT_FULL_LOG_VAR, VERDICT_RUN, all_jobs, windows_jobs  # noqa: E402  the five steps' commands and env, the verdict prefix, the job readers
+from test_windows_split import MUTATE_JOBS  # noqa: E402  the three mutation shard jobs, in shard order (shard i/3 runs in job i)
 
 ROOT = os.path.normpath(os.path.join(HERE, ".."))
 WORKFLOW = ".github/workflows/checks.yml"
@@ -95,6 +98,7 @@ NO_MD = [
     'Stall watch stop suite',
     'Simulator boot-record fixture suite',
     'Start check suite',
+    'Lease file suite',
     'Directory before a segment suite',
     'Refusal settle fixture suite',
     'Stop-hook triage hold suite',
@@ -110,6 +114,7 @@ NO_MD = [
     'Ruling census fixture suite',
     'Ruled store fixture suite',
     'Guard log report fixture suite',
+    'Pace numbers fixture suite',
     'Guard outcome claims fixture suite',
     'Verdict runner fixture suite',
     'Wait-pid helper fixture suite',
@@ -125,6 +130,10 @@ NO_MD = [
     'Mutation report-mode fixture suite',
     'Hook platform exit fixture suite',
     'Hook dup-name fixture suite',
+    'Stand-in signature fixture suite',
+    'Test temp helper fixture suite',  # reads lint/_test_temp.py and lint/test_test_temp.py only: no .md at run time
+    'Tests set config fixture suite',  # reads lint/check_tests_set_config.py and .py test files only: no .md at run time
+    'Tests set config check',  # walks the repo and parses test_*.py files only (no .md read). It names no file, so not NAMES_ONLY
     'Plan refuter fixture suite',
     'Copy finder fixture suite',
     'Time-pinned finder fixture suite',
@@ -315,6 +324,7 @@ PR_ONLY = [
     'Ruling kind check',
     'Silent undo check',
     'Comment narration check',
+    'Time-pinned new-finding check',
 ]
 
 # The checks job's step names. An unnamed step is its `uses:` reference.
@@ -372,6 +382,7 @@ MAIN_STEPS = [
     'Deny checks never raise suite',
     'Session start notice suite',
     'Start check suite',
+    'Lease file suite',
     'Directory before a segment suite',
     'Refusal settle fixture suite',
     'Stop-hook guard fixture suite',
@@ -396,6 +407,7 @@ MAIN_STEPS = [
     'Ruled store fixture suite',
     'Route judge measure fixture suite',
     'Guard log report fixture suite',
+    'Pace numbers fixture suite',
     'Guard outcome claims fixture suite',
     'Verdict runner fixture suite',
     'Wait-pid helper fixture suite',
@@ -424,12 +436,17 @@ MAIN_STEPS = [
     'Hook platform exit fixture suite',
     'Hook stub fixture suite',
     'Hook dup-name fixture suite',
+    'Stand-in signature fixture suite',
+    'Test temp helper fixture suite',
+    'Tests set config fixture suite',
+    'Tests set config check',
     'Record slug fixture suite',
     'Cost line pin fixture suite',
     'Red-run trailer fixture suite',
     'Plan refuter fixture suite',
     'Copy finder fixture suite',
     'Time-pinned finder fixture suite',
+    'Time-pinned new-finding check',
     'Mod version fixture suite',
     'Hook catalog fixture suite',
     'Hook catalog check',
@@ -1545,6 +1562,142 @@ class HangStopWrap(unittest.TestCase):
                                      % (job, identity(st)))
                     self.assertNotIn("VERDICT_HANG_SECONDS", ws.step_env(st), "%s: step %r sets VERDICT_HANG_SECONDS; no mutation step is stopped yet"
                                      % (job, identity(st)))
+
+
+# The folder a mutation shard saves its verdicts in: the name hooks/mutate_shared.py reads (VERDICT_DIR_ENV).
+MUTATE_VERDICT_VAR = "MUTATE_VERDICT_DIR"
+RUNNER_TEMP = "${{ runner.temp }}/"
+RESTORE_ACTION = "actions/cache/restore"
+SAVE_ACTION = "actions/cache/save"
+GUARD_SCOPE = "needs.scope.outputs.guard == 'true'"
+FULL_SHA = re.compile(r"@[0-9a-f]{40}$")
+
+
+def github_expr(name):
+    """The `${{ github.<name> }}` expression in a cache key, spaced as the workflow writes it or not."""
+    return re.compile(r"\$\{\{\s*github\.%s\s*\}\}" % re.escape(name))
+
+
+class MutateVerdictCache(unittest.TestCase):
+    """Each mutation shard job keeps its per-mutant verdicts across a rerun of the same run (decision hang-stop: a stopped run resumes).
+    Per shard job: the shard step sets MUTATE_VERDICT_DIR to a folder under runner.temp; an actions/cache/restore step before it and an
+    actions/cache/save step after it both use that folder. The restore key names the job and the run id, and a rerun (a later attempt of
+    the same run id) finds attempt 1's save through a restore-keys prefix: a cache key matches only exactly, so a prefix is the only way.
+    The save key names the job, the run id and the run attempt, since a cache key cannot be overwritten and each job saves its own.
+    The save step runs after a failed shard step (always()). Both cache steps carry the shard step's scope condition."""
+
+    def setUp(self):
+        self.text = read_repo(WORKFLOW)
+
+    def shard(self, index, job):
+        """(the job's steps, the index of its shard step). The scope is read first: the shard step must carry the guard scope."""
+        steps = ws.step_blocks(ws.job_block(self.text, job) or "")
+        name = "Guard mutation test, shard %d/%d" % (index, len(MUTATE_JOBS))
+        found = [i for i, st in enumerate(steps) if value(st, "name") == name]
+        self.assertEqual(len(found), 1, "%s: want one step named %r, found %d" % (job, name, len(found)))
+        self.assertEqual(top_level_conjuncts(value(steps[found[0]], "if")), [GUARD_SCOPE],
+                         "%s: the shard step's if is %r, want the guard scope" % (job, value(steps[found[0]], "if")))
+        return steps, found[0]
+
+    def only_cache_step(self, steps, action, job):
+        """(index, step) of the one step of `job` that runs `action`, read with its `uses:` pin."""
+        found = [(i, st) for i, st in enumerate(steps) if (value(st, "uses") or "").startswith(action + "@")]
+        self.assertEqual(len(found), 1, "%s: want one %s step, found %d (the verdicts are not %s)"
+                         % (job, action, len(found), "saved" if action == SAVE_ACTION else "restored"))
+        return found[0]
+
+    def test_each_shard_step_sets_the_verdict_folder_under_runner_temp(self):
+        for index, job in enumerate(MUTATE_JOBS, 1):
+            with self.subTest(job=job):
+                steps, at = self.shard(index, job)
+                folder = yaml_scalar(ws.step_env(steps[at]).get(MUTATE_VERDICT_VAR))
+                self.assertTrue(folder.startswith(RUNNER_TEMP) and len(folder) > len(RUNNER_TEMP),
+                                "%s: the shard step sets %s to %r, want a folder under ${{ runner.temp }}" % (job, MUTATE_VERDICT_VAR, folder))
+
+    def test_each_shard_job_has_one_restore_step_before_its_shard_step(self):
+        for index, job in enumerate(MUTATE_JOBS, 1):
+            with self.subTest(job=job):
+                steps, at = self.shard(index, job)
+                i, _st = self.only_cache_step(steps, RESTORE_ACTION, job)
+                self.assertLess(i, at, "%s: the restore step (step %d) comes after its shard step (step %d)" % (job, i, at))
+
+    def test_each_restore_step_is_pinned_to_a_full_sha(self):
+        for index, job in enumerate(MUTATE_JOBS, 1):
+            with self.subTest(job=job):
+                steps, _at = self.shard(index, job)
+                _i, st = self.only_cache_step(steps, RESTORE_ACTION, job)
+                self.assertRegex(value(st, "uses"), FULL_SHA, "%s: the restore step is not pinned to a full commit sha" % job)
+
+    def test_each_restore_step_carries_the_shard_scope_and_no_run_on_failure(self):
+        for index, job in enumerate(MUTATE_JOBS, 1):
+            with self.subTest(job=job):
+                steps, _at = self.shard(index, job)
+                _i, st = self.only_cache_step(steps, RESTORE_ACTION, job)
+                self.assertEqual(top_level_conjuncts(value(st, "if")), [GUARD_SCOPE],
+                                 "%s: the restore step's if is %r, want the shard's guard scope alone" % (job, value(st, "if")))
+
+    def test_each_restore_step_reads_the_shard_folder_and_keys_it_by_job_and_run_id(self):
+        for index, job in enumerate(MUTATE_JOBS, 1):
+            with self.subTest(job=job):
+                steps, at = self.shard(index, job)
+                folder = yaml_scalar(ws.step_env(steps[at]).get(MUTATE_VERDICT_VAR))
+                _i, st = self.only_cache_step(steps, RESTORE_ACTION, job)
+                with_ = ws.step_with(st)
+                self.assertEqual(yaml_scalar(with_.get("path")), folder, "%s: the restore step's path is %r, want the shard folder %r"
+                                 % (job, with_.get("path"), folder))
+                key = with_.get("key") or ""
+                self.assertRegex(key, github_expr("job"), "%s: the restore key %r does not name the job" % (job, key))
+                self.assertRegex(key, github_expr("run_id"), "%s: the restore key %r does not name the run id" % (job, key))
+
+    def test_each_restore_key_prefix_matches_only_its_own_jobs_and_runs_saves(self):
+        for index, job in enumerate(MUTATE_JOBS, 1):
+            with self.subTest(job=job):
+                steps, _at = self.shard(index, job)
+                _i, restore = self.only_cache_step(steps, RESTORE_ACTION, job)
+                _j, save = self.only_cache_step(steps, SAVE_ACTION, job)
+                save_key = ws.step_with(save).get("key") or ""
+                prefixes = [p.strip() for p in (ws.step_with(restore).get("restore-keys") or "").split("\n") if p.strip()]
+                usable = [p for p in prefixes if save_key.startswith(p) and p.endswith("-") and github_expr("job").search(p)
+                          and github_expr("run_id").search(p) and not github_expr("run_attempt").search(p)]
+                self.assertTrue(usable, "%s: no restore-keys prefix of the save key %r names the job and run id and ends in a dash, "
+                                "so a rerun of the run finds no save (a cache key matches only exactly; restore-keys match by prefix)"
+                                % (job, save_key))
+
+    def test_each_shard_job_has_one_save_step_after_its_shard_step(self):
+        for index, job in enumerate(MUTATE_JOBS, 1):
+            with self.subTest(job=job):
+                steps, at = self.shard(index, job)
+                i, _st = self.only_cache_step(steps, SAVE_ACTION, job)
+                self.assertGreater(i, at, "%s: the save step (step %d) comes before its shard step (step %d)" % (job, i, at))
+
+    def test_each_save_step_runs_after_a_failed_shard_step_and_carries_the_shard_scope(self):
+        for index, job in enumerate(MUTATE_JOBS, 1):
+            with self.subTest(job=job):
+                steps, _at = self.shard(index, job)
+                _i, st = self.only_cache_step(steps, SAVE_ACTION, job)
+                self.assertEqual(sorted(top_level_conjuncts(value(st, "if"))), sorted(["always()", GUARD_SCOPE]),
+                                 "%s: the save step's if is %r, want always() with the shard's guard scope (it runs after a failed shard step)"
+                                 % (job, value(st, "if")))
+
+    def test_each_save_step_is_pinned_to_a_full_sha(self):
+        for index, job in enumerate(MUTATE_JOBS, 1):
+            with self.subTest(job=job):
+                steps, _at = self.shard(index, job)
+                _i, st = self.only_cache_step(steps, SAVE_ACTION, job)
+                self.assertRegex(value(st, "uses"), FULL_SHA, "%s: the save step is not pinned to a full commit sha" % job)
+
+    def test_each_save_step_keys_its_job_run_id_and_attempt_and_saves_the_shard_folder(self):
+        for index, job in enumerate(MUTATE_JOBS, 1):
+            with self.subTest(job=job):
+                steps, at = self.shard(index, job)
+                folder = yaml_scalar(ws.step_env(steps[at]).get(MUTATE_VERDICT_VAR))
+                _i, st = self.only_cache_step(steps, SAVE_ACTION, job)
+                with_ = ws.step_with(st)
+                key = with_.get("key") or ""
+                for name in ("job", "run_id", "run_attempt"):
+                    self.assertRegex(key, github_expr(name), "%s: the save key %r does not name github.%s" % (job, key, name))
+                self.assertEqual(yaml_scalar(with_.get("path")), folder, "%s: the save step's path is %r, want the shard folder %r"
+                                 % (job, with_.get("path"), folder))
 
 
 if __name__ == "__main__":
