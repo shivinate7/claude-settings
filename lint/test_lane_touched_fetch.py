@@ -938,8 +938,9 @@ class IfCompareCaseInsensitive(unittest.TestCase):
 
 
 class MacLegRunsOn(unittest.TestCase):
-    """The macOS leg's runs-on: vars.MAC_RUNS_ON turns the Mac on for the same repository, a fork's pull request always gets
-    macos-latest, and an unset or empty variable falls back to macos-latest."""
+    """The macOS leg's runs-on: vars.MAC_RUNS_ON turns the Mac on for the same repository, and an unset or empty variable falls back
+    to macos-latest. A fork's run uses the fork's own copy of the workflow, so the fork case proves only that this file's
+    expression sends a fork's pull request to the hosted label."""
 
     def test_the_macos_leg_runs_on_names_the_variable(self):
         text = read_lane()
