@@ -1733,12 +1733,14 @@ jobs:
           job: checks-guard-4
 
   # The fixtureless family of the guard suite: each member runs fresh, in its own process, with only its
-  # named fixtures built. It is opt-in, so no shard runs it. Measured 1036.1 s on the Mac; cap 25 min = time / 0.7 (decision ci-job-caps).
+  # named fixtures built. It is opt-in, so no shard runs it.
   checks-fixtureless:
     runs-on: ubuntu-latest
     needs: scope
     if: ${{ needs.scope.outputs.records_only_skip != 'true' }}
-    timeout-minutes: 25
+    # provisional 60 (decision ci-job-caps, rule 6) until 5 green runs, then re-cap from the measured slowest run / 0.7.
+    # It measured 1036.1 s on the Mac, not on a runner, so the Mac time is no cap.
+    timeout-minutes: 60 # provisional
     permissions:
       contents: read
       pull-requests: write
