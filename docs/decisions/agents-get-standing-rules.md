@@ -2,7 +2,7 @@
 
 ## The ruling
 
-Owner, 2026-10-12: a SubagentStart hook injects the standing rules, so a brief need not retype them. `hooks/agent_brief.py` prints `additionalContext` with the lines below. The standing line bans three things only; the reset ban went by owner ruling, 14:12 CST 2026-11-23.
+Owner, 2026-10-12: a SubagentStart hook injects the standing rules, so a brief need not retype them. `hooks/agent_brief.py` prints `additionalContext` with the lines below. The standing line bans three things only. It holds no reset ban (owner, 14:12 CST 2026-11-23: "yes drop the line then"), so the brief agrees with decision `agent-worktree-discard-is-noted`, where an agent may undo commits inside its own agent-owned worktree. Lane pick, not the owner's: only the reset verb left the line.
 
 - Never run git stash, git checkout <path>, or git restore.
 - push only with `git push origin HEAD:<branch>`;
