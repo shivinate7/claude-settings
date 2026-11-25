@@ -47,7 +47,7 @@ file may repeat a path that map keeps for the kind, never name another. The last
 - Owner ruling, 2026-10-28 (waiting-page item 32, answer c): home gets its mark at its own roll-out, not
   before. Home's roll-out (home PR 370) landed with the mark on 2026-10-28.
 - Owner ruling, 2026-11-25 10:19 CST: "it should be a more outcomes based plan as well ie any repo that pulls in claude settings ought to be able to know how to properly be using files yanno rather than just keeping it all in one area".
-- Files that many lanes edit: where they go is in this record; how their lines are shaped is in `lists-one-entry-per-line`.
+- Files that many lanes edit: where they go is in this record; how their lines are shaped is in `lists-one-line-per-item`.
 - A move keeps each file name. No record is renumbered or renamed (one-shared-record-stamp).
 
 Reason: the tools disagreed on where records live. `lint/ste_lint.py` read `docs/decisions` by default,

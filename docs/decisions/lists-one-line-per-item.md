@@ -46,7 +46,7 @@ Each branch below is in flight. None is built.
 - `mutants-one-file-per-rule`: mutants, one file per rule.
 - `outline-tool`: prints a file's outline, so a session reads one section.
 - `conflict-hotspots`: ranks the files that conflict.
-- `list-shape-check`: the list check.
+- The list check, on its own branch; the glossary check refuses that branch's slug in an added line, so the slug is held back.
 - `ready-checks-one-per-line`: ready checks, one entry per line.
 - `guard-file-set-one-manifest`: the guard's file set, in one manifest.
 - `record-prose-one-sentence-line`: record prose, one sentence per line.
