@@ -5351,7 +5351,7 @@ class ToolPinsLane(Job):
         self.assertNotEqual(rc, 0, "a missing checker is no proof, so the run must not exit 0: %s" % out)
 
     def test_control_a_checkout_with_neither_pin_file_is_silent_and_passes(self):
-        # Control, green on the head: a repo with no pins has nothing to judge. No tool-pins line, no checker, exit 0.
+        # Control: a repo with no pins has nothing to judge. No tool-pins line, no checker, exit 0.
         self.checkout(None, checker=False)
         rc, lines, out = self.run_job(self.LINT_STEP, args=self.ARGS)
         self.assertEqual([ln for ln in lines if "tool pins" in ln], [], "with neither pin file the lane lint must print no tool-pins line: %s" % out)
@@ -5359,7 +5359,7 @@ class ToolPinsLane(Job):
         self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS"]), out)
 
     def test_control_a_pin_file_that_cannot_be_read_stays_unknown(self):
-        # Control, green on the head: .tool-versions is present but a directory, so the checker cannot read it. One unknown line, no pass.
+        # Control: .tool-versions is present but a directory, so the checker cannot read it. One unknown line, no pass.
         self.checkout(None)
         os.makedirs(os.path.join(self.root, ".tool-versions", "unreadable"))
         rc, lines, out = self.run_job(self.LINT_STEP, args=self.ARGS)
