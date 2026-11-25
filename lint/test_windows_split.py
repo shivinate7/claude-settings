@@ -1991,6 +1991,11 @@ class SplitJobs(unittest.TestCase):
         # Named failure: the merge suite runs whole in one job, so that job's cap bounds every case of the suite (SHARD_COUNTS).
         self.assertEqual(shard_family_problems(self.text, LINUX_MERGE_JOBS, LINUX_MERGE_CMD, MERGE_VAR, LINUX_CODE), [])
 
+    def test_each_linux_merge_shard_job_is_in_the_split_job_list(self):
+        # Named failure: a shard job is missing from CHECKS_SUITE_JOBS, so the lint-job, step-name and split rules never read it.
+        # The install shards are listed in that tuple the same way.
+        self.assertEqual([job for job in LINUX_MERGE_JOBS if job not in CHECKS_SUITE_JOBS], [])
+
     def test_the_guard_outcome_suite_is_pinned_in_the_linux_split(self):
         # Named failure: the guard outcome suite has no LINUX_SUITES row, so the `if:` of its checks.yml step is not pinned.
         self.assertTrue("python3 lint/test_guard_outcome.py" in LINUX_SUITES,
