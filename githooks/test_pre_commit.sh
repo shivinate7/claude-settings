@@ -17,7 +17,7 @@ export CLAUDE_HOOKS_DIR="$repo/hooks"
 
 # One run folder per run, from the one home of the test-temp standard (lint/_test_temp.py).
 run="$(python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); import _test_temp; print(_test_temp.run_folder())' "$repo/lint")" || { echo "FAIL setup: no run folder"; exit 1; }
-trap 'rm -rf "$run"' EXIT
+trap 'cd "$repo"; rm -rf "$run"' EXIT
 mkdir "$run/empty"
 
 # Built from parts, so this file never holds an env file name whole.
