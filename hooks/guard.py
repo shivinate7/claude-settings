@@ -1600,7 +1600,9 @@ def handoff_unread_fields(path, payload):
             "lines": reread_check.READ_MAX_LINES, "cap": reread_check.READ_CAP_TOKENS}
 
 # The remedy is reread_check's: its one text serves this refusal and the Stop block. One `%s`: the handoff path.
-COMPACTION_AUDIT_REASON = "Rule (compaction audit): " + reread_check.AUDIT_OWED + reread_check.AUDIT_REMEDY
+# The cite is a literal here, since the refusal-cite scan reads literals; reread_check.AUDIT_CITE is its twin.
+COMPACTION_AUDIT_REASON = "Rule (compaction audit): " + reread_check.AUDIT_OWED + reread_check.AUDIT_REMEDY + (
+    " (decision precompact-handoff, item 16)")
 # The refusal ends with the session's transcript path, which an `Audit:` brief must name (reread_check.audit_spawn).
 COMPACTION_AUDIT_TRANSCRIPT = " This session's transcript path, which the brief must name: "
 
@@ -1610,6 +1612,7 @@ def audit_helper_hit(tool: str, tool_input, handoff: str) -> bool:
     helper under its own path, the handoff path filled in, nothing chained, piped or added."""
     command = tool_input.get("command") if isinstance(tool_input, dict) else None
     return tool == "Bash" and isinstance(command, str) and command == reread_check.audit_helper_command(handoff)
+
 
 HANDOFF_SECTIONS_REASON = (
     "Rule (handoff-sections): this write would leave the session handoff without a section the "

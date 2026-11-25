@@ -311,12 +311,15 @@ AUDIT_REMEDY = (
     "Remedy: print the brief with `" + _esc(AUDIT_HELPER_HEAD) + "%s\"`, then spawn one Explore agent on Sonnet with "
     "exactly that brief, whose first line is `" + _esc(EXPLORE_AUDIT_MARKER or "Audit:") + "` (step 3 of the handoff "
     "prompt). The brief names this session's transcript path, and a spawn whose brief does not name it clears nothing. "
-    "That spawn clears this check. Then repeat the call. (decision precompact-handoff, item 16)")
+    "That spawn clears this check. Then repeat the call.")
+# The cite closes each message that prints the remedy. The guard's refusal spells it as a literal, because the
+# refusal-cite scan reads literals only.
+AUDIT_CITE = " (decision precompact-handoff, item 16)"
 
 
 def audit_reason(handoff):
     """The Stop block's text for an owed audit."""
-    return AUDIT_OWED[0].upper() + AUDIT_OWED[1:] + AUDIT_REMEDY % handoff
+    return AUDIT_OWED[0].upper() + AUDIT_OWED[1:] + AUDIT_REMEDY % handoff + AUDIT_CITE
 
 
 # The spawn tools. guard.SPAWN_TOOLS names the same two; this file cannot import the guard, which imports it.
