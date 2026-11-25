@@ -293,8 +293,8 @@ def _write_opus(session_id, path, at, length, role, said=None, log=True, model=N
     until, role) for a keyword grant; for a plain ask ("opus" or "model", until, role, end, model)."""
     number, unit = length
     until = _length_end(at, number, unit)
-    stamp = until.astimezone(timezone.utc).isoformat()
-    body = {"kind": "opus", "until": stamp, "role": role}
+    ends = until.astimezone(timezone.utc).isoformat()
+    body = {"kind": "opus", "until": ends, "role": role}
     if model is not None:
         body.update(model=model, at=at.astimezone(timezone.utc).isoformat(), said=" ".join((said or "").split()))
         if end:
@@ -303,7 +303,7 @@ def _write_opus(session_id, path, at, length, role, said=None, log=True, model=N
     result = ("opus", until, role) if model is None else ("opus" if model == "opus" else "model", until, role, end, model)
     if not log:
         return result
-    detail = "%s until %s" % (", ".join(role) if isinstance(role, list) else role or "every role", stamp)
+    detail = "%s until %s" % (", ".join(role) if isinstance(role, list) else role or "every role", ends)
     if model not in (None, "opus"):
         detail = "model %s, %s" % (model, detail)
     if end:
@@ -984,8 +984,8 @@ def _report_since(at, transcript, records=None, report_ok=None):
     for rec in reversed(records) if records is not None else _records_backward(transcript, ASSISTANT_LINE):
         if not isinstance(rec, dict):
             continue
-        stamp = _parse_when(rec.get("timestamp"))
-        if stamp is not None and stamp <= at:
+        sent = _parse_when(rec.get("timestamp"))
+        if sent is not None and sent <= at:
             return False
         if rec.get("type") != "assistant" or rec.get("isSidechain"):
             continue

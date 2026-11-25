@@ -3700,8 +3700,8 @@ def model_line_problem(hook, records, reply):
         return ""
     why = " ".join((hold.get("said") or "").replace(";", ",").split()).rstrip(".!?")[:MODEL_LINE_WHY_MAX] or "<his words>"
     import local_time  # the time line's own clock names the hour the hold ends at the latest
-    stamp = local_time.central_hhmm(hold["until"])
-    return MODEL_LINE_REASON % (model, " until %s at the latest" % stamp if stamp else "", model, why, model)
+    ends_at = local_time.central_hhmm(hold["until"])
+    return MODEL_LINE_REASON % (model, " until %s at the latest" % ends_at if ends_at else "", model, why, model)
 
 
 def main():
