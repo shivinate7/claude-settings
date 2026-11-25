@@ -426,6 +426,11 @@ class RedMainJudge(unittest.TestCase):
         self.assertTrue(callable(judge), "clear_rule has no judge_main: base_state still judges main in merge.py")
         return judge
 
+    def judge_fixed(self, page, jobs, caps=None):
+        """The home's (verdict, [(run id, red job names)]) for a page, read from clear_rule alone. The fixed cases pin their answer by hand, never base_state."""
+        verdict, red = self.judge_home()(page, FLOWS, set(), caps or {}, lambda r: jobs.get(r["id"]), lambda r: CHECKS_TEXT)
+        return verdict, [(rid, list(names)) for rid, names in red]
+
     def assert_same_judgment(self, page, jobs, caps=None):
         judge = self.judge_home()
         verdict, red = judge(page, FLOWS, set(), caps or {}, lambda r: jobs.get(r["id"]), lambda r: CHECKS_TEXT)
@@ -509,6 +514,28 @@ class RedMainJudge(unittest.TestCase):
         with caps_read_as(caps):
             _got, _red, want = ScriptedHost([], {}).red_jobs(rows)
         self.assertEqual(judge_names(rows, caps), want, "red_job_names and Host.red_jobs name different red jobs")
+
+    def test_fixed_a_newest_run_that_passed_judges_green_with_no_red_run(self):
+        self.assertEqual(self.judge_fixed([page_run(2, "success")], {2: [job_row("scope", "success"), job_row("checks", "success")]}),
+                         ("green", []), "a newest run that passed is not green with no red run")
+
+    def test_fixed_a_red_job_in_the_newest_run_judges_red_with_that_job_named(self):
+        self.assertEqual(self.judge_fixed([page_run(2, "failure")], {2: [job_row("scope", "success"), job_row("checks", "failure")]}),
+                         ("red", [(2, ["checks"])]), "a red job in the newest run is not red, named by that job")
+
+    def test_fixed_a_cancelled_run_with_no_red_job_judges_unknown_with_no_red_run(self):
+        self.assertEqual(self.judge_fixed([page_run(2, "cancelled")], {2: [job_row("scope", "success"), job_row("checks", "cancelled")]}),
+                         ("unknown", []), "a cancelled run with no red job is not unknown with no red run")
+
+    def test_fixed_a_re_run_in_flight_above_an_older_green_run_judges_unknown(self):
+        self.assertEqual(self.judge_fixed([page_run(3, None, status="in_progress", attempt=2), page_run(2, "success")],
+                                          {3: [job_row("checks", None, status="in_progress")], 2: [job_row("checks", "success")]}),
+                         ("unknown", []), "a re-run in flight above a green run does not make main unknown")
+
+    def test_fixed_an_empty_green_push_run_above_an_older_red_push_run_leaves_that_red_run_standing(self):
+        self.assertEqual(self.judge_fixed([page_run(3, "success"), page_run(2, "failure")],
+                                          {3: [job_row("scope", "success")], 2: [job_row("scope", "success"), job_row("checks", "failure")]}),
+                         ("red", [(2, ["checks"])]), "an empty green push run hides the older red push run")
 
     def test_control_the_scripted_host_reads_a_red_job_red_through_base_state(self):
         """Control, green on the old code: the cases above compare with base_state, so base_state must show a red job red on this host."""
