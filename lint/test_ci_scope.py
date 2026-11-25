@@ -416,6 +416,25 @@ class Scope(FlagAsserts, unittest.TestCase):
             with self.subTest(path=p):
                 self.assertFlags(run([p], existing=[p]), want_true=["guard"])
 
+    # hooks/guard.py role_agent_keys reads every top-level agents/*.md of the checkout, and ci-scope.sh's arm names only today's ten. So an
+    # edit to an agents file the arm does not name sets `guard` and `checks_guard` too. agents/scout.md is a fixture name: no such file is
+    # tracked. It is an edit (`existing`): a new file under agents/ (a landed dir) sets `guard` through the landed-dirs rule.
+    # Named failure: an edit to an agents file the arm does not name sets no `guard`, so the guard suite skips a file it reads.
+    def test_an_edit_to_an_agents_file_outside_the_list_turns_on_guard(self):
+        p = "agents/scout.md"
+        got = run([p], existing=[p])
+        self.assertFlags(got, want_true=["guard"])
+        self.assertEqual(got["checks_guard"], "true", f"checks_guard for {p}, which the guard suite reads: {got}")
+
+    # The control: a nested file under agents/ is never listed (role_agent_keys reads the top level only), so `guard` stays off. In a bash
+    # case, `*` matches `/`, so the agents/*.md arm of the guard-read block must sit behind an agents/*/*.md arm that takes the nested file.
+    # Named failure: `guard` turns on for a nested agents file the guard never reads.
+    def test_an_edit_to_a_nested_agents_file_leaves_guard_off(self):
+        p = "agents/x/y.md"
+        got = run([p], existing=[p])
+        self.assertFlags(got, want_false=["guard"])
+        self.assertEqual(got["checks_guard"], "false", f"checks_guard for {p}, which the guard suite does not read: {got}")
+
     # actions/ci-alarm/events.json and clear_rule.py: the Windows merge slice (checks-windows-merge, flag checks_windows_merge) runs
     # merge/test_merge.py on windows-latest. That suite reads events.json (test_base_events_are_the_keys_of_the_events_file) and runs
     # clear_rule through merge.py (load_clear_rule). So an edit to either sets checks_windows_merge. Named failure: the Windows slice
@@ -710,8 +729,8 @@ class Scope(FlagAsserts, unittest.TestCase):
             with self.subTest(path=p):
                 self.assertEqual(self.true_set(run([p], existing=[p])), {"shell_macos", "code"})
 
-    # bin/sim-test is in GUARD_READ_FILES, so the guard suite reads it and an edit also sets `guard`. Named failure:
-    # without the guard arm the set lacks `guard`, and the guard suite skips a change to the script it reads.
+    # bin/sim-test is in TRACED_READS (lint/test_guard_inputs.py), the files the guard suite opens, so the guard suite reads it and an edit
+    # also sets `guard`. Named failure: without the guard arm the set lacks `guard`, and the guard suite skips a change to the script it reads.
     def test_sim_test_edit_turns_on_the_macos_shell_job_and_guard(self):
         self.assertEqual(self.true_set(run(["bin/sim-test"], existing=["bin/sim-test"])), {"shell_macos", "code", "guard"})
 
@@ -866,13 +885,14 @@ class GuardReadsReader(unittest.TestCase):
         ("no assignment", "OTHER = 1\n", None),
     ]
 
-    def reads_of(self, form, text):
-        """-> guard_read_files() on `text`, which is written to the run folder and read through MUTATE_GUARD."""
+    def reads_of(self, form, text, reader=guard_read_files):
+        """-> reader() on `text`, which is written to the run folder and read through MUTATE_GUARD. The reader is guard_read_files
+        (GUARD_READ_FILES) or guard_read_folders (GUARD_READ_FOLDERS): one home for both reads."""
         path = os.path.join(RUN_DIR, form.replace(" ", "-") + ".py")
         with open(path, "w", encoding="utf-8") as f:
             f.write(text)
         with mock.patch.object(sys.modules[__name__], "MUTATE_GUARD", path):
-            return guard_read_files()
+            return reader()
 
     def test_a_tuple_or_list_reads_whole(self):
         for form, text, want in self.OK:
@@ -911,6 +931,38 @@ class GuardReadsReader(unittest.TestCase):
                 text = 'GUARD_READ_FILES = [os.path.join("bin", "sim-lease")]\nGUARD_READ_FILES.%s()\n' % name
                 with self.assertRaises(AssertionError, msg="GUARD_READ_FILES.%s() reads whole, so the change passes unseen" % name):
                     self.reads_of("mutator " + name, text)
+
+    # GUARD_READ_FOLDERS names the folders the guard copies whole. guard_read_folders reads it as guard_read_files reads its list: a tuple
+    # or list of string literals, read whole, or the reader fails and names its line.
+    FOLDER_OK = [
+        ("folders tuple", 'GUARD_READ_FOLDERS = ("lint", "janitor")\n', ["lint", "janitor"]),
+        ("folders list", 'GUARD_READ_FOLDERS = ["lint"]\n', ["lint"]),
+    ]
+    FOLDER_FAIL = [
+        ("folder name entry", 'GUARD_READ_FOLDERS = ("lint", FOLDER)\n', 1),
+        ("empty folders", "GUARD_READ_FOLDERS = ()\n", 1),
+        ("second folders assignment", 'GUARD_READ_FOLDERS = ("lint",)\nGUARD_READ_FOLDERS = ("janitor",)\n', 2),
+    ]
+
+    def test_guard_read_folders_reads_whole_or_fails_naming_its_line(self):
+        for form, text, want in self.FOLDER_OK:
+            with self.subTest(form=form):
+                self.assertEqual(self.reads_of(form, text, guard_read_folders), want)
+        for form, text, line in self.FOLDER_FAIL:
+            with self.subTest(form=form):
+                with self.assertRaises(AssertionError) as cm:
+                    self.reads_of(form, text, guard_read_folders)
+                self.assertIn(" line %d: " % line, str(cm.exception))
+
+    # The real module: GUARD_READ_FOLDERS names at least one folder, and each one is a folder of the checkout. Named failure: a folder the
+    # guard copies whole is renamed or dropped in the module, and no case notices.
+    def test_guard_read_folders_names_folders_of_the_checkout(self):
+        folders = guard_read_folders()
+        self.assertTrue(folders, "GUARD_READ_FOLDERS names no folder")
+        for folder in folders:
+            with self.subTest(folder=folder):
+                self.assertTrue(os.path.isdir(os.path.join(HERE, "..", folder)),
+                                f"GUARD_READ_FOLDERS names {folder}, which is not a folder of the checkout")
 
 
 # A records-only push after a fully green head. GREEN_HEAD names the
@@ -2244,10 +2296,11 @@ class DocGroups(unittest.TestCase):
         for g in DOC_GROUPS:
             self.assertEqual(got["doc_" + g], "true" if g in want else "false", f"doc_{g} for {path}: {got}")
 
-    def assertJobFlagsOff(self, got, path):
+    def assertJobFlagsOff(self, got, path, ignore=()):
         for n in ALL:
             self.assertIn(n, got, f"output {n} missing for {path}: {got}")
-            self.assertEqual(got[n], "false", f"{n} set by {path}: {got}")
+            if n not in ignore:
+                self.assertEqual(got[n], "false", f"{n} set by {path}: {got}")
 
     def assertDocFlagsOn(self, got, what):
         for f in DOC_FLAGS:
@@ -2337,7 +2390,9 @@ class DocGroups(unittest.TestCase):
         paths = [f"docs/notes/{i}.md" for i in range(60)] + existing
         got = run(paths, existing=existing)
         self.assertDocFlags(got, {"other", "decisions", "rules", "agents", "any"}, "a 63-file docs diff")
-        self.assertJobFlagsOff(got, "a 63-file docs diff")
+        # agents/x.md is a top-level agents file the guard suite reads, so `guard` is on; no other job flag is.
+        self.assertEqual(got["guard"], "true", f"guard for a 63-file docs diff with agents/x.md: {got}")
+        self.assertJobFlagsOff(got, "a 63-file docs diff", ignore=("guard",))
 
 
 @unittest.skipUnless(BASH, "bash not on PATH")
@@ -2378,8 +2433,13 @@ SNAPSHOT_DIFFS = [
                              "lint_red_run", "sweep"]),
     (["merge/merge.py"], {}, ["checks_guard", "checks_macos", "checks_windows", "checks_windows_merge", "code", "guard",
                               "lint_comment_narration", "lint_red_run"]),
-    # agents/*.md and a decision record the guard suite does not read (agents/builder.md and agent-model-cap.md are read by it).
-    (["agents/x.md"], {"existing": ["agents/x.md"]}, ["doc_agents", "doc_any"]),
+    # agents/*.md: the guard suite reads every top-level agents file (hooks/guard.py role_agent_keys lists the folder), so an edit sets
+    # `guard` and `checks_guard` too. agents/x/y.md is nested, which the guard never lists, so it sets no guard. The rows hold the flags
+    # the guard-read rule sets (decision guard-reads-turn-guard-on), as the SKILL.md row does.
+    (["agents/x.md"], {"existing": ["agents/x.md"]}, ["checks_guard", "doc_agents", "doc_any", "guard"]),
+    (["agents/x/y.md"], {"existing": ["agents/x/y.md"]}, ["doc_any"]),
+    (["agents/builder.md"], {"existing": ["agents/builder.md"]}, ["checks_guard", "doc_agents", "doc_any", "guard"]),
+    # a decision record the guard suite does not read.
     (["docs/decisions/session-tiers.md"], {"existing": ["docs/decisions/session-tiers.md"]},
      ["doc_any", "doc_decisions", "lint_ruling_kind"]),
     # guard, checks_guard: the guard suite reads this file (decision guard-reads-turn-guard-on). A prose edit sets no code, and the fixture
