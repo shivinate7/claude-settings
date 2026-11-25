@@ -1,0 +1,1 @@
+- standin-mock-forms-uncounted: `patch.object(product, "name", return_value=...)`, `wraps=`, and a patch with no stand-in are not counted, about 28 sites on main. A Mock takes any call. Decision: standins-accept-callers-keywords. Seen: 2026-11-24 x1
