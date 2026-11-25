@@ -142,8 +142,9 @@ def guard_read_files():
 
 def run(paths, event="pull_request", base="auto", existing=(), landed=None, head_ref="", green=None,
         green_sibling=False, green_head=None, contents=None, green_contents=None, facts=None, merged=None, moves=None,
-        guard_inputs=REAL_GUARD_INPUTS, scope_files=None, proven=False, modes=()):
-    """-> {name: 'true'|'false'} the script wrote. `paths` are committed on top of one base commit. `scope_files` (a list of paths), when
+        guard_inputs=REAL_GUARD_INPUTS, scope_files=None, proven=False, modes=(), nightly_skip=None):
+    """-> {name: 'true'|'false'} the script wrote. `nightly_skip` is NIGHTLY_SKIP, the nightly-skip job's answer (`"true"` on a skipped
+    daily); None leaves it unset, so no NIGHTLY_SKIP of the caller's environment reaches the script. `paths` are committed on top of one base commit. `scope_files` (a list of paths), when
     given, is SCOPE_FILES: the script reads those paths in place of the diff, with the same BASE_SHA range as the other cases. `head_ref` is HEAD_REF,
     empty when not given, so no HEAD_REF of the caller's environment reaches the script. `base` is BASE_SHA: "auto" is the base
     commit (the pull request's base), and "head" (HEAD itself), "green" (the `green` commit) and "sibling" (a commit off the base
@@ -253,6 +254,9 @@ def run(paths, event="pull_request", base="auto", existing=(), landed=None, head
         env.pop("PR_HEAD", None)  # a caller's value never reaches the script; only `merged` sets it
         if merged is not None:
             env["PR_HEAD"] = head_sha
+        env.pop("NIGHTLY_SKIP", None)  # a caller's value never reaches the script; only `nightly_skip` sets it
+        if nightly_skip is not None:
+            env["NIGHTLY_SKIP"] = nightly_skip
         env.pop("SCOPE_FILES", None)  # a caller's value never reaches the script; only `scope_files` sets it
         if scope_files is not None:
             env["SCOPE_FILES"] = "\n".join(scope_files)
@@ -1907,6 +1911,81 @@ class RecordsOnlyEveryJob(unittest.TestCase):
 
 
 
+@unittest.skipUnless(BASH, "bash not on PATH")
+class SkippedDaily(unittest.TestCase):
+    """A skipped daily (EVENT=schedule, NIGHTLY_SKIP=true). ci-scope.sh turns every flag off, sets records_only_skip and
+    skip_comment_delta, and keeps tool_pins on (decision tool-pins). On that run
+    each pin job starts for its Tool pins step, and no job runs a test step. Each job's and step's if: is read on the script's own
+    outputs by RecordsOnlyEveryJob's reader. The plain daily is the control: its test steps and Tool pins steps run."""
+
+    DECISION_JOBS = ("scope", "nightly-skip", "push-skip")  # they decide the skip and read it, so they run on every event
+    PIN_JOBS = ("checks", "checks-windows", "checks-macos")  # the jobs with a Tool pins step (decision tool-pins)
+    TOOL_PINS = "Tool pins (this runner)"
+    # A command line that runs a test file, a mod runner or a mutation test. runs_suite reads the suite files only, so these are named here.
+    TEST_RUN = re.compile(r"\btest_|\.test\.|mod-tests\.sh|mutate_|--test\b")
+    KEPT_ON = ("records_only_skip", "skip_comment_delta", "tool_pins")  # the outputs a skipped daily sets to true
+
+    def workflow(self):
+        return RecordsOnlyEveryJob.workflow(self)  # the one reader of checks.yml in this file
+
+    def skipped_daily(self):
+        """The outputs of a skipped daily. The scope outputs are asserted first, so each if: is read on a run that set them."""
+        outs = run([], event="schedule", nightly_skip="true")
+        for name in self.KEPT_ON:
+            self.assertEqual(outs.get(name), "true", f"a skipped daily does not set {name} to true: {outs}")
+        on = sorted(n for n, v in outs.items() if n not in self.KEPT_ON and v != "false")
+        self.assertEqual(on, [], f"a skipped daily leaves these scope flags on: {on}")
+        return outs
+
+    def running(self, text, job, outs, event="schedule"):
+        """The steps of `job` that run on this run, or [] when the job does not start."""
+        if not job_runs(job_if(text, job), outs, event):
+            return []
+        return [st for st in step_blocks(job_block(text, job)) if step_runs(step_key(st, "if"), outs, event)]
+
+    def runs_test(self, st):
+        """True when a step runs a test: a suite file (runs_suite), or a command line that TEST_RUN matches. A comment is no command."""
+        lines = [line for line in (run_body(st) or "").split("\n") if line.strip() and not line.lstrip().startswith("#")]
+        return runs_suite(st) or any(self.TEST_RUN.search(line) for line in lines)
+
+    # Named failure: a job runs a test step on a skipped daily, so the suites the green daily proved run again. One subtest per job.
+    def test_no_job_runs_a_test_step_on_a_skipped_daily(self):
+        text = self.workflow()
+        outs = self.skipped_daily()
+        for job in job_names(text):
+            if job in self.DECISION_JOBS:
+                continue
+            with self.subTest(job=job):
+                tests = [step_key(st, "name") or " ".join((run_body(st) or "").split())[:50]
+                         for st in self.running(text, job, outs) if self.runs_test(st)]
+                self.assertFalse(tests, f"{job} runs {len(tests)} test steps on a skipped daily, the first {tests[:3]}")
+
+    # Named failure: a pin job does not start on a skipped daily, or starts without its Tool pins step. One subtest per pin job.
+    def test_each_pin_job_starts_and_runs_its_tool_pins_step_on_a_skipped_daily(self):
+        text = self.workflow()
+        outs = self.skipped_daily()
+        for job in self.PIN_JOBS:
+            with self.subTest(job=job):
+                expr = job_if(text, job)
+                self.assertTrue(job_runs(expr, outs, "schedule"),
+                                f"{job} does not start on a skipped daily, so its Tool pins step does not run; its job-level if is {expr}")
+                names = [step_key(st, "name") for st in self.running(text, job, outs)]
+                self.assertIn(self.TOOL_PINS, names, f"{job} starts on a skipped daily but its Tool pins step does not run: {names}")
+
+    # Control: the plain daily starts each pin job with its Tool pins step, and checks-macos runs test steps, so the two cases above
+    # read steps that do run.
+    def test_a_plain_daily_runs_the_tool_pins_step_and_the_test_steps_in_checks_macos(self):
+        text = self.workflow()
+        outs = run([], event="schedule")
+        for job in self.PIN_JOBS:
+            with self.subTest(job=job):
+                names = [step_key(st, "name") for st in self.running(text, job, outs)]
+                self.assertIn(self.TOOL_PINS, names, f"{job} does not run its Tool pins step on a plain daily: {names}")
+        with self.subTest(job="checks-macos"):
+            tests = [st for st in self.running(text, "checks-macos", outs) if self.runs_test(st)]
+            self.assertTrue(tests, "checks-macos runs no test step on a plain daily, so the no-test case has no step to see")
+
+
 # The mod phase must run each mods check script (mods/**/check.mjs), not only *.test.mjs. The script cds to its own
 # root, so each case runs a copy of it inside a scratch tree under the run folder.
 @unittest.skipUnless(BASH, "bash not on PATH")
@@ -2634,6 +2713,55 @@ class PushDiffFromProvenBase(FlagAsserts, unittest.TestCase):
     def test_a_pull_request_diff_is_unchanged_by_a_proven_base(self):
         self.assertFlags(run(self.DOCS, event="pull_request", proven=True), want_false=ALL)
         self.assertFlags(run(self.CODE, event="pull_request", proven=True), want_true=["checks_windows_merge", "code"])
+
+
+@unittest.skipUnless(BASH, "bash not on PATH")
+class ToolPinsScope(unittest.TestCase):
+    """The tool_pins output. A pull request's run judges the pins only when that pull request moves a pin or the checker
+    (decision tool-pins, the 11:05 CST Nov 25 ruling). The checker is .tool-versions and lint/check_tool_pins.py: a change to the
+    checker's own suite is not a move of the checker. A schedule and a dispatch judge them on every run. An unreadable diff turns
+    every flag on, tool_pins too (ci-scope.sh header)."""
+
+    PIN_PATHS = [".tool-versions", "lint/check_tool_pins.py"]
+
+    def tool_pins(self, paths, **keys):
+        got = run(paths, **keys)
+        self.assertIn("tool_pins", got, "the scope script writes no tool_pins output: %s" % got)
+        return got["tool_pins"]
+
+    def test_a_pull_request_that_moves_a_pin_or_the_checker_turns_it_on(self):
+        for p in self.PIN_PATHS:
+            with self.subTest(path=p):
+                self.assertEqual(self.tool_pins([p], event="pull_request"), "true",
+                                 "a pull request that touches %s must turn tool_pins on" % p)
+
+    def test_a_pull_request_that_moves_only_the_checker_suite_keeps_it_off(self):
+        self.assertEqual(self.tool_pins(["lint/test_check_tool_pins.py"], event="pull_request"), "false",
+                         "a pull request that touches only lint/test_check_tool_pins.py moves neither a pin nor the checker, so tool_pins stays off")
+
+    def test_a_schedule_and_a_dispatch_turn_it_on_for_a_docs_only_diff(self):
+        for ev in ("schedule", "workflow_dispatch"):
+            with self.subTest(event=ev):
+                self.assertEqual(self.tool_pins(["README.md"], event=ev), "true",
+                                 "a %s run must judge the pins even when the diff touches no pin" % ev)
+
+    def test_the_all_on_paths_keep_it_off(self):
+        for p in (".github/workflows/checks.yml", ".github/scripts/ci-scope.sh"):
+            with self.subTest(path=p):
+                self.assertEqual(self.tool_pins([p]), "false", "a diff touching %s moves neither a pin nor the checker, so tool_pins stays off" % p)
+
+    def test_a_pull_request_with_an_unreadable_base_turns_it_on_like_every_other_flag(self):
+        self.assertEqual(self.tool_pins(["README.md"], base="f" * 40), "true",
+                         "an unreadable pull request diff must turn tool_pins on, as it turns every other flag on (ci-scope.sh header)")
+
+    def test_a_push_with_no_proven_base_turns_it_on_like_every_other_flag(self):
+        self.assertEqual(self.tool_pins(["README.md"], event="push", base=""), "true",
+                         "a push with no proven base must turn tool_pins on, as it turns every other flag on (ci-scope.sh header)")
+
+    def test_an_unrelated_diff_keeps_it_off(self):
+        for p in ("merge/merge.py", "README.md"):
+            with self.subTest(path=p):
+                self.assertEqual(self.tool_pins([p]), "false", "a diff that touches no pin or the checker must keep tool_pins off")
 
 
 if __name__ == "__main__":

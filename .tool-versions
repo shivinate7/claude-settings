@@ -1,0 +1,6 @@
+# The tools this repo's checks run on, one `<tool> <version>` per line. lint/check_tool_pins.py compares them to the machine.
+# The python line is read by actions/setup-python, so a comment never sits after it.
+# read: python = python3 --version
+# read: python = python --version
+python 3.15
+git 2.56
