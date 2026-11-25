@@ -895,7 +895,7 @@ class MovedLineTests(Fixture):
         reflow = "    bundle|\\\n    keep|\\\n    tree)\n"
         code, out = self.split({"hooks/x.sh": self.ARM + "echo kept\n"}, {"hooks/y.sh": self.ARM},
                                keep=reflow + "echo kept\n", source="hooks/x.sh")
-        flagged = [row for row in out.splitlines() if row.startswith(("hooks/x.sh:", "hooks/y.sh:"))]
+        flagged = [row for row in out.splitlines() if "hooks/x.sh:" in row or "hooks/y.sh:" in row]
         self.assertEqual(code, 1, "one deleted line excused its reflow in hooks/x.sh and its exact copy in hooks/y.sh\n" + out)
         self.assertEqual(len(flagged), 1, "one deleted line excused two added copies of its words, so the check flagged none of them\n" + out)
 
