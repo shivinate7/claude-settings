@@ -2984,6 +2984,10 @@ GREEN = "CI green on %s: no failing jobs" % CI_SHA
 RED = "CI red on %s: lint, unit" % CI_SHA
 CANCELLED = "CI cancelled on %s: build" % CI_SHA
 UNKNOWN = "CI unknown on %s: still running" % CI_SHA
+# The ids a CronCreate call returns (toolUseResult id, as the tool returned it), one per PR, and when a check-in
+# fires: seconds from NOW (the Stop clock), negative when it has already fired.
+RET_A, RET_B = "5c1e0a11", "9b2d7f40"
+FIRED_AHEAD, UNFIRED_AHEAD = -60, 600
 CALL_IDS = itertools.count(1)
 # Each call that starts a process, opens a network socket or writes a file. The cost case stands each in for a
 # recorder, so a check that makes one is named.
@@ -3042,9 +3046,25 @@ def checkin(name):
     return tool_call(name, {"message": "CI check on PR %s" % CI_PR})
 
 
-def checkin_answered(name, is_error):
+def checkin_answered(name, is_error, returned=None, fires_in=UNFIRED_AHEAD, pr=CI_PR):
     """A check-in call and its result, in file order. An error result carries its text as toolUseResult, as a
-    failed call does in a transcript."""
+    failed call does in a transcript. CronCreate and ScheduleWakeup take the measured forms: the input the tool
+    is called with, and a result text that holds no CI_KEYS word, so only the record's toolUseResult carries
+    the id and the fire time. A CronCreate returns the id given as returned, and nextFireAt (epoch ms) fires_in
+    seconds from NOW. A ScheduleWakeup returns no id, only scheduledFor."""
+    if name == "CronCreate":
+        call_rec = tool_call(name, {"cron": "14 22 24 11 *", "recurring": False, "prompt": "CI check on PR %s" % pr})
+        call_id = call_rec["message"]["content"][0]["id"]
+        text = ("Scheduled one-shot task %s (14 22 24 11 *). Session-only (not written to disk, dies when Claude "
+                "exits). It will fire once then auto-delete." % returned)
+        fields = {"id": returned, "humanSchedule": "14 22 24 11 *", "recurring": False, "durable": False,
+                  "nextFireAt": (NOW + fires_in) * 1000}
+        return [call_rec, tool_result(call_id, text, tool_use_result=fields)]
+    if name == "ScheduleWakeup":
+        call_rec = tool_call(name, {"delaySeconds": 600, "prompt": "CI check on PR %s" % pr})
+        call_id = call_rec["message"]["content"][0]["id"]
+        fields = {"scheduledFor": (NOW + fires_in) * 1000, "clampedDelaySeconds": 600, "wasClamped": False}
+        return [call_rec, tool_result(call_id, "Next wakeup scheduled for 11:12:00 (in 600s).", tool_use_result=fields)]
     call_rec = checkin(name)
     call_id = call_rec["message"]["content"][0]["id"]
     text = "send_later failed: no session" if is_error else "scheduled"
@@ -3601,15 +3621,28 @@ def CI48_check_reads_only_the_transcript():
     come from the check"""
     folder = new_dir()
     path = transcript([prompt("merge when green"), ready()], folder=folder)
+    return cost_problems(path, folder, block_shown)
+
+
+def block_shown(out):
+    """The problems with the Stop check's output as the CI block: no block printed is a problem."""
+    if out.strip() == "":
+        return ["no CI block printed, so the cost is not measured on the check"]
+    problems = []
+    block_reason(out, problems)
+    return problems
+
+
+def cost_problems(path, folder, shown):
+    """The cost of the CI check on the transcript at path: it starts no process, opens no network and writes no
+    file, and it reads no file but the transcript. shown(out) gives the problems with what the check printed, so
+    the calls counted come from a check that printed the thing the case is about (scope)."""
     spies = []
     rc, out, stats, opens = stop_in_process(path, spies)
     problems = expect(any(os.path.basename(p) == "session.jsonl" for p in opens),
                       f"scope: stop() did not open the session transcript: opens {opens}")
     problems += expect(rc == 0, f"exit {rc}, want 0")
-    if out.strip() == "":
-        problems.append("no CI block printed, so the cost is not measured on the check")
-    else:
-        block_reason(out, problems)
+    problems += shown(out)
     problems += expect(spies == [], f"the CI check made calls it must not make: {spies}")
     stray = [p for p in opens if p.startswith(folder) and os.path.basename(p) != "session.jsonl"]
     problems += expect(stray == [], f"the CI check read files other than the transcript: {stray}")
@@ -4472,6 +4505,193 @@ def CI110_two_refused_ready_calls_in_one_message_restore_the_earlier_wait():
     wait is back on the earlier PR, so the Stop blocks and names it only"""
     items = ready_mark(CI_EARLIER_PR, refused=False) + ready_marks_together((CI_PR, True), (CI_OTHER_PR, True))
     return expect_block(items, pr=CI_EARLIER_PR, not_named=[CI_PR, CI_OTHER_PR])
+
+
+# ---- The cancel line (decision ci-wait-reads-run-status): a merge or close of the waited PR, or its return to
+# draft, that closes a CI wait while a check-in this session set has not fired, prints one systemMessage line. The
+# line names the PR, the id the check-in's tool returned (not the call's own tool_use id), and the tool. A
+# ScheduleWakeup returns no id, so its line says it cannot be deleted by id. The line blocks nothing. A check-in
+# whose nextFireAt (epoch ms) is at or before NOW has fired; a deleted one (CronDelete with its id) is gone.
+
+
+def cancel_problems(out, pr, ids=(), tool="", not_named=(), says=()):
+    """The problems with out as the cancel line of pr: one systemMessage line that is no block, names pr as a whole
+    token, names each id in ids and tool, has each phrase in says (case-blind), and names no token of not_named."""
+    if out.strip() == "":
+        return ["no cancel line printed, but the merge closed a CI wait with an unfired check-in"]
+    problems = []
+    if '"decision"' in out:
+        problems.append(f"the cancel line blocks the Stop, want a notice only: {out[:200]!r}")
+    msg = system_message(out, problems)
+    if msg == "":
+        return problems
+    problems += expect(re.search(r"\b%s\b" % pr, msg) is not None, f"cancel line does not name PR {pr}: {msg!r}")
+    for rid in ids:
+        problems += expect(rid in msg, f"cancel line does not name check-in id {rid} as the tool returned it: {msg!r}")
+    problems += expect(tool in msg, f"cancel line does not name the tool {tool} that set the check-in: {msg!r}")
+    for phrase in says:
+        problems += expect(phrase.lower() in msg.lower(), f"cancel line does not say {phrase!r}: {msg!r}")
+    for other in not_named:
+        problems += expect(other not in msg, f"cancel line names {other}, which is not this merge's check-in: {msg!r}")
+    return problems
+
+
+def cancel_line(source, pr, **want):
+    """Run the Stop check on source and return the problems with its output as the cancel line of pr."""
+    problems, out = ci_run(source)
+    return problems + cancel_problems(out, pr, **want)
+
+
+def cron_set(returned, fires_in=UNFIRED_AHEAD, pr=CI_PR):
+    """A CronCreate check-in with its result (checkin_answered), and the call's own tool_use id."""
+    recs = checkin_answered("CronCreate", False, returned=returned, fires_in=fires_in, pr=pr)
+    return recs, recs[0]["message"]["content"][0]["id"]
+
+
+def cron_delete(returned):
+    """A CronDelete call for the id a check-in's tool returned, and its result."""
+    call_rec = tool_call("CronDelete", {"id": returned})
+    call_id = call_rec["message"]["content"][0]["id"]
+    return [call_rec, tool_result(call_id, "Cancelled job %s." % returned, tool_use_result={"id": returned})]
+
+
+def answered(call_rec, text):
+    """A Bash call and its stdout, in file order."""
+    return [call_rec, bash_result(call_rec["message"]["content"][0]["id"], text)]
+
+
+def gh_merge(number=CI_PR):
+    """A Bash call of gh pr merge for the PR."""
+    return shell("gh pr merge %s --squash" % number)
+
+
+@case
+def CI111_gh_pr_merge_names_the_pr_and_the_id_the_tool_returned():
+    """CI111. a gh pr merge that closes a CI wait with an unfired CronCreate check-in prints one systemMessage line
+    that names the PR, the id the tool returned (and not the call's own tool_use id), and CronCreate, and says to
+    delete it. Control: the same session without the merge prints nothing, so the merge is what prints the line"""
+    recs, call_id = cron_set(RET_A)
+    base = [ready()] + recs
+    problems = cancel_line(base + [gh_merge()], CI_PR, ids=[RET_A], tool="CronCreate",
+                           not_named=[call_id], says=["delete"])
+    return problems + ["control: " + p for p in expect_silent(base)]
+
+
+@case
+def CI112_merge_tool_names_the_pr_and_the_id_the_tool_returned():
+    """CI112. the merge tool (bin/merge N --confirm) that closes a CI wait with an unfired CronCreate check-in prints
+    the same line, though its result reads "merged as <sha>": open_ci_wait reads the call, not that result. Control:
+    the same session without the merge prints nothing"""
+    recs, call_id = cron_set(RET_A)
+    base = [ready()] + recs
+    problems = cancel_line(base + answered(merge_bin(CI_PR), "merged as %s" % CI_SHA), CI_PR, ids=[RET_A],
+                           tool="CronCreate", not_named=[call_id], says=["delete"])
+    return problems + ["control: " + p for p in expect_silent(base)]
+
+
+@case
+def CI113_gh_pr_close_names_the_pr_and_the_id_the_tool_returned():
+    """CI113. a gh pr close that closes a CI wait with an unfired CronCreate check-in prints the same line as a merge.
+    Control: the same session without the close prints nothing"""
+    recs, call_id = cron_set(RET_A)
+    base = [ready()] + recs
+    problems = cancel_line(base + [shell("gh pr close %s" % CI_PR)], CI_PR, ids=[RET_A], tool="CronCreate",
+                           not_named=[call_id], says=["delete"])
+    return problems + ["control: " + p for p in expect_silent(base)]
+
+
+@case
+def CI114_return_to_draft_names_the_pr_and_the_id_the_tool_returned():
+    """CI114. a GitHub MCP update_pull_request with draft true, which returns the PR to draft and closes its CI wait,
+    prints the same line for an unfired CronCreate check-in. Control: the same session without it prints nothing"""
+    recs, call_id = cron_set(RET_A)
+    base = [ready()] + recs
+    problems = cancel_line(base + [mcp_pr(MCP_READY, draft=True)], CI_PR, ids=[RET_A], tool="CronCreate",
+                           not_named=[call_id], says=["delete"])
+    return problems + ["control: " + p for p in expect_silent(base)]
+
+
+@case
+def CI115_fired_checkin_prints_no_line():
+    """CI115. a merge after a CronCreate check-in has fired (nextFireAt at or before NOW) prints no line: the one-shot
+    job is gone. Control: the same merge with the check-in still unfired prints the line"""
+    fired, _ = cron_set(RET_A, fires_in=FIRED_AHEAD)
+    unfired, call_id = cron_set(RET_A, fires_in=UNFIRED_AHEAD)
+    problems = ["fired check-in: " + p for p in expect_silent([ready()] + fired + [gh_merge()])]
+    return problems + ["control, unfired: " + p for p in cancel_line([ready()] + unfired + [gh_merge()], CI_PR,
+                                                                     ids=[RET_A], tool="CronCreate",
+                                                                     not_named=[call_id], says=["delete"])]
+
+
+@case
+def CI116_merge_with_no_checkin_prints_no_line():
+    """CI116. a merge of a PR whose CI wait has no check-in prints no line: there is nothing to delete. Control: the
+    same merge with an unfired check-in prints the line"""
+    problems = ["no check-in: " + p for p in expect_silent([ready(), gh_merge()])]
+    recs, call_id = cron_set(RET_A)
+    return problems + ["control, with an unfired check-in: " + p
+                       for p in cancel_line([ready()] + recs + [gh_merge()], CI_PR, ids=[RET_A], tool="CronCreate",
+                                            not_named=[call_id], says=["delete"])]
+
+
+@case
+def CI117_two_prs_names_only_the_merged_pr_and_its_id():
+    """CI117. two PRs, each with a CronCreate check-in, and the newer PR merges: the one line names that PR and its
+    check-in's id, and names neither the other PR nor its id. Control: the same session without the merge prints
+    nothing"""
+    first, _ = cron_set(RET_A, pr=CI_PR)
+    second, _ = cron_set(RET_B, pr=CI_OTHER_PR)
+    base = [ready(CI_PR)] + first + [ready(CI_OTHER_PR)] + second
+    problems = cancel_line(base + [gh_merge(CI_OTHER_PR)], CI_OTHER_PR, ids=[RET_B], tool="CronCreate",
+                           not_named=[RET_A, CI_PR], says=["delete"])
+    return problems + ["control: " + p for p in expect_silent(base)]
+
+
+@case
+def CI118_scheduled_wakeup_names_the_tool_and_says_it_has_no_id():
+    """CI118. a ScheduleWakeup check-in that has not fired, closed by a merge, prints one line that names the PR and
+    ScheduleWakeup, and says it cannot be deleted by id: its result carries no id. Control: the same session without
+    the merge prints nothing"""
+    base = [ready()] + checkin_answered("ScheduleWakeup", False)
+    problems = cancel_line(base + [gh_merge()], CI_PR, tool="ScheduleWakeup", says=["cannot be deleted by id"])
+    return problems + ["control: " + p for p in expect_silent(base)]
+
+
+@case
+def CI119_cancelled_checkin_prints_no_line():
+    """CI119. a CronCreate check-in that the session cancelled with CronDelete, by the id it returned, prints no line
+    at the merge that follows, so the line does not repeat at each Stop. Control: the same merge without the
+    CronDelete prints the line"""
+    recs, call_id = cron_set(RET_A)
+    problems = ["cancelled check-in: " + p
+                for p in expect_silent([ready()] + recs + cron_delete(RET_A) + [gh_merge()])]
+    return problems + ["control, not cancelled: " + p
+                       for p in cancel_line([ready()] + recs + [gh_merge()], CI_PR, ids=[RET_A], tool="CronCreate",
+                                            not_named=[call_id], says=["delete"])]
+
+
+@case
+def CI120_checkin_with_no_ci_wait_prints_no_line():
+    """CI120. a CronCreate check-in set with no CI wait open (no ready call), then a merge, prints no line: the merge
+    closes no CI wait, so the check-in was not a CI wait's. Control: the same check-in under a ready call prints the
+    line"""
+    recs, _ = cron_set(RET_A)
+    problems = ["no CI wait: " + p for p in expect_silent(recs + [gh_merge()])]
+    return problems + ["control, under a ready call: " + p
+                       for p in cancel_line([ready()] + recs + [gh_merge()], CI_PR, ids=[RET_A],
+                                            tool="CronCreate", says=["delete"])]
+
+
+@case
+def CI121_cancel_line_reads_only_the_transcript():
+    """CI121. cost: the cancel line starts no process, opens no network and writes no file, and reads no file but the
+    transcript. The shared cost check (cost_problems, as CI48) on a merge that closes a wait with an unfired check-in.
+    Scope first: the line printed, so the calls counted come from the cancel path"""
+    folder = new_dir()
+    recs, _ = cron_set(RET_A)
+    path = transcript([ready()] + recs + [gh_merge()], folder=folder)
+    return cost_problems(path, folder, lambda out: cancel_problems(out, CI_PR, ids=[RET_A], tool="CronCreate",
+                                                                   says=["delete"]))
 
 
 def paused_job(job_id, command):
