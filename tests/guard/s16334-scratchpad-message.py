@@ -109,10 +109,10 @@ else:
     scratch_refuse("scratchpad-message: an agent's commit -F through a variable set in the same command is refused",
                  "S=" + SCRATCH_DIR + "; " + VCS + " commit -F $S/commit_msg.txt")
 # A variable whose value holds `~` is no literal to the guard, so the file it names is unread and the call is
-# refused. The file is clean and sits outside every scratchpad. No rule id is pinned: the case fails only when
-# such a call is let through.
-scratch_refuse("scratchpad-message: an agent's commit -F through a variable holding ~ is refused, by any rule",
-             "S=" + slash(TILDE_DIR) + "; " + VCS + " commit -F $S/commit_msg.txt", rule=None, carries=())
+# refused by cite-by-id, the rule that reads the unreadable message file. The file is clean and sits outside every
+# scratchpad.
+scratch_refuse("scratchpad-message: an agent's commit -F through a variable holding ~ is refused by cite-by-id",
+             "S=" + slash(TILDE_DIR) + "; " + VCS + " commit -F $S/commit_msg.txt", rule="cite-by-id", carries=())
 scratch_refuse("scratchpad-message: an agent's commit -F after pushd into its scratchpad is refused",
              "pushd " + SCRATCH_DIR + " && " + VCS + " commit -F commit_msg.txt")
 scratch_refuse("scratchpad-message: an agent's commit -C . -F after cd into its scratchpad is refused",
