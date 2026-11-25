@@ -1174,6 +1174,11 @@ UNSTARTED_RE = re.compile(
 # load brake may also be in the sentence.
 _UNSTARTED_LANE_WAIT_RE = re.compile(
     r"\b(?:PRs?|pull requests?|merges?|merged|merging|land(?:s|ed|ing)?)\b|#\d+", re.I)
+# An item waits only when it says so: a waiting word beside a PR, merge or landing word. A PR named for context
+# with no waiting word ("not briefed yet; the PR merged") is no wait.
+_UNSTARTED_WAIT_WORD_RE = re.compile(
+    r"\b(?:wait\w*|await\w*|needs?|blocked|blocks?|until|till|after|once|when|behind|before|first|follows?"
+    r"|pending|depends?|hold(?:s|ing)?|held|gated|stuck)\b", re.I)
 # "none" or "nothing", bare, in bold or in parentheses, says no item waits.
 _UNSTARTED_NONE_RE = re.compile(r"[\s*(]*(?:none|nothing)\b", re.I)
 _UNSTARTED_STOP_RE = re.compile(r"\s*(?:\*\*(?:Done|Deviations|Input Needed|Next)\b|$)")
@@ -1212,39 +1217,85 @@ def _unstarted_item(block, found):
 def _names_a_file(item):
     for m in _SHARED_FILE_RE.finditer(item):
         word = m.group(0).lower()
-        if word not in _NOT_A_FILE and not re.fullmatch(r"[\d/]+", word):
+        if (word not in _NOT_A_FILE and not re.fullmatch(r"[\d/]+", word)
+                and not re.fullmatch(r"[A-Z]+(?:/[A-Z]+)+", m.group(0))):
             return True
     return False
 
 
 # A code need names the symbol it builds on in backticks: a name, with dots or call parens, never a path.
-_CODE_NEED_RE = re.compile(r"\bneeds?\b[^`;]*?\bcode\s*:\s*`[A-Za-z_][\w.]*(?:\(\))?`", re.I)
+_CODE_NEED_RE = re.compile(r"\bneeds?\b[^`;]*?\bcode\s*:\s*`([A-Za-z_][\w.]*)(?:\(\))?`", re.I)
 # A measured conflict says where it was measured, then the file it names.
-_MEASURED_CONFLICT_RE = re.compile(r"\b(?:measured\s+(?:a\s+)?conflict|merge-tree\s+shows\s+a\s+conflict)\s+in\b(.*)",
-                                   re.I | re.S)
+_MEASURED_CONFLICT_RE = re.compile(
+    r"\b(?:measured\s+(?:a\s+)?conflicts?|merge-tree\s+shows\s+a\s+conflict)\s+in\b(.*)", re.I | re.S)
+# A file name with a source suffix, or a build file, is no symbol; nor is a common word.
+_FILE_SUFFIXES = frozenset((
+    "py", "sh", "bash", "zsh", "yml", "yaml", "json", "jsonl", "toml", "md", "txt", "cfg", "ini", "js", "mjs",
+    "ts", "tsx", "jsx", "html", "css", "swift", "rb", "go", "rs", "c", "h", "cpp", "java", "kt", "lock", "csv",
+    "xml", "plist", "pbxproj", "sql", "ps1", "env", "conf", "log"))
+_NOT_A_SYMBOL = frozenset((
+    "the", "a", "an", "it", "its", "this", "that", "these", "those", "they", "them", "he", "she", "we", "you",
+    "i", "code", "codes", "change", "changes", "file", "files", "lane", "lanes", "pr", "prs", "branch", "work",
+    "stuff", "thing", "things", "all", "some", "any", "one", "and", "or", "of", "to", "in", "on", "at", "for",
+    "with", "as", "is", "are", "was", "be", "here", "there", "same", "both", "none", "nothing", "more", "rest",
+    "diff", "patch", "fix", "fixes", "makefile", "dockerfile", "gemfile", "rakefile", "procfile", "justfile",
+    "jenkinsfile", "vagrantfile", "codeowners"))
+
+
+def _is_symbol(name):
+    name = name.lower()
+    if name in _NOT_A_SYMBOL or len(name) < 2:
+        return False
+    return not ("." in name and name.rsplit(".", 1)[1] in _FILE_SUFFIXES)
 
 
 def _checkable_wait(item):
     """True when a wait on another lane names a code need with its symbol, or a measured conflict in a file."""
-    if _CODE_NEED_RE.search(item):
+    if any(_is_symbol(m.group(1)) for m in _CODE_NEED_RE.finditer(item)):
         return True
     return any(_names_a_file(m.group(1)) for m in _MEASURED_CONFLICT_RE.finditer(item))
 
 
+# A clause led by a pronoun or a reason phrase continues the item before it; any other clause after a `;` is an
+# item of its own.
+_CONTINUES_RE = re.compile(r"[\s*(]*(?:it|its|they|this|that|which|both|also|measured|merge-tree)\b", re.I)
+
+
+def _unstarted_units(item):
+    """The Unstarted item split into the waits it holds: a bullet is one, and a `;` clause that is not a
+    continuation is one. Each is judged alone."""
+    units = []
+    for line in item.split("\n"):
+        if _BULLET_RE.match(line) or not units:
+            units.append([])
+        units[-1].append(line)
+    out = []
+    for unit in units:
+        for clause in "\n".join(unit).split(";"):
+            if out and _CONTINUES_RE.match(clause):
+                out[-1] += ";" + clause
+            else:
+                out.append(clause)
+    return out
+
+
+def _is_lane_wait(unit):
+    return bool(_UNSTARTED_WAIT_WORD_RE.search(unit) and _UNSTARTED_LANE_WAIT_RE.search(unit))
+
+
 def unstarted_problem(text, spawned):
-    """The refusal reason when a builder ran this turn and Next's `Unstarted:` line is missing, or waits on
-    another lane's merge, PR or landing with no code need (a symbol) and no measured conflict (a file).
-    '' when the line is fine."""
+    """The refusal reason when a builder ran this turn and Next's `Unstarted:` line is missing, or an item
+    waits on another lane's merge, PR or landing with no code need (a symbol) and no measured conflict (a
+    file). Each item is judged alone. '' when the line is fine."""
     if "builder" not in spawned:
         return ""
     block = block_text(text, keep_indent=True)
     found = UNSTARTED_RE.search(block)
     if not found:
         return UNSTARTED_REASON
-    item = _unstarted_item(block, found)
-    if (not _UNSTARTED_NONE_RE.match(item) and _UNSTARTED_LANE_WAIT_RE.search(item)
-            and not _checkable_wait(item)):
-        return UNSTARTED_FILE_REASON
+    for unit in _unstarted_units(_unstarted_item(block, found)):
+        if (not _UNSTARTED_NONE_RE.match(unit) and _is_lane_wait(unit) and not _checkable_wait(unit)):
+            return UNSTARTED_FILE_REASON
     return ""
 
 # decisions-reach-a-clickable-pick: "a pick with options" in the Input Needed item is either two or
