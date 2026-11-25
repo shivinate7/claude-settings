@@ -1205,8 +1205,9 @@ AUDIT_SPAWN = {"description": "audit", "subagent_type": "Explore", "model": "son
 PATHLESS_SPAWN = {"description": "audit", "subagent_type": "Explore", "model": "sonnet",
                   "prompt": "Audit: check the handoff against the repo."}
 PLAIN_SPAWN = {"description": "look", "prompt": "Read the repo and list its tests."}
+# Names the transcript path, so the path rule passes it and only the first-line rule refuses it.
 QUOTED_SPAWN = {"description": "look", "subagent_type": "Explore", "model": "sonnet",
-                "prompt": "Read the repo.\n\nAudit: this line is quoted, not the first one."}
+                "prompt": "Read the repo.\n\nAudit: this line is quoted, not the first one.\nTranscript: " + SESSION_TRANSCRIPT}
 BLANK_SPAWN = {"description": "audit", "subagent_type": "Explore", "model": "sonnet",
                "prompt": "\n\n   Audit: check after blank lines\nTranscript: " + SESSION_TRANSCRIPT}
 PATHLESS_BLANK = dict(BLANK_SPAWN, prompt="\n\n   Audit: check after blank lines\nmore text")
