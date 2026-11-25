@@ -28,13 +28,18 @@ import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lin
 
 CHECK = os.path.join(HERE, "check_tool_pins.py")
 RUN_TIMEOUT = 60  # a hang guard well above a run of a few process starts
-GIT_MISMATCH = "tool-pins: git pinned 2.56, found 2.54.0; move the pin or the tool"
+GIT_MISMATCH = "git pinned 2.56, found 2.54.0; move the pin or the tool"  # the cause; the line prefix is not pinned here
 APPLE_GIT = "git version 2.54.0 (Apple Git-155)"
 WINDOWS_GIT_256 = "git version 2.56.1.windows.1"
 # A copy of the pattern setup-python documents for .tool-versions, written from that documentation and not read from
 # its source. The JS form names its group <version>; Python spells the same named group (?P<version>...).
 SETUP_PYTHON_PIN = re.compile(r"^\s*python\s*v?\s*(?P<version>[^\s]+)\s*$")
 RUN_FOLDER = None  # made in setUpModule, so an import leaks no folder
+
+
+def line_ends(out, text):
+    """True when a line of `out` ends with `text`. The words that name the cause are pinned; the prefix of a line is not."""
+    return any(line.strip().endswith(text) for line in out.splitlines())
 
 
 def setUpModule():
@@ -142,15 +147,15 @@ class MatchTests(ToolPinsCase):
         local = self.write("node 26.11.2\n")
         rc, out = self.run_check("--file", local)
         self.assertEqual(rc, 1, "node 26.11.2 must fail against v26.11.1: exit %d: %s" % (rc, out))
-        self.assertIn("tool-pins: node pinned 26.11.2, found 26.11.1; move the pin or the tool",
-                      out.splitlines(), "the mismatch line must name node, its pin and the found version: %s" % out)
+        self.assertTrue(line_ends(out, "node pinned 26.11.2, found 26.11.1; move the pin or the tool"),
+                        "the mismatch line must name node, its pin and the found version: %s" % out)
 
     def test_a_git_mismatch_fails_with_the_named_message(self):
         self.fake("git", APPLE_GIT)
         local = self.write("git 2.56\n")
         rc, out = self.run_check("--file", local)
         self.assertEqual(rc, 1, "git 2.56 must fail against git version 2.54.0: exit %d: %s" % (rc, out))
-        self.assertIn(GIT_MISMATCH, out.splitlines(), "the mismatch line must name git, its pin and the found version: %s" % out)
+        self.assertTrue(line_ends(out, GIT_MISMATCH), "the mismatch line must name git, its pin and the found version: %s" % out)
 
     def test_the_gh_jq_and_bash_string_shapes_match_their_pins(self):
         self.fake("gh", "gh version 2.105.0 (2026-03-02)")
@@ -177,8 +182,8 @@ class MatchTests(ToolPinsCase):
         local = self.write("pinprobe 4.2\n")
         rc, out = self.run_check("--file", local)
         self.assertEqual(rc, 1, "an invented tool that differs from its pin must exit 1: exit %d: %s" % (rc, out))
-        self.assertIn("tool-pins: pinprobe pinned 4.2, found 4.1.0; move the pin or the tool",
-                      out.splitlines(), "the mismatch line must name the invented tool: %s" % out)
+        self.assertTrue(line_ends(out, "pinprobe pinned 4.2, found 4.1.0; move the pin or the tool"),
+                        "the mismatch line must name the invented tool: %s" % out)
 
     def test_a_missing_tool_reads_unknown_and_never_a_crash(self):
         local = self.write("pinprobe-absent 1.0\n")
@@ -191,11 +196,11 @@ class MatchTests(ToolPinsCase):
 
 class LocalModeTests(ToolPinsCase):
 
-    def test_local_mode_notes_a_mismatch_and_exits_zero(self):
+    def test_local_mode_notes_a_mismatch_and_exits_three(self):
         self.fake("git", APPLE_GIT)
         local = self.write("git 2.56\n")
         rc, out = self.run_check("--file", local, "--local")
-        self.assertEqual(rc, 0, "--local must not fail a mismatch: exit %d: %s" % (rc, out))
+        self.assertEqual(rc, 3, "--local must exit 3 on a mismatch, not 0 and not 1: exit %d: %s" % (rc, out))
         self.assertIn("git pinned 2.56, found 2.54.0", out, "--local must still note the mismatch: %s" % out)
 
 
@@ -303,16 +308,16 @@ class VersionReadTests(ToolPinsCase):
         local = self.write("tooly 3.15\n")
         rc, out = self.run_check("--file", local)
         self.assertEqual(rc, 1, "tooly 3.15 must fail against 3.14.2: a 3.15 inside a path is not the version: exit %d: %s" % (rc, out))
-        self.assertIn("tool-pins: tooly pinned 3.15, found 3.14.2; move the pin or the tool", out.splitlines(),
-                      "the mismatch must name the version the tool printed: %s" % out)
+        self.assertTrue(line_ends(out, "tooly pinned 3.15, found 3.14.2; move the pin or the tool"),
+                        "the mismatch must name the version the tool printed: %s" % out)
 
     def test_a_dotted_number_in_a_windows_path_is_never_the_version(self):
         self.fake("pytool", "C:\\Dev\\Sdk\\py3.15\\Pytool.exe version 3.14.2")
         local = self.write("pytool 3.15\n")
         rc, out = self.run_check("--file", local)
         self.assertEqual(rc, 1, "pytool 3.15 must fail against 3.14.2: a 3.15 inside a path is not the version: exit %d: %s" % (rc, out))
-        self.assertIn("tool-pins: pytool pinned 3.15, found 3.14.2; move the pin or the tool", out.splitlines(),
-                      "the mismatch must name the version the tool printed: %s" % out)
+        self.assertTrue(line_ends(out, "pytool pinned 3.15, found 3.14.2; move the pin or the tool"),
+                        "the mismatch must name the version the tool printed: %s" % out)
 
     def test_a_match_line_names_the_version_when_the_output_leads_with_another_number(self):
         self.fake("swift-driver", "swift-driver version: 1.168.6 Apple Swift version 6.4.2")
@@ -325,8 +330,8 @@ class VersionReadTests(ToolPinsCase):
         local = self.write("# read: swift = swift-driver --version\nswift 6.4\n")
         rc, out = self.run_check("--file", local)
         self.assertEqual(rc, 1, "with no match line, swift 6.4 must fail against the first number 1.168.6: exit %d: %s" % (rc, out))
-        self.assertIn("tool-pins: swift pinned 6.4, found 1.168.6; move the pin or the tool", out.splitlines(),
-                      "the mismatch must name the number found: %s" % out)
+        self.assertTrue(line_ends(out, "swift pinned 6.4, found 1.168.6; move the pin or the tool"),
+                        "the mismatch must name the number found: %s" % out)
 
     def test_a_match_line_with_no_group_exits_one_with_a_plain_message(self):
         self.fake("swift-driver", "Apple Swift version 6.4.2")
@@ -463,8 +468,115 @@ class MajorOnlyPinTests(ToolPinsCase):
         local = self.write("tint 3\n")
         rc, out = self.run_check("--file", local)
         self.assertEqual(rc, 1, "tint 3 must fail against 4.0: exit %d: %s" % (rc, out))
-        self.assertIn("tool-pins: tint pinned 3, found 4.0; move the pin or the tool", out.splitlines(),
-                      "the mismatch must name the major found: %s" % out)
+        self.assertTrue(line_ends(out, "tint pinned 3, found 4.0; move the pin or the tool"),
+                        "the mismatch must name the major found: %s" % out)
+
+
+class FailLineTests(ToolPinsCase):
+    """Without --local a mismatch line starts with FAIL, so a reader finds the failing pin by its first word."""
+
+    def test_a_mismatch_line_without_local_starts_with_fail(self):
+        self.fake("git", APPLE_GIT)
+        local = self.write("git 2.56\n")
+        rc, out = self.run_check("--file", local)
+        self.assertEqual(rc, 1, "git 2.56 must fail against git version 2.54.0: exit %d: %s" % (rc, out))
+        self.assertTrue(any(line.startswith("FAIL") and GIT_MISMATCH in line for line in out.splitlines()),
+                        "the mismatch line must start with FAIL and name git, its pin and the found version: %s" % out)
+
+
+class LocalExitCodeTests(ToolPinsCase):
+    """With --local the exit code tells lane lint a match (0), a mismatch (3) and an unknown or refused file (1) apart."""
+
+    def test_a_local_mismatch_exits_three(self):
+        self.fake("git", APPLE_GIT)
+        local = self.write("git 2.56\n")
+        rc, out = self.run_check("--file", local, "--local")
+        self.assertEqual(rc, 3, "--local on a mismatch must exit 3, so lane lint tells it from a match: exit %d: %s" % (rc, out))
+
+    def test_a_local_match_exits_zero(self):
+        self.fake("python", "Python 3.15.2")
+        local = self.write("python 3.15\n")
+        rc, out = self.run_check("--file", local, "--local")
+        self.assertEqual(rc, 0, "--local on a match must exit 0: exit %d: %s" % (rc, out))
+
+    def test_a_local_unknown_exits_one_and_names_the_tool(self):
+        local = self.write("pinprobe-absent 1.0\n")
+        rc, out = self.run_check("--file", local, "--local")
+        self.assertEqual(rc, 1, "--local on an unknown read must exit 1: exit %d: %s" % (rc, out))
+        self.assertIn("pinprobe-absent", out, "the unknown line must name the tool: %s" % out)
+
+    def test_a_local_refused_file_exits_one(self):
+        local = self.write("python 3.15 # CI python\n")
+        rc, out = self.run_check("--file", local, "--local")
+        self.assertEqual(rc, 1, "--local on a refused file must exit 1: exit %d: %s" % (rc, out))
+
+
+class ReadLineOrderTests(ToolPinsCase):
+    """A tool may have several `# read:` lines, tried in order. The first that runs and prints a version wins, so one file
+    can name python3 first and python second, for a Windows runner that has only python. No tool name is hard-coded."""
+
+    PY_READS = "# read: python = python3 --version\n# read: python = python --version\npython 3.15\n"
+
+    def test_the_first_read_that_runs_wins_over_a_later_one(self):
+        self.fake("python3", "Python 3.15.2")
+        self.fake("python", "Python 2.7.18")
+        local = self.write(self.PY_READS)
+        rc, out = self.run_check("--file", local)
+        self.assertEqual(rc, 0, "the first # read: line that runs must give the version, so python3's 3.15.2 passes: exit %d: %s" % (rc, out))
+        self.assertEqual(self.invoked(), ["python3"], "the later # read: line must not run once the first printed a version: log %s" % self.invoked())
+
+    def test_a_later_read_runs_when_the_first_program_is_absent(self):
+        self.fake("python", "Python 3.15.2")
+        local = self.write(self.PY_READS)
+        rc, out = self.run_check("--file", local)
+        self.assertEqual(rc, 0, "with python3 absent, the later python read must give the version: exit %d: %s" % (rc, out))
+
+    def test_a_first_read_that_prints_no_version_falls_to_the_next(self):
+        self.fake("python3", "no version here")
+        self.fake("python", "Python 3.15.2")
+        local = self.write(self.PY_READS)
+        rc, out = self.run_check("--file", local)
+        self.assertEqual(rc, 0, "a first read that prints no version must fall to the next read: exit %d: %s" % (rc, out))
+
+    def test_a_tool_whose_every_read_fails_reads_unknown(self):
+        local = self.write(self.PY_READS)
+        rc, out = self.run_check("--file", local)
+        self.assertEqual(rc, 1, "a tool whose every read fails must read unknown and exit 1: exit %d: %s" % (rc, out))
+        self.assertIn("python", out, "the unknown line must name the tool: %s" % out)
+
+    def test_a_hash_inside_a_quoted_first_read_is_not_a_comment_and_that_read_wins(self):
+        self.fake("pinprobe-ver", "pinprobe 4.2.7")
+        local = self.write('# read: pinprobe = pinprobe-ver "a # b"\n# read: pinprobe = pinprobe-absent\npinprobe 4.2\n')
+        rc, out = self.run_check("--file", local)
+        self.assertEqual(rc, 0, "a # inside a quoted first read must stay part of that read, and that read must win: exit %d: %s" % (rc, out))
+        self.assertEqual(self.invoked(), ["pinprobe-ver"], "the quoted first read must be the one that runs: log %s" % self.invoked())
+
+    def test_a_lone_quote_in_a_comment_between_read_lines_keeps_the_first_read_first(self):
+        self.fake("python3", "Python 3.15.2")
+        self.fake("python", "Python 2.7.18")
+        local = self.write("# read: python = python3 --version\n# the Windows's python is read below\n# read: python = python --version\npython 3.15\n")
+        rc, out = self.run_check("--file", local)
+        self.assertEqual(rc, 0, "a lone quote in a comment must not change which read line runs first: exit %d: %s" % (rc, out))
+
+
+class WindowsAppsTests(ToolPinsCase):
+    """A program that resolves under a WindowsApps folder is the Store's app alias, not an install: it is skipped as not installed."""
+
+    def test_a_program_under_a_windowsapps_folder_is_skipped_as_not_installed(self):
+        self.bin = os.path.join(self.dir, "WindowsApps", "bin")
+        self.fake("pinprobe", "pinprobe 4.2.7")
+        local = self.write("pinprobe 4.2\n")
+        rc, out = self.run_check("--file", local)
+        self.assertNotIn("pinprobe", self.invoked(), "a program under a WindowsApps folder must not run: log %s" % self.invoked())
+        self.assertEqual(rc, 1, "a tool skipped as not installed reads unknown and exits 1: exit %d: %s" % (rc, out))
+        self.assertIn("unknown", out, "the skipped tool must print unknown: %s" % out)
+
+    def test_the_same_program_outside_a_windowsapps_folder_is_checked(self):
+        self.fake("pinprobe", "pinprobe 4.2.7")
+        local = self.write("pinprobe 4.2\n")
+        rc, out = self.run_check("--file", local)
+        self.assertEqual(rc, 0, "the same program outside WindowsApps must be checked and match: exit %d: %s" % (rc, out))
+        self.assertEqual(self.invoked(), ["pinprobe"], "the program outside WindowsApps must run: log %s" % self.invoked())
 
 
 if __name__ == "__main__":
