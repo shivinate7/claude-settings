@@ -54,19 +54,59 @@ def _has_testcase(tree):
     return any(isinstance(n, ast.ClassDef) and any(_is_testcase_base(b) for b in n.bases) for n in ast.walk(tree))
 
 
-def _calls_main(tree):
-    bare = _unittest_main_names(tree)
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.Call):
+def _is_main_guard(node):
+    """True for `if __name__ == "__main__":` (either operand order)."""
+    if not (isinstance(node, ast.If) and isinstance(node.test, ast.Compare) and len(node.test.ops) == 1
+            and isinstance(node.test.ops[0], ast.Eq)):
+        return False
+    operands = [node.test.left, node.test.comparators[0]]
+    return any(isinstance(o, ast.Name) and o.id == "__name__" for o in operands) \
+        and any(isinstance(o, ast.Constant) and o.value == "__main__" for o in operands)
+
+
+def _reached_calls(nodes):
+    """Calls that run when these statements run: not inside a nested def, class or lambda, and not in the
+    body of an `if False:`/`if 0:` (its else branch still runs)."""
+    for node in nodes:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)):
             continue
-        func = node.func
-        if isinstance(func, ast.Attribute) and func.attr == "main" and isinstance(func.value, ast.Name) \
-                and func.value.id == "unittest":
+        if isinstance(node, ast.If) and isinstance(node.test, ast.Constant) and not node.test.value:
+            yield from _reached_calls(node.orelse)
+            continue
+        if isinstance(node, ast.Call):
+            yield node
+        yield from _reached_calls(ast.iter_child_nodes(node))
+
+
+def _is_runner_call(func, bare):
+    """unittest.main(...), a `main` imported from unittest, run_class(...), or TextTestRunner(...).run(...)."""
+    if isinstance(func, ast.Attribute):
+        if func.attr == "main" and isinstance(func.value, ast.Name) and func.value.id == "unittest":
             return True
-        if isinstance(func, ast.Name) and func.id in bare | {RUN_CLASS}:
+        if func.attr == RUN_CLASS:
             return True
-        if isinstance(func, ast.Attribute) and func.attr == RUN_CLASS:
-            return True
+        if func.attr == "run" and isinstance(func.value, ast.Call):
+            made = func.value.func
+            return (isinstance(made, ast.Attribute) and made.attr == "TextTestRunner") \
+                or (isinstance(made, ast.Name) and made.id == "TextTestRunner")
+        return False
+    return isinstance(func, ast.Name) and func.id in bare | {RUN_CLASS}
+
+
+def _calls_main(tree):
+    """True when the `if __name__ == "__main__":` block runs a unittest runner: directly, or through a
+    module-level function that block calls (a function nothing calls, or `if False:`, never runs)."""
+    bare = _unittest_main_names(tree)
+    functions = {n.name: n for n in tree.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))}
+    bodies = [[stmt for n in tree.body if _is_main_guard(n) for stmt in n.body]]
+    seen = set()
+    for body in bodies:  # bodies grows as called functions are found
+        for call in _reached_calls(body):
+            if _is_runner_call(call.func, bare):
+                return True
+            if isinstance(call.func, ast.Name) and call.func.id in functions and call.func.id not in seen:
+                seen.add(call.func.id)
+                bodies.append(functions[call.func.id].body)
     return False
 
 
