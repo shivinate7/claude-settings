@@ -366,8 +366,8 @@ def case_settings_json():
     path = os.path.join(REPO_ROOT, "settings.json")
     with open(path, "r", encoding="utf-8") as f:
         settings = json.load(f)
-    check("settings: autoCompactWindow is 500000",
-          settings.get("autoCompactWindow") == 500000, "settings: %r" % settings)
+    check("settings: autoCompactWindow is 550000",
+          settings.get("autoCompactWindow") == 550000, "settings: %r" % settings)
     env = settings.get("env", {})
     # R40, the owner's compaction ruling (13:21 CST, Nov 11, "compaction: A"), sets the
     # compaction trigger to 92 in the settings env.
@@ -397,6 +397,15 @@ def case_settings_json():
               and "--reorient" in h.get("command", "")]
     check("settings: a SessionStart hook, matcher 'compact', runs it with --reorient",
           bool(found2), "SessionStart hooks: %r" % session_start)
+
+
+def case_settings_window_reader_reads_550k():
+    """The hook's own window reader, run on the repo's real settings.json, returns 550,000. The pin
+    above only reads the value; this case fails when the reader would ignore it."""
+    with Env(CLAUDE_CONFIG_DIR=REPO_ROOT, CLAUDE_CODE_AUTO_COMPACT_WINDOW=None):
+        got, err = call_under_test("window_limit")
+    expect_value("settings: window_limit reads 550,000 from the repo's settings.json",
+                 got, err, 550000)
 
 
 # --------------------------------------------------------------------------- Stop --nudge
@@ -3762,6 +3771,26 @@ def run_goal_order_cases():
     case_goal_order_writes_state_before_its_reads()
 
 
+def case_f3_audit_brief_done_names_answered_items():
+    """F3, the brief wording: the audit brief's DONE line counts an item as done when its work landed on main, or when
+    its question or feedback id is answered, closed or withdrawn (the consultant's pick, undoable). Only questions and
+    feedback ids can be answered, so the line scopes that word to them. Red on the old brief, whose DONE line says
+    "the item" and so counts any kind of item as answered. --audit-brief prints the brief, with the payload's transcript
+    path."""
+    c = Case("f3-brief")
+    try:
+        p = c.run(["--audit-brief"], {"session_id": c.session_id, "hook_event_name": "PreCompact",
+                                      "transcript_path": os.path.join(c.repo, "transcript.jsonl"), "cwd": c.repo})
+        check("F3: --audit-brief exits 0", p.returncode == 0, "rc=%r err=%r" % (p.returncode, p.stderr[-160:]))
+        text = " ".join(p.stdout.split())
+        phrase = ("DONE: handoff lines whose work landed on main, or whose question or feedback id is answered, "
+                  "closed or withdrawn.")
+        check("F3: the audit brief's DONE line scopes answered, closed or withdrawn to questions and feedback ids",
+              phrase in text, "the DONE line says %r" % text[text.find("DONE:"):][:140])
+    finally:
+        c.cleanup()
+
+
 def main() -> int:
     case_prompt_names_audit_agent()
     case_precompact_writes_digest_and_state()
@@ -3770,6 +3799,7 @@ def main() -> int:
     case_reorient_no_state_says_digest_missing()
     case_reorient_failed_state_says_digest_missing()
     case_settings_json()
+    case_settings_window_reader_reads_550k()
     case_nudge()
     case_nudge_exact_boundary()
     case_nudge_uses_last_assistant_entry_and_sums_cache()
@@ -3855,6 +3885,7 @@ def main() -> int:
     case_owner_waits_substring_act_blocks()
     case_owner_waits_alone_on_line_names_act()
     case_owner_waits_prose_line_names_no_act()
+    case_f3_audit_brief_done_names_answered_items()
     run_goal_order_cases()
 
     if FAILED:

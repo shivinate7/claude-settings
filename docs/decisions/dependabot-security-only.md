@@ -12,3 +12,5 @@ Why: a version bump that fixes nothing costs a review and a CI run. A security f
 
 Kind: process
 Home: .github/dependabot.yml
+
+Interpreter pins: decision `ci-pins-newest-interpreter`.

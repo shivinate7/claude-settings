@@ -54,6 +54,7 @@ Cost: one more haiku call (low effort, OPUS_SCOPE_TIMEOUT s) for such an ask, no
 """
 import json
 import os
+import re
 import sys
 
 HERE = os.path.dirname(os.path.realpath(__file__))
@@ -64,7 +65,7 @@ if HERE not in sys.path:
 # building-allow-list-is-the-constant). Cost: importing guard.py for it measured about 120 ms per Agent spawn;
 # shared_names is standard library only and adds about 2 ms.
 from shared_names import EXPLORE_AUDIT_MARKER  # noqa: E402
-from shared_names import DATA_TOOL  # noqa: E402  stdlib only: the one home of the tool name
+from shared_names import DATA_TOOL, SETTINGS_REPO  # noqa: E402  stdlib only: the one home of the tool name and the settings repo
 
 OK_SHAPE = {"ok": (True, False)}
 SPAWN_RULE, QUESTION_RULE = "spawn-judge", "question-judge"
@@ -136,7 +137,10 @@ PAST_RULING_ITEM = (
     "something a standing decision already explains (such as asking what a rule means when a decision says why "
     "it was set so). A question whose `Based on (ruling): ...` line names that ruling (its id or slug) passes: "
     "a re-ask the ruling allows is fine. This item passes when no list follows. "
-    "When you refuse, the reason names the listed id, such as decisions/<name>, and gives the ruling's date."
+    "When you refuse, the reason names the listed id, such as decisions/<name>, and gives the ruling's date. "
+    "The code labels the questions Q1, Q2, ... in the list that follows the rulings. When you refuse, the answer "
+    "also carries \"item\": 8, and \"questions\": the labels of every question the ruling covers, such as [\"Q2\"]. "
+    "Never count the questions yourself."
 )
 # The question-judge call of lint/report_guard.py (a Stop whose reply asks the owner something): Sonnet, 60 s.
 PAST_RULING_MODEL, PAST_RULING_TIMEOUT = SPAWN_MODEL, 60
@@ -150,8 +154,8 @@ JUDGE_ITEMS = (
     "6. Nothing points outside the box, such as an earlier message or an item number.\n"
     "7. One option is recommended.\n"
     "8. " + PAST_RULING_ITEM + "\n"
-    "Reply JSON only: {\"ok\": true} or {\"ok\": false, \"reason\": \"<the item that misses, and the fix, "
-    "one line>\"}."
+    "Reply JSON only: {\"ok\": true} or {\"ok\": false, \"item\": <the number of the item that misses, 1 to 8>, "
+    "\"reason\": \"<the item that misses, and the fix, one line>\"}. For item 8 also add \"questions\", as that item says."
 )
 QUESTION_PROMPT = (
     "Review this AskUserQuestion call: %s\nAnswer {\"ok\": true} at once for a question with one option "
@@ -198,8 +202,10 @@ WIDENING_TEMPLATE = (
     "This call sets options. An option that widens what a shared tool accepts (a second accepted form, an allow-list "
     "entry, a per-repo exception) must carry `%s: true`, the JSON boolean true, not the string \"true\". Block an unmarked widening option, and name its option key in "
     "the reason. An option that only names a repo, or changes a repo to fit the shared tool, is not widening. "
-    "Widening means a shared tool is made so that one repo's differing form passes. "
-    "Never flag a change to the shared tool that every repo gets alike, with no repo named as its reason. A marked "
+    "Widening means a shared tool is made so that the differing form of a repo other than %s passes. "
+    "Never flag a change to the shared tool that every repo gets alike, with no repo named as its reason. "
+    "Also never flag a change that names only %s, the tool's home, as where it applies, unless it lets the "
+    "differing form of a repo other than %s pass. A marked "
     "option passes this rule. When unsure, allow."
 )
 
@@ -207,7 +213,7 @@ WIDENING_TEMPLATE = (
 def widening_rule():
     """The widening rule's text, with the mark's key from question_form.WIDENS_KEY."""
     import question_form
-    return WIDENING_TEMPLATE % question_form.WIDENS_KEY
+    return WIDENING_TEMPLATE % (question_form.WIDENS_KEY, SETTINGS_REPO, SETTINGS_REPO, SETTINGS_REPO)
 
 
 def __getattr__(name):  # PEP 562: the module constant WIDENING_RULE costs no import until it is read
@@ -367,16 +373,29 @@ def unvetted(payload, tool, args, rule, why, units):
     return refuse(payload, tool, args, rule, UNVETTED_REMEDY % why)
 
 
+FORM_ITEM_REASON = re.compile(r"\W*(?:item\s*)?[1-7]\b", re.I)
+
+
+def form_refusal(verdict, reason) -> bool:
+    """Whether the judge's refusal is of a form item (1 to 7), not the past-ruling item. The verdict's own `item` field
+    decides when it is a whole number from 1 to 8; without one, the reason's opener does (FORM_ITEM_REASON)."""
+    item = verdict.get("item")
+    if isinstance(item, int) and not isinstance(item, bool) and 1 <= item <= 8:
+        return item <= 7
+    return bool(FORM_ITEM_REASON.match(reason))
+
+
 def past_ruling_context(payload, units):
-    """(prompt tail, candidate ids, unreadable sources) for the questions in `units`. Prints the one stderr line for
-    the sources not searched. The only process of a judged call besides the model runs here."""
+    """(prompt tail, candidate ids, unreadable sources, candidates) for the questions in `units`. Prints the one stderr
+    line for the sources not searched. The only process of a judged call besides the model runs here."""
     import question_form
     cwd = payload.get("cwd") or ""
     candidates, unknown = question_form.past_rulings(" ".join(words for _, words in units),
                                                      question_form._git_root_of(cwd) or cwd or os.getcwd())
     print(question_form.unknown_line(unknown), file=sys.stderr)
-    return (question_form.candidates_block(candidates, unknown), question_form.candidate_ids(candidates),
-            question_form.unreadable_sources(unknown))
+    return (question_form.candidates_block(candidates, unknown, [words for _, words in units]),
+            question_form.candidate_ids(candidates),
+            question_form.unreadable_sources(unknown), candidates)
 
 
 def main():
@@ -413,9 +432,9 @@ def main():
             widening = any(sets_options(w) for w in judged)
         else:
             shown = json.dumps(args, ensure_ascii=False)
-        tail, ids = "", []
+        tail, ids, candidates = "", [], []
         if units:
-            tail, ids, unreadable = past_ruling_context(payload, units)
+            tail, ids, unreadable, candidates = past_ruling_context(payload, units)
             if unreadable:
                 return unvetted(payload, tool, args, rule, "; ".join(unreadable), units)
         full = prompt % shown
@@ -439,7 +458,17 @@ def main():
         cite = question_form.ruling_cite(reason, ids) if units else ""
         if cite == "bogus":  # the answer cites a record the model was not shown: no usable verdict
             return unvetted(payload, tool, args, rule, "the review cited a record that was not in the list", units)
-        return refuse(payload, tool, args, question_form.PAST_RULING_RULE if cite else rule, reason)
+        # A form refusal (item 1 to 7) keeps its rule and its text, whatever ids it names.
+        past = bool(cite) and not form_refusal(verdict, reason)
+        if past:
+            # A listed ruling named in a unit's own Based on (ruling) line passes that unit by code, whatever the judge
+            # answered. The text holds none of the judge's words; its labels only narrow which units are refused.
+            texts = [words for _, words in units]
+            reason = question_form.past_ruling_text(reason, ids, candidates, texts, verdict.get("questions"),
+                                                    "\n".join(texts))
+            if not reason:
+                return 0
+        return refuse(payload, tool, args, question_form.PAST_RULING_RULE if past else rule, reason)
     return 0
 
 

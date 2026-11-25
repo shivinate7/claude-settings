@@ -82,6 +82,8 @@ RULING_SUITE = os.path.join(HERE, "test_ruling_home.py")
 OVERRIDE = os.path.join(HERE, "override.py")
 CALL_JUDGE = os.path.join(HERE, "call_judge.py")
 CALL_JUDGE_SUITE = os.path.join(HERE, "test_call_judge.py")
+STALL_WATCH = os.path.join(HERE, "stall_watch.py")
+STALL_WATCH_SUITE = os.path.join(HERE, "test_stall_watch_stop.py")
 SIM_LEASE = os.path.join(HERE, "..", "bin", "sim-lease")
 
 # A mutation names the file it breaks and the suite that must catch it. "guard" is the default, so
@@ -93,6 +95,9 @@ TARGETS = {
     "ruling": (RULING, RULING_SUITE, "RULING_HOME_UNDER_TEST", "ruling_home"),
     "override": (OVERRIDE, SUITE, "GUARD_UNDER_TEST", "override"),
     "calljudge": (CALL_JUDGE, CALL_JUDGE_SUITE, "CALL_JUDGE_UNDER_TEST", "call_judge"),
+    # hooks/stall_watch.py, the Stop check's agent check-ins and the long-agent age. Its suite is the stop-mode file,
+    # which reads its module from STALL_WATCH_MODULE.
+    "stall": (STALL_WATCH, STALL_WATCH_SUITE, "STALL_WATCH_MODULE", "stall_watch"),
     # bin/sim-lease, which the guard loads by path (hooks/guard.py sim_lease_holds). The suite is the guard's.
     "simlease": (SIM_LEASE, SUITE, "GUARD_UNDER_TEST", "sim_lease"),
     # The guard family's compaction-audit rule, judged by test_handoff_wave2.py part 4 (test_guard.py has no
@@ -261,11 +266,21 @@ MUTATIONS = [
      '    if False:\n        return False', "guard",
      'worktree remove: a locked tree denies even though it is clean'),
     ("worktree-remove: a live session no longer denies",
-     '    live = worktree_live_session(target)\n    if live is None:\n        return None\n'
-     '    if live:\n        return False',
-     '    live = worktree_live_session(target)\n    if live is None:\n        return None\n'
-     '    if False:\n        return False', "guard",
+     '    live = worktree_live_session(target, absent_is_out=True)\n    if live:\n        return False',
+     '    live = worktree_live_session(target, absent_is_out=True)\n    if False:\n        return False', "guard",
      'worktree remove: a live session standing in a clean tree still denies'),
+    ("worktree-remove: a live process in the tree is ignored when its record's folder is gone",
+     '    standing = _process_stands_in(target)\n    if standing:\n        return False',
+     '    standing = _process_stands_in(target)\n    if False:\n        return False', "guard",
+     'log: a live process in a clean tree refuses the remove'),
+    ("worktree-remove: a process read that fails no longer refuses when a record's folder is gone",
+     '    if standing is None:\n        return False',
+     '    if False:\n        return False', "guard",
+     'a process read that raises refuses the remove'),
+    ("worktree-remove: an unreadable session record no longer allows the remove with a note",
+     '    if live is None:\n        return None',
+     '    if False:\n        return None', "guard",
+     'a record under an absent parent, is noted as unconfirmed'),
     ("worktree-remove: any session record counts as live, recycled pid included",
      '    diff = actual - started\n    if diff > SESSION_LIVE_TOLERANCE_MS:\n'
      '        return None\n    return diff >= -SESSION_LIVE_TOLERANCE_MS',
@@ -1368,27 +1383,21 @@ MUTATIONS = [
     ("step-up: the first-line round row is dropped, so a Round 3 of 3 behind a role word on line one asks",
      '            hit = rx.search(first)\n            found = [hit] if hit else []',
      '            hit = rx.search(first) if kind != "round" else None\n            found = [hit] if hit else []', "guard",
-     'first-line marker: builder on opus with a role word before Round 3 of 3 on line one is allowed'),
+     'first-line marker: reviewer on haiku with Round 3 of 3 after a role word on line one is denied, round 3 names Sonnet'),
     ("step-up: round 3 must name its row's model exactly, so an opus reviewer is refused",
      'ROLE_ROUND_EXACT = ("2",)',
      'ROLE_ROUND_EXACT = ("2", "3")', "guard", 'floor step-up: reviewer Round 3 of 3 on opus is denied (the grant is per spawn, not standing)'),
-    ("step-up: the builder marker drops Round, so a Round 3 of 3 builder on opus loses its standing grant",
-     'BUILDER_MARKERS = ("round", "try")',
-     'BUILDER_MARKERS = ("try",)', "guard", 'floor step-up: builder Round 3 of 3 on opus is allowed (standing grant)'),
-    ("step-up: the builder marker drops Try before its sunset, so a Try 3 of 3 builder on opus loses its standing grant",
-     'BUILDER_MARKERS = ("round", "try")',
-     'BUILDER_MARKERS = ("round",)', "guard", 'floor step-up: builder Try 3 of 3 on opus is allowed (standing grant)'),
-    ("ceiling: any builder round earns the standing grant, so a Round 2 of 3 builder on opus passes unrefused",
-     'kind.lower() in BUILDER_MARKERS and n == "3"',
-     'kind.lower() in BUILDER_MARKERS and n in "23"', "guard",
-     'first-line marker: builder on opus with Round 2 of 3 on line one is denied'),
+    ("ceiling: a builder whose brief opens with Round 3 of 3 is lifted past the opus refusal, so the spawn passes unrefused",
+     '    if role in OPUS_STANDING_ROLES:\n        return False',
+     '    if role in OPUS_STANDING_ROLES or (role == "builder" and re.search(r"(?m)^Round 3 of 3", str(brief or ""))):\n        return False',
+     "guard", 'floor step-up: builder Round 3 of 3 on opus is denied under agent-model-cap (no builder row takes Opus)'),
+    ("ceiling: a builder whose brief opens with Try 3 of 3 is lifted past the opus refusal, so the spawn passes unrefused",
+     '    if role in OPUS_STANDING_ROLES:\n        return False',
+     '    if role in OPUS_STANDING_ROLES or (role == "builder" and re.search(r"(?m)^Try 3 of 3", str(brief or ""))):\n        return False',
+     "guard", 'floor step-up: builder Try 3 of 3 on opus is denied under agent-model-cap (no builder row takes Opus)'),
     ("ceiling: the Opus spawn denial never fires, so an Opus spawn passes unrefused",
      'if "opus" not in str(tool_input.get("model") or "").lower():\n        return False',
      'if True:\n        return False', "guard", 'ceiling: Agent with model opus and no role is denied'),
-    ("ceiling: a third-round line earns the standing grant for any role, so a reviewer passes unrefused",
-     'if role == "builder" and builder_third_round(brief):',
-     'if builder_third_round(brief):', "guard",
-     "ceiling: Agent reviewer on opus with the brief 'Try 3 of 3. Finish the f' is denied"),
     ("ceiling: the Workflow scan yields no spawn, so a workflow builder on opus passes unrefused",
      'if unseen & {"model", "agentType"}:',
      'if True:', "guard", 'role-model: Workflow builder on opus with no round line is denied under agent-model-cap'),
@@ -1624,6 +1633,19 @@ MUTATIONS = [
      '        if live is None:\n            saw_unreadable = True',
      '        if not session_is_live(record):\n            continue',
      "guard", "liveness: worktree_live_session answers None on an unreadable record under target"),
+    # Every OSError is read as a removed folder, so a permission error on a record's cwd reads as gone. The
+    # permission-denied control (tests/guard/s33355-misc.py) must die: its cwd is unreadable, not absent.
+    ("liveness: _folder_is_gone reads every OSError as a removed folder",
+     "    except (FileNotFoundError, NotADirectoryError):\n",
+     "    except OSError:\n",
+     "guard", "liveness: worktree_live_session answers None for permission denied on a record's cwd, "
+     "with or without the opt-in"),
+    # A missing parent folder reads unknown, never gone (git_reads._folder_is_gone). Without that rule a record whose
+    # cwd and parent are both absent reads as a gone folder, so a forced remove of a clean tree is allowed unnoted.
+    ("liveness: _folder_is_gone reads a missing parent as a removed folder",
+     '        return parent != path and os.path.isdir(parent)',
+     '        return parent != path', "guard",
+     "log: a forced remove, a record under an absent parent, is noted as unconfirmed"),
     ("liveness: the windows arm reads access-denied (error 5) as CONFIRMED dead",
      '        if error == 87:  # ERROR_INVALID_PARAMETER: no such process\n            return None',
      '        if error in (87, 5):\n            return None',
@@ -2848,6 +2870,24 @@ MUTATIONS = [
      'NPM_DRY_RUN_WRITERS = {"rebuild", "rb", "edit"}',
      'NPM_DRY_RUN_WRITERS = set()',
      "guard", 'linked-nm: refuse npm rebuild --dry-run (Bash) in a linked folder'),
+    # ---- the Stop check's long-agent rule (hooks/stall_watch.py, decision stall-watch). An agent that has run
+    # AGENT_LONG seconds is due one check-in; these four cross the age test, the check-in fire time and its ahead bound.
+    ("stall: the long-agent age test admits the limit one step late, so an agent exactly AGENT_LONG old is not yet due",
+     "now - began >= long_age and not checked_in(job, began + long_age, sent)",
+     "now - began > long_age and not checked_in(job, began + long_age, sent)", "stall",
+     "A11f."),
+    ("stall: a check-in made before the crossing counts, so a check-in older than the crossing clears the block",
+     "if ahead <= AGENT_CHECKIN_AHEAD and fire >= crossed:",
+     "if ahead <= AGENT_CHECKIN_AHEAD and fire <= crossed:", "stall",
+     "A13b."),
+    ("stall: a check-in's fire time ignores its delay, so a check-in made before the crossing that fires after it does not count",
+     "fire = when + ahead * 60",
+     "fire = when", "stall",
+     "A13c."),
+    ("stall: the ahead bound is dropped, so a check-in set far ahead of the Stop clears the block",
+     "ahead <= AGENT_CHECKIN_AHEAD and fire >= crossed",
+     "fire >= crossed", "stall",
+     "A13f."),
     # ---- the always-silent stub. A hook whose main() exits 0 with no output passes every
     # "nothing printed" case on its own. Each suite pairs that silence with a known-bad input in
     # the same case (`known-bad pair`), and these mutants are the stub itself.
@@ -3510,7 +3550,8 @@ MUTATIONS = [
      '            reread_check = type("R", (), {"ph": 1, "unread_handoff": staticmethod(lambda payload: ""),\n'
      '                "unread_note": staticmethod(lambda payload: ""), "too_big_estimate": staticmethod(lambda result, path: 0),\n'
      '                "agent_rewrite": staticmethod(lambda payload: None),\n'
-     '                "HANDOFF_MAX_TOKENS": 10000, "READ_CAP_TOKENS": 25000, "READ_MAX_LINES": 2000})\n',
+     '                "HANDOFF_MAX_TOKENS": 10000, "READ_CAP_TOKENS": 25000, "READ_MAX_LINES": 2000,\n'
+     '                "AUDIT_OWED": "", "AUDIT_REMEDY": ""})\n',
      "guard", "a guard copy without reread_check.py refuses as guard-crash"),
     ("handoff-unread: a reread_check without its precompact_handoff sibling is let load again",
      '        if reread_check.ph is None:',
@@ -5023,6 +5064,17 @@ def lay_out(sources, work: str, target: str, name: str, old: str, new: str) -> s
         tree = os.path.join(work, "%s_%s" % (stem, mutate_shared.safe_name(name)))
         mutate_shared.guard_tree(tree)
         copy_path = os.path.join(tree, "call_judge.py")
+        with open(copy_path, "w", encoding="utf-8", newline="\n") as handle:
+            handle.write(mutated)
+    elif target == "stall":
+        # stall_watch.py imports own_session, shared_names and the other hooks modules beside it, so the copy
+        # gets the whole family in hooks/, or every case crashes on the import, not on the mutant. The suite's
+        # CI case reads actions/ci-done-comment beside the folder above the module, so that folder is laid out too.
+        root = os.path.join(work, "%s_%s" % (stem, mutate_shared.safe_name(name)))
+        tree = os.path.join(root, "hooks")
+        mutate_shared.guard_tree(tree)
+        tracked_tree.copy_tracked(root, "actions/ci-done-comment", root=os.path.dirname(HERE))
+        copy_path = os.path.join(tree, "stall_watch.py")
         with open(copy_path, "w", encoding="utf-8", newline="\n") as handle:
             handle.write(mutated)
     elif target not in ("guard", "simlease", "audit"):

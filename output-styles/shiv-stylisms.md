@@ -40,8 +40,8 @@ Short and plain are one goal. Never trade one for the other.
   main, never "none", "stays" or "as today". A new thing is `Departs from: main — adds <X>`. A question that
   restates main is not asked. Each
   option's description says `Gain:` and `Lose:`, as effects on the user. An option that widens
-  what a shared tool accepts so that one repo's differing form passes, such as a second form, an allow-list entry or a per-repo exception,
-  carries "Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo" and is never the recommended option. A change to the shared tool that every repo gets alike, with no repo named as its reason, is never flagged (item 734, owner 14:19 CST Nov 17). On the
+  what a shared tool accepts so that the differing form of a repo other than claude-settings passes, such as a second form, an allow-list entry or a per-repo exception,
+  carries "Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo" and is never the recommended option. A change to the shared tool that every repo gets alike, with no repo named as its reason, is never flagged (item 734, owner 14:19 CST Nov 17, scoped by owner 19:31 CST Nov 24 2026). A change that names only claude-settings, the tool's home, as where it applies is never widening, unless it lets another repo's differing form pass. On the
   waiting page the same lines go in `context`, with a `gain` and a `lose` on each option and `widens:
   true` on a widening one. When the options trade off heavily, so that every `Lose:` is large (a ruling gone, a known gap left
   open), add one better-solution option that keeps most of the gain. That option is a writing rule only:

@@ -98,6 +98,7 @@ NO_MD = [
     'Stall watch stop suite',
     'Simulator boot-record fixture suite',
     'Start check suite',
+    'Lease file suite',
     'Directory before a segment suite',
     'Refusal settle fixture suite',
     'Stop-hook triage hold suite',
@@ -113,6 +114,7 @@ NO_MD = [
     'Ruling census fixture suite',
     'Ruled store fixture suite',
     'Guard log report fixture suite',
+    'Pace numbers fixture suite',
     'Guard outcome claims fixture suite',
     'Verdict runner fixture suite',
     'Wait-pid helper fixture suite',
@@ -128,6 +130,10 @@ NO_MD = [
     'Mutation report-mode fixture suite',
     'Hook platform exit fixture suite',
     'Hook dup-name fixture suite',
+    'Stand-in signature fixture suite',
+    'Test temp helper fixture suite',  # reads lint/_test_temp.py and lint/test_test_temp.py only: no .md at run time
+    'Tests set config fixture suite',  # reads lint/check_tests_set_config.py and .py test files only: no .md at run time
+    'Tests set config check',  # walks the repo and parses test_*.py files only (no .md read). It names no file, so not NAMES_ONLY
     'Plan refuter fixture suite',
     'Copy finder fixture suite',
     'Time-pinned finder fixture suite',
@@ -318,6 +324,7 @@ PR_ONLY = [
     'Ruling kind check',
     'Silent undo check',
     'Comment narration check',
+    'Time-pinned new-finding check',
 ]
 
 # The checks job's step names. An unnamed step is its `uses:` reference.
@@ -375,6 +382,7 @@ MAIN_STEPS = [
     'Deny checks never raise suite',
     'Session start notice suite',
     'Start check suite',
+    'Lease file suite',
     'Directory before a segment suite',
     'Refusal settle fixture suite',
     'Stop-hook guard fixture suite',
@@ -399,6 +407,7 @@ MAIN_STEPS = [
     'Ruled store fixture suite',
     'Route judge measure fixture suite',
     'Guard log report fixture suite',
+    'Pace numbers fixture suite',
     'Guard outcome claims fixture suite',
     'Verdict runner fixture suite',
     'Wait-pid helper fixture suite',
@@ -427,12 +436,17 @@ MAIN_STEPS = [
     'Hook platform exit fixture suite',
     'Hook stub fixture suite',
     'Hook dup-name fixture suite',
+    'Stand-in signature fixture suite',
+    'Test temp helper fixture suite',
+    'Tests set config fixture suite',
+    'Tests set config check',
     'Record slug fixture suite',
     'Cost line pin fixture suite',
     'Red-run trailer fixture suite',
     'Plan refuter fixture suite',
     'Copy finder fixture suite',
     'Time-pinned finder fixture suite',
+    'Time-pinned new-finding check',
     'Mod version fixture suite',
     'Hook catalog fixture suite',
     'Hook catalog check',

@@ -85,6 +85,8 @@ GHRUNPEND = os.path.join(ROOT, "ghrunpend")  # every check passed, one workflow 
 GHBROKEN = os.path.join(ROOT, "ghbroken")  # answers every call with text that is not JSON
 GHNEED = os.path.join(ROOT, "ghneed")      # green, but only for a call that names pull request 12 and y/x
 GHEMPTY = os.path.join(ROOT, "ghempty")    # no check and no workflow run reported yet
+GHROLL = os.path.join(ROOT, "ghroll")      # one check: the all-jobs-passed rollup, green (what a repo with CI on its base needs under first-proof)
+GHPASSCHK = os.path.join(ROOT, "ghpasschk")  # one check named checks, green, and no all-jobs-passed rollup
 GHCWD = os.path.join(ROOT, "ghcwd")        # green, but only for a call run inside the folder `ctxrepo`
 WFREPO = os.path.join(ROOT, "wfrepo")      # a folder that holds one workflow file
 GHSLOW = os.path.join(ROOT, "ghslow")      # green, but every call takes longer than the guard waits
@@ -458,6 +460,7 @@ WTPRUNESTALE = os.path.join(ROOT, "wtprunestale")
 WTLIVECFG = os.path.join(ROOT, "wtlivecfg")
 WTDEADCFG = os.path.join(ROOT, "wtdeadcfg")
 WTSTALESTARTCFG = os.path.join(ROOT, "wtstalestartcfg")
+WTSTALECFG = os.path.join(ROOT, "wtstalecfg")  # a record whose cwd folder was removed: it stands in no tree
 
 # BASE COPIES (the base-copies incident, Nov 1 22:41 CST). A worktree whose staged files are byte-equal to
 # its branch base, with no unpushed commit, must remove. BCINC is that state: its branch moved onto P1 with
@@ -1129,6 +1132,8 @@ UNDERTESTS = os.path.join(ROOT, "tests", "clone")   # a repo whose own folder si
 
 
 LINKS_MADE = False  # set by build_fixtures; True only where os.symlink works
+# The skip reason of every case that needs a symlink. Sections load in number order, and this one first.
+NO_LINK_HERE = "this host gives no symlink, so the link case does not run here"
 
 
 # Lazy fixtures. A block that runs git or builds a repo is a builder, run the first time a case
@@ -1213,6 +1218,8 @@ def build_fixtures():
     write(PATHSPEC_LIST, "f.txt\n")
     make_fake_gh(GHPEND, "main", checks=[{"name": "checks", "bucket": "pending", "link": ""}])
     make_fake_gh(GHRED, "main", checks=[{"name": "checks", "bucket": "fail", "link": ""}])
+    make_fake_gh(GHROLL, "main", checks=[{"name": "all-jobs-passed", "bucket": "pass", "link": ""}])
+    make_fake_gh(GHPASSCHK, "main", checks=[{"name": "checks", "bucket": "pass", "link": ""}])
     make_fake_gh(GHRUNPEND, "main",
                  runs=[{"status": "in_progress", "conclusion": "", "name": "checks"}])
     make_fake_gh(GHBROKEN, "main", broken=True)
@@ -2539,6 +2546,19 @@ def _build_worktrees():
         }),
     )
 
+    # A RECORD WHOSE FOLDER IS GONE: this runner's own live pid, with a cwd whose leaf is absent under a folder that
+    # stays. A missing parent reads unknown, not gone (`_folder_is_gone`). Such a record stands in no tree
+    # (owner, 20:53 CST 11-24, 2026), so WTCLEAN passes past it.
+    stale_gone = os.path.join(ROOT, "wtstale-gone")
+    os.makedirs(stale_gone, exist_ok=True)
+    os.makedirs(os.path.join(WTSTALECFG, "sessions"), exist_ok=True)
+    write(
+        os.path.join(WTSTALECFG, "sessions", "%d.json" % self_pid),
+        json.dumps({
+            "pid": self_pid, "cwd": slash(os.path.join(stale_gone, "wt")), "startedAt": self_start_ms,
+        }),
+    )
+
     # WTPRUNE is its own repository, so pruning it can never touch WTMAIN's own worktrees.
     # WTPRUNESTALE is added and then its directory is removed out from under git, the same shape
     # `is_worktree`'s own comment measures elsewhere in this file: a stale administrative record
@@ -2796,7 +2816,7 @@ lazy_fixture([PUSHFEAT, PUSHMAIN, PUSHTRUNK, PUSHTRUNKLOCAL, PUSHNOHEAD, PUSHDET
               PUSHALLNOAGENT, PUSHALLAGENT, PUSHALLAGENTWT, PUSHALLAGENTCLAUDE, PUSHALLAGENTAHEAD, PUSHALLBROKEN],
              _build_push)
 lazy_fixture([WTMAIN, WTCLEAN, WTDIRTY, WTLOCKED, WTLIVE, WTDEADSESSION, WTSTALESTART, WTPRUNE,
-              WTPRUNESTALE, WTLIVECFG, WTDEADCFG, WTSTALESTARTCFG], _build_worktrees)
+              WTPRUNESTALE, WTLIVECFG, WTDEADCFG, WTSTALESTARTCFG, WTSTALECFG], _build_worktrees)
 lazy_fixture([LINKMAIN, LINKOUT, WTLINKDIR, WTLINKFILE, WTCTRLFILE, WTCTRLTRACKED, WTCTRLDIR,
               WTCTRLNESTED], _build_links)
 

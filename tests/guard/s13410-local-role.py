@@ -89,22 +89,22 @@ add("local-tier: a session id that fails the id shape is refused, even with a fi
 add("local-tier: a /clear's new session id gets no stale role from the old id's file", "deny", rule=RECORD_RULE,
     tool="Bash", command=LT_PUSH, cwd=PUSHSSH, session=LT_NEW, config=LT_CLEAR, lacks=LT_LACKS)
 
-# RED. Cause: no guard rule covers the role folder, so Claude's own write into it is allowed.
-add("local-tier: a Write of a role file by Claude is refused", "deny", tool="Write", cwd=PUSHSSH,
+# frozen-path refuses each form below: the role folder is a frozen path, so Claude's own write into it is refused.
+add("local-tier: a Write of a role file by Claude is refused", "deny", rule="frozen-path", tool="Write", cwd=PUSHSSH,
     session=LT_SID, config=LT_TRIAGE, file_path=LT_ROLEFILE, content=lt_role(LT_SID, "triage"))
-add("local-tier: an Edit of a role file by Claude is refused", "deny", tool="Edit", cwd=PUSHSSH,
+add("local-tier: an Edit of a role file by Claude is refused", "deny", rule="frozen-path", tool="Edit", cwd=PUSHSSH,
     session=LT_SID, config=LT_TRIAGE, file_path=LT_ROLEFILE, old_string="triage", new_string="coordinator")
-add("local-tier: a MultiEdit of a role file by Claude is refused", "deny", tool="MultiEdit", cwd=PUSHSSH,
+add("local-tier: a MultiEdit of a role file by Claude is refused", "deny", rule="frozen-path", tool="MultiEdit", cwd=PUSHSSH,
     session=LT_SID, config=LT_TRIAGE, file_path=LT_ROLEFILE,
     edits=[{"old_string": "triage", "new_string": "batch-runner"}])
 sh("local-tier: a shell redirect into a role file is refused",
-   "echo '" + lt_role(LT_SID, "triage") + "' > " + LT_ROLEFILE, "deny", cwd=PUSHSSH,
+   "echo '" + lt_role(LT_SID, "triage") + "' > " + LT_ROLEFILE, "deny", rule="frozen-path", cwd=PUSHSSH,
    session=LT_SID, config=LT_TRIAGE)
 sh("local-tier: a tee into a role file is refused",
-   "printf '{}' | tee " + LT_ROLEFILE, "deny", cwd=PUSHSSH, session=LT_SID, config=LT_TRIAGE)
-sh("local-tier: a delete of a role file is refused", "rm -f " + LT_ROLEFILE, "deny", cwd=PUSHSSH,
+   "printf '{}' | tee " + LT_ROLEFILE, "deny", rule="frozen-path", cwd=PUSHSSH, session=LT_SID, config=LT_TRIAGE)
+sh("local-tier: a delete of a role file is refused", "rm -f " + LT_ROLEFILE, "deny", rule="frozen-path", cwd=PUSHSSH,
    session=LT_SID, config=LT_TRIAGE)
-add("local-tier: a PowerShell write of a role file is refused", "deny", tool="PowerShell", cwd=PUSHSSH,
+add("local-tier: a PowerShell write of a role file is refused", "deny", rule="frozen-path", tool="PowerShell", cwd=PUSHSSH,
     session=LT_SID, config=LT_TRIAGE, windows=True,
     command="Set-Content -Path '" + LT_ROLEFILE + "' -Value '{}'")
 
@@ -192,9 +192,9 @@ for _cmd in (
     "~/.claude/bin/claude-role triage",
     "bin/claude-role.cmd triage",
 ):
-    add("local-role: a Bash call that starts a child session with a role is denied: " + _cmd, "deny",
+    add("local-role: a Bash call that starts a child session with a role is denied: " + _cmd, "deny", rule="self-role-claim",
         tool="Bash", command=_cmd, cwd=PUSHSSH, session=LT_SID)
-add("local-role: a PowerShell call that sets CS_SESSION_ROLE and starts claude is denied", "deny",
+add("local-role: a PowerShell call that sets CS_SESSION_ROLE and starts claude is denied", "deny", rule="self-role-claim",
     tool="PowerShell", command="$env:CS_SESSION_ROLE='x'; claude", cwd=PUSHSSH, session=LT_SID, windows=True)
 # Reading the variable, grepping for the launcher's name and reading its file are allowed, since none of them gives a role.
 add("local-role: echo of CS_SESSION_ROLE is allowed", "allow", tool="Bash", command="echo $CS_SESSION_ROLE",
@@ -211,9 +211,9 @@ for _cmd in (
     "echo $(CS_SESSION_ROLE=batch-runner claude -p hi)",
     "{ CS_SESSION_ROLE=triage claude; }",
 ):
-    add("local-role: a Bash call that starts a child session with a role in a group or substitution is denied: " + _cmd, "deny",
+    add("local-role: a Bash call that starts a child session with a role in a group or substitution is denied: " + _cmd, "deny", rule="self-role-claim",
         tool="Bash", command=_cmd, cwd=PUSHSSH, session=LT_SID)
-add("local-role: a PowerShell call that sets CS_SESSION_ROLE with SetEnvironmentVariable and starts claude is denied", "deny",
+add("local-role: a PowerShell call that sets CS_SESSION_ROLE with SetEnvironmentVariable and starts claude is denied", "deny", rule="self-role-claim",
     tool="PowerShell", command="[Environment]::SetEnvironmentVariable('CS_SESSION_ROLE', 'batch-runner', 'Process'); claude -p hi",
     cwd=PUSHSSH, session=LT_SID, windows=True)
 # Text that names the variable or the launcher is not a claim, and a shell that reads or unsets the variable is not one either.
