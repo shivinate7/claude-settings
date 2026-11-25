@@ -1697,6 +1697,147 @@ class UnstartedItemsTests(unittest.TestCase):
              "a wait once lane X has landed names no file"),
         ])
 
+    def test_un_red_backticked_file_name_is_not_a_symbol(self):
+        # Catches: a backticked file name with a source suffix is read as the code need's symbol, so the wait passes.
+        self.assert_refused_for_shared_file([
+            (self.DONE + "> **Next** Unstarted: lint-stub needs PR #3916's code: `sweep.py`",
+             "a Python file name as the symbol"),
+            (self.DONE + "> **Next** Unstarted: lint-stub needs PR #3916's code: `run.sh`",
+             "a shell file name as the symbol"),
+            (self.DONE + "> **Next** Unstarted: lint-stub needs PR #3916's code: `ci.yml`",
+             "a YAML file name as the symbol"),
+        ])
+
+    def test_un_red_backticked_path_with_a_slash_stays_refused(self):
+        # Control: a backticked path with a slash is a file, so the need names no symbol and is refused today.
+        self.assert_refused_for_shared_file([
+            (self.DONE + "> **Next** Unstarted: lint-stub needs PR #3916's code: `lint/sweep.py`",
+             "control: a path with a slash"),
+            (self.DONE + "> **Next** Unstarted: lint-stub needs PR #3916's code: `bin/merge`",
+             "control: an extensionless path with a slash"),
+        ])
+
+    def test_un_green_backticked_symbols_pass(self):
+        # Control: symbols with an underscore, a dot or parentheses pass today; a four-letter word passes as a symbol.
+        self.assert_passes_unstarted([
+            (self.DONE + "> **Next** Unstarted: lint-stub needs PR #3916's code: `reap_nested_clone`",
+             "control: a symbol with an underscore"),
+            (self.DONE + "> **Next** Unstarted: lint-stub needs PR #3916's code: `Host.merge`",
+             "control: a dotted symbol"),
+            (self.DONE + "> **Next** Unstarted: lint-stub needs PR #3916's code: `reap()`",
+             "control: a call with parentheses"),
+            (self.DONE + "> **Next** Unstarted: lint-stub needs PR #3916's code: `reap`",
+             "a four-letter word that is no stop word is a symbol"),
+        ])
+
+    def test_un_red_backticked_common_word_is_not_a_symbol(self):
+        # Catches: a backticked common word is read as the code need's symbol, so the wait passes.
+        self.assert_refused_for_shared_file([
+            (self.DONE + "> **Next** Unstarted: lint-stub needs PR #3916's code: `the`",
+             "a short stop word"),
+            (self.DONE + "> **Next** Unstarted: lint-stub needs PR #3916's code: `code`",
+             "a four-letter stop word"),
+            (self.DONE + "> **Next** Unstarted: lint-stub needs PR #3916's code: `it`",
+             "a pronoun"),
+        ])
+
+    def test_un_green_plural_measured_conflicts_pass(self):
+        # Control: the singular measured conflict passes today, and the plural names the same file.
+        self.assert_passes_unstarted([
+            (self.DONE + "> **Next** Unstarted: lint-stub waits on PR #3679 to merge; measured conflict in "
+             "lint/report_guard.py", "control: the singular measured conflict"),
+            # Catches: the plural "measured conflicts in" is not read as a measured conflict, so the wait is refused.
+            (self.DONE + "> **Next** Unstarted: lint-stub waits on PR #3679 to merge; measured conflicts in "
+             "lint/report_guard.py", "the plural measured conflicts"),
+        ])
+
+    def test_un_red_none_first_does_not_clear_the_items_after_it(self):
+        # Control: a bare none passes.
+        self.assert_passes_unstarted([
+            (self.DONE + "> **Next** Unstarted: none", "control: a bare none"),
+        ])
+        self.assert_refused_for_shared_file([
+            # Catches: a line that opens with "none" clears every item after it, so a wait that names no file passes.
+            (self.DONE + "> **Next** Unstarted: none; lint-stub waits on PR #3679 to merge",
+             "none first, then a wait that names no file"),
+        ])
+
+    def test_un_green_pr_named_for_context_with_no_wait_passes(self):
+        self.assert_passes_unstarted([
+            # Control: a lane not yet briefed names no PR, and passes today.
+            (self.DONE + "> **Next** Unstarted: lint-stub, not briefed yet", "control: a lane not yet briefed"),
+            # Catches: a PR named for context, with no wait, is read as a wait, so the turn is refused.
+            (self.DONE + "> **Next** Unstarted: not briefed yet; PR 3916 merged",
+             "a PR named for context after a not-briefed item"),
+            (self.DONE + "> **Next** Unstarted: not briefed yet (PR 3916 merged at 10:35)",
+             "a PR and its merge time, named for context"),
+        ])
+
+    def test_un_red_measured_conflict_in_a_non_file_is_refused(self):
+        # Control: the same wait with a measured conflict in lint/report_guard.py passes
+        # (test_un_green_measured_conflict_names_its_file_and_passes).
+        self.assert_refused_for_shared_file([
+            (self.DONE + "> **Next** Unstarted: lint-stub waits on PR #3679 to merge; measured conflict in CI/CD",
+             "CI/CD is not a file"),
+        ])
+
+    def test_un_red_client_server_split_is_not_a_file(self):
+        # Refused as a non-file. It clashes with the docs/decisions row of test_un_shared_path_names_the_shared_file,
+        # which must pass. The clash is an open ruling; see the commit body.
+        self.assert_refused_for_shared_file([
+            (self.DONE + "> **Next** Unstarted: lint-stub waits on PR #3679 to merge; measured conflict in "
+             "client/server split", "client/server split is not a file"),
+        ])
+
+    def test_un_red_item_is_judged_alone_beside_another_items_code_need(self):
+        # Control: "it needs" continues the wait before it, and passes (test_un_green_code_need_with_a_named_symbol_passes).
+        self.assert_refused_for_shared_file([
+            # Catches: a wait with no reason passes when an item after the ";" names a code need.
+            (self.DONE + "> **Next** Unstarted: lint-stub waits on PR #3679 to merge; bin-x needs PR #3916's code: "
+             "`reap_nested_clone`", "a wait with no reason beside another item's code need"),
+            # Catches: another lane's need for the same PR's code clears a wait on that PR, so the turn passes.
+            (self.DONE + "> **Next** Unstarted: lint-stub waits on PR #3916 to merge; bin-x needs PR #3916's code: "
+             "`reap_nested_clone`", "a wait on PR 3916 beside another lane's need for PR 3916's code"),
+        ])
+
+    def test_un_red_file_only_wait_beside_a_code_need_is_refused(self):
+        self.assert_refused_for_shared_file([
+            # Catches: a wait that names only a shared file passes when an item after the ";" names a code need.
+            (self.DONE + "> **Next** Unstarted: lint-stub waits on PR #3679 to merge, both touch lint/report_guard.py; "
+             "bin-x needs PR #3916's code: `reap_nested_clone`",
+             "a file-only wait beside another item's code need"),
+        ])
+
+    def test_un_red_file_only_wait_beside_another_items_measured_phrase_is_refused(self):
+        self.assert_refused_for_shared_file([
+            # Catches: a file-only wait passes when an item after the ";" carries a measured conflict.
+            (self.DONE + "> **Next** Unstarted: lint-stub waits on PR #3679 to merge, both touch lint/report_guard.py; "
+             "bin-x waits on PR #3680 to merge; measured conflict in lint/sweep.py",
+             "a file-only wait beside another item's measured conflict"),
+        ])
+
+    def test_un_red_bullet_is_judged_alone(self):
+        self.assert_refused_for_shared_file([
+            # Catches: the bullets under a bare Unstarted line form one item, so a need in a later bullet clears the wait.
+            (self.DONE + "> **Next**\n> Unstarted:\n> - lint-stub waits on PR #3679 to merge\n"
+             "> - bin-x needs PR #3916's code: `reap_nested_clone`",
+             "a wait bullet beside a code need bullet"),
+        ])
+
+    def test_un_green_each_item_with_its_own_reason_passes(self):
+        self.assert_passes_unstarted([
+            (self.DONE + "> **Next** Unstarted: lint-stub needs PR #3916's code: `reap_nested_clone`; "
+             "bin-x waits for the load brake", "a code need, then a wait on the load brake"),
+            (self.DONE + "> **Next**\n> Unstarted:\n> - lint-stub needs PR #3916's code: `reap_nested_clone`\n"
+             "> - bin-x waits for the load brake", "the same two items as bullets"),
+        ])
+
+    def test_un_green_brake_owner_and_qag_waits_pass(self):
+        self.assert_passes_unstarted([
+            (self.DONE + "> **Next** Unstarted: lint-stub waits for the load brake", "a wait on the load brake"),
+            (self.DONE + "> **Next** Unstarted: lint-stub waits on your ruling on QAG", "a wait on the owner's ruling on QAG"),
+        ])
+
 
 class NoResendTests(unittest.TestCase):
     """A report guard never makes a session send its whole report twice (roadmap c101)."""
