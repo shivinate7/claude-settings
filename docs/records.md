@@ -216,6 +216,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `lease` | Owner rulings, 2026-11-24 US Central. | [`docs/decisions/lease.md`](../docs/decisions/lease.md) |
 | `leftover-temp-reap` | Leftover temp folders of dead test runs are reaped after an hour | [`docs/decisions/leftover-temp-reap.md`](../docs/decisions/leftover-temp-reap.md) |
 | `list-form-subprocess-ignores-a-path-shim-on-windows` | A blind-command fixture cannot shadow a real executable for a list-form subprocess call on Windows. | [`docs/decisions/list-form-subprocess-ignores-a-path-shim-on-windows.md`](../docs/decisions/list-form-subprocess-ignores-a-path-shim-on-windows.md) |
+| `lists-one-line-per-item` | The owner's words are quoted below. | [`docs/decisions/lists-one-line-per-item.md`](../docs/decisions/lists-one-line-per-item.md) |
 | `local-time-central` | Owner, 2026-10-12: a session tells the owner times in US Central (America/Chicago), DST-aware, 24-hour clock. | [`docs/decisions/local-time-central.md`](../docs/decisions/local-time-central.md) |
 | `main-branch-protection` | `main` of shivinate7/claude-settings requires no status check. | [`docs/decisions/main-branch-protection.md`](../docs/decisions/main-branch-protection.md) |
 | `map-facts-are-checked` | Owner, 2026-10-30 16:09 CDT. | [`docs/decisions/map-facts-are-checked.md`](../docs/decisions/map-facts-are-checked.md) |
