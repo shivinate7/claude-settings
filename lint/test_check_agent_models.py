@@ -67,7 +67,7 @@ def verdict(relpath, model=None, closed=True, text=None, relative=False, name="x
         os.makedirs(os.path.dirname(path))
         with open(path, "w") as handle:
             if text is None:
-                head = "---\nname: %s\ndisallowedTools: mcp__claude-code-remote__*\n%s%s" % (
+                head = "---\nname: %s\ndisallowedTools: mcp__*\n%s%s" % (
                     name, "model: %s\n" % model if pinned else "", "effort: %s\n" % effort if effort else "")
                 handle.write("%s%sbody\n" % (head, "---\n" if closed else ""))
             else:
@@ -85,8 +85,8 @@ def verdict(relpath, model=None, closed=True, text=None, relative=False, name="x
 
 
 def agent_file(role, *lines, body="body\n"):
-    """A fixture agents/<role>.md: closed frontmatter with the name, the remote withheld and the given lines, no pin."""
-    return "---\nname: %s\ndisallowedTools: mcp__claude-code-remote__*\n%s---\n%s" % (
+    """A fixture agents/<role>.md: closed frontmatter with the name, every MCP tool withheld and the given lines, no pin."""
+    return "---\nname: %s\ndisallowedTools: mcp__*\n%s---\n%s" % (
         role, "".join(line + "\n" for line in lines), body)
 
 
@@ -247,7 +247,7 @@ class PinEqualsRow(unittest.TestCase):
                                 "%s: no line names the pin and the row: %r" % (label, out))
         # A comment after a haiku pin that names sonnet leaves the pin haiku, so the file passes.
         self.assertEqual(verdict("agents/reviewer.md",
-                                 text="---\nname: reviewer\ndisallowedTools: mcp__claude-code-remote__*\n"
+                                 text="---\nname: reviewer\ndisallowedTools: mcp__*\n"
                                       "model: haiku  # sonnet is above the row\n%s---\nbody\n"
                                       % "".join(line + "\n" for line in effort_lines("reviewer"))),
                          (0, ""))
@@ -718,7 +718,7 @@ BARE_SLOT = "Under Done, the first line is PASS, FAIL, or PARTIAL, then the roun
 
 def agent_text(body, description=None):
     """A fixture agent file: a frontmatter block with a name, a sonnet pin, an optional description, then the body."""
-    keys = ["name: fixture", "model: sonnet", "disallowedTools: mcp__claude-code-remote__*"] + (
+    keys = ["name: fixture", "model: sonnet", "disallowedTools: mcp__*"] + (
         ["description: %s" % description] if description else [])
     return "---\n%s\n---\n%s" % ("\n".join(keys), body)
 
@@ -906,16 +906,17 @@ REMOTE = "mcp__claude-code-remote"
 
 
 def agent_with(*lines, body="body\n"):
-    """A fixture agent file, agents/fixture.md: a name, a sonnet pin, the given lines, then the body."""
-    return "---\n%s\n---\n%s" % ("\n".join(("name: fixture", "model: sonnet") + lines), body)
+    """A fixture agents/designer.md: the design pair's real pins and effort, the given lines, then the body. Only the
+    design pair keeps the remote server withheld alone, so every case here is about that withhold."""
+    return role_with("designer", *lines, body=body)
 
 
 def server_withheld(keys):
-    """True when the agent cannot reach the claude-code-remote server: disallowedTools: names the whole server, or tools:
-    is an allow-list with no entry for it. It reads the files, not the check, so the repo case is red before the check
-    is built."""
+    """True when the agent cannot reach the claude-code-remote server: disallowedTools: names the whole server or every MCP
+    tool (the glob covers the server too), or tools: is an allow-list with no entry for it. It reads the files, not the
+    check, so the real-folder case is red before the check is built."""
     denied = tokens(keys.get("disallowedTools", ""))
-    if REMOTE in denied or REMOTE + "__*" in denied:
+    if REMOTE in denied or REMOTE + "__*" in denied or MCP_GLOB in denied:
         return True
     if "tools" in keys:
         return not any(item == REMOTE or item.startswith(REMOTE + "__") for item in tokens(keys["tools"]))
