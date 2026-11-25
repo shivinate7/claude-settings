@@ -7,7 +7,16 @@ A session record whose folder is gone stands in no tree, for a removal that the 
 Owner rulings, 2026-11-24:
 
 - 20:53 CST, on "a session record whose folder is gone counts as not in this worktree": "i'm a fan of this but think an opus agent needs to plan it and u need to aggregate all the work sim manager gives to you on this worktree concept".
-- 21:19 CST, on the orphan-process reap and the trash sweep: "the notion had been that if a sessino loses its worktree bc its told to commit everything beforehand nothing's rly lost, it just needs to know it needs to make a new worktree and reach main. and with that implemented it should basically be B or C right". Read as: the two acts read a gone record as absent only after their own dirty and process checks. The ruling makes that depend on the telling being built ("with that implemented"). The telling is not built: the resume notice in `hooks/session_start.sh` says only to make a new worktree, not to commit first. No ruling covers that gap.
+- 21:19 CST, on the orphan-process reap and the trash sweep: "the notion had been that if a sessino loses its worktree bc its told to commit everything beforehand nothing's rly lost, it just needs to know it needs to make a new worktree and reach main. and with that implemented it should basically be B or C right". Read as: the two acts read a gone record as absent only after their own dirty and process checks. The ruling tied that to the commit-first notice being built ("with that implemented"). The notice is not built: the resume notice in `hooks/session_start.sh` says only to make a new worktree, not to commit first. The owner's 2026-11-25 answers and the consultant's reading below answer that gap.
+
+Owner answers, 2026-11-25:
+
+- Owner, 2026-11-25 09:54 CST, typed in the consultant's chat, on the withdrawn rule that deleted a trash folder holding a clean pushed clone: "how could this be lost? your idea of deleting something fully clean aka nothing being lost is good, i think it j ust needed more thought?"
+- Owner, 2026-11-25 10:19 CST, on the open question whether the acts' own dirty and live-process checks meet his "commit first" condition: "did i not answer this conceptually?"
+
+Consultant's reading, 2026-11-25 (not his words; the owner may reverse it):
+
+- A target that is fully clean may be deleted, because nothing is lost. So each act's own dirty and live-process check meets the condition (option a of question QAE, whether the acts' own checks meet the commit-first condition).
 
 Consultant's picks from round 1 review, not owner rulings:
 
