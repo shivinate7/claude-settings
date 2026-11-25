@@ -48,9 +48,10 @@ rule's settings-write ask, and it reaches agents.
   for any other prompt. The yes/no call fails closed: an error or an odd answer grants nothing. The plain path's rules:
     - Strip every MACHINE_TAGS or NOTICE_FRAMES block anywhere, and a pasted block, first. An unclosed block, and a
       `[SYSTEM NOTIFICATION` line, run to the end.
-    - The keyword forms and both plain asks read what follows the desktop app's notes at the start of the prompt (_typed:
-      whole <system-reminder> blocks that a blank line closes) as the owner's typed words. A prompt that is only
-      notes, an unclosed block, a fired task's block and any other frame grant nothing.
+    - The keyword forms and both plain asks read what follows the app blocks at the start of the prompt (_typed: whole
+      <system-reminder> blocks that a blank line closes, or that one newline chains to the next block) as the owner's
+      typed words. A prompt that is only app blocks, an unclosed block, a fired task's block and any frame (a
+      NOTICE_FRAMES one such as <side-sessions-event> or <ci-monitor-event>, a peer or agent message) grant nothing.
     - In a cloud session (env CLAUDE_CODE_REMOTE_SESSION_ID set), a prompt with no earlier owner turn in the
       transcript is a seed prompt: no judge call.
     - A first word `opus` keeps the keyword path only when the rest starts with `off`, a length, or a role then a
@@ -362,8 +363,10 @@ def _text_of(rec):
 
 
 def _typed(prompt):
-    """The prompt less the app blocks at its start (lint/_transcript.py strip_app_notes): the desktop app puts a block ahead
-    of the owner's typed words, and those words are the owner's as if the note were absent. A fired task's block stays.
+    """The prompt less the app blocks at its start (lint/_transcript.py strip_app_notes): the desktop app puts a block, or
+    a chain of blocks one newline apart, ahead of the owner's typed words, and those words are the owner's as if no app block
+    were there. A fired task's block stays. A frame after the blocks (NOTICE_FRAMES: <side-sessions-event>, <ci-monitor-event>,
+    a peer message) is no typed word: it stays, and the callers' notice checks refuse it.
     The prompt as given when it is no string or the helper cannot load: a plain `override 15m` still grants."""
     if not isinstance(prompt, str):
         return prompt
