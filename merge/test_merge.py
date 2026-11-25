@@ -30170,6 +30170,17 @@ class StaleMergeTrees(unittest.TestCase):
         ret, _ = self.drop_printed(tmp, wt)
         self.assertIs(ret, True, "drop_worktree returns True for a tree it removed; returned %r" % (ret,))
 
+    def test_dropping_a_tree_that_is_already_gone_prints_no_line_and_returns_true(self):
+        """A tree the first drop removed is gone. git refuses a removal of a gone tree, and that is no failure: the second drop prints
+        nothing and returns True."""
+        tmp, wt = self.make_tree("twice", "merge tool, pid %d" % os.getpid())
+        first_ret, _ = self.drop_printed(tmp, wt)
+        self.assertIs(first_ret, True, "scope: the first drop of a clean tree must return True, or the second drop proves nothing; returned %r" % (first_ret,))
+        self.assertFalse(os.path.exists(tmp), "scope: the first drop must remove the folder, or the second drop is not a drop of a gone tree")
+        ret, printed = self.drop_printed(tmp, wt)
+        self.assertEqual(printed, [], "a drop of a tree that is already gone prints no line; printed %r" % (printed,))
+        self.assertIs(ret, True, "a drop of a tree that is already gone returns True; returned %r" % (ret,))
+
 
 class ProducerFolderNames(unittest.TestCase):
     """A run folder that a real producer makes carries the run's pid in its name, so the merge tool's sweep can find it once the
