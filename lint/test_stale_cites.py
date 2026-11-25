@@ -2941,15 +2941,14 @@ class CitedExcerptTests(unittest.TestCase):
         self.assertIsNone(shown, "a read cite with no backing path gives %r, want None" % (shown,))
 
     def test_a_cited_row_is_whole_when_no_row_limit_is_given(self):
-        # Control: a row limit is opt-in, so a caller that names none still gets each cited row whole. The judge's cut of one over-budget
-        # line passes its own limit (the packing pick, 04:00 CST Nov 24 2026) and changes no other caller.
+        # Control: a row limit is opt-in. A caller that sets none still gets each cited row whole.
         long_row = "a = " + "1" * 500
         shown = self.stale.cited_excerpt("read src/widget.py:1", long_row + "\n")
         self.assertEqual(shown, "1: " + long_row, "a cited row of %d characters is not whole with no row limit given" % len(long_row))
 
-    # A `read` cite that names a symbol, and gives no line number, starts at that symbol: its def, its class, or its module-level
-    # assignment. The file head is the wrong place for a symbol far below it (hooks/guard.py's header runs to line 642).
-    DEEP = "".join("x%d = %d\n" % (n, n) for n in range(60)) + "\n\ndef deep():\n    return 1\n"  # `def deep` is line 63
+    # A `read` cite that names a symbol and gives no line number starts at that symbol: its def, its class, or its module-level
+    # assignment. A file head shows none of a symbol that sits past the first 40 rows.
+    DEEP = "".join("x%d = %d\n" % (n, n) for n in range(60)) + "\n\ndef deep():\n    return 1\n"  # `def deep` sits past the first 40 rows
     DEEP_LONG = DEEP + "".join("    v%d = 1\n" % n for n in range(80))  # the same def, with a body past the default limit
 
     def test_a_read_cite_naming_a_function_starts_at_its_def(self):
@@ -2981,7 +2980,7 @@ class CitedExcerptTests(unittest.TestCase):
                          "a read cite naming a method starts at %r, not at the method" % shown.split("\n")[0])
 
     def test_a_read_cite_naming_no_symbol_shows_the_file_head(self):
-        # Control: a name the file does not bind falls back to the top of the file, as it does today.
+        # Control: a name the file does not bind falls back to the top of the file.
         shown = self.stale.cited_excerpt("read lint/widget.py missing_name", self.DEEP)
         self.assertEqual(shown.split("\n")[0], "1: x0 = 0",
                          "a read cite naming no symbol starts at %r, not at the file head" % shown.split("\n")[0])
@@ -2992,13 +2991,13 @@ class CitedExcerptTests(unittest.TestCase):
         self.assertEqual(shown, "63: def deep():\n64:     return 1", "a read line range past line 40 does not give those two lines")
 
     def test_a_test_cite_past_line_40_starts_at_its_def(self):
-        # Control: the test form already starts at the def of its name, past line 40 too.
+        # Control: the test form starts at the def of its name, also when that def sits past the first 40 rows.
         shown = self.stale.cited_excerpt("test lint/widget.py::deep", self.DEEP)
         self.assertEqual(shown.split("\n")[0], "63: def deep():",
                          "a test cite past line 40 starts at %r, not at its def" % shown.split("\n")[0])
 
     def test_a_test_cite_to_a_def_at_line_11_shows_limit_rows_from_it(self):
-        # The window runs from the def, whatever line it is on: 40 rows from line 11, which ends at line 50.
+        # The window runs limit rows from the def, wherever the def sits. Here the def is near the top of the file.
         text = "".join("x%d = %d\n" % (n, n) for n in range(10)) + "def near():\n" + "".join("    v%d = 1\n" % n for n in range(80))
         rows = self.stale.cited_excerpt("test lint/widget.py::near", text).split("\n")
         self.assertEqual(rows[0], "11: def near():", "a test cite to a def at line 11 starts at %r, not at its def" % rows[0])
@@ -3006,7 +3005,7 @@ class CitedExcerptTests(unittest.TestCase):
                          "a test cite to a def at line 11 ends at %r, want line 50 (40 rows from the def)" % rows[-1])
 
     def test_a_test_cite_to_a_def_at_line_63_shows_limit_rows_from_it(self):
-        # The same claim past line 40: 40 rows from line 63 of a 200-line file, which ends at line 102.
+        # The same claim for a def past the first 40 rows: the window still runs limit rows from the def.
         text = "".join("x%d = %d\n" % (n, n) for n in range(62)) + "def deep():\n" + "".join("    v%d = 1\n" % n for n in range(137))
         rows = self.stale.cited_excerpt("test lint/widget.py::deep", text).split("\n")
         self.assertEqual(rows[0], "63: def deep():", "a test cite to a def at line 63 starts at %r, not at its def" % rows[0])
@@ -3014,7 +3013,7 @@ class CitedExcerptTests(unittest.TestCase):
                          "a test cite to a def at line 63 ends at %r, want line 102 (40 rows from the def)" % rows[-1])
 
     def test_a_test_cite_to_a_def_five_lines_before_the_end_shows_those_five(self):
-        # The window stops at the file end: a def at line 196 of a 200-line file shows lines 196 to 200, five rows.
+        # The window stops at the file end, so a def near the end shows only the rows that exist.
         text = "".join("x%d = %d\n" % (n, n) for n in range(195)) + "def tail():\n" + "".join("    v%d = 1\n" % n for n in range(3)) + "    return 1"
         shown = self.stale.cited_excerpt("test lint/widget.py::tail", text)
         self.assertEqual(shown.split("\n"), ["196: def tail():", "197:     v0 = 1", "198:     v1 = 1", "199:     v2 = 1", "200:     return 1"],
@@ -3052,16 +3051,16 @@ class CitedExcerptTests(unittest.TestCase):
                          "a read cite starts at %r, not at the def after a lone quote in a comment" % shown.split("\n")[0])
 
     def two_path_excerpt(self, cite, texts):
-        # The one-text shape takes a single file's text, so a dict raises. That raise is the shape this case assumes is missing,
-        # and it fails here as an assert that names it. A builder who takes a {path: text} mapping makes the call return.
+        # A cite that names two paths takes a {path: text} mapping. A call that raises instead (the one-text shape) fails the
+        # case with a message that names the missing shape.
         try:
             return self.stale.cited_excerpt(cite, texts)
         except (AttributeError, TypeError) as exc:
             self.fail("cited_excerpt takes one file's text, so a cite naming two paths cannot show both: %s" % exc)
 
     def test_a_cite_naming_two_paths_shows_each_symbol_under_its_own_path(self):
-        # ASSUMED SHAPE: cited_excerpt(cite, {path: text}) returns one block per path, each opened by a "== path" line, then that
-        # path's numbered rows capped at the default limit of 40. A str still means the one file the cite's first path names.
+        # cited_excerpt(cite, {path: text}) gives one block per path, each opened by a "== path" row, then that path's numbered
+        # rows, capped at the default limit of 40. A str text still means the one file the cite's first path names.
         alpha = "".join("a%d = %d\n" % (n, n) for n in range(60)) + "\n\ndef alpha():\n" + "".join("    a%d = 1\n" % n for n in range(60))
         beta = "".join("b%d = %d\n" % (n, n) for n in range(60)) + "\n\ndef beta():\n" + "".join("    b%d = 1\n" % n for n in range(60))
         shown = self.two_path_excerpt("read lint/a.py alpha, lint/b.py beta", {"lint/a.py": alpha, "lint/b.py": beta})
