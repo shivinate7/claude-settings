@@ -3123,6 +3123,69 @@ class CitedExcerptTests(unittest.TestCase):
         self.assertEqual(shown.split("\n")[0], "2:     def render(self):",
                          "a name defined twice starts at %r, not at the earliest def" % shown.split("\n")[0])
 
+    # The fixture for the cases below: one def or constant per name, with FILL_ROWS between two of them, so a window of
+    # 20 rows from one name never reaches another name's rows.
+    def apart(self, *blocks):
+        return "".join(block + self.FILL_ROWS for block in blocks)
+
+    def name_fixture(self):
+        return self.apart("def alpha():\n    return 1\n", "def beta():\n    return 2\n", "def read(path):\n    return path\n",
+                          "def test():\n    return 3\n", "def the():\n    return 4\n", "def Then():\n    return 5\n",
+                          "ALPHA = 6\n", "class Guard:\n    def check(self):\n        return 7\n")
+
+    def test_a_second_read_of_one_path_shows_its_name_and_not_the_verb(self):
+        # Two reads of one path. The second `read` is a verb, and beta is the name of the second cite.
+        shown = self.stale.cited_excerpt("read pkg/mod.py alpha; read pkg/mod.py beta", self.name_fixture())
+        self.assertIn("def alpha():", shown, "the first read of pkg/mod.py does not show alpha's def")
+        self.assertIn("def beta():", shown, "the second read of pkg/mod.py gives no rows: beta's def is not in the excerpt")
+        self.assertNotIn("def read(", shown, "the verb `read` of the second cite is taken as a name of pkg/mod.py: def read shows")
+
+    def test_a_read_verb_after_a_comma_is_not_a_name(self):
+        shown = self.stale.cited_excerpt("read pkg/mod.py alpha, read", self.name_fixture())
+        self.assertIn("def alpha():", shown, "alpha's def is not in the excerpt of `read pkg/mod.py alpha, read`")
+        self.assertNotIn("def read(", shown, "the verb `read` after a comma is taken as a name: def read shows")
+
+    def test_a_test_verb_after_a_comma_is_not_a_name(self):
+        shown = self.stale.cited_excerpt("read pkg/mod.py alpha, test", self.name_fixture())
+        self.assertIn("def alpha():", shown, "alpha's def is not in the excerpt of `read pkg/mod.py alpha, test`")
+        self.assertNotIn("def test(", shown, "the verb `test` after a comma is taken as a name: def test shows")
+
+    def test_a_capitalised_word_after_a_sentence_end_is_not_a_name(self):
+        # `Then...` ends the cite. The word after a name's sentence end is prose, so it is not a name.
+        shown = self.stale.cited_excerpt("read pkg/mod.py alpha. Then...", self.name_fixture())
+        self.assertIn("def alpha():", shown, "alpha's def is not in the excerpt of `read pkg/mod.py alpha. Then...`")
+        self.assertNotIn("def Then(", shown, "the word Then after a sentence end is taken as a name: def Then shows")
+
+    def test_a_word_after_a_comma_before_capitalised_prose_is_not_a_name(self):
+        # `the` is followed by a capitalised word, so the lower-case prose check does not stop it. It is still prose.
+        shown = self.stale.cited_excerpt("read pkg/mod.py alpha, the Bash route's denial", self.name_fixture())
+        self.assertIn("def alpha():", shown, "alpha's def is not in the excerpt of `read pkg/mod.py alpha, the Bash route's denial`")
+        self.assertNotIn("def the(", shown, "the word `the` before prose is taken as a name: def the shows")
+
+    def test_a_constant_then_a_name_both_show_control(self):
+        # Control: a capitalised constant is a name, and the name after it is a name too.
+        shown = self.stale.cited_excerpt("read pkg/mod.py ALPHA, beta", self.name_fixture())
+        self.assertIn("ALPHA = 6", shown, "the constant ALPHA is not in the excerpt of `read pkg/mod.py ALPHA, beta`")
+        self.assertIn("def beta():", shown, "beta, the name after ALPHA, is not in the excerpt")
+
+    def test_a_dotted_name_starts_at_its_method_control(self):
+        # Control: Guard.check starts at the method, not at the class line or the file head.
+        shown = self.stale.cited_excerpt("read pkg/mod.py Guard.check", self.name_fixture())
+        self.assertEqual(shown.split("\n")[0].split(": ", 1)[1], "    def check(self):",
+                         "Guard.check starts at %r, not at the method" % shown.split("\n")[0])
+
+    def test_a_lower_case_word_after_a_sentence_end_stays_prose_control(self):
+        # Control: the lower-case `the` after `Then` keeps Then out of the names.
+        shown = self.stale.cited_excerpt("read pkg/mod.py alpha. Then the guard runs", self.name_fixture())
+        self.assertIn("def alpha():", shown, "alpha's def is not in the excerpt of `read pkg/mod.py alpha. Then the guard runs`")
+        self.assertNotIn("def Then(", shown, "Then, followed by lower-case prose, is taken as a name: def Then shows")
+
+    def test_a_lower_case_word_after_a_comma_stays_prose_control(self):
+        # Control: `the` is followed by lower-case prose, so it is not a name.
+        shown = self.stale.cited_excerpt("read pkg/mod.py alpha, the second route's denial", self.name_fixture())
+        self.assertIn("def alpha():", shown, "alpha's def is not in the excerpt of `read pkg/mod.py alpha, the second route's denial`")
+        self.assertNotIn("def the(", shown, "`the`, followed by lower-case prose, is taken as a name: def the shows")
+
 
 CONFIG = "hooks/config.py"  # the Python file the value cites name
 LIMIT_BASE = "LIMIT = 4\n\n\ndef keep():\n    return 1\n"
