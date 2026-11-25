@@ -736,8 +736,9 @@ jobs:
       # Stable's copy of the code runs on this tree. This tree's script drives it, because stable may not hold the script yet.
       # A change that only edits a reader passes while stable reads the data as it stands the way the changed reader does. It is red when the changed reader
       # reads the existing data differently from stable, or when stable already misreads it: land that reader alone, move stable, then land the data that needs it.
-      # Cost per run: one git archive and tar, then three python starts (a probe of each tree's readers, and the stable records generator), plus one temporary worktree
-      # and one generator run when this pull request changed the records page. Measured on this repo: 2.8 s, or 7.8 s with the page proof (n=1 each, a laptop).
+      # A pull request that changes no data file (stamp.json, the workflows, the records page) gets a stable-versus-head difference waived, with one printed line per key.
+      # Cost per run: one git archive and tar, then four python starts (this script, a probe of each tree's readers, and the stable records generator), plus one temporary
+      # worktree and one more python start (a generator run) when this pull request changed the records page. Measured on this repo: 2.8 s, or 7.8 s with the page proof (n=1 each, a laptop).
       - name: Stable readers accept this tree
         if: ${{ !cancelled() && github.event_name == 'pull_request' }}
         env:

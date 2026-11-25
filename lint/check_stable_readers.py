@@ -6,7 +6,10 @@ Usage: python3 lint/check_stable_readers.py --stable-tree DIR --head-tree DIR [-
   --stable-tree  a tree of the stable branch (merge/, lint/, hooks/, actions/ at least), never the live clone.
   --head-tree    the pull request's tree, a git checkout. Its data is read: .github/stamp.json, .github/workflows, the records page.
   --base-ref     optional git ref in the head tree. The records page is judged only when the head changed it against that ref, because a
-                 page left stale by a new record is normal on a pull request: the merge tool regenerates it at merge.
+                 page left stale by a new record is normal on a pull request: the merge tool regenerates it at merge. A pull request that
+                 changes no data file against that ref (the stamp, the workflows, the records page) has each stable-versus-head difference
+                 waived, with one printed line naming its key: the data is the same as on the base, so the difference is the reader's, and
+                 the pull request that lands the reader is the one the rule says to land first. A refusal is never waived.
 Exit 0 every stable reader accepts the tree; 1 a reader refuses or reads it differently from the head's own reader (each finding names the
 reader and its key); 2 a bad call.
 
@@ -24,6 +27,7 @@ KEYS = {  # the data each reader reads, named in a finding
     "parse_config": CONFIG + " merge block", "ready_job_groups": "merge.readyChecks", "base_job_caps": ".github/workflows",
     "base_stamp": "kinds", "page_is_generated": "the records page", "pinned_required": "merge.requiredChecks", "cite_form": "cite.form",  # glossary-ok: the reader's name in merge/merge.py
 }
+CHANGED = "data_changed"  # the probe's own key: the data files the pull request changes against the base, not a reader
 PROBE_SECONDS, CATALOG_SECONDS = 300, 120  # unmeasured: the longest read is one worktree add and one generator run
 
 
@@ -51,7 +55,7 @@ def probe(code_tree, data, base_ref):
         with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
             spec.loader.exec_module(merge)
     except (Exception, SystemExit) as e:
-        return {"merge.py": {"error": f"cannot load merge/merge.py: {type(e).__name__}: {e}"}}
+        return {"merge.py": {"error": f"cannot load merge/merge.py (unknown): {type(e).__name__}: {e}"}}
     try:
         with open(os.path.join(data, CONFIG), encoding="utf-8") as f:
             cfg = json.load(f)
@@ -77,6 +81,10 @@ def probe(code_tree, data, base_ref):
     read("pinned_required", lambda: guard_merge.pinned_required(data))
     import agent_brief  # noqa: E402
     read("cite_form", lambda: agent_brief.cite_form(data))
+    if base_ref:  # an unreadable diff leaves the key out: no waiver is given on an unknown
+        code, out = merge.git(data, "diff", "--name-only", base_ref, "HEAD", "--", CONFIG, ".github/workflows", page)
+        if code == 0:
+            results[CHANGED] = {"value": out.split()}
     return results
 
 
@@ -103,8 +111,9 @@ def differing_keys(stable, head):
 
 
 def compare(stable, head):
-    """-> findings: one line per reader that refuses the head's data, or reads it differently from the head's own reader."""
-    findings = []
+    """-> (findings, differences): one line per reader that refuses the head's data, or reads it differently from the head's own reader.
+    `differences` are the findings that are a plain difference between two values, the only kind a reader-only pull request may waive."""
+    findings, differences = [], []
     for name, got in stable.items():
         key = KEYS.get(name, name)
         if "error" in got:
@@ -113,9 +122,10 @@ def compare(stable, head):
             findings.append(f"{name} ({key}): the stable generator does not write the committed page: it was edited by hand or the generator reads the records differently")
         elif name in head and head[name] != got:
             keys = differing_keys(got.get("value"), head[name].get("value")) if name == "parse_config" else ""
-            findings.append(f"{name} ({keys or key}): the stable reader reads this tree differently from the head's reader: "
-                            f"stable {json.dumps(got.get('value'))[:160]}, head {json.dumps(head[name].get('value', head[name]))[:160]}")
-    return findings
+            line = (f"{name} ({keys or key}): the stable reader reads this tree differently from the head's reader: "
+                    f"stable {json.dumps(got.get('value'))[:160]}, head {json.dumps(head[name].get('value', head[name]))[:160]}")
+            (differences if "value" in head[name] else findings).append(line)
+    return findings, differences
 
 
 def catalog_finding(stable_tree, head_tree):
@@ -150,18 +160,28 @@ def main(argv):
     stable_tree, head_tree = os.path.abspath(args.stable_tree), os.path.abspath(args.head_tree)
     stable, why = run_probe(stable_tree, head_tree, args.base_ref)
     head, head_why = run_probe(head_tree, head_tree, args.base_ref)
-    findings = []
+    findings, waived = [], []
     if stable is None:
         findings.append(f"probe (the stable readers): could not run (unknown): {why}")
-    elif "merge.py" in stable:
-        findings.append(f"merge.py ({stable['merge.py']['error']})")
     elif head is None:
         findings.append(f"probe (the head's readers): could not run (unknown): {head_why}")
+    elif "merge.py" in stable or "merge.py" in head:  # a merge tool that does not load gives no reader to compare: unknown, never a pass
+        findings += [f"merge.py ({side}'s tool): {got['merge.py']['error']}" for side, got in (("stable", stable), ("head", head)) if "merge.py" in got]
     else:
-        findings += compare(stable, head)
+        changed = head.pop(CHANGED, None)
+        stable.pop(CHANGED, None)
+        found, differences = compare(stable, head)
+        findings += found
+        if changed is not None and not changed["value"]:
+            waived = differences
+        else:
+            findings += differences
     found = catalog_finding(stable_tree, head_tree)
     if found:
         findings.append(found)
+    for line in waived:
+        key = line.split(" (", 1)[1].split("):", 1)[0]
+        print(f"stable readers: waived {key}: this pull request changes no data file against {args.base_ref}, so the difference is the reader's")
     for line in findings:
         print(f"stable readers: {line}")
     if findings:
