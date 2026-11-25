@@ -3706,6 +3706,10 @@ MUTATIONS = [
      "        return bool(BRIEF_DESTRUCTIVE_FREE_SPAN.fullmatch(command.strip()))",
      "        return True",
      "guard", "a reset span with a flag, then -free, is denied"),
+    ("brief-destructive-git: the -free pass is never called, so a git stash span followed directly by -free is denied",
+     "(_brief_free(command, after) or",
+     "(False or",
+     "guard", "a git stash span followed directly by -free is allowed"),
     ("brief-destructive-git: a prohibition is any negator in 4 words, so do not forget to run is allowed",
      "    return len(words) >= 2 and words[-1] in BRIEF_DESTRUCTIVE_RUN_VERBS and words[-2] in BRIEF_DESTRUCTIVE_NEGATORS",
      "    return any(word in BRIEF_DESTRUCTIVE_NEGATORS for word in words[-4:])",
@@ -3732,6 +3736,12 @@ MUTATIONS = [
      "return bool(negator) and _brief_git_list(text.strip()[negator.end():])",
      "return bool(negator)",
      "guard", "a span that opens with Never run, then a joiner and a reset order, is denied"),
+    # Rule brief-destructive-git: a span with no joiner after it ends a prohibited list, so a colon or a space does not carry
+    # the negator on to the span after it.
+    ("brief-destructive-git: a span with no joiner after it does not end the list, so Avoid a span, a colon, then a reset span is allowed",
+     'if words[-1] == "\\x00" and not joined:',
+     "if False:",
+     "guard", "brief-destructive-git: Avoid a span, a colon, then a reset span is denied"),
     # Rule brief-claim-has-probe: one mutant per edge the cases pin.
     ("brief-claim: the check never fires, so an unprobed claim about main passes",
      '    return brief_claim_gaps(tool_input.get("prompt"))',
