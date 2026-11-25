@@ -262,8 +262,32 @@ class CheckLandedDirsTests(unittest.TestCase):
         self.assertEqual(result.returncode, 1, result.stdout)
         self.assertIn("has an entry that is not os.path.normcase", result.stderr)
 
+    def assert_refused_loudly(self, result, cause):
+        # A refusal is the check's own FAIL line, not a traceback from a crash.
+        self.assertEqual(result.returncode, 1, "%s passed the check: %s" % (cause, result.stdout))
+        self.assertIn("check_landed_dirs: FAIL", result.stderr, "%s was not refused with the check's message: %s"
+                      % (cause, result.stderr))
+        self.assertIn("CONFIG_FROZEN_DIRS", result.stderr, "the refusal does not name the frozen dirs: %s" % result.stderr)
 
-GUARD_LITERAL = 'CONFIG_FROZEN_DIRS = (\n    os.path.normcase("hooks"),\n    os.path.normcase("lint"),\n)\n'
+    def test_a_second_frozen_dirs_literal_is_refused_loudly(self):
+        # Why: two literals of one name leave the reader to pick one, and a guard that reads the other goes unchecked.
+        result = run_in_copy(edit_frozen_literal(lambda literal: literal + literal))
+        self.assert_refused_loudly(result, "a second CONFIG_FROZEN_DIRS literal")
+
+    def test_an_augmented_frozen_dirs_assignment_is_refused_loudly(self):
+        # Why: += changes the frozen set after the literal, and a reader that reads only the literal misses the change.
+        result = run_in_copy(edit_frozen_literal(
+            lambda literal: literal + 'CONFIG_FROZEN_DIRS += (os.path.normcase("newdir"),)\n'))
+        self.assert_refused_loudly(result, "a CONFIG_FROZEN_DIRS += after the literal")
+
+    def test_an_append_to_frozen_dirs_inside_an_if_is_refused_loudly(self):
+        # Why: an append under an if changes the frozen set on some platforms only, and the reader must not skip it.
+        result = run_in_copy(edit_frozen_literal(
+            lambda literal: literal + 'if os.name:\n    CONFIG_FROZEN_DIRS.append(os.path.normcase("newdir"))\n'))
+        self.assert_refused_loudly(result, "an append to CONFIG_FROZEN_DIRS inside an if")
+
+
+GUARD_LITERAL ='CONFIG_FROZEN_DIRS = (\n    os.path.normcase("hooks"),\n    os.path.normcase("lint"),\n)\n'
 
 
 class GuardTupleReadTests(unittest.TestCase):
