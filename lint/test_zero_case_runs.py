@@ -4,14 +4,16 @@
 A hand runner prints its own `PASS: N of N` line and exits 0 when its case list is empty, so a suite
 that lost every case still passes when run directly. CI runs most steps without bin/verdict, the one
 place that fails a run of zero tests. So each hand runner here runs with its case lists emptied, and
-must exit non-zero without a traceback. The token-weather collector runs with every `await test(`
-disabled, and must exit non-zero too.
+must exit non-zero without a traceback. Each mods test collector (token-weather, session-board,
+decision-watch, plain-diff) runs with every `await test(` disabled, and must exit non-zero too.
 
 The runner's case lists are emptied by a driver in the run folder: it loads the runner file as a module
 (not as __main__), sets each case list it finds to an empty one of the same type, then calls main().
 A runner that loads its cases in another name must be added to CASE_LISTS.
 """
 import os
+import pathlib
+import re
 import shutil
 import subprocess
 import sys
@@ -42,7 +44,13 @@ RUNNERS = [
     "hooks/test_reply_judge.py",
 ]
 MODS_TEST = os.path.join("mods", "token-weather", "token-weather.test.mjs")
-DISABLE_FROM = "await test("  # every case in the collector starts with this call
+SESSION_BOARD = os.path.join("mods", "session-board", "session-board.test.mjs")
+DECISION_WATCH = os.path.join("mods", "decision-watch", "decision-watch.test.mjs")
+PLAIN_DIFF = os.path.join("mods", "plain-diff", "plain-diff.test.mjs")
+DISABLE_FROM = "await test("  # every case in a mods collector starts with this call
+SUMMARY = re.compile(r"fail of 0\b")  # every collector ends with "<name>: N pass, M fail of T"
+# An import with a relative specifier: `from './x'`, `import '../y'`, or a dynamic `import('./z')`.
+STATIC_IMPORT = re.compile(r"""(\bfrom\s+|\bimport\s+|\bimport\(\s*)(['"])(\.\.?/[^'"]+)\2""")
 
 DRIVER = '''import importlib.util, os, sys
 path = os.path.abspath(sys.argv[1])
@@ -86,22 +94,55 @@ class HandRunnersWithNoCases(unittest.TestCase):
                 self.assertNotIn("Traceback", proc.stderr, "%s crashed with zero cases, not failed" % path)
 
 
+def absolute_import(match, base):
+    """The import with its relative specifier made an absolute file URL under base."""
+    target = os.path.normpath(os.path.join(base, match.group(3)))
+    return match.group(1) + match.group(2) + pathlib.Path(target).as_uri() + match.group(2)
+
+
+def zero_test_exit(case, path):
+    """Run one mods test file with every `await test(` call disabled, and check that the run fails.
+
+    The copy goes in the run folder. Its static relative imports become absolute file URLs, and every
+    import.meta.url names the original file, so top-level reads of repo files still find them. The
+    summary line must print first: a crash before it fails the case under its own name, not as a
+    zero-test run that passed."""
+    node = shutil.which("node")
+    if node is None:
+        case.skipTest("node is not on PATH: the %s zero-test case skips here" % os.path.basename(path))
+    with open(os.path.join(REPO, path), encoding="utf-8") as f:
+        source = f.read()
+    case.assertGreater(source.count(DISABLE_FROM), 0,
+                       "%s has no `await test(` call to disable, so no zero-test run can be made" % path)
+    original = os.path.join(REPO, path)
+    base = os.path.dirname(original)
+    copied = STATIC_IMPORT.sub(lambda m: absolute_import(m, base), source)
+    copied = copied.replace("import.meta.url", '"%s"' % pathlib.Path(original).as_uri())
+    variant = os.path.join(RUN, "zero_" + os.path.basename(path))
+    with open(variant, "w", encoding="utf-8") as f:
+        f.write(copied.replace(DISABLE_FROM, "if (false) " + DISABLE_FROM))
+    proc = subprocess.run([node, variant], cwd=RUN, capture_output=True, text=True, timeout=TIMEOUT)
+    last = (proc.stdout + proc.stderr).strip().splitlines()[-1:] or ["<no output>"]
+    case.assertRegex(proc.stdout, SUMMARY,
+                     "%s did not reach its summary line with zero tests run: its last line is %r" % (path, last[0]))
+    case.assertNotEqual(proc.returncode, 0,
+                        "%s exits 0 with zero tests run: its last line is %r" % (path, last[0]))
+
+
 class TokenWeatherCollectorWithNoTests(unittest.TestCase):
     def test_collector_exits_nonzero_when_every_test_is_disabled(self):
-        node = shutil.which("node")
-        if node is None:
-            self.skipTest("node is not on PATH: the token-weather zero-test case skips here")
-        with open(os.path.join(REPO, MODS_TEST), encoding="utf-8") as f:
-            source = f.read()
-        self.assertGreater(source.count(DISABLE_FROM), 0,
-                           "%s has no `await test(` call to disable, so no zero-test run can be made" % MODS_TEST)
-        variant = os.path.join(RUN, "token_weather_zero.test.mjs")
-        with open(variant, "w", encoding="utf-8") as f:
-            f.write(source.replace(DISABLE_FROM, "if (false) " + DISABLE_FROM))
-        proc = subprocess.run([node, variant], cwd=RUN, capture_output=True, text=True, timeout=TIMEOUT)
-        last = (proc.stdout + proc.stderr).strip().splitlines()[-1:] or ["<no output>"]
-        self.assertNotEqual(proc.returncode, 0,
-                            "token-weather collector exits 0 with zero tests run: its last line is %r" % last[0])
+        zero_test_exit(self, MODS_TEST)
+
+
+class ModsCollectorsWithNoTests(unittest.TestCase):
+    def test_session_board_exits_nonzero_when_every_test_is_disabled(self):
+        zero_test_exit(self, SESSION_BOARD)
+
+    def test_decision_watch_exits_nonzero_when_every_test_is_disabled(self):
+        zero_test_exit(self, DECISION_WATCH)
+
+    def test_plain_diff_exits_nonzero_when_every_test_is_disabled(self):
+        zero_test_exit(self, PLAIN_DIFF)
 
 
 if __name__ == "__main__":
