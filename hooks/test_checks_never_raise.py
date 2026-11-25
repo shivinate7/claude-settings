@@ -974,8 +974,9 @@ def main():
     started = time.monotonic()
     try:
         with pinned_env(SHAPES[0][1]):
-            if not (self_test() and sweep_proof()):
-                return 1
+            if not self_test():
+                return 1   # a broken harness proves nothing, so the run stops here
+            sweep_ok = sweep_proof()   # a failed sweep is counted at the end; the fuzz still shows its rows
         problems = fixture_proof()
         for problem in problems:
             print("FAIL fixture: %s" % problem)   # the fuzz still runs, so each family's own rows show too
@@ -1027,7 +1028,7 @@ def main():
                  failing, elapsed))
         print("not fuzzed directly: %s" % ", ".join("%s.%s (%s)" % (key[0], key[1], why)
                                                   for key, why in sorted(outside.items())))
-        return 1 if failing or problems else 0
+        return 1 if failing or problems or not sweep_ok else 0
     finally:
         shutil.rmtree(RUN, ignore_errors=True)
 
