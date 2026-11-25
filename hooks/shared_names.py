@@ -33,6 +33,11 @@ REMOTE_OUTWARD_TOOLS = tuple(REMOTE_SERVER + "__" + short for short in (
     "unsubscribe_pr_activity", "add_repo", "register_repo_root", "confirm_repository_trust",
     "request_computer_folder"))
 
+# The one home of the model families, lowest to highest by the order roles run them (opus and fable sit above sonnet; the
+# guard ranks fable beside opus). The guard's role rank, the owner's model word (hooks/override.py), the turn-end model
+# line and the agent self-model scan read this tuple, never a copy of it.
+MODEL_FAMILIES = ("haiku", "sonnet", "opus", "fable")
+
 # A prompt that starts with one of these is a notice from a tool or an agent, never the owner.
 TASK_NOTIFICATION_TAG = "<task-notification>"
 # The words of the completed notice for a background agent that ended its turn while its own background

@@ -4828,7 +4828,8 @@ def step_up_reason(prompt: str, role, model, rounds=None) -> str:
 # skill, a hook) names no role, and the first row for a role wins. Cost per Agent or Task spawn: one read of the record and,
 # for a spawn with no model, one read of the agent files. No process starts and no file is written, except the one
 # `agent-role-model-unread` log line when a read fails.
-ROLE_MODEL_RANK = ("haiku", "sonnet", "opus")
+from shared_names import MODEL_FAMILIES  # noqa: E402  the one home of the model list, shared with lint/report_guard.py
+ROLE_MODEL_RANK = MODEL_FAMILIES  # the family a model name holds ranks by its place here; fable sits beside opus, above sonnet
 EFFORT_LEVELS = ("low", "medium", "high", "xhigh", "max")  # the words an effort cell or an `effort:` key can hold
 ROLE_TABLE_FILE = "agent-model-cap.md"   # inside the record folder that lint/layout.py names
 ROLE_TABLE_MAX = 256 * 1024
@@ -5343,11 +5344,11 @@ def role_model_one(tool_input):
     role = role_name(table, tool_input.get("subagent_type"))
     model = str(tool_input.get("model") or "").strip()
     if model:
-        top = len(ROLE_MODEL_RANK) - 1
+        top = ROLE_MODEL_RANK.index("opus")
         named = role_model_rank(model)
         row = table.get(role)
-        if named is None:
-            # A model the table does not rank is above every row below the top rank. Its own rank is unruled, so none is guessed.
+        if named is None or named > top:
+            # A model the table does not rank, and fable above opus, is above every row below the top rank. Its own rank is unruled, so none is guessed.
             named = top if row == ROLE_MODEL_RANK[top] else top + 1
         if named == top or row is None:
             return "", "", False

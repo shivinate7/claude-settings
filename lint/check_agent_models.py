@@ -31,6 +31,7 @@ sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
 import layout  # noqa: E402  the one home of where records live (lint/layout.json)
 sys.path.insert(0, os.path.join(ROOT, "hooks"))
 from tool_lists_test import tokens, unread_list  # noqa: E402  the one reader of tool lists (hooks/tool_lists_test.py)
+from shared_names import MODEL_FAMILIES  # noqa: E402  the one home of the model list (hooks/shared_names.py)
 # One home for the role list: the guard's HAIKU_ROLES. Read it, never copy it.
 _spec = importlib.util.spec_from_file_location("guard", os.path.join(ROOT, "hooks", "guard.py"))
 _guard = importlib.util.module_from_spec(_spec)
@@ -44,7 +45,7 @@ MODEL_KEY = re.compile(r"^model\s*:\s*(.*)$", re.IGNORECASE)
 # The self-model rules. An agent runs the model its spawn names, so its body must not state a model as its own. A
 # sentence is a run of text up to `.`, `!` or `?` before a space, wrapped lines included. A chunk of sentences ends at
 # a blank line or at a list, heading or table line, so one list item never joins the next.
-MODEL_NAME = re.compile(r"\b(?:haiku|sonnet|opus)\b", re.IGNORECASE)
+MODEL_NAME = re.compile(r"\b(?:%s)\b" % "|".join(MODEL_FAMILIES), re.IGNORECASE)
 OWN_MODEL = re.compile(r"\byour\b(?:(?!\byour\b).)*?\bmodel\b", re.IGNORECASE | re.DOTALL)
 HEADER_WORD = re.compile(r"\b(?:PASS|FAIL|PARTIAL)\b")
 MODEL_SLOT = re.compile(r"<model>|\bthe model\b", re.IGNORECASE)

@@ -257,6 +257,7 @@ def _hooks_on_path():
 
 _hooks_on_path()
 from shared_names import CONSULTANT_TAG, LANE_TAG  # noqa: E402  the one home of the lane and consultant tags, shared with hooks/guard.py
+from shared_names import MODEL_FAMILIES  # noqa: E402  the one home of the model list, shared with hooks/guard.py and hooks/override.py
 
 # guard.py owns the one shell parser this repo trusts: quote-aware segment splitting,
 # heredoc-body stripping, and `git_calls`, which resolves each `git` invocation past `sudo`
@@ -1043,12 +1044,11 @@ def placeholder_problem(text):
 # search or a Plan spawn needs no name. A Workflow agent() is unseen: its model can sit in a variable.
 NAMED_ROLES = {"builder", "reviewer", "test-author", "record-writer"}
 SPAWN_TOOLS = {"Agent", "Task"}
-MODEL_FAMILIES = ("haiku", "sonnet", "opus", "fable")
 # A model names the roles just before it: "builder sonnet", "builder: sonnet", "builder (sonnet)",
 # and "builder and reviewer sonnet" all count.
 _ROLE = r"(?:builder|reviewer|test-author|record-writer)"
 ROLE_MODEL_RE = re.compile(
-    r"\b(" + _ROLE + r"(?:\s*(?:,|/|&|\band\b)\s*" + _ROLE + r")*)\s*[:(]?\s*(haiku|sonnet|opus|fable)\b",
+    r"\b(" + _ROLE + r"(?:\s*(?:,|/|&|\band\b)\s*" + _ROLE + r")*)\s*[:(]?\s*(" + "|".join(MODEL_FAMILIES) + r")\b",
     re.I)
 ROLE_RE = re.compile(_ROLE, re.I)
 # A test hook: REPORT_GUARD_AGENTS_DIR points agent_pin at a fixture folder. Read once at import; unset or empty keeps the
