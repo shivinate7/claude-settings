@@ -1606,6 +1606,96 @@ class DoneNamesModelsTests(unittest.TestCase):
         self.assertIsNotNone(out, "Done named builder opus, which no builder spawn ran, and passed")
         self.assertIn("'builder opus' matches no builder spawn, which ran sonnet", out["reason"])
 
+    # A lane's peer message can start a turn with no spawn of its own. Turn 1 ran a test-author haiku and reported; the
+    # owner's next message comes, then a lane's peer message. The turn holds no spawn, and the window holds none either.
+    PEER_BODY = "The lane's test-author ran sonnet and wrote the cases."
+    PRIOR_HAIKU_REPORT = "> **Done** BUILT the cases, PR #4 (test-author haiku)\n> **Next** Unstarted: none"
+
+    def peer_turn_records(self, window=()):
+        """Turn 1's test-author haiku and its report, then `window` (spawns made after that report, before the owner's
+        message), then the owner's next message and a lane's peer message."""
+        records = self.turn_records(earlier=[self.TEST_AUTHOR_HAIKU], report=self.PRIOR_HAIKU_REPORT, window=window)
+        return records + [human("the owner's next message"), peer_msg(self.PEER_BODY)]
+
+    def test_dm_peer_turn_with_no_spawn_passes_a_relayed_lane_model(self):
+        # Red today: the model check reads the whole transcript, where turn 1's haiku test-author ran, so Done's
+        # "test-author sonnet" matches no spawn and is refused. The lane ran the sonnet, and no spawn this session made
+        # since the report is a test-author, so the check judges no test-author: passes.
+        records = self.peer_turn_records()
+        self.assertEqual(RG.spawn_models(records[-2:]), {}, "a spawn sits in the owner's turn")
+        self.assertEqual(self.window_models(records), {}, "a spawn sits since turn 1's report")
+        out = self.stop(records, "> **Done** BUILT the cases, PR #5 (test-author sonnet)\n> **Next** Unstarted: none")
+        self.assertIsNone(out, out and out["reason"])
+
+    def test_dm_control_peer_turn_builder_in_window_still_refused(self):
+        # Control for the case above: the same turn, with a builder sonnet made after turn 1's report. The builder sits
+        # in the window, so Done's "builder opus" matches no spawn of the window's builder, and is refused. The
+        # compaction case, test_dm_red_builder_run_before_compaction_blocks, is the other control for this check.
+        records = self.peer_turn_records(window=[self.BUILDER_SONNET])
+        self.assertEqual(RG.spawn_models(records[-2:]), {}, "a spawn sits in the owner's turn")
+        self.assertEqual(self.window_models(records), {"builder": ["sonnet"]}, "the window holds no builder sonnet")
+        out = self.stop(records, "> **Done** BUILT the guard, PR #5 (builder opus)\n> **Next** Unstarted: none")
+        self.assertIsNotNone(out, "Done named builder opus, which the window's builder did not run, and passed")
+        self.assertIn("'builder opus' matches no builder spawn, which ran sonnet", out["reason"])
+
+    # The window after a session's last report is read from the records after that report. A long transcript
+    # reads only its tail: a forward scan of the whole transcript reads every record before it.
+    GOOD_BUILDER_DONE = "> **Done** BUILT the guard, PR #5 (builder sonnet)\n> **Next** Unstarted: none"
+
+    def long_transcript(self):
+        """About three thousand tool records, with an accepted report every five hundred, then one more report, then
+        ten tool records. Returns the records and the index of that last report."""
+        records = [human("do the task")]
+        for n in range(1500):
+            records += [tool_use_msg("Bash", {"command": "ls"}), tool_result_msg()]
+            if n % 500 == 499:
+                records.append(assistant_text(self.PRIOR_BUILDER_REPORT))
+        last = len(records)
+        records.append(assistant_text(self.PRIOR_BUILDER_REPORT))
+        for _ in range(5):
+            records += [tool_use_msg("Bash", {"command": "ls"}), tool_result_msg()]
+        return records, last
+
+    def test_dm_window_control_is_the_records_after_the_last_report(self):
+        # Control for the cost case below: the window is the records after the last report, on this transcript.
+        records, last = self.long_transcript()
+        self.assertEqual(RG.records_since_report(records, self.GOOD_BUILDER_DONE), records[last + 1:])
+
+    def test_dm_cost_window_reads_no_record_before_the_last_report(self):
+        # Red today: records_since_report reads every record of the transcript to find its last report, so it touches
+        # index 0. It must touch no index before the last report, which sits at index `last`.
+        class Touched(list):
+            """A transcript that notes the lowest index a reader touches, by index, slice, iteration or reversal."""
+            low = None
+
+            def note(self, index):
+                self.low = index if self.low is None else min(self.low, index)
+
+            def __getitem__(self, key):
+                if isinstance(key, slice):
+                    span = range(*key.indices(len(self)))
+                    if len(span):
+                        self.note(min(span[0], span[-1]))
+                else:
+                    self.note(key % len(self))
+                return list.__getitem__(self, key)
+
+            def __iter__(self):
+                for index, item in enumerate(list.__iter__(self)):
+                    self.note(index)
+                    yield item
+
+            def __reversed__(self):
+                for index in range(len(self) - 1, -1, -1):
+                    self.note(index)
+                    yield list.__getitem__(self, index)
+
+        records, last = self.long_transcript()
+        counted = Touched(records)
+        RG.records_since_report(counted, self.GOOD_BUILDER_DONE)
+        self.assertGreaterEqual(counted.low, last,
+                                "records_since_report read record %s, before the last report at %d" % (counted.low, last))
+
 
 class UnstartedItemsTests(unittest.TestCase):
     """reports-name-unstarted-items, in report_guard.py's Stop hook."""
@@ -2070,15 +2160,15 @@ class RewriteAfterMissingReportTests(unittest.TestCase):
 
     @staticmethod
     def summary_record():
-        """The stop_hook_summary the harness writes after a blocked Stop, just before the feedback record."""
+        """The stop_hook_summary the harness writes after a refused Stop, just before the feedback record."""
         return {"type": "system", "subtype": "stop_hook_summary", "hookErrors": ["Stop hook: send the report now."],
                 "hasOutput": True, "level": "suggestion"}
 
-    def refused_turn(self, reports, spawn=None, between=()):
-        """The turn's records: a spawn (test-author haiku by default), then each of `reports` (a report the Stop hook
-        refused), each followed by the summary, the `between` records the harness may write, and the feedback record.
-        The caller appends the correction."""
-        records = [human("do the task"), tool_use_msg("Agent", spawn or self.TEST_AUTHOR), tool_result_msg(),
+    def refused_turn(self, reports, spawn=None, between=(), before=()):
+        """The turn's records: the `before` records after the human message, then a spawn (test-author haiku by default),
+        then each of `reports` (a report the Stop hook refused), each followed by the summary, the `between` records the
+        harness may write, and the feedback record. The caller appends the correction."""
+        records = [human("do the task"), *before, tool_use_msg("Agent", spawn or self.TEST_AUTHOR), tool_result_msg(),
                    tool_use_msg("Bash", {"command": "git commit -m x"}), tool_result_msg()]
         for report in reports:
             records += [assistant_text(report), self.summary_record(), *between, self.feedback_record()]
@@ -2154,6 +2244,43 @@ class RewriteAfterMissingReportTests(unittest.TestCase):
         self.assertEqual(self.window_of(records, self.SONNET_NAMED), {"test-author": ["haiku"]},
                          "a record between the refused report's summary and its feedback cut the window, so its "
                          "haiku spawn is out of it")
+        out = self.run_hook(records, True)
+        self.assertIsNotNone(out, "the correction named test-author sonnet, which no spawn in its window ran, and passed")
+        self.assertIn(self.WRONG_NAME, out["reason"])
+
+    # An accepted report with an earlier sonnet test-author before it. It makes the sonnet name a spawn of the transcript
+    # but not of the correction's window, which starts after this report.
+    ACCEPTED_SONNET = "> **Done** BUILT the cases, PR #3 (test-author sonnet)\n> **Next** Unstarted: none"
+    EARLY_SONNET = {"subagent_type": "test-author", "model": "sonnet", "prompt": "write the cases"}
+    BEFORE_ACCEPTED = [*keyed_spawn(EARLY_SONNET, 0), assistant_text(ACCEPTED_SONNET)]
+
+    @staticmethod
+    def meta_record():
+        """A string-content isMeta user record, as the harness may write one between a refused report's summary and its
+        feedback. It is no owner message and no feedback, so it must not end the refusal of the report before it."""
+        return {"type": "user", "isSidechain": False, "isMeta": True,
+                "message": {"role": "user", "content": "Caveat: the harness wrote this record."}}
+
+    def test_rw_after_refusal_meta_record_before_feedback_still_refused(self):
+        # Red today: the isMeta record reads as an incoming message, so the refused report reads as unrefused and cuts
+        # the window, which then holds no haiku spawn. The sonnet correction passes. Control: the twin below, the same
+        # refusal with no record between the summary and the feedback.
+        self.missing_report_block()
+        records = self.refused_turn([self.REFUSED_SONNET], before=self.BEFORE_ACCEPTED,
+                                    between=[self.meta_record()]) + [assistant_text(self.SONNET_NAMED)]
+        self.assertEqual(self.window_of(records, self.SONNET_NAMED), {"test-author": ["haiku"]},
+                         "a string-content isMeta record between the refused report's summary and its feedback cut the "
+                         "window, so its haiku spawn is out of it")
+        out = self.run_hook(records, True)
+        self.assertIsNotNone(out, "the correction named test-author sonnet, which no spawn in its window ran, and passed")
+        self.assertIn(self.WRONG_NAME, out["reason"])
+
+    def test_rw_after_refusal_twin_without_meta_record_still_refused(self):
+        # Control for the case above: the same fixture with no record between the summary and the feedback.
+        self.missing_report_block()
+        records = self.refused_turn([self.REFUSED_SONNET], before=self.BEFORE_ACCEPTED) + [assistant_text(self.SONNET_NAMED)]
+        self.assertEqual(self.window_of(records, self.SONNET_NAMED), {"test-author": ["haiku"]},
+                         "the refused report cut no window, so its haiku spawn is in the correction's window")
         out = self.run_hook(records, True)
         self.assertIsNotNone(out, "the correction named test-author sonnet, which no spawn in its window ran, and passed")
         self.assertIn(self.WRONG_NAME, out["reason"])
