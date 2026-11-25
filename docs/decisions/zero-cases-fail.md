@@ -26,22 +26,23 @@ CI stays green while a suite tests nothing. CI runs most steps without `bin/verd
 - The 11 hand runners call it: `hooks/test_agent_brief.py`, `test_config_watch.py`, `test_config_watch_fast_exit.py`, `test_feedback_inbox.py`, `test_guard_load_os.py`, `test_page_link_check.py`, `test_reply_judge.py`, `test_rm_prompt_answer.py`, `test_shared_names.py`, `test_waiting_export.py`, `test_wrappers.py`.
 - The four mods collectors fail on `results.length === 0`: `mods/token-weather`, `mods/session-board`, `mods/decision-watch`, `mods/plain-diff`.
 - `lint/check_suites_have_main.py`, the checker. It reads each `test_*.py` as a syntax tree. `ALLOWED` is empty.
-- Tests: `hooks/test_case_runner.py` (3 cases); `lint/test_zero_case_runs.py` (the 11 runners with their case lists emptied, and the 4 collectors with every `await test(` disabled); `lint/test_suites_have_main.py` (4 fixture cases and 1 run over the repo).
+- `make_variant` in `lint/test_zero_case_runs.py` writes the copy of a mods file. `rewrite_variant.cjs` runs it under node with TypeScript's scanner, so it finds code, not text.
+- Tests: `hooks/test_case_runner.py` (3 cases); `lint/test_zero_case_runs.py` (the 11 runners with their case lists emptied; the 4 collectors with every awaited `test(` statement disabled; 7 cases for the copy's code-only edits); `lint/test_suites_have_main.py` (4 fixture cases and 1 run over the repo).
 
 ## Cost
 
 - Checker: one walk of the repo tree, which skips `.git`, `node_modules`, `__pycache__` and `.claude/worktrees`. Then one open and one `ast` parse per `test_*.py`. It writes no file and starts no timer. Run time: unmeasured.
 - Zero-case checks: a length test on a list or a results array. No read and no process.
-- `lint/test_zero_case_runs.py` starts 11 runner processes and up to 4 `node` processes per run, each with a 300 s limit. Run time: unmeasured.
+- `lint/test_zero_case_runs.py` starts 11 runner processes. Each copy of a mods file takes two `node` starts (rewrite, then run), and the 7 rewriter cases take one each. Each rewrite loads `typescript.js` (size and time unmeasured). Every process has a 300 s limit.
 
 ## Limits
 
 - No `checks.yml` step runs the checker, `hooks/test_case_runner.py`, `lint/test_suites_have_main.py` or `lint/test_zero_case_runs.py`. CiCoverage (`lint/test_windows_split.py`) flags the three test files for it. On a draft PR, `lane-touched-tests.yml` runs a touched `test_*.py` on Windows. The checker is not a `test_*.py`, so no workflow runs it.
 - A filter after the check. In `hooks/test_config_watch.py`, `MUTATE_ONLY` filters the case loop in `main()` after `no_cases_exit`. A value that names no case runs zero cases, skips the sweep check, prints `PASS: N of N cases right` and exits 0. `no_cases_exit` does not catch this.
 - `RUNNERS` in `lint/test_zero_case_runs.py` is a hand list. A hand runner not in it is not checked there. The file's own comment names `hooks/test_guard.py` and `lint/check_guardset_lists.py` as left out.
-- `STATIC_IMPORT` in `lint/test_zero_case_runs.py` is a text match, not a parse. It matches `from `, `import ` or `import(`, then a `'` or `"` quote, then a specifier that starts `./` or `../`, up to the same quote. It matches inside strings and comments too. It misses backtick specifiers, `require(...)`, and `import (` with a space. In the same copy step, `zero_test_exit` replaces every `import.meta.url` and every `await test(` as plain text.
+- The copy rewrites only code. It changes an import or export whose specifier starts `./` or `../`, a dynamic `import()` of one, `import.meta.url`, and an awaited `test(...)` statement. It does not change `require(...)`, a specifier without `./` or `../`, or a `test(` call that is not an awaited statement. A run with such a call still exits 1 when its own test fails, so the mods case would pass without a zero-test run.
+- The mods and rewriter cases need `tsc` and `node` on PATH, or they skip. The `CI` variable makes them run anyway, so a missing `tsc` fails there. `npm ci --ignore-scripts --prefix actions/code-check/tools` puts `tsc` on PATH (CI does this).
 - The checker reads the syntax tree, not the flow. A `unittest.main()` or `run_class` call anywhere in the file counts, even under `if False` or in an uncalled function. A base whose name ends in `TestCase` counts. A TestCase that comes from an imported base with another name is not seen.
-- `lint/test_zero_case_runs.py` skips its four mods cases when `node` is not on PATH.
 - Not this question: `bin/verdict` fails a zero-test run it reads (PR 3705). That record answers when verdict reads an exit-0 run as a failure. Its record, `decisions/verdict-reads-runner-markers.md`, was culled in commit 46eaf546d5.
 
 Basis: commit adfab4906a (incident); the all-suites audit of 2026-11-24 (brief).
