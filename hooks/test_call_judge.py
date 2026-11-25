@@ -2249,7 +2249,9 @@ UNREADABLE_WHY = "the judge's reply could not be read"
 # Path 2, item 8 named no listed ruling: the code-written text that stands in for the judge's reason.
 NO_ID_SENTENCE = ("A past ruling may cover this question, but the check named none of the listed rulings. Read the listed "
                   "rulings: if one decides this question, add a `Based on (ruling): <id>` line that names it and send the "
-                  "question again.")
+                  "question again. If none does, send the question again as it is.")
+
+
 def order_words_in(text):
     """The order words of JUDGE_REPLY that `text` holds as whole words. An empty list when it holds none."""
     words = set(re.findall(r"[a-z]+", text.lower()))
