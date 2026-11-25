@@ -346,7 +346,7 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        `CLAUDE_CODE_SUBAGENT_MODEL`, `CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL` or the `_FORCE` form.
                        (agent-model-cap)
                        deny. An Agent or Task spawn that sets model opus, unless Plan, designer,
-                       design-reviewer, refuter, a builder's third-round marker or an Explore's `Audit:` marker
+                       design-reviewer, refuter or an Explore's `Audit:` marker
                        covers it. The owner's model name lifts agent-model-floor only (owner_names_model), never this ceiling. The general override, `opus [role] <time>` or a step grant lifts the
                        spawn refusal; none lifts the settings-write ask.
   ask-alone            deny. The one remaining ask (the agent-model cap write) chained with other commands. (ask-commands-run-alone)
@@ -4322,9 +4322,6 @@ def refuse_lane_start(tool: str, hits: list) -> None:
                continue_on_lift=not last)
 
 
-# A builder's third-round marker is the `Round N of 3` line. The old `Try N of 3` line still counts until
-# note try-marker-sunset.
-BUILDER_MARKERS = ("round", "try")
 # The one marker scanner reads shared_names.BRIEF_MARKERS; each row is compiled once, at import.
 from shared_names import BRIEF_MARKERS  # noqa: E402  the one home of the marker rows
 _MARKER_ROWS = tuple((kind, re.compile(text), position) for kind, text, position in BRIEF_MARKERS)
@@ -4367,11 +4364,6 @@ def brief_markers(brief) -> list:
     """The [(kind, n)] round and try markers of a brief in line order, with the first-line one last: marker_scan
     without the audit marker, which has no n. Line order picks which refusal text a reviewer brief gets."""
     return [(kind, n) for kind, n in marker_scan(brief) if n is not None]
-
-
-def builder_third_round(brief) -> bool:
-    """True when a brief holds a builder's third-round marker, in either spelling."""
-    return any(kind.lower() in BUILDER_MARKERS and n == "3" for kind, n in brief_markers(brief))
 
 
 # BRIEF CLAIMS NEED A PROBE (rule brief-claim-has-probe, decision brief-claim-has-probe). A brief to a builder or a
@@ -5250,8 +5242,9 @@ def role_name(table, subagent_type) -> str:
     return next((name for name in table if role_key(name) == role_key(role)), role)
 
 
-# A Workflow spawn whose brief the scan could not read carries BRIEF_UNREAD; its refusal adds BRIEF_LITERAL_REMEDY.
-# The remedy stays lowercase mid-sentence, so both refusals carry the same words.
+# A Workflow spawn whose brief the scan could not read carries BRIEF_UNREAD. The role-model refusal (role_model_one) and the
+# Opus-ceiling refusal for a role other than builder add BRIEF_LITERAL_REMEDY: no builder marker grants Opus, so a readable
+# brief would not lift a builder's Opus refusal. The remedy stays lowercase mid-sentence, so both refusals carry the same words.
 BRIEF_UNREAD = "brief_unread"
 WORKFLOW_NO_MODEL = "workflow_no_model"   # set on a spawn_inputs yield for a Workflow call with a literal agentType and no model key
 BRIEF_LITERAL_REMEDY = "write the brief as a literal string so the marker is readable"
@@ -5264,7 +5257,7 @@ def spawn_inputs(tool: str, tool_input):
     (decision agent-model-cap). A call with a literal agentType, no `model` key and no spread yields too, with
     WORKFLOW_NO_MODEL set and an empty model: role_model_one refuses it when the role has a row and the Workflow default (ROLE_WORKFLOW_MODEL_ENV) is unset or not that row's model. A brief the scan cannot read (a variable, or a prompt key beside a spread) carries no
     marker and grants nothing, so the spawn is judged with an empty brief and BRIEF_UNREAD set, and its refusal names
-    BRIEF_LITERAL_REMEDY, so the author can make the marker readable. A
+    BRIEF_LITERAL_REMEDY (but not a builder's Opus refusal), so the author can make the marker readable. A
     call whose model or agentType the scan cannot read is skipped, and so is one with no model and no literal
     agentType, or with a spread that may hold the model: a static read never guesses a role or a model. A shorthand or a spread with no literal agentType may set the role, so it is unread;
     a literal agentType beside a spread is read. step_up_hit still skips an unread brief, as a marker it cannot read
@@ -5744,14 +5737,10 @@ def audit_disk_cleanup_hit(tool: str, tool_input) -> bool:
 OPUS_SPAWN_REASON = (
     "Rule (configuration): this spawn sets model Opus, above its role's model. Opus runs "
     "only on the owner's typed override or grant for this spawn, except Plan, the designer, the design "
-    "reviewer, the refuter, a builder's Round 3 of 3 and an Explore whose brief's first line carries the `%s` marker "
+    "reviewer, the refuter and an Explore whose brief's first line carries the `%s` marker "
     "(decision agent-model-cap). Remedy: drop the model field, or name the role's model. A reviewer's Round 2 or "
-    "Round 3 brief names sonnet."
+    "Round 3 brief names sonnet. A builder's third try runs Sonnet."
 ) % EXPLORE_AUDIT_MARKER
-OPUS_BUILDER_REASON = (
-    OPUS_SPAWN_REASON + " No `Round 3 of 3` marker was found in the brief's first line or at the start of "
-    "any line. The marker applies only to a builder's third try: after review round 2 failed, or after round 1 failed and every fix verifier failed."
-)
 OPUS_STANDING_ROLES = ("Plan", "designer", "design-reviewer", REFUTER_ROLE)
 
 
@@ -5759,7 +5748,7 @@ def opus_spawn_hit(tool: str, tool_input) -> tuple:
     """(model, role, brief_unread) of the first spawn in an Agent, Task or Workflow call that sets Opus with no standing grant,
     else ("", "", False). `role` is the role the spawn names, "" for none. `brief_unread` is the spawn's BRIEF_UNREAD.
     A standing grant
-    is the role Plan, designer, design-reviewer or refuter, a builder whose brief holds the third-round marker (builder_third_round reads it), or an Explore whose brief's first non-blank line carries EXPLORE_AUDIT_MARKER (decision agent-model-cap).
+    is the role Plan, designer, design-reviewer or refuter, or an Explore whose brief's first non-blank line carries EXPLORE_AUDIT_MARKER (decision agent-model-cap).
     Any other spawn above its role's model is refused (decision agent-model-cap), a reviewer on Opus too. The refusal is liftable by an override, so never_lifted does not read it."""
     for spawn in spawn_inputs(tool, tool_input):
         if opus_without_grant(spawn):
@@ -5773,10 +5762,8 @@ def opus_without_grant(tool_input) -> bool:
     role, brief = tool_input.get("subagent_type"), tool_input.get("prompt")
     if role in OPUS_STANDING_ROLES:
         return False
-    if role == "builder" and builder_third_round(brief):
-        return False
-    # Only the Explore grant reads the role through role_key, as role_model_check does; the other standing roles and the
-    # builder stay exact-case, as they were.
+    # Only the Explore grant reads the role through role_key, as role_model_check does; the other standing roles
+    # stay exact-case, as they were.
     if role_key(role) == role_key(EXPLORE_ROLE) and ("audit", None) in marker_hits(brief):
         return False
     return True
@@ -8655,9 +8642,9 @@ def judge(payload) -> None:
     opus_model, opus_role, opus_unread = opus_spawn_hit(tool, tool_input)
     if opus_model:
         refuse(tool, "deny", "agent-model-cap",
-               (OPUS_BUILDER_REASON if opus_role == "builder" else OPUS_SPAWN_REASON)
+               OPUS_SPAWN_REASON
                + (" The scan could not read this brief, so it read no marker: " + BRIEF_LITERAL_REMEDY + "."
-                  if opus_unread else ""),
+                  if opus_unread and role_key(opus_role) != "builder" else ""),
                opus_model,
                spawn_role=opus_role or "general-purpose")
 
