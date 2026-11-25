@@ -667,18 +667,19 @@ def sim_lease_override_check():
 
 # --------------------------------------------------------------------------- the lease allow
 # Decision sim-test-is-the-one-boot-path, ruling 5, and decision sim-lease-tool. An MCP launch of a shut-down
-# phone simulator is allowed when THIS session holds a LIVE lease whose slot maps to the launched device's UDID.
-# The cap and twin rules still refuse first, and a lease that cannot be read keeps the refusal. Liveness is
-# sim-lease's reap: the pid is alive and `ps -o lstart=` gives the recorded start. The slot map is the one in
-# skills/ios-apps/SKILL.md, Phone simulators (lines 67-69), typed here as data. The test does not import it from
-# bin/sim-lease, so a missing constant there fails an assert and not an import. Each case differs from the allow
-# case in one input.
+# phone simulator is allowed when THIS session holds a LIVE lease whose recorded udid is the launched device's UDID.
+# Each lease records the udid of the device its take granted (bin/sim-lease writes it from the device it finds by
+# name), so the lease's own udid decides, not its slot. The cap and twin rules still refuse first, and a lease that
+# cannot be read keeps the refusal. Liveness is sim-lease's reap: the pid is alive and `ps -o lstart=` gives the
+# recorded start. The udids below are fresh ids typed here as data: no repo file holds them, and the test does not
+# import them from bin/sim-lease. Each case differs from the allow case in one input.
 LEASE_RULE = "simulator-boot-lease"
 LEASE_CARRIES = ("sim-test", "lease")
-LEASE_SLOT_UDID = {"1": "3553660D-315C-4B9C-8614-039D7A5B637E",     # Duo 1
-                   "2": "801F55F4-F666-4C6D-AB04-7DF77C953974",     # Duo 2
-                   "pro": "86F9268A-A905-4B82-9BC0-D7EBB682D341"}   # iPhone 18 Pro
+LEASE_SLOT_UDID = {"1": "5E7A0011-0000-4000-8000-0000000000A1",     # the udid slot 1's lease records (Duo A)
+                   "2": "5E7A0012-0000-4000-8000-0000000000A2",     # the udid slot 2's lease records (Duo B)
+                   "pro": "5E7A0013-0000-4000-8000-0000000000A3"}   # the udid the pro lease records (iPhone 18 Pro)
 LEASE_DUO1, LEASE_DUO2, LEASE_PRO = LEASE_SLOT_UDID["1"], LEASE_SLOT_UDID["2"], LEASE_SLOT_UDID["pro"]
+LEASE_NEW = "5E7A0014-0000-4000-8000-0000000000A4"  # a device no slot's lease names by default (Duo C)
 LEASE_DECOY = "1A2B3C4D-0000-4000-8000-0000000000D6"  # named "Duo 1", but not Duo 1's UDID: a name match would allow it
 LEASE_PID = os.getpid()    # a live holder for the whole run
 LEASE_OTHER_PID = 4243     # another session's holder, live in the fake ps
@@ -690,10 +691,14 @@ LEASE_OWN, LEASE_OTHER = "sess-own-0001", "sess-other-0002"
 LEASE_ENV = {"CI": None, "GITHUB_ACTIONS": None}  # sim-lease's no-op reads CI; the guard's lease read must not
 
 
-def lease_entry(slot, pid=LEASE_PID, start=LEASE_START, session=LEASE_OWN):
-    """One lease record as sim-lease's take writes it: the slot is a string, the device is `pro` or `duo`."""
-    return {"pid": pid, "start": start, "device": "pro" if slot == "pro" else "duo",
-            "session": session, "slot": slot}
+def lease_entry(slot, pid=LEASE_PID, start=LEASE_START, session=LEASE_OWN, udid=None, no_udid=False):
+    """One lease record as sim-lease's take writes it: the slot is a string, the device is `pro` or `duo`, and the
+    record carries the udid the take granted. UDID overrides the slot's udid, NO_UDID writes no udid key at all."""
+    entry = {"pid": pid, "start": start, "device": "pro" if slot == "pro" else "duo",
+             "session": session, "slot": slot}
+    if not no_udid:
+        entry["udid"] = udid or LEASE_SLOT_UDID[slot]
+    return entry
 
 
 def lease_fixture(name, rows, pid_starts, leases=None, queue=(), raw=None, as_dir=False, records=None, ps_log=False):
@@ -881,6 +886,24 @@ def register_simulator_lease_cases():
                  own1, device="Duo 1", rule=LEASE_RULE)
     lease_launch("lease: the decoy's udid is refused by this session's slot 1 lease", "deny",
                  own1, udid=LEASE_DECOY, rule=LEASE_RULE)
+
+    # The lease's recorded udid decides, not its slot: each take records the udid of the device it granted. A device
+    # that no slot's default names is allowed when this session's lease records its udid. A lease with no udid, one
+    # that names another device, or a udid that is not a string keeps the refusal.
+    rows_new = rows + [(LEASE_NEW, "iPhone Duo C", "Shutdown", SIM_TYPE_MINI, SIM_RT)]
+    recorded = lease_fixture("recorded_udid", rows_new, live, [lease_entry("1", udid=LEASE_NEW)])
+    lease_launch("lease allow: this session's slot 1 lease records Duo C's udid, a launch of Duo C by udid is allowed",
+                 "allow", recorded, udid=LEASE_NEW)
+    lease_launch("lease allow: this session's slot 1 lease records Duo C's udid, a launch of Duo C by name is allowed",
+                 "allow", recorded, device="iPhone Duo C")
+    lease_launch("lease: this session's slot 1 lease records no udid, a launch of Duo C by udid is refused", "deny",
+                 lease_fixture("no_udid", rows_new, live, [lease_entry("1", no_udid=True)]),
+                 udid=LEASE_NEW, rule=LEASE_RULE)
+    lease_launch("lease: this session's slot 1 lease records Duo A's udid, a launch of Duo C by udid is refused", "deny",
+                 lease_fixture("other_udid", rows_new, live, [lease_entry("1")]), udid=LEASE_NEW, rule=LEASE_RULE)
+    lease_launch("lease: this session's slot 1 lease records a udid that is not a string, a launch of Duo C is refused",
+                 "deny", lease_fixture("int_udid", rows_new, live, [dict(lease_entry("1", no_udid=True), udid=7)]),
+                 udid=LEASE_NEW, rule=LEASE_RULE)
 
     # A name that two shut-down devices share resolves to both UDIDs. The launch is allowed only when this
     # session's live leases hold every one of them (sim_lease_holds is all, not any). Duo 2 is on the older runtime.
