@@ -414,8 +414,8 @@ MODELS_REASON = owner_line(
 UNSTARTED_REASON = owner_line(
     "Unstarted guard", "this turn ran a builder, and Next holds no \"Unstarted:\" line")
 UNSTARTED_FILE_REASON = owner_line(
-    "Unstarted guard", "an Unstarted item waits on another lane's merge or PR and names no code need or measured "
-    "conflict, and a shared file alone is no reason to wait")
+    "Unstarted guard", "an Unstarted item waits on another lane's merge or PR and names no code need (needs PR #N's "
+    "code: `symbol`) or measured conflict (measured conflict in <file>), and a shared file alone is no reason to wait")
 
 
 # is_last_human and tool_uses live in lint/_transcript.py, imported above.
@@ -1177,7 +1177,9 @@ UNSTARTED_RE = re.compile(
 # standalone word: "merge" inside merge-tool-refactor or bin/merge names a lane or a file.
 _PR_REF_RE = re.compile(r"\b(?:PRs?|pull\s+requests?)\s*#?\s*(\d+)\b|#(\d+)\b", re.I)
 _MERGE_WORD_RE = re.compile(
-    r"(?<![\w/.-])(?:merges?|merged|merging|land(?:s|ed|ing)?)(?![\w/-]|\.\w)", re.I)
+    r"(?<![\w/.-])(?:merges?|merged|merging|land(?:s|ed|ing)?)(?![\w/-]|\.\w)"
+    r"(?!\s+(?:tool|rules?|queue|button|checks?|policy|process|conflicts?|commits?|bot|gate|script|command"
+    r"|flow|logic|strategy|order|window|guard|record|step|page|zone|pad)\b)", re.I)
 # An item waits only when it says so: a waiting word, or "dependent on" or "starts at", before a PR, merge or
 # landing word, in one clause. A PR named for context ("not briefed yet; the PR merged", "PR #N awaits review")
 # has no waiting word before it, so it is no wait. A waiting word inside a name (after-merge, wait-for-x) is no
@@ -1230,8 +1232,11 @@ def _names_a_file(item):
     return False
 
 
-# A code need names the symbol it builds on in backticks: a name, with dots or call parens, never a path.
-_CODE_NEED_RE = re.compile(r"\bneeds?\b[^`;]*?\bcode\s*:\s*`([A-Za-z_][\w.]*)(?:\(\))?`", re.I)
+# A code need names the symbol it builds on in backticks: a name, with dots or call parens, never a path. The
+# symbol follows `code:` or the noun that names what it is (`helper`, `function`), as in "needs PR #N's helper `x`".
+_CODE_NEED_RE = re.compile(
+    r"\bneeds?\b[^`;]*?\b(?:code\s*:|(?:helpers?|functions?|methods?|class(?:es)?|symbols?|constants?|modules?"
+    r"|types?|apis?)\s*:?)\s*`([A-Za-z_][\w.]*)(?:\(\))?`", re.I)
 # A measured conflict says where it was measured, then the file it names.
 _MEASURED_CONFLICT_RE = re.compile(
     r"\b(?:measured\s+(?:a\s+)?conflicts?|conflicts?\s+measured|merge-tree\s+shows\s+a\s+conflict)\s+in\b(.*)",
@@ -1261,19 +1266,49 @@ def _pr_numbers(text):
     return {a or b for a, b in _PR_REF_RE.findall(text)}
 
 
+# A PR that the item waits on may be the subject of the clause, with no waiting word ahead of it: "PR #N must merge
+# first", "PR #N merges before it", "PR #N blocks it", "PR #N is the blocker". A bare "merged" or "awaits review"
+# is context, so a modal, "first" or "before", or a blocking verb is needed. "The batch merges first" names no PR.
+_PR_SUBJECT_RE = re.compile(
+    r"(?:\b(?:PRs?|pull\s+requests?)\s*#?\s*(\d+)|#(\d+))\b['\u2019]?s?\s+(?:"
+    r"(?:must|should|will|has\s+to|have\s+to|needs\s+to|is\s+to|to)\s+(?:merge|land)\b"
+    r"|(?:merges?|lands?)\s+(?:first|before)\b"
+    r"|(?:blocks?|blocking|gates?)\b|is\s+(?:the|a|still\s+the)\s+blocker\b|is\s+blocking\b)", re.I)
+_MERGE_FIRST_RE = re.compile(r"(?<![\w/.-])(?:merges?|lands?)\s+(?:first|before)\b", re.I)
+# A wait on the owner's answer, ruling or decision is no wait on a PR or merge that the answer is about.
+_PERSON_WAIT_RE = re.compile(
+    r"\b(?:owner|answers?|rulings?|decisions?|repl(?:y|ies)|verdicts?|approvals?|sign-?offs?|go-ahead|grants?"
+    r"|picks?|choices?|yes)\b", re.I)
+_JOINS_RE = re.compile(r"\b(?:and|or|then|plus)\b|[&+]", re.I)
+
+
+def _waits_on_a_person(between):
+    """True when the words between a waiting word and the PR it names say the wait is on the owner's answer."""
+    return (bool(_PERSON_WAIT_RE.search(between)) and not _JOINS_RE.search(between)
+            and not re.search(r"['\u2019]s\s*$", between))
+
+
 def _wait_targets(unit):
-    """What the unit waits on: each PR number named after a waiting word in a clause, and None for a merge or
-    landing named there with no PR reference. Backticked text is masked, so a symbol is no clause."""
+    """What the unit waits on: each PR number the item says it waits on, and None for a merge or landing it
+    waits on with no PR reference. A wait is a waiting word before the PR or merge, or the PR as the subject of
+    "must merge first", "blocks it" or "is the blocker". Backticked text is masked, so a symbol is no clause."""
     masked = re.sub(r"`[^`\n]*`", lambda m: "x" * len(m.group(0)), unit)
     targets = []
     for clause in re.split(r"[;,\n]", masked):
+        for m in _PR_SUBJECT_RE.finditer(clause):
+            targets.append(m.group(1) or m.group(2))
+        if _PR_SUBJECT_RE.search(clause) is None and _MERGE_FIRST_RE.search(clause):
+            targets.append(None)
         wait = _UNSTARTED_WAIT_WORD_RE.search(clause)
         if not wait:
             continue
-        tail = clause[wait.start():]
-        if _pr_numbers(tail):
-            targets.extend(_pr_numbers(tail))
-        elif _MERGE_WORD_RE.search(tail):
+        tail = clause[wait.end():]
+        refs = list(_PR_REF_RE.finditer(tail))
+        if refs:
+            for ref in refs:
+                if not _waits_on_a_person(tail[:ref.start()]):
+                    targets.append(ref.group(1) or ref.group(2))
+        elif _MERGE_WORD_RE.search(tail) and not _waits_on_a_person(tail[:_MERGE_WORD_RE.search(tail).start()]):
             targets.append(None)
     return targets
 
