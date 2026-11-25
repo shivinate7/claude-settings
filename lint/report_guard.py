@@ -1256,7 +1256,7 @@ def _checkable_wait(item):
     return any(_names_a_file(m.group(1)) for m in _MEASURED_CONFLICT_RE.finditer(item))
 
 
-# An item is a short lane name, then what it waits on: `bin-x waits on PR #3680`, `docs lane needs ...`. A clause
+# An item is a short lane name, then what it waits on: `bin-x waits on the batch`, `docs lane needs ...`. A clause
 # after a comma, `;` or sentence end starts a new item only in that shape. A reason, a measured conflict, a file or
 # a pronoun clause ("which ...", "it needs ...", "both touch ...") has no lane name before its waiting word, or has
 # a long one, so it stays with the item it explains. A connective ahead of a name ("also bin-x waits") is no part of
