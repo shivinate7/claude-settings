@@ -2442,6 +2442,7 @@ def case_over_limit_file_edit_shrink_passes_grow_refused():
 # A Read clears the reread flag only when its range counts: at most READ_CAP_TOKENS = 25000 tokens and at most
 # 2000 lines (the Read default when no limit is given). The hook cannot see what a Read returned, so a range over
 # the cap counts nothing. An agent's rewrite of the handoff sets no read flag: the read is owed after a compaction only.
+# A rewrite that changes the text while a read is owed drops the lines read so far: the new text was never read.
 
 READ_CAP_TOKENS = 25000
 
@@ -2622,6 +2623,69 @@ def case_main_write_sets_no_flag():
              "" if not os.path.isfile(audit_flag(c, SID)) else "the main session's Write set the audit flag")
         step("the main session's Bash call is allowed after its own Write",
              allowed_why(guard_call(c, SID, "Bash", BASH)))
+    finally:
+        c.cleanup()
+
+
+TWENTY = handoff_text(600)   # 20 lines: the six sections (19 lines) and one filler line
+REWRITE = TWENTY.replace("Fix the handoff.", "Fix the handoff now.", 1)   # line 4 changes: lines 1-10 are unread
+
+
+def owed_split_read(c, rewrite):
+    """A compaction owes the handoff's read. Lines 1-10 of TWENTY are read. With `rewrite`, the session's agent then
+    writes REWRITE, so lines 1-10 of the new text were never read. Then lines 11-20 are read. True when the
+    compaction, the partial Read and the Read of lines 11-20 all exit 0."""
+    if not step("PostCompact exits 0", exit_why(compact_with(c, SID, TWENTY))):
+        return False
+    if not step("the Read of lines 1-10 exits 0", exit_why(read_range(c, SID, c.handoff(SID), offset=1, limit=10))):
+        return False
+    if not step("the Read of lines 1-10 keeps the reread flag set",
+                "" if flag_set(c, SID) else "the Read of lines 1-10 cleared the reread flag"):
+        return False
+    if rewrite:
+        if not step("the agent's Write of the handoff is allowed",
+                    allowed_why(write_handoff(c, REWRITE, agent_id=AGENT_ID))):
+            return False
+        put_bytes(c.handoff(SID), REWRITE.encode("utf-8"))
+    return step("the Read of lines 11-20 exits 0",
+                exit_why(read_range(c, SID, c.handoff(SID), offset=11, limit=10)))
+
+
+def case_rewrite_while_owed_drops_read_ranges():
+    """A compaction owes the handoff's read, and lines 1-10 of a 20-line handoff are read. An agent then rewrites the
+    handoff, changing line 4. Lines 1-10 of the new text were never read, so the Read of lines 11-20 must leave the
+    reread flag set, and Bash is refused by handoff-unread. A whole Read of the new text then clears the flag."""
+    c = Case("rewrite-owed")
+    try:
+        if not owed_split_read(c, rewrite=True):
+            return
+        if not step("the Read of lines 11-20 keeps the reread flag set after the rewrite",
+                     "" if flag_set(c, SID) else "the Read of lines 11-20 cleared the reread flag, though lines 1-10 "
+                     "of the rewritten handoff were never read"):
+            return
+        if not step("the Bash call is refused by handoff-unread after the rewrite and the Read of lines 11-20",
+                    refused_by(guard_call(c, SID, "Bash", BASH), HANDOFF_RULE)):
+            return
+        whole = read_range(c, SID, c.handoff(SID))
+        if not step("the whole Read of the rewritten handoff exits 0", exit_why(whole)):
+            return
+        step("the whole Read of the rewritten handoff clears the reread flag",
+             "" if not flag_set(c, SID) else "the whole Read did not clear the reread flag")
+        step("the Bash call is then refused by compaction-audit, the audit flag still owed",
+             refused_by(guard_call(c, SID, "Bash", BASH), AUDIT_RULE))
+    finally:
+        c.cleanup()
+
+
+def case_owed_split_read_clears_without_rewrite():
+    """The twin of the case above with no rewrite: lines 1-10, then lines 11-20 of the same 20-line handoff cover
+    every line, so the second Read clears the reread flag. Green on the old code, the control for the case above."""
+    c = Case("owed-split")
+    try:
+        if not owed_split_read(c, rewrite=False):
+            return
+        step("with no rewrite, the Reads of lines 1-10 and 11-20 clear the reread flag",
+             "" if not flag_set(c, SID) else "the reread flag is still set after lines 1-10 and 11-20")
     finally:
         c.cleanup()
 
@@ -3448,7 +3512,7 @@ def main() -> int:
     case_over_limit_file_write_shrink_passes_grow_refused()
     case_over_limit_file_edit_shrink_passes_grow_refused()
 
-    print("Part 8: a Read counts only within the cap, and an agent's rewrite sets no read flag (hooks/reread_check.py)")
+    print("Part 8: a Read counts only within the cap, an agent's rewrite sets no read flag, and a rewrite while a read is owed drops the lines read (hooks/reread_check.py)")
     case_plain_read_over_cap_keeps_flag()
     case_range_over_cap_counts_nothing()
     case_pages_under_cap_clear_flag()
@@ -3458,6 +3522,8 @@ def main() -> int:
     case_agent_edit_sets_no_read_flag()
     case_agent_multiedit_sets_no_read_flag()
     case_main_write_sets_no_flag()
+    case_rewrite_while_owed_drops_read_ranges()
+    case_owed_split_read_clears_without_rewrite()
 
     print("Part 9: the handoff check costs no open of the handoff on a call with no flag (hooks/guard.py, hooks/reread_check.py)")
     case_no_flag_call_opens_no_handoff()
