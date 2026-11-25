@@ -253,7 +253,7 @@ def broken_qf_build():
 
 lazy_fixture([QF_BROKEN], broken_qf_build)
 add("port question: a copy whose question_form.py will not import refuses a port item as guard-crash",
-    "deny", None, carries=("guard-crash",), tool="ArtifactData", cwd=PQ_REPO, url=PQ_URL, action="set",
+    "deny", "guard-crash", carries=("guard-crash",), tool="ArtifactData", cwd=PQ_REPO, url=PQ_URL, action="set",
     collection="items", doc_id="suspense-cards", data=pq_item(), guard=os.path.join(QF_BROKEN, "hooks", "guard.py"))
 add("port question: an unreadable file_path fails open", "allow", tool="ArtifactData", cwd=PQ_REPO,
     url=PQ_URL, action="set", collection="items", doc_id="suspense-cards",

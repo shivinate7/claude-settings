@@ -11,14 +11,14 @@ FAMILY = "owner-judge"
 # PREMISE_KINDS. Each option has a non-empty gain and lose. Only those lines count: the same words in the
 # title, an option, why or elsewhere in context never do. A task, a status-only or rank-only update, another artifact's page and a
 # decision with status closed (the chat-answer flow writes one already answered) pass.
-# A missing line is refused by `question-form`. The contract does not say whether `question-form` or
-# `owner-judge` names a bare Problem line or a stake outside the set, so those cases accept either id.
+# A missing line is refused by `question-form`. A bare Problem line or a stake outside the set is refused by
+# `owner-judge`, the rule that prints there, so those cases pin it.
 
 OJ_KINDS = ("goal", "money", "risk", "rule", "cannot undo")
 OJ_DOC = "ci-check-job"
 OJ_CTX = "The stamp check runs in the lint job today. The test job could run it too."
 OJ_RULE = "question-form"
-OJ_PROBLEM_RULES = ("question-form", "owner-judge")
+OJ_PROBLEM_RULE = "owner-judge"  # the rule that refuses a bare Problem line or a stake outside the set
 OJ_OPTIONS = [
     {"key": "a", "label": "Keep the check in the lint job", "how": "Leave the workflow as it is.",
      "gain": "No change to review.", "lose": "The lint job stays the slow one."},
@@ -56,11 +56,10 @@ def oj_item(**over):
 
 
 def oj(name, expected, item, rule=OJ_RULE, **extra):
-    """One write of the item. `rule` names the refusal on a deny. A tuple of ids is any-of, and the
-    refusal must name the Problem line either way."""
-    if isinstance(rule, tuple):
-        extra["carries"] = (*extra.get("carries", ()), "Problem", rule)
-        rule = None
+    """One write of the item. `rule` names the refusal on a deny. A refusal for a bare Problem line also names the
+    Problem line."""
+    if rule == OJ_PROBLEM_RULE:
+        extra["carries"] = (*extra.get("carries", ()), "Problem")
     wp_write("owner judge: " + name, expected, rule, item, doc_id=OJ_DOC, **extra)
 
 
@@ -105,14 +104,14 @@ oj("a Goal phrase mid-line does not count", "deny", oj_item(context=oj_ctx(goal=
 oj("no Problem line is denied", "deny", oj_item(context=oj_ctx(problem=None)))
 oj("a Problem phrase mid-line does not count", "deny", oj_item(context=oj_ctx(problem="Reason. " + OJ_STAKE)))
 oj("a stake outside the set (internals) is denied", "deny",
-   oj_item(context=oj_ctx(problem="Problem (internals): which job runs the check")), rule=OJ_PROBLEM_RULES)
+   oj_item(context=oj_ctx(problem="Problem (internals): which job runs the check")), rule=OJ_PROBLEM_RULE)
 oj("a bare Problem line with nothing after the colon is denied", "deny",
-   oj_item(context=oj_ctx(problem="Problem (risk):   ")), rule=OJ_PROBLEM_RULES)
+   oj_item(context=oj_ctx(problem="Problem (risk):   ")), rule=OJ_PROBLEM_RULE)
 oj("a stake with no colon and no text is denied", "deny",
-   oj_item(context=oj_ctx(problem="Problem (risk)")), rule=OJ_PROBLEM_RULES)
+   oj_item(context=oj_ctx(problem="Problem (risk)")), rule=OJ_PROBLEM_RULE)
 oj("a Problem line with no stake, on a decision that is not a stood pick, is denied", "deny",
    oj_item(context=oj_ctx(problem="Problem: which job runs the check, and why it needs your word")),
-   rule=OJ_PROBLEM_RULES)
+   rule=OJ_PROBLEM_RULE)
 oj("no Based on line is denied", "deny", oj_item(context=oj_ctx(based=())))
 oj("four Based on lines are denied", "deny",
    oj_item(context=oj_ctx(based=(OJ_BASED, "Based on (notes): two", "Based on (notes): three",
@@ -179,7 +178,7 @@ oj("an update that carries kind decision and a context with the form is allowed"
 
 oj("an update that carries kind decision and a bare Problem line with no stake is denied", "deny",
    {"kind": "decision", "context": oj_ctx(problem="Problem: which job runs the check")},
-   action="update", rule=OJ_PROBLEM_RULES)
+   action="update", rule=OJ_PROBLEM_RULE)
 oj("an update that carries kind decision and no context is allowed", "allow",
    {"kind": "decision", "title": "Which CI job runs the check?"}, action="update")
 oj("an update that carries kind decision and options with an option that has no lose is denied", "deny",
@@ -213,7 +212,7 @@ oj_replace("that drops the Goal line from context is denied", "deny", "context",
 oj_replace("that drops the only Based on line from context is denied", "deny", "context", OJ_GOOD,
            oj_ctx(based=()))
 oj_replace("that swaps the Problem line for a stake outside the set is denied", "deny", "context", OJ_STAKE,
-           "Problem (internals): which job runs the check", rule=OJ_PROBLEM_RULES)
+           "Problem (internals): which job runs the check", rule=OJ_PROBLEM_RULE)
 oj_replace("that keeps every form line in context is allowed", "allow", "context", OJ_GOOD,
            oj_ctx(tail="The stamp check runs in the test job today."))
 oj_replace("that swaps the Problem line for another stake is allowed", "allow", "context", OJ_STAKE,

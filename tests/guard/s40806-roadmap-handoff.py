@@ -253,7 +253,7 @@ record_refuse("roadmap-one-writer handoff: a commit and a push in one call is re
               VCS + " add roadmap/outbox/outbox-a-handoff.md && " + VCS + " commit -m handoff && " + HANDOFF_PUSH,
               LANE, cwd=HANDOFF_REPO["no-diff"], carries="commit in its own call first")
 sh("roadmap-one-writer handoff: a forced push of the own handoff is refused, by force-push",
-   VCS + " push --force origin HEAD:roadmap", "deny", transcript=LANE, env=ROLE_ENV, cwd=HANDOFF_REPO["modify-own"])
+   VCS + " push --force origin HEAD:roadmap", "deny", rule="force-push", transcript=LANE, env=ROLE_ENV, cwd=HANDOFF_REPO["modify-own"])
 record_refuse("roadmap-one-writer handoff: a coordinator's push of a handoff is refused",
               HANDOFF_PUSH, role_path("coordinator"), cwd=HANDOFF_REPO["modify-own"])
 record_refuse("roadmap-one-writer handoff: a session with no cs-build tag is refused a handoff push",
