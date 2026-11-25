@@ -98,3 +98,7 @@ class IsolatedConfig(unittest.TestCase):
         with isolated_config_under_test()(RUN) as second:
             pass
         self.assertNotEqual(first, second, "two blocks gave the same folder, so one block's files reach the next")
+
+
+if __name__ == "__main__":
+    unittest.main()

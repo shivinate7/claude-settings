@@ -111,3 +111,7 @@ class TestsSetConfig(unittest.TestCase):
             print("  " + line, file=sys.stderr)
         self.assertTrue(any(line.startswith(MERGE_TEST + ":") for line in found),
                         "%s pops CLAUDE_CONFIG_DIR at import and is not among the repo's findings: %r" % (MERGE_TEST, found))
+
+
+if __name__ == "__main__":
+    unittest.main()
