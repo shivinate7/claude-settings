@@ -8,8 +8,9 @@ reads RUNNER_TEMP/case-times. Each row has suite, group, case, s, fixture_s, out
 
 Rows from every file are merged and grouped by (suite, group): the group is the suite file for unittest and
 the family for the guard runner. A skipped case is left out of its group, since it did no work. A case is
-flagged when its `s` is at least FLAG_RATIO times its group's median and at least FLAG_FLOOR_S seconds. A group
-under MIN_GROUP cases is not judged. The flags print with the largest excess over the median first.
+flagged when its time (`s` plus `fixture_s`; a row with no `fixture_s` reads 0.0) is at least FLAG_RATIO times
+its group's median time and at least FLAG_FLOOR_S seconds. A group under MIN_GROUP cases is not judged. The flags
+print with the largest excess over the median first, each with the case's total, its `s` and its `fixture_s`.
 
 It prints `read: <path>` for each row file it read, then `missing: <job>` for each job named in the env
 CASE_TIMES_JOBS (comma-separated) that has no `<job>.jsonl` file.
@@ -53,6 +54,9 @@ def read_rows(folder):
                     if not isinstance(row, dict) or any(key not in row for key in KEYS) \
                             or isinstance(row["s"], bool) or not isinstance(row["s"], (int, float)):
                         raise ValueError("%s line %d is not a case row" % (path, number))
+                    fixture = row.get("fixture_s", 0.0)
+                    if isinstance(fixture, bool) or not isinstance(fixture, (int, float)):
+                        raise ValueError("%s line %d has a fixture_s that is not a number" % (path, number))
                     rows.append(row)
     if not paths:
         raise ValueError("no .jsonl row file under %s" % folder)
@@ -68,6 +72,11 @@ def missing_jobs(paths):
     return [job for job in named if job and job + ".jsonl" not in have]
 
 
+def case_s(row):
+    """A case's whole time: its own `s` plus its fixture time."""
+    return row["s"] + row.get("fixture_s", 0.0)
+
+
 def flagged(rows):
     """(excess seconds, median, row) for each flagged case, largest excess first, plus the groups judged."""
     groups = {}
@@ -80,10 +89,11 @@ def flagged(rows):
         if len(members) < MIN_GROUP:
             continue
         judged += 1
-        median = statistics.median(row["s"] for row in members)
+        median = statistics.median(case_s(row) for row in members)
         for row in members:
-            if row["s"] >= FLAG_RATIO * median and row["s"] >= FLAG_FLOOR_S:
-                found.append((row["s"] - median, median, row))
+            total = case_s(row)
+            if total >= FLAG_RATIO * median and total >= FLAG_FLOOR_S:
+                found.append((total - median, median, row))
     found.sort(key=lambda item: -item[0])
     return found, judged
 
@@ -114,9 +124,10 @@ def main(argv=None):
     if not found:
         print("No case flagged.")
     for excess, median, row in found:
-        print("%8.2f s  %5.1fx median %.3f s  %s  [%s]  %s"
-              % (row["s"], row["s"] / median if median else float("inf"), median, row["case"], row["group"],
-                 row["suite"]))
+        total = case_s(row)
+        print("%8.2f s  %5.1fx median %.3f s  (s %.2f + fixture_s %.2f)  %s  [%s]  %s"
+              % (total, total / median if median else float("inf"), median, row["s"], row.get("fixture_s", 0.0),
+                 row["case"], row["group"], row["suite"]))
     return 0
 
 
