@@ -26,17 +26,26 @@ Change it only in a PR, never as this update.
 Use the compaction summary above. Read the digest file the reorient message named, when
 it named one. Together they cover the work since the handoff's last write.
 
-After a compaction, also send one Explore agent on Sonnet to audit the handoff. Its brief's
-first line is `Audit:`. It reads the session transcript from the previous
+After a compaction, also send one Explore agent on Sonnet to audit the handoff. Print its
+brief with `python3 <hooks dir>/precompact_handoff.py --audit-brief --handoff <your handoff path>`
+(the guard's refusal and the Stop block print the exact command), and send that brief as it is.
+Its first line is `Audit:`, and it names this session's transcript path: a spawn whose brief
+lacks the path clears nothing. It reads the session transcript from the previous
 "This session is being continued" marker to the end (with no earlier marker, from the start),
 and compares it with the handoff. A marker is a `compact_boundary` system record and the
 summary that follows it. A line that only quotes the text, such as this prompt in a tool
 result, is no marker. The transcript is
 `<config dir>/projects/<project>/<session_id>.jsonl`; the session id is in the handoff's
-path. It reports three lists in 40 lines or fewer: MISSING (rulings, facts and work in the transcript
-that the handoff lacks), STALE (handoff lines the transcript replaced) and DONE (handoff
-lines whose work landed). Then rewrite the handoff whole (step 4) from that report. One
-agent per compaction, never per Stop checkpoint.
+path. It reports three lists in 40 lines or fewer, one item per line, each with one backticked
+token: MISSING (rulings, facts and work in the transcript that the handoff lacks), STALE
+(handoff lines the transcript replaced) and DONE (handoff lines whose work landed). Then
+rewrite the handoff whole (step 4) from that report. One agent per compaction, never per Stop
+checkpoint.
+
+After that rewrite, the next Stop checks it. Keep each `#N` and `fb-` id the old handoff held,
+each token the audit lists MISSING, and each job or agent that still runs. A token the audit
+lists DONE or STALE may go. When the size limit leaves no room, summarize text, never drop a
+token.
 
 ## 4. Rewrite the whole file
 

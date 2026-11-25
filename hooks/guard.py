@@ -837,6 +837,7 @@ while True:
         # fails open on a raise, so the refusal it was loaded for would turn into an allow.
         _missing = [_name for _name in ("unread_note", "too_big_estimate", "agent_rewrite") if not callable(getattr(reread_check, _name, None))]
         _missing += [_name for _name in ("HANDOFF_MAX_TOKENS", "READ_CAP_TOKENS", "READ_MAX_LINES") if not isinstance(getattr(reread_check, _name, None), int)]
+        _missing += [_name for _name in ("AUDIT_OWED", "AUDIT_REMEDY") if not isinstance(getattr(reread_check, _name, None), str)]
         if _missing:
             raise ImportError("reread_check lacks %s" % ", ".join(_missing))
 
@@ -1598,15 +1599,8 @@ def handoff_unread_fields(path, payload):
             "span": " (lines still unread: %s)" % unread if unread else "",
             "lines": reread_check.READ_MAX_LINES, "cap": reread_check.READ_CAP_TOKENS}
 
-from shared_names import EXPLORE_AUDIT_MARKER as _AUDIT_MARKER  # noqa: E402  the one home of the marker the remedy names; reread_check.audit_reason reads it too
-
-COMPACTION_AUDIT_REASON = (
-    "Rule (compaction audit): context was compacted and the handoff audit is still owed. "
-    "Remedy: spawn one Explore agent on Sonnet whose brief's first line is `" + _AUDIT_MARKER.replace("%", "%%") + "`, as step 3 of the "
-    "handoff prompt says. It reads the transcript from the last compaction marker and compares it "
-    "with %s. That spawn clears this check. Then repeat the call. "
-    "(decision precompact-handoff, item 16)"
-)
+# The remedy is reread_check's: its one text serves this refusal and the Stop block. One `%s`: the handoff path.
+COMPACTION_AUDIT_REASON = "Rule (compaction audit): " + reread_check.AUDIT_OWED + reread_check.AUDIT_REMEDY
 
 HANDOFF_SECTIONS_REASON = (
     "Rule (handoff-sections): this write would leave the session handoff without a section the "

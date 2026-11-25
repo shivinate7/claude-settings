@@ -9,6 +9,10 @@ Modes:
 - --reorient: At SessionStart after compact, clear or fork, tells the session to rewrite
   its handoff from the digest. After clear or fork, it also names the handoff of the prior
   session for the same project.
+- --audit-brief: Prints the brief of the handoff audit (prompt step 3) with the session's transcript path,
+  its compaction boundaries and its handoff path filled in. The session comes from stdin JSON, or from
+  `--handoff <path>`. PreCompact also stores the handoff's `#N` and `fb-` ids in the state file, the baseline
+  that reread_check --stop judges the rewritten handoff against.
 - --session-end: At SessionEnd with reason clear, writes a pointer file that holds the old
   session id and the project folder, so the next session can find the old handoff.
 
@@ -337,7 +341,30 @@ def _repo_top_level(cwd):
     return cwd
 
 
-def _write_state(session_id, digest_path_, repo_top, ok, failure):
+# The ids a rewritten handoff must keep (reread_check judges the rewrite against this set): a PR number `#N` and a
+# feedback id `fb-HHMM-N`. A job id is not stored: a job counts only while it still runs at the check.
+_KEPT_PR = re.compile(r"(?<![\w&#])#\d{1,6}\b")
+_KEPT_FB = re.compile(r"\bfb-\d+(?:-\d+)+\b")
+
+
+def kept_tokens(text):
+    """The `#N` and `fb-` tokens `text` holds, each once, in order of first sight."""
+    found = [(m.start(), m.group(0)) for rx in (_KEPT_PR, _KEPT_FB) for m in rx.finditer(text)]
+    return list(dict.fromkeys(tok for _, tok in sorted(found)))
+
+
+def _baseline_tokens(session_id):
+    """The handoff's kept tokens as it stands now ([] when it does not exist), or None when it cannot be read."""
+    try:
+        with open(handoff_path(session_id), "r", encoding="utf-8", errors="replace") as f:
+            return kept_tokens(f.read())
+    except FileNotFoundError:
+        return []
+    except Exception:
+        return None
+
+
+def _write_state(session_id, digest_path_, repo_top, ok, failure, tokens=None):
     path = state_path(session_id)
     os.makedirs(os.path.dirname(path), exist_ok=True)
     state = {
@@ -348,6 +375,8 @@ def _write_state(session_id, digest_path_, repo_top, ok, failure):
     }
     if failure:
         state["failure"] = failure
+    if tokens is not None:
+        state["tokens"] = tokens
     tmp = path + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(state, f)
@@ -382,7 +411,7 @@ def run_precompact(payload):
         digest_path_ = None
 
     try:
-        _write_state(session_id, digest_path_, repo_top, ok, failure)
+        _write_state(session_id, digest_path_, repo_top, ok, failure, _baseline_tokens(session_id))
     except Exception as e:
         sys.stderr.write("precompact_handoff: could not write state: %s\n" % e)
     if failure:
@@ -418,6 +447,12 @@ def audit_flag_path(session_id):
     return os.path.join(config_dir(), "state", "handoff", "%s.audit" % session_id)
 
 
+def rewrite_flag_path(session_id):
+    """The flag reread_check sets when the audit spawn passes: the rewritten handoff is still to be judged at Stop.
+    Defined here so SessionEnd can drop it."""
+    return os.path.join(config_dir(), "state", "handoff", "%s.rewrite" % session_id)
+
+
 def record_dir(session_id, cwd):
     """Record the session's project dir in <sid>.dir, so the fork fallback finds a session
     that never compacted. Every handoff hook that runs for a session calls this."""
@@ -445,7 +480,7 @@ def recorded_dir(session_id):
 
 def run_session_end(payload):
     """SessionEnd: record the dir for any reason. Only reason `clear` leaves a pointer to
-    the old session, and drops that session's re-read and audit flags."""
+    the old session, and drops that session's re-read, audit and rewrite flags."""
     session_id = payload.get("session_id", "")
     if not session_id:
         return 0
@@ -453,7 +488,7 @@ def run_session_end(payload):
     record_dir(session_id, cwd)
     if payload.get("reason") != "clear":
         return 0
-    for flag in (reread_flag_path(session_id), audit_flag_path(session_id)):
+    for flag in (reread_flag_path(session_id), audit_flag_path(session_id), rewrite_flag_path(session_id)):
         try:
             os.remove(flag)
         except OSError:
@@ -464,6 +499,79 @@ def run_session_end(payload):
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump({"session_id": session_id, "cwd": cwd}, f)
     os.replace(tmp, path)
+    return 0
+
+
+def find_transcript(session_id):
+    """The newest <config dir>/projects/<project>/<session_id>.jsonl, or "" when none exists."""
+    root = os.path.join(config_dir(), "projects")
+    try:
+        found = [os.path.join(root, d, "%s.jsonl" % session_id) for d in os.listdir(root)]
+        return _newest([p for p in found if os.path.isfile(p)]) or ""
+    except OSError:
+        return ""
+
+
+def _boundary_lines(transcript):
+    """The 1-based line numbers of the transcript's `compact_boundary` records, [] when it cannot be read."""
+    lines = []
+    try:
+        with open(transcript, "rb") as f:
+            for n, line in enumerate(f, 1):
+                if b"compact_boundary" in line:
+                    try:
+                        rec = json.loads(line)
+                    except ValueError:
+                        continue
+                    if rec.get("type") == "system" and rec.get("subtype") == "compact_boundary":
+                        lines.append(n)
+    except OSError:
+        return []
+    return lines
+
+
+def audit_brief(session_id, transcript):
+    """The audit agent's brief (prompt step 3), with the transcript path, the compaction boundaries and the handoff
+    path filled in. Its first line carries the audit marker, and the transcript path is on a line of its own:
+    reread_check.audit_spawn lets a spawn clear the audit only when its brief names the session's transcript path,
+    and reread_check's Stop judgment reads the MISSING, STALE and DONE lists this brief asks for."""
+    marks = _boundary_lines(transcript) if transcript else []
+    where = ("`compact_boundary` records at transcript lines %s: start at the second to last of them (the "
+             "previous compaction), or at line 1 when there are fewer than two" % ", ".join(map(str, marks))) if marks else (
+             "no `compact_boundary` record found: start at line 1")
+    return "\n".join([
+        "Audit: compare this session's handoff with its transcript and list what the handoff lacks. Read only.",
+        "",
+        "Transcript: %s" % (transcript or "<config dir>/projects/<project>/%s.jsonl" % session_id),
+        "Handoff: %s" % handoff_path(session_id),
+        "Boundary: %s. A boundary is a `compact_boundary` system record and the summary that follows it; "
+        "a line that only quotes the text is no boundary." % where,
+        "",
+        "Reply in 40 lines or fewer, as three lists, each under its own heading line `MISSING`, `STALE` or `DONE`. "
+        "One item per line, each with exactly one backticked token that names it: a PR as `#N`, a feedback id "
+        "as `fb-HHMM-N`, a background job or agent by its id, a decision, rule or file by its name.",
+        "- MISSING: rulings, open PRs, running jobs and agents, questions owed, and work in the transcript that the "
+        "handoff lacks.",
+        "- STALE: handoff lines the transcript replaced.",
+        "- DONE: handoff lines whose work landed on main.",
+        "",
+    ])
+
+
+def run_audit_brief(payload, argv):
+    """--audit-brief: print the audit brief. The session comes from the payload on stdin, else from the handoff path
+    after --handoff (its file name is <session_id>.md); the transcript path from the payload, else the newest
+    projects file of that session."""
+    session_id = payload.get("session_id") if isinstance(payload.get("session_id"), str) else ""
+    if not session_id and "--handoff" in argv[:-1]:
+        session_id = os.path.splitext(os.path.basename(argv[argv.index("--handoff") + 1]))[0]
+    if not session_id:
+        sys.stderr.write("precompact_handoff: --audit-brief needs a session: stdin JSON with session_id, "
+                         "or --handoff <path>\n")
+        return 0
+    transcript = payload.get("transcript_path")
+    transcript = transcript if isinstance(transcript, str) and transcript else find_transcript(session_id)
+    sys.stdout.write(audit_brief(session_id, transcript))
     return 0
 
 
@@ -1725,6 +1833,8 @@ def main():
         payload = {}
 
     try:
+        if "--audit-brief" in sys.argv[1:]:
+            return run_audit_brief(payload if isinstance(payload, dict) else {}, sys.argv[1:])
         if "--nudge" in sys.argv[1:]:
             return run_nudge(payload)
         if "--session-end" in sys.argv[1:]:

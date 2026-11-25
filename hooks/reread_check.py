@@ -13,8 +13,8 @@ Modes:
   handoff exists, refuses once per turn and names the handoff path. With that flag cleared
   and the audit flag still set, it refuses once per turn and names the Audit: remedy.
 
-Spec: docs/decisions/precompact-handoff.md, items 9 and 16. Two flag files per session,
-<config dir>/state/handoff/<session_id>.reread and <session_id>.audit. Three modes, JSON on stdin:
+Spec: docs/decisions/precompact-handoff.md, items 9 and 16. Three flag files per session,
+<config dir>/state/handoff/<session_id>.reread, <session_id>.audit and <session_id>.rewrite. Three modes, JSON on stdin:
 
   --post-compact (PostCompact)  sets both flags.
   --pre-read (PreToolUse, Read)  records the lines read when file_path is the session's own
@@ -28,9 +28,16 @@ Spec: docs/decisions/precompact-handoff.md, items 9 and 16. Two flag files per s
       handoff path while the audit flag is set, the re-read flag is already cleared and the call is
       the main session's, else "".
   audit_spawn(payload, spawn_tools) (import)  true for a spawn from the main session whose brief's
-      first non-blank line carries the audit marker (shared_names.EXPLORE_AUDIT_MARKER, `Audit:`).
-      audit_clear(payload) drops the audit flag; the guard's main() calls it when judge() returns, or when a later
-      rule crashes after the spawn was marked.
+      first non-blank line carries the audit marker (shared_names.EXPLORE_AUDIT_MARKER, `Audit:`) and that names
+      the session's transcript path (the payload's transcript_path, compared as a string; the brief that
+      `precompact_handoff.py --audit-brief` prints does). A payload with no transcript_path is judged by the marker
+      alone. audit_clear(payload) drops the audit flag and sets the rewrite flag, <sid>.rewrite; the guard's main()
+      calls it when judge() returns, or when a later rule crashes after the spawn was marked.
+  --stop (Stop), with the audit flag cleared and the rewrite flag set: judges the rewritten handoff (rewrite_check).
+      Required: each `#N` and `fb-` id the handoff held at PreCompact (the baseline in the state file), each
+      token the audit's MISSING list names, and each job or agent that still runs (stall_watch.scan_jobs). A token
+      the audit's DONE or STALE list names may go. It stays quiet while the audit agent itself still runs. A passing
+      check, or a baseline that is unreadable, clears the rewrite flag. It reads no PR state.
   --stop (Stop)  with the flag set and the handoff file present, prints
       {"decision": "block", "reason": ...} naming the handoff path. Exits quietly on
       stop_hook_active, so it cannot loop. The flag stays set until the handoff is read,
@@ -40,6 +47,7 @@ Never exits 2: bad stdin, a failed import of the sibling precompact_handoff, and
 other failure exit 0. Importing this module never exits: without the sibling,
 `unread_handoff` and `audit_pending` return "".
 """
+import importlib
 import json
 import os
 import re
@@ -244,8 +252,10 @@ def audit_pending(payload):
 def audit_spawn(payload, spawn_tools):
     """True when the call is a spawn (its tool is in `spawn_tools`, the guard's SPAWN_TOOLS) from the
     main session whose brief's first non-blank line carries the audit marker, as the one home reads it
-    (shared_names.BRIEF_MARKERS, the first-line audit row: case-sensitive, text or markup may stand ahead of it).
-    A line quoted further down does not count. Never raises."""
+    (shared_names.BRIEF_MARKERS, the first-line audit row: case-sensitive, text or markup may stand ahead of it),
+    and whose brief names the payload's transcript_path as a string. That path rule enforces the brief that
+    `precompact_handoff.py --audit-brief` prints; a payload with no transcript_path skips it, since no remedy could
+    satisfy it. A line quoted further down does not count. Never raises."""
     try:
         if not isinstance(payload, dict) or payload.get("agent_id") or payload.get("tool_name") not in spawn_tools:
             return False
@@ -253,6 +263,9 @@ def audit_spawn(payload, spawn_tools):
         prompt = tool_input.get("prompt") if isinstance(tool_input, dict) else None
         if not isinstance(prompt, str):
             return False
+        path = payload.get("transcript_path")
+        if isinstance(path, str) and path and path not in prompt:
+            return False   # a stray `Audit:` brief: the helper's brief names the session's transcript
         first = next((line for line in prompt.split("\n") if line.strip()), "")   # the guard's brief_first_line pick
         return AUDIT_ROW is not None and AUDIT_ROW.search(first) is not None
     except Exception:
@@ -260,19 +273,182 @@ def audit_spawn(payload, spawn_tools):
 
 
 def audit_clear(payload):
-    """Drop the session's audit flag. Never raises."""
+    """Drop the session's audit flag and set its rewrite flag: the next Stop judges the rewritten handoff. Never raises."""
     try:
         os.remove(ph.audit_flag_path(payload["session_id"]))
     except Exception:
         pass
+    try:
+        flag = ph.rewrite_flag_path(payload["session_id"])
+        os.makedirs(os.path.dirname(flag), exist_ok=True)
+        with open(flag, "w", encoding="utf-8") as f:
+            f.write("1")
+    except Exception:
+        pass
+
+
+def _esc(text):
+    return text.replace("%", "%%")
+
+
+# The one remedy text for an owed audit. The Stop block uses it, and so does the guard's compaction-audit refusal
+# (guard.COMPACTION_AUDIT_REASON), so the two cannot drift. It holds one `%s`: the handoff path.
+AUDIT_OWED = "context was compacted and the handoff audit is still owed. "
+AUDIT_REMEDY = (
+    "Remedy: print the brief with `python3 \"" + _esc(os.path.join(os.path.dirname(os.path.realpath(__file__)),
+                                                                    "precompact_handoff.py"))
+    + "\" --audit-brief --handoff \"%s\"`, then spawn one Explore agent on Sonnet with exactly that brief, whose "
+    "first line is `" + _esc(EXPLORE_AUDIT_MARKER or "Audit:") + "` (step 3 of the handoff prompt). The brief names "
+    "this session's transcript path, and a spawn whose brief does not name it clears nothing. That spawn clears this "
+    "check. Then repeat the call. (decision precompact-handoff, item 16)")
 
 
 def audit_reason(handoff):
-    """The Stop block's text. The guard's refusal has its own constant, COMPACTION_AUDIT_REASON."""
-    return ("Context was compacted and the handoff audit is still owed. Spawn one Explore agent on "
-            "Sonnet whose brief's first line is `%s`, as step 3 of the handoff prompt says "
-            "(it reads the transcript from the last compaction marker and compares it with %s), "
-            "then repeat. (decision precompact-handoff, item 16)" % (EXPLORE_AUDIT_MARKER or "Audit:", handoff))
+    """The Stop block's text for an owed audit."""
+    return AUDIT_OWED[0].upper() + AUDIT_OWED[1:] + AUDIT_REMEDY % handoff
+
+
+# The spawn tools. guard.SPAWN_TOOLS names the same two; this file cannot import the guard, which imports it.
+SPAWN_NAMES = ("Agent", "Task")
+_HEADING = re.compile(r"^[\s#*_>`-]*(MISSING|STALE|DONE)[\s:*_`]*$")
+_TICKS = re.compile(r"`([^`\n]+)`")
+
+
+def _text(content):
+    """The text of a message content or a tool result: a string, or the text of a list's blocks, nested."""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "\n".join(_text(b.get("text") if b.get("type") == "text" else b.get("content"))
+                         for b in content if isinstance(b, dict))
+    return ""
+
+
+def parse_audit(text):
+    """{heading: [backticked tokens]} for the audit's reply: a line that is only MISSING, STALE or DONE starts a
+    list, and each token in backticks on the lines after it joins that list. None when the text has no heading."""
+    lists, cur = {}, None
+    for line in text.splitlines():
+        found = _HEADING.match(line)
+        if found:
+            cur = found.group(1)
+            lists.setdefault(cur, [])
+        elif cur:
+            lists[cur] += [t.strip() for t in _TICKS.findall(line) if t.strip()]
+    return lists or None
+
+
+def audit_reply(transcript):
+    """(agent id, parsed lists) for the session's newest audit spawn in `transcript`: the agent id when that spawn
+    launched a background agent (else None), and parse_audit of its reply, taken from the spawn's own tool result or,
+    for a background agent, from a later record that names the agent id. (None, None) when the transcript holds no
+    such spawn or its reply cannot be read. Never raises."""
+    tu, agent, texts = None, None, []
+    try:
+        with open(transcript, "rb") as f:
+            for line in f:
+                call = b"tool_use" in line and any(b'"%s"' % name.encode() in line for name in SPAWN_NAMES)
+                if not call and not (tu and (tu.encode() in line or (agent and agent.encode() in line))):
+                    continue
+                try:
+                    rec = json.loads(line)
+                    content = rec["message"]["content"] if isinstance(rec.get("message"), dict) else None
+                except Exception:
+                    continue
+                blocks = [b for b in content if isinstance(b, dict)] if isinstance(content, list) else []
+                answered = False
+                for b in blocks:
+                    if b.get("type") == "tool_use" and audit_spawn(
+                            {"tool_name": b.get("name"), "tool_input": b.get("input"), "transcript_path": transcript},
+                            SPAWN_NAMES):
+                        tu, agent, texts = b.get("id"), None, []
+                    elif tu and b.get("type") == "tool_result" and b.get("tool_use_id") == tu:
+                        answered = True
+                        texts.append(_text(b.get("content")))
+                        result = rec.get("toolUseResult")
+                        if isinstance(result, dict) and result.get("isAsync") is True \
+                                and isinstance(result.get("agentId"), str):
+                            agent = result["agentId"]
+                if agent and not answered and agent.encode() in line:   # the background agent's own report
+                    note = rec.get("attachment")
+                    texts.append(_text(content) or (note.get("prompt") if isinstance(note, dict) else ""))
+        parsed = next((p for p in (parse_audit(t) for t in reversed(texts) if isinstance(t, str)) if p), None)
+        return agent, parsed
+    except Exception:
+        return None, None
+
+
+def _held(text, token):
+    """True when `text` holds `token` as a whole word: `#38731` does not hold `#3873`."""
+    lead = "(?<!&)" if token.startswith("#") else r"(?<!\w)"
+    return re.search(lead + re.escape(token) + r"(?!\w)", text) is not None
+
+
+REWRITE_WHY = {"base": "in the handoff at compaction", "missing": "the audit lists it MISSING",
+               "live": "a job or agent that still runs"}
+REWRITE_SHOWN = 12
+
+
+def rewrite_check(payload):
+    """Judge the rewritten handoff once the audit spawn has set the rewrite flag. Returns the Stop block's reason, or
+    "" to pass. Required in the handoff: the `#N` and `fb-` ids it held at PreCompact (the state file's baseline), the
+    tokens the audit's MISSING list names, and the jobs and agents that still run (stall_watch.scan_jobs). A token the
+    audit's DONE or STALE list names may go. An audit reply the transcript cannot give leaves the baseline and the
+    live jobs, and no token may go. It stays quiet while the audit agent itself runs. A state file with no usable
+    baseline passes and clears the flag, with one line on stderr. A pass clears the flag. Reads no PR state.
+    Never raises."""
+    try:
+        sid = payload["session_id"]
+        flag = ph.rewrite_flag_path(sid)
+        try:
+            with open(ph.handoff_path(sid), "r", encoding="utf-8", errors="replace") as f:
+                text = f.read()
+        except OSError:
+            return ""
+        try:
+            with open(ph.state_path(sid), "r", encoding="utf-8") as f:
+                state = json.load(f)
+            base = state["tokens"] if state.get("ok") is True else None
+            base = base if isinstance(base, list) and all(isinstance(t, str) for t in base) else None
+        except Exception:
+            base = None
+        if base is None:
+            os.remove(flag)
+            sys.stderr.write("reread_check: the handoff baseline that PreCompact stores is unreadable, "
+                             "so the rewrite is not judged\n")
+            return ""
+        path = payload.get("transcript_path")
+        agent, parsed, live = None, None, []
+        if isinstance(path, str) and path:
+            agent, parsed = audit_reply(path)
+            try:
+                # By name, not an import statement: only this Stop process reads the jobs, and the guard that imports
+                # this file never runs stall_watch (hooks/test_guard.py's macOS arm check follows import statements).
+                live = list(importlib.import_module("stall_watch").scan_jobs(path)[0])
+            except Exception as e:
+                sys.stderr.write("reread_check: cannot read the running jobs: %s\n" % e)
+        if agent and agent in live:
+            return ""   # the audit has not reported: nothing to judge against yet
+        gone = {t for key in ("DONE", "STALE") for t in (parsed or {}).get(key, [])}
+        need = [(t, "base") for t in base if t not in gone]
+        need += [(t, "missing") for t in (parsed or {}).get("MISSING", [])]
+        need += [(t, "live") for t in live if t != agent]
+        lacking = list(dict.fromkeys((t, REWRITE_WHY[why]) for t, why in need if not _held(text, t)))
+        if not lacking:
+            os.remove(flag)
+            return ""
+        shown = "; ".join("`%s` (%s)" % pair for pair in lacking[:REWRITE_SHOWN])
+        more = " and %d more" % (len(lacking) - REWRITE_SHOWN) if len(lacking) > REWRITE_SHOWN else ""
+        why_none = "" if parsed else " (the audit's reply could not be read, so none may go on its account)"
+        return ("The handoff you rewrote after compaction leaves out %d item(s) that must stay: %s%s. "
+                "Remedy: write the whole handoff again and keep each token, in a few words on its line. A token may go "
+                "only when the audit's DONE or STALE list names it%s, or when it is a job that no longer runs. "
+                "If the audit missed that, keep the token for this one rewrite. If the size limit leaves no room, "
+                "summarize text, never drop a token. (decision precompact-handoff)"
+                % (len(lacking), shown, more, why_none))
+    except Exception as e:
+        sys.stderr.write("reread_check: rewrite check: %s\n" % e)
+        return ""
 
 
 def from_agent(payload):
@@ -328,6 +504,10 @@ def main():
                 f.write("1")
             with open(audit_flag, "w", encoding="utf-8") as f:
                 f.write("1")
+            try:   # the last compaction's rewrite flag would judge against a baseline this compaction replaces
+                os.remove(ph.rewrite_flag_path(sid))
+            except OSError:
+                pass
         elif "--pre-read" in args:
             if from_agent(payload):
                 return 0
@@ -343,6 +523,11 @@ def main():
                     "now, then continue. (decision precompact-handoff)" % ph.handoff_path(sid))}))
             elif not payload.get("stop_hook_active") and audit_pending(payload):
                 print(json.dumps({"decision": "block", "reason": audit_reason(ph.handoff_path(sid))}))
+            elif (not payload.get("stop_hook_active") and not from_agent(payload)
+                  and os.path.isfile(ph.rewrite_flag_path(sid))):
+                reason = rewrite_check(payload)
+                if reason:
+                    print(json.dumps({"decision": "block", "reason": reason}))
     except Exception as e:
         sys.stderr.write("reread_check: %s\n" % e)
     return 0
