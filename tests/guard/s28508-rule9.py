@@ -779,9 +779,9 @@ add("brief-destructive-git: control, builder brief that says `git reset --hard o
     subagent_type="builder", model="sonnet")
 
 
-# Three shapes that name a span the rule should not read as an order: a span holding its own never-run list (shape a), a
-# span followed directly by "-free" (shape b), and a span after "ran", "had run" or "has run", which reports an act that
-# is done (shape c). Each allow is a false alarm the scan raises. Each control is an order or a near-miss, and stays denied.
+# Two shapes that name a span the rule should not read as an order: a span holding its own never-run list (shape a), and a
+# span followed directly by "-free" (shape b). Each allow is a false alarm the scan raises. Each control is an order or a
+# near-miss, and stays denied. The scan has no report pass, so a span after "ran", "had run" or "has run" is an order.
 add("brief-destructive-git: a span whose own text opens with Never run, naming stash, checkout and restore, is allowed",
     "allow", tool="Agent",
     prompt="Keep the lane's tree as it is:\n`- Never run git stash, git checkout <path>, or git restore.`",
@@ -799,20 +799,23 @@ add("brief-destructive-git: a git stash span followed directly by -free is allow
 add("brief-destructive-git: control, the same span with the -free suffix dropped is denied", "deny",
     BRIEF_DESTRUCTIVE, tool="Agent", prompt="Do the check in a `git stash` aside, then report.",
     subagent_type="builder", model="sonnet")
-add("brief-destructive-git: a reported act, a builder ran git checkout, is allowed", "allow",
-    tool="Agent", prompt="The first builder ran `git checkout -- <path>` and lost the edit. Redo it.",
+# Denied: a span after "ran" is an order, since the scan has no report pass (lane decision on report forms).
+add("brief-destructive-git: a report that a builder ran git checkout is denied", "deny",
+    BRIEF_DESTRUCTIVE, tool="Agent", prompt="The first builder ran `git checkout -- <path>` and lost the edit. Redo it.",
     subagent_type="builder", model="sonnet")
 add("brief-destructive-git: control, run in place of ran is denied", "deny",
     BRIEF_DESTRUCTIVE, tool="Agent", prompt="The first builder run `git checkout -- <path>` and lost the edit. Redo it.",
     subagent_type="builder", model="sonnet")
-add("brief-destructive-git: a reported act, the lane had run git reset --hard, is allowed", "allow",
-    tool="Agent", prompt="The lane had run `git reset --hard origin/main` before the crash. Redo it.",
+# Denied: a span after "had run" is an order, since the scan has no report pass (lane decision on report forms).
+add("brief-destructive-git: a report that the lane had run git reset --hard is denied", "deny",
+    BRIEF_DESTRUCTIVE, tool="Agent", prompt="The lane had run `git reset --hard origin/main` before the crash. Redo it.",
     subagent_type="builder", model="sonnet")
 add("brief-destructive-git: control, run in place of had run is denied", "deny",
     BRIEF_DESTRUCTIVE, tool="Agent", prompt="The lane run `git reset --hard origin/main` before the crash. Redo it.",
     subagent_type="builder", model="sonnet")
-add("brief-destructive-git: a reported act, the lane has run git reset --hard, is allowed", "allow",
-    tool="Agent", prompt="The lane has run `git reset --hard origin/main` after the crash. Redo it.",
+# Denied: a span after "has run" is an order, since the scan has no report pass (lane decision on report forms).
+add("brief-destructive-git: a report that the lane has run git reset --hard is denied", "deny",
+    BRIEF_DESTRUCTIVE, tool="Agent", prompt="The lane has run `git reset --hard origin/main` after the crash. Redo it.",
     subagent_type="builder", model="sonnet")
 add("brief-destructive-git: control, run in place of has run is denied", "deny",
     BRIEF_DESTRUCTIVE, tool="Agent", prompt="The lane run `git reset --hard origin/main` after the crash. Redo it.",
@@ -828,9 +831,8 @@ add("brief-destructive-git: known limit, a sentence saying a guard asks for a re
     prompt="The shell guard asks for `git reset --hard origin/main` before the lane starts.",
     subagent_type="builder", model="sonnet")
 # The own-negator check reads one negator and then skips the whole span, so a joiner inside the span lets an order through.
-# The report check reads one word before the span, so a slip of "ran" for "run" lets an order through. The "-free" check
-# skips the span whatever it holds. Each deny below is an order the rule must refuse. Each control is a shape the rule
-# must keep allowing, in its whole-shape form.
+# The "-free" check skips the span whatever it holds. Each deny below is an order the rule must refuse. Each control is a
+# shape the rule must keep allowing, in its whole-shape form.
 add("brief-destructive-git: a forbidding span joined to a reset order by then is denied", "deny",
     BRIEF_DESTRUCTIVE, tool="Agent", prompt="Never run `git stash then run git reset --hard origin/main`.",
     subagent_type="builder", model="sonnet")
@@ -874,12 +876,52 @@ add("brief-destructive-git: control, a three-act list after Never run in one spa
     prompt="`Never run git stash, git reset --hard, or git clean -fd.`", subagent_type="builder", model="sonnet")
 add("brief-destructive-git: control, a two-token span then -free is allowed", "allow", tool="Agent",
     prompt="Do the check in a `git status`-free aside, then report.", subagent_type="builder", model="sonnet")
-add("brief-destructive-git: control, the reviewer had run a reset before a span is allowed", "allow", tool="Agent",
+# Denied: a span after "had run" is an order, since the scan has no report pass (lane decision on report forms).
+add("brief-destructive-git: a report that the reviewer had run a reset is denied", "deny",
+    BRIEF_DESTRUCTIVE, tool="Agent",
     prompt="The reviewer had run `git reset --hard origin/main` before the crash. Redo it.",
     subagent_type="builder", model="sonnet")
-# Pins for three shapes the brief scan must refuse: a negator inside a span that joins a reset order, a report clause
-# that holds "you" with ran, and a report clause that holds ran inside a longer phrase. A mutant row in
-# hooks/mutate_guard.py kills each one.
+# Report-form probes: each orders a reset in the words of a label, a done-condition or a report, so each is denied. The
+# scan has no report pass (lane decision on report forms).
+add("brief-destructive-git: a Done when: clause that holds a ran reset is denied", "deny", BRIEF_DESTRUCTIVE, tool="Agent",
+    prompt="Done when: the lane ran `git reset --hard origin/main`.", subagent_type="builder", model="sonnet")
+add("brief-destructive-git: a Goal: clause that holds a ran reset is denied", "deny", BRIEF_DESTRUCTIVE, tool="Agent",
+    prompt="Goal: the lane ran `git reset --hard origin/main`.", subagent_type="builder", model="sonnet")
+add("brief-destructive-git: a Task: clause that holds a ran reset is denied", "deny", BRIEF_DESTRUCTIVE, tool="Agent",
+    prompt="Task: the lane ran `git reset --hard origin/main`.", subagent_type="builder", model="sonnet")
+add("brief-destructive-git: a Required: clause that holds a ran reset is denied", "deny", BRIEF_DESTRUCTIVE, tool="Agent",
+    prompt="Required: the lane ran `git reset --hard origin/main`.", subagent_type="builder", model="sonnet")
+add("brief-destructive-git: a Plan: clause that holds a ran reset is denied", "deny", BRIEF_DESTRUCTIVE, tool="Agent",
+    prompt="Plan: the lane ran `git reset --hard origin/main`.", subagent_type="builder", model="sonnet")
+add("brief-destructive-git: a Next: clause that holds a ran reset is denied", "deny", BRIEF_DESTRUCTIVE, tool="Agent",
+    prompt="Next: the lane ran `git reset --hard origin/main`.", subagent_type="builder", model="sonnet")
+add("brief-destructive-git: Finished when lane has run a reset is denied", "deny", BRIEF_DESTRUCTIVE, tool="Agent",
+    prompt="Finished when lane has run `git reset --hard origin/main`.", subagent_type="builder", model="sonnet")
+add("brief-destructive-git: Confirm the lane ran a reset is denied", "deny", BRIEF_DESTRUCTIVE, tool="Agent",
+    prompt="Confirm the lane ran `git reset --hard origin/main`.", subagent_type="builder", model="sonnet")
+add("brief-destructive-git: Verify the lane has run a reset is denied", "deny", BRIEF_DESTRUCTIVE, tool="Agent",
+    prompt="Verify the lane has run `git reset --hard origin/main`.", subagent_type="builder", model="sonnet")
+add("brief-destructive-git: Check the lane ran a reset is denied", "deny", BRIEF_DESTRUCTIVE, tool="Agent",
+    prompt="Check the lane ran `git reset --hard origin/main`.", subagent_type="builder", model="sonnet")
+add("brief-destructive-git: Assume the lane ran a reset, then do the same, is denied", "deny", BRIEF_DESTRUCTIVE,
+    tool="Agent", prompt="Assume the lane ran `git reset --hard origin/main`; do the same.",
+    subagent_type="builder", model="sonnet")
+add("brief-destructive-git: Immediately ran a reset is denied", "deny", BRIEF_DESTRUCTIVE, tool="Agent",
+    prompt="Immediately ran `git reset --hard origin/main`.", subagent_type="builder", model="sonnet")
+add("brief-destructive-git: The lane must ran a reset is denied", "deny", BRIEF_DESTRUCTIVE, tool="Agent",
+    prompt="The lane must ran `git reset --hard origin/main`.", subagent_type="builder", model="sonnet")
+add("brief-destructive-git: The lane ran a reset, then do the same, is denied", "deny", BRIEF_DESTRUCTIVE, tool="Agent",
+    prompt="The lane ran `git reset --hard origin/main`; do the same.", subagent_type="builder", model="sonnet")
+# A colon does not end a clause, so a forbidding word before the first span reaches the span after the colon: an order.
+add("brief-destructive-git: Avoid a span, a colon, then a reset span is denied", "deny", BRIEF_DESTRUCTIVE, tool="Agent",
+    prompt="Avoid `git stash`: `git reset --hard origin/main`.", subagent_type="builder", model="sonnet")
+add("brief-destructive-git: Without a span, a colon, then a reset span is denied", "deny", BRIEF_DESTRUCTIVE, tool="Agent",
+    prompt="Without `git stash`: `git reset --hard origin/main`.", subagent_type="builder", model="sonnet")
+# Control: plain words with no backtick span name no command, so the scan has nothing to read and allows the brief.
+add("brief-destructive-git: control, plain no rebase and no force words with no span are allowed", "allow", tool="Agent",
+    prompt="Do the check with no rebase, no force, then report.", subagent_type="builder", model="sonnet")
+# Pins for three forms the brief scan must refuse: a negator inside a span that joins a reset order, a span after "you ran",
+# and a span after "ran" inside a longer phrase. A mutant row in hooks/mutate_guard.py kills each one.
 add("brief-destructive-git: a span that opens with Never run, then a joiner and a reset order, is denied", "deny",
     BRIEF_DESTRUCTIVE, tool="Agent", prompt="`Never run git stash then run git reset --hard origin/main`",
     subagent_type="builder", model="sonnet")
