@@ -8,7 +8,8 @@ the standard source loader, which keeps it in hooks/__pycache__ (or under PYTHON
 (`__name__ == "__main__"`) are unchanged.
 
 It writes the cache even when the host sets PYTHONDONTWRITEBYTECODE=1: that setting made every guard call compile
-guard.py and each module it imports. The override is this file's own pick, not an owner ruling.
+guard.py and each module it imports. Nothing the host or the owner set asks for this override; it is a choice made here
+so the cache pays off.
 
 Fail safe: a stale, corrupt or other-version cache is rebuilt, and any error while getting the cached code falls back
 to compiling guard.py's source here, the plain start. This file never judges a call and never decides to allow one.
