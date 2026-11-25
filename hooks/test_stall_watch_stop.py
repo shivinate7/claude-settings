@@ -88,6 +88,7 @@ transcript and prints one JSON line `{"decision": "block", "reason": "..."}`, or
 import atexit
 import builtins
 import contextlib
+import datetime
 import importlib.util
 import io
 import itertools
@@ -1867,14 +1868,18 @@ def finished_notice(aid):
     return notice(aid, "completed", summary='Agent "review the diff" completed')
 
 
-def agent_checkin(ago, aid, is_error=False, delay=None):
-    """A send_later check-in that names agent aid, made ago seconds before NOW, with its result: an error when
-    is_error, else a good result. Both records are stamped, so the check-in's time is known. delay, when given, is
-    the check-in's delay_minutes: how many minutes ahead it is set."""
+def agent_checkin(ago, aid, is_error=False, delay=None, at_time=None, tool=None, fields=None):
+    """A check-in of tool (send_later unless tool names another) that names agent aid, made ago seconds before NOW, with
+    its result: an error when is_error, else a good result. Both records are stamped, so the check-in's time is known.
+    delay, when given, is the check-in's delay_minutes: how many minutes ahead it is set. at_time, when given, is its
+    `at` text. fields, when given, is merged into the input as it stands (a ScheduleWakeup delaySeconds, a CronCreate cron)."""
     inp = {"message": "check agent %s" % aid}
     if delay is not None:
         inp["delay_minutes"] = delay
-    rec = tool_call(SEND_LATER, inp)
+    if at_time is not None:
+        inp["at"] = at_time
+    inp.update(fields or {})
+    rec = tool_call(tool or SEND_LATER, inp)
     call_id = rec["message"]["content"][0]["id"]
     text = "send_later failed: no session" if is_error else "scheduled"
     return stamped([rec, tool_result(call_id, text, is_error=is_error, tool_use_result=text)], ago)
@@ -2328,6 +2333,28 @@ def A17i_waiting_notice_newer_than_the_latest_resume_keeps_the_agent_waiting():
 
 
 @case
+def A17k_waiting_notice_resume_then_waiting_notice_again_keeps_the_agent_waiting():
+    """A17k. a background agent launched 50 min before the Stop, sent a waiting notice 48 min before it, resumed 20 min
+    before it, sent a waiting notice again 10 min before it, and quiet for 400 s: the second waiting notice is newer than
+    the resume, so the flag is set again and the agent gets no quiet row. Control: a second agent, launched 15 min before,
+    never waiting and quiet for 400 s, is listed once"""
+    aid, ctl_id = agent_id(317), agent_id(318)
+    folder = new_dir()
+    launch, spec = background_agent(folder, aid, agent_step("k"), 400)
+    lc, ctl = background_agent(folder, ctl_id, agent_step("c2"), 400)
+    recs = (stamped(launch, 3000) + stamped([waiting_notice(aid)], 2880) + stamped(resume_records("k", aid), 1200)
+            + stamped([waiting_notice(aid)], 600) + stamped(lc, 900))
+    rc, out, err = run_stop(transcript(recs, agents=[spec, ctl], folder=folder))
+    problems = expect(rc == 0, f"exit {rc}, want 0: {err.strip()[:200]}")
+    msg = system_message(out, problems)
+    problems += expect(aid not in msg,
+                       f"agent {aid} has a quiet row though its second waiting notice is newer than its resume: "
+                       f"{out[:200]!r}")
+    problems += ["control: " + p for p in listed_once(msg, ctl_id, by_line=True)]
+    return problems
+
+
+@case
 def A17j_agent_never_resumed_with_a_waiting_notice_stays_waiting_and_its_block_says_so():
     """A17j. a background agent launched 31 min before the Stop, sent a waiting notice 10 min before it, never resumed,
     and quiet for 400 s: it gets no quiet row, and its 1800 s block names it and says it is waiting on its own
@@ -2410,6 +2437,211 @@ def A18c_checkin_set_29_minutes_ahead_clears_the_block():
                                        agents=[spec], folder=folder))
     problems = expect(rc == 0, f"exit {rc}, want 0: {err.strip()[:200]}")
     problems += expect('"decision"' not in out, f"a check-in set 29 minutes ahead left a block: {out[:200]!r}")
+    return problems
+
+
+LOCAL_NOW = "2026-11-24T12:00:00-06:00"  # a fixed local-time clock at UTC-06:00, so no case reads the machine's zone
+
+
+def at_text(ago, minutes, offset_hours=0, with_offset=True):
+    """The `at` text of a check-in made ago seconds before NOW, set minutes after that call: ISO-8601 in the zone
+    offset_hours from UTC, with its offset text, or with no offset text at all when with_offset is False."""
+    zone = datetime.timezone(datetime.timedelta(hours=offset_hours))
+    when = datetime.datetime.fromtimestamp(NOW - ago + minutes * 60, zone)
+    if not with_offset:
+        when = when.replace(tzinfo=None)
+    return when.isoformat(timespec="seconds")
+
+
+@case
+def A18d_checkin_at_29_minutes_after_the_call_counts():
+    """A18d. a background agent launched 31 min before the Stop, still writing, with a send_later check-in that names
+    it, made 30 s before the Stop, whose `at` is 29 minutes after that call (UTC, with its offset): within the 30-minute
+    remedy, so it counts and the Stop prints no block. Control: the same agent with no check-in blocks"""
+    aid = agent_id(323)
+    folder = new_dir()
+    launch, spec = background_agent(folder, aid, agent_step("m1"), 10)
+    rc, out, err = run_stop(transcript(stamped(launch, 1860) + agent_checkin(30, aid, at_time=at_text(30, 29)),
+                                       agents=[spec], folder=folder))
+    problems = expect(rc == 0, f"exit {rc}, want 0: {err.strip()[:200]}")
+    problems += expect('"decision"' not in out, f"a check-in whose at is 29 minutes after the call left a block: {out[:200]!r}")
+    folder = new_dir()
+    launch, spec = background_agent(folder, aid, agent_step("m1"), 10)
+    rc, out, err = run_stop(transcript(stamped(launch, 1860), agents=[spec], folder=folder))
+    problems += ["control: " + p for p in agent_block(out, aid)]
+    return problems
+
+
+@case
+def A18e_checkin_at_180_minutes_after_the_call_does_not_count():
+    """A18e. the agent of A18d with a send_later check-in that names it, made 30 s before the Stop, whose `at` is 180
+    minutes after that call (UTC, with its offset): the remedy allows 30 minutes ahead at most, so the check-in does not
+    count and the Stop still blocks and names the agent"""
+    aid = agent_id(324)
+    folder = new_dir()
+    launch, spec = background_agent(folder, aid, agent_step("m2"), 10)
+    rc, out, err = run_stop(transcript(stamped(launch, 1860) + agent_checkin(30, aid, at_time=at_text(30, 180)),
+                                       agents=[spec], folder=folder))
+    problems = expect(rc == 0, f"exit {rc}, want 0: {err.strip()[:200]}")
+    problems += expect(aid in block_text(out),
+                       f"a check-in whose at is 180 minutes after the call cleared the block of agent {aid}, though the "
+                       f"remedy allows 30 minutes ahead at most: {out[:200]!r}")
+    return problems
+
+
+@case
+def A18f_checkin_at_with_no_offset_is_read_in_the_local_clock_offset():
+    """A18f. the agent of A18d with a send_later check-in whose `at` has no UTC offset, set 29 minutes after the call. It
+    is read in the offset of the local-time clock (LOCAL_TIME_NOW, fixed at UTC-06:00 here), so it counts and the Stop
+    prints no block. Control: the same offset-less text 180 minutes after the call does not count, and the Stop blocks"""
+    aid = agent_id(325)
+    problems = []
+    with mock.patch.dict(os.environ, {"LOCAL_TIME_NOW": LOCAL_NOW}):
+        folder = new_dir()
+        launch, spec = background_agent(folder, aid, agent_step("m3"), 10)
+        rc, out, err = run_stop(transcript(stamped(launch, 1860) + agent_checkin(30, aid, at_time=at_text(30, 29, -6, False)),
+                                           agents=[spec], folder=folder))
+        problems += expect(rc == 0, f"offset-less at 29 minutes ahead: exit {rc}, want 0: {err.strip()[:200]}")
+        problems += expect('"decision"' not in out,
+                           f"an offset-less at 29 minutes after the call left a block: {out[:200]!r}")
+        folder = new_dir()
+        launch, spec = background_agent(folder, aid, agent_step("m3b"), 10)
+        rc, out, err = run_stop(transcript(stamped(launch, 1860) + agent_checkin(30, aid, at_time=at_text(30, 180, -6, False)),
+                                           agents=[spec], folder=folder))
+        problems += ["control, offset-less at 180 minutes ahead: " + p for p in agent_block(out, aid)]
+    return problems
+
+
+@case
+def A18g_checkin_with_neither_field_still_counts():
+    """A18g. the agent of A18d with a check-in that names it and has neither delay_minutes nor `at`, as a CronCreate or
+    a ScheduleWakeup call gives: its time is not judged, so it counts and the Stop prints no block for either tool.
+    Control: the same agent with no check-in blocks"""
+    aid = agent_id(326)
+    problems = []
+    for tool in ("CronCreate", "ScheduleWakeup"):
+        folder = new_dir()
+        launch, spec = background_agent(folder, aid, agent_step("m4"), 10)
+        rc, out, err = run_stop(transcript(stamped(launch, 1860) + agent_checkin(30, aid, tool=tool),
+                                           agents=[spec], folder=folder))
+        problems += expect(rc == 0, f"{tool} check-in: exit {rc}, want 0: {err.strip()[:200]}")
+        problems += expect('"decision"' not in out,
+                           f"a {tool} check-in with neither field left a block of agent {aid}: {out[:200]!r}")
+    folder = new_dir()
+    launch, spec = background_agent(folder, aid, agent_step("m4"), 10)
+    rc, out, err = run_stop(transcript(stamped(launch, 1860), agents=[spec], folder=folder))
+    problems += ["control: " + p for p in agent_block(out, aid)]
+    return problems
+
+
+@case
+def A18h_checkin_with_delay_180_and_an_unreadable_at_does_not_count():
+    """A18h. a background agent launched 31 min before the Stop, still writing, with a send_later check-in that names it,
+    made 30 s before the Stop, whose delay_minutes is 180 and whose `at` does not read ("tomorrow", then ""): the 180
+    minutes already read stand, so the check-in does not count and the Stop still blocks and names the agent. A failed
+    read of `at` must not drop the delay"""
+    problems = []
+    for at_value in ("tomorrow", ""):
+        aid = agent_id(327)
+        folder = new_dir()
+        launch, spec = background_agent(folder, aid, agent_step("m5"), 10)
+        rc, out, err = run_stop(transcript(stamped(launch, 1860) + agent_checkin(30, aid, delay=180, at_time=at_value),
+                                           agents=[spec], folder=folder))
+        problems += expect(rc == 0, f"at {at_value!r}: exit {rc}, want 0: {err.strip()[:200]}")
+        problems += expect(aid in block_text(out),
+                           f"a check-in with delay_minutes 180 and at {at_value!r} cleared the block of agent {aid}, "
+                           f"though its 180 minutes read: {out[:200]!r}")
+    return problems
+
+
+@case
+def A18i_schedule_wakeup_with_delay_seconds_3600_does_not_count():
+    """A18i. a background agent launched 31 min before the Stop, still writing, with a ScheduleWakeup check-in that names
+    it, made 30 s before the Stop, whose delaySeconds is 3600 (60 minutes ahead): the remedy allows 30 minutes at most,
+    so the check-in does not count and the Stop still blocks and names the agent"""
+    aid = agent_id(328)
+    folder = new_dir()
+    launch, spec = background_agent(folder, aid, agent_step("m6"), 10)
+    rc, out, err = run_stop(transcript(stamped(launch, 1860) + agent_checkin(30, aid, tool="ScheduleWakeup",
+                                                                            fields={"delaySeconds": 3600}),
+                                       agents=[spec], folder=folder))
+    problems = expect(rc == 0, f"exit {rc}, want 0: {err.strip()[:200]}")
+    problems += expect(aid in block_text(out),
+                       f"a ScheduleWakeup check-in set 3600 seconds (60 minutes) ahead cleared the block of agent {aid}, "
+                       f"though the remedy allows 30 minutes ahead at most: {out[:200]!r}")
+    return problems
+
+
+@case
+def A18j_schedule_wakeup_with_delay_seconds_1500_counts():
+    """A18j. the agent of A18i with a ScheduleWakeup check-in whose delaySeconds is 1500 (25 minutes ahead): within the
+    30-minute remedy, so it counts and the Stop prints no block"""
+    aid = agent_id(329)
+    folder = new_dir()
+    launch, spec = background_agent(folder, aid, agent_step("m7"), 10)
+    rc, out, err = run_stop(transcript(stamped(launch, 1860) + agent_checkin(30, aid, tool="ScheduleWakeup",
+                                                                            fields={"delaySeconds": 1500}),
+                                       agents=[spec], folder=folder))
+    problems = expect(rc == 0, f"exit {rc}, want 0: {err.strip()[:200]}")
+    problems += expect('"decision"' not in out,
+                       f"a ScheduleWakeup check-in set 1500 seconds (25 minutes) ahead left a block: {out[:200]!r}")
+    return problems
+
+
+@case
+def A18k_cron_create_check_in_is_not_judged_for_its_schedule():
+    """A18k. the agent of A18i with a CronCreate check-in that names it and carries a cron schedule that is far off, and
+    no delay_minutes, at or delaySeconds: the check reads no CronCreate schedule, so the check-in counts and the Stop
+    prints no block. This pins the limit: a CronCreate check-in is taken as a check-in whatever its schedule"""
+    aid = agent_id(330)
+    folder = new_dir()
+    launch, spec = background_agent(folder, aid, agent_step("m8"), 10)
+    rc, out, err = run_stop(transcript(stamped(launch, 1860) + agent_checkin(30, aid, tool="CronCreate",
+                                                                            fields={"cron": "0 3 1 1 *",
+                                                                                    "recurring": False}),
+                                       agents=[spec], folder=folder))
+    problems = expect(rc == 0, f"exit {rc}, want 0: {err.strip()[:200]}")
+    problems += expect('"decision"' not in out,
+                       f"a CronCreate check-in left a block: {out[:200]!r}")
+    return problems
+
+
+@case
+def A18l_unparseable_launch_row_reads_background_agent_launch_time_unread():
+    """A18l. a quiet background agent whose launch time does not parse gets a row that reads "background agent, launch
+    time unread", with a space after the comma"""
+    aid = agent_id(331)
+    folder = new_dir()
+    launch, spec = background_agent(folder, aid, agent_step("u5"), 400)
+    rc, out, err = run_stop(transcript(launch, agents=[spec], folder=folder))
+    problems = expect(rc == 0, f"exit {rc}, want 0: {err.strip()[:200]}")
+    msg = system_message(out, problems)
+    rows = [line for line in msg.splitlines() if aid in line]
+    problems += expect(any("background agent, launch time unread" in line for line in rows),
+                       f"the row for agent {aid} with no parseable launch time does not read 'background agent, launch "
+                       f"time unread': {rows!r}")
+    return problems
+
+
+@case
+def A18m_unread_row_names_the_exception_type():
+    """A18m. a quiet background agent whose read raises in the job loop gets a row that says it is unread and names the
+    exception's type. Two runs, one raising ValueError and one KeyError, so the row names the type it was given"""
+    problems = []
+    for exc in (ValueError, KeyError):
+        aid = agent_id(332)
+        folder = new_dir()
+        launch, spec = background_agent(folder, aid, agent_step("u6"), 400)
+        path = transcript(stamped(launch, 900), agents=[spec], folder=folder)
+
+        def failing_read(*args, _exc=exc, **kwargs):  # a stand-in for a read inside the job loop that raises
+            raise _exc("a read in the job loop failed")
+        rc, out, _, _ = stop_in_process(path, patch={"open_call": failing_read})
+        problems += expect(rc == 0, f"{exc.__name__}: exit {rc}, want 0")
+        msg = system_message(out, problems)
+        rows = [line for line in msg.splitlines() if aid in line and "unread" in line]
+        problems += expect(any(exc.__name__ in line for line in rows),
+                           f"the unread row for agent {aid} whose read raised {exc.__name__} does not name it: {rows!r}")
     return problems
 
 
