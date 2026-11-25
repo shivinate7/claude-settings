@@ -1,0 +1,1 @@
+- form-string-float-untested: no case gives a string or float form mark ("2", 2.0) a reason that names a listed id, so a `form_refusal` that reads integer marks only leaves every case green. `case_item_string_two_keeps_the_judge_reason` and `case_item_float_two_keeps_the_judge_reason` use `JUDGE_REPLY`, which opens with no digit. Seen: 2026-11-25 x1

@@ -1,0 +1,1 @@
+- item8-dash-opener-no-mark: with no `item`, the openers "8 - ", "8 — " and "8, " are not item 8 marks (`PAST_ITEM_REASON`), and `FORM_ITEM_REASON` does not match them either. With no listed id cited, the refusal keeps the judge's reason. Debt `judge-dash-order-passes` (judge words in a refusal) covers this path. Seen: 2026-11-25 x1

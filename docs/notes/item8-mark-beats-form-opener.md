@@ -1,0 +1,1 @@
+- item8-mark-beats-form-opener: an item mark of "8" or 8.0 beats a form-numbered opener ("2. ..."). With a listed id cited and a question whose Based on (ruling) line names it, `main` lets the call through: `item_mark` gives 8, so `form_refusal` is False. It takes a judge that contradicts itself. No case pins it. Seen: 2026-11-25 x1
