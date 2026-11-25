@@ -651,23 +651,12 @@ def prime_pushed(root: str, entries):
         cache.update({h: h not in unpushed for h in heads if h not in cache})
 
 
-def _local_ref_tips(path: str):
-    """The commit SHAs of every local branch in PATH, or None when git could not tell.
-    One `for-each-ref`; a detached HEAD is not a ref and `fully_pushed` reads it apart."""
-    answer = git_reads._git(path, "for-each-ref", "--format=%(objectname)", "refs/heads")
-    if answer is None or answer.returncode != 0:
-        return None
-    return answer.stdout.split()
-
-
-def fully_pushed(path: str, every_ref: bool = False):
+def fully_pushed(path: str):
     """True when every commit on HEAD is reachable from a head the remote lists now (a detached
     HEAD counts too), False when one is not, None when git could not tell: ls-remote failed
     or rev-list failed. A live SHA missing locally is dropped, not unreadable. Every reap needs it, not only a
     stale agent lock: a lane always commits, and a detached HEAD has no branch to tombstone.
-    HEAD is read now; `prime_pushed` may already have settled that commit this run.
-    EVERY_REF adds each local branch to HEAD, in the same ls-remote and rev-list: a nested clone
-    in a trash folder holds work on a side branch, which a HEAD read does not see."""
+    HEAD is read now; `prime_pushed` may already have settled that commit this run."""
     live = _live_remote_heads(path)
     if live is None:
         return None
@@ -675,21 +664,15 @@ def fully_pushed(path: str, every_ref: bool = False):
     if head is None or head.returncode != 0 or not head.stdout.strip():
         return None
     head = head.stdout.strip()
-    heads = [head]
-    if every_ref:
-        tips = _local_ref_tips(path)
-        if tips is None:
-            return None
-        heads += tips
     cache = _pushed_cache(path)
-    if cache is not None and not every_ref and head in cache:
+    if cache is not None and head in cache:
         return cache[head]
-    unpushed = _unpushed_among(path, heads, live)
+    unpushed = _unpushed_among(path, [head], live)
     if unpushed is None:
         return None
     if cache is not None:
-        cache.update({h: h not in unpushed for h in heads})
-    return not unpushed
+        cache[head] = head not in unpushed
+    return head not in unpushed
 
 
 STRICT_IDLE_SECONDS = 60 * 60  # a tree needs 1 hour of git quiet
@@ -3130,12 +3113,14 @@ def untrash_name(basename: str):
 
 
 def has_nested_git(path: str):
-    """True when a `.git` folder or file sits anywhere under the folder PATH, False when none does, None
-    when a folder under it could not be read. A nested repo or a linked worktree's pointer file holds work
-    the parent repo's status reads as one untracked line. The walk stops at the first hit and follows no link."""
+    """True when a nested repo sits anywhere under the folder PATH: a `.git` folder, file or link, or a bare
+    repo (a folder holding `HEAD`, `objects` and `refs`). False when none does, None when a folder under it
+    could not be read. A nested repo or a linked worktree's pointer file holds work the parent repo's status
+    reads as one untracked line. The walk stops at the first hit and follows no link."""
     unreadable = []
     for _, dirnames, filenames in os.walk(path, followlinks=False, onerror=unreadable.append):
-        if ".git" in dirnames or ".git" in filenames:
+        if (".git" in dirnames or ".git" in filenames
+                or ("HEAD" in filenames and "objects" in dirnames and "refs" in dirnames)):
             return True
     return None if unreadable else False
 
@@ -3181,48 +3166,13 @@ def _own_trash_lines(parent: str, base: str, original: str, lines):
     return mine
 
 
-def _nested_repo_holds_work(repo: str):
-    """True when the repo at REPO has an uncommitted path, any stash entry (local-only work by nature, so
-    never tested against a remote), or a commit no remote head holds on HEAD or any local branch, False when it
-    is clean and every commit is on its remote (a clone: build output), None when git cannot say."""
-    lines = git_reads.porcelain(repo)
-    if lines is None:
-        return None
-    if lines:
-        return True
-    stash = git_reads._git(repo, "rev-parse", "--verify", "--quiet", "refs/stash")
-    if stash is None or stash.returncode not in (0, 1):
-        return None
-    if stash.returncode == 0:
-        return True
-    pushed = fully_pushed(repo, every_ref=True)
-    return None if pushed is None else not pushed
-
-
-def _nested_repos_hold_work(path: str):
-    """True when a repo under the trash folder PATH holds work, False when each one is a clean clone of its
-    remote, None when one cannot be read. A `.git` file or link is a pointer git cannot judge here, so it is
-    work, as it was before a clone could read clean. The walk follows no link and skips each `.git` folder."""
-    unreadable = []
-    verdicts = []
-    for dirpath, dirnames, filenames in os.walk(path, followlinks=False, onerror=unreadable.append):
-        if ".git" in filenames or (".git" in dirnames and is_link(os.path.join(dirpath, ".git"))):
-            return True
-        if ".git" in dirnames:
-            dirnames.remove(".git")
-            verdicts.append(_nested_repo_holds_work(dirpath))
-    if True in verdicts:
-        return True
-    return None if unreadable or None in verdicts else False
-
-
 def trash_dirty(path: str):
     """True when the trash folder PATH holds work, False when it holds none, None when git cannot say.
     The reap renames a build folder whole and deletes it whatever it holds (decision
     build-dirs-reaped-at-agent-end), so an untracked path under the trash name is build output, not work.
     What is work is a path git tracks: a staged or changed file, or a tracked file the rename moved away
-    from the build name (listed as deleted there), judged on this folder's own lines only. A nested repo is
-    work too, since the parent repo cannot see it, unless it is a clean clone with every commit on its remote. The read is limited to the trash
+    from the build name (listed as deleted there), judged on this folder's own lines only. A nested repo
+    anywhere inside is work too: the parent repo cannot see it. The read is limited to the trash
     name and the name it had before the rename."""
     parent, base = os.path.split(os.path.normpath(path))
     original = untrash_name(base)
@@ -3234,8 +3184,6 @@ def trash_dirty(path: str):
     if lines is not None and any(line[:2] != "??" for line in lines):
         return True
     nested = has_nested_git(path)
-    if nested:
-        nested = _nested_repos_hold_work(path)
     if nested:
         return True
     return None if lines is None or nested is None else False
