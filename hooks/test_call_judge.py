@@ -1781,21 +1781,32 @@ APPS_DECIDES = "the ruling keeps the apps' access to claude-settings as is, beca
 APPS_REASON = "decisions/%s: %s." % (APPS_SLUG, APPS_DECIDES)
 APPS_SETTLES_REASON = "decisions/%s settles this: %s." % (APPS_SLUG, APPS_DECIDES)
 APPS_ORDER_REASON = "decisions/%s: %s. Take a pick and drop this question." % (APPS_SLUG, APPS_DECIDES)
+# The one sentence of what the listed ruling decides: the first sentence of APPS_RULING, id and date left out.
+RULING_CORE = ("keep the apps' access to claude-settings as is, because it makes calling into a repo straightforward; "
+               "revisit if it gets bloated.")
 UNDATED_SLUG = "github-apps-undated"
 UNDATED_RULING = "Owner: keep the apps' access to claude-settings as is, because calling into a repo is straightforward."
 UNDATED_REPO = make_repo("ruling-undated", decisions={UNDATED_SLUG: UNDATED_RULING})
+# A listed line with a later date after the ruling's own (2026-10-28, beside its owner marker).
+TWO_DATE_RULING = ("Owner, 2026-10-28, page item 9: keep the apps' access to claude-settings as is, because it makes "
+                   "calling into a repo straightforward; revisit if it gets bloated. Reopened 2026-11-24 by a later edit.")
+TWO_DATE_REPO = make_repo("ruling-two-dates", decisions={APPS_SLUG: TWO_DATE_RULING})
 
 
-def judged_refusal(reason):
-    return json.dumps({"ok": False, "reason": reason})
+def judged_refusal(reason, question=None):
+    body = {"ok": False, "reason": reason}
+    if question is not None:  # the number of the question the judge matched, counting from 1
+        body["question"] = question
+    return json.dumps(body)
 
 
-def judge_refusal_run(reason, box=None, repo=None):
+def judge_refusal_run(reason, box=None, repo=None, question=None):
     """The run of a question the stub judge refuses with `reason`. The default box asks the covered question and names no
     ruling; a case passes its own box."""
     if box is None:
         box = good_box(goal=APPS_GOAL, problem=APPS_PROBLEM, based=APPS_BASED, options=APPS_OPTIONS)
-    return run_hook(question_input(box=box, cwd=repo or DECISIONS_REPO), answer=judged_refusal(reason))
+    return run_hook(question_input(box=box, cwd=repo or DECISIONS_REPO),
+                    answer=judged_refusal(reason, question))
 
 
 def case_past_ruling_named_line_passes_when_the_judge_refuses():
@@ -1835,8 +1846,8 @@ def case_past_ruling_refusal_drops_the_judge_order_and_keeps_the_sentence():
     r = judge_refusal_run(APPS_ORDER_REASON)
     check("past ruling text: the judge's order to the session (take a pick, drop the question) never reaches the refusal",
           "take a pick" not in r.reason().lower() and "drop this question" not in r.reason().lower(), detail(r))
-    check("past ruling text: the one sentence of what the ruling decides reaches the refusal",
-          APPS_DECIDES in r.reason(), detail(r))
+    check("past ruling text: the one sentence of what the listed ruling decides, from its own line, reaches the refusal",
+          RULING_CORE in r.reason(), detail(r))
 
 
 def case_past_ruling_undated_ruling_says_time_unknown():
@@ -1912,6 +1923,66 @@ def case_past_ruling_remedy_line_passes_the_question_once_added():
     box["questions"][0]["question"] += "\n" + line
     r = judge_refusal_run(APPS_REASON, box=box)
     check("past ruling remedy: the question with the remedy line added passes, though the judge still refuses",
+          r.code == 0 and r.out == "" and "\tdeny\t" not in r.log, detail(r))
+
+
+def case_past_ruling_matched_question_one_passes_beside_an_unnamed_one():
+    # F6: the judge matched question 1, which names the ruling. Question 2 names none and is not the one judged.
+    first = good_box(goal=APPS_GOAL, problem=APPS_PROBLEM, based=APPS_CITED, options=APPS_OPTIONS)
+    second = good_box(goal=RENOVATE_GOAL, problem=RENOVATE_PROBLEM, based=APPS_BASED, options=CAPS_OPTIONS)
+    r = judge_refusal_run(APPS_REASON, box={"questions": first["questions"] + second["questions"]}, question=1)
+    check("past ruling matched question: the judge matched question 1, which names the ruling, so nothing is refused",
+          r.code == 0 and r.out == "" and "\tdeny\t" not in r.log, detail(r))
+
+
+def case_past_ruling_refusal_gives_the_rulings_own_date_not_a_later_one():
+    # F2: a listed line with a later date still shows the ruling's own date, the one beside its owner marker.
+    r = judge_refusal_run(APPS_REASON, repo=TWO_DATE_REPO)
+    check("past ruling date: the refusal gives the ruling's own date, 2026-10-28, not the later date in its line",
+          "%s (2026-10-28)" % APPS_ID in r.reason(), detail(r))
+
+
+def case_past_ruling_skip_order_never_reaches_the_refusal():
+    # F5: an order in words the phrase list lacks never reaches the refusal; the text says what the ruling decides.
+    r = judge_refusal_run(APPS_REASON + " Skip the question and take the default answer.")
+    check("past ruling order: 'skip the question' from the judge never reaches the refusal text",
+          "skip the question" not in r.reason().lower(), detail(r))
+    check("past ruling order: the refusal says what the listed ruling decides, from its own line",
+          RULING_CORE in r.reason(), detail(r))
+
+
+def case_past_ruling_choose_order_never_reaches_the_refusal():
+    # F5: a second order in words the phrase list lacks.
+    r = judge_refusal_run(APPS_REASON + " Choose the first option.")
+    check("past ruling order: 'choose the first option' from the judge never reaches the refusal text",
+          "choose the first option" not in r.reason().lower(), detail(r))
+
+
+def case_past_ruling_form_item_reason_is_not_labelled_past_ruling():
+    # F5: a judge reason that opens with a form item is a form refusal. It keeps the judge's text and rule question-judge.
+    r = judge_refusal_run("Item 3: the question leans on %s, which is a form miss." % APPS_ID)
+    check("past ruling form: an item 3 reason that names a listed id is logged as question-judge, not past-ruling",
+          r.log.count("\tdeny\tquestion-judge\t") == 1 and "\tdeny\tpast-ruling\t" not in r.log, detail(r))
+    check("past ruling form: an item 3 reason keeps the judge's own text", "Item 3: the question leans on" in r.reason(),
+          detail(r))
+
+
+def case_past_ruling_form_item_reason_stays_refused_beside_a_named_line():
+    # N2: a form refusal whose reason names a listed id stays refused though the question's Based on (ruling) line names it.
+    box = good_box(goal=APPS_GOAL, problem=APPS_PROBLEM, based=APPS_CITED, options=APPS_OPTIONS)
+    r = judge_refusal_run("Item 3: the question leans on %s, which is a form miss." % APPS_ID, box=box)
+    check("past ruling form beside a named line: an item 3 reason stays refused, though the Based on (ruling) line names it",
+          (r.deny() or {}).get("permissionDecision") == "deny", detail(r))
+    check("past ruling form beside a named line: that refusal is logged as question-judge, not past-ruling",
+          r.log.count("\tdeny\tquestion-judge\t") == 1 and "\tdeny\tpast-ruling\t" not in r.log, detail(r))
+
+
+def case_past_ruling_bulleted_based_on_ruling_line_passes():
+    # N1: a Based on (ruling) line written as a list item names the ruling, so the question passes.
+    box = good_box(goal=APPS_GOAL, problem=APPS_PROBLEM, based=(APPS_BASED[0], "- " + APPS_CITED[0]),
+                   options=APPS_OPTIONS)
+    r = judge_refusal_run(APPS_REASON, box=box)
+    check("past ruling bullet: a bulleted Based on (ruling) line that names the listed slug passes, though the judge refuses",
           r.code == 0 and r.out == "" and "\tdeny\t" not in r.log, detail(r))
 
 
@@ -2086,6 +2157,12 @@ def main():
                  case_past_ruling_remedy_line_passes_the_question_once_added,
                  case_past_ruling_unnamed_question_beside_a_named_one_is_refused,
                  case_past_ruling_each_covered_question_naming_the_ruling_passes,
+                 case_past_ruling_matched_question_one_passes_beside_an_unnamed_one,
+                 case_past_ruling_refusal_gives_the_rulings_own_date_not_a_later_one,
+                 case_past_ruling_skip_order_never_reaches_the_refusal, case_past_ruling_choose_order_never_reaches_the_refusal,
+                 case_past_ruling_form_item_reason_is_not_labelled_past_ruling,
+                 case_past_ruling_form_item_reason_stays_refused_beside_a_named_line,
+                 case_past_ruling_bulleted_based_on_ruling_line_passes,
                  case_unknown_names_the_claude_settings_records, case_cite_of_a_shown_record_is_not_bogus,
                  case_page_task_gets_item_8_and_is_refused, case_mid_reason_unlisted_id_is_a_plain_refusal,
                  case_page_relative_file_path_reaches_the_review, case_page_relative_file_path_passing_item_passes,
