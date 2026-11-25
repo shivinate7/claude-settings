@@ -828,9 +828,41 @@ class EmptyTests(unittest.TestCase):
         self.assertEqual(not_judged, 0, "want every generated stand-in judged, none counted as not judged")
 
 
+# The fixture for the forms in UnjudgedFormTests: one test method whose body is the lines a case gives.
+FORM_HEAD = '''import json
+import unittest
+import unittest.mock
+
+import merge
+
+
+def fake_sh(args):
+    return 0, ""
+
+
+class FormTests(unittest.TestCase):
+    def test_form(self):
+'''
+
+PRODUCT_LIMIT = PRODUCT_KW + "\nLIMIT = 1\n"
+
+
+def form_file(body):
+    return FORM_HEAD + "".join("        " + line + "\n" for line in body)
+
+
 class UnjudgedFormTests(unittest.TestCase):
-    """A patch form the check cannot resolve is counted in not_judged, never skipped. Each stand-in here is a
-    MagicMock, which no check can judge, so these cases pin the count and never a judgement of the stand-in."""
+    """A form the check cannot resolve is counted in not_judged, never silent: a MagicMock, a string target, a
+    patch.multiple, a new_callable, an assignment to a product function, a setattr, or a ** dict. Each case here is
+    such a form, or a control that must add nothing. The cases pin the count and never a judgement of a stand-in."""
+
+    def assert_not_judged_adds(self, want, variant, body, expected, product=PRODUCT_KW):
+        """Judge the test file with body against the same file with body set to pass, so the count compares only the
+        form's own growth. The form adds no finding."""
+        _, base = judge(self, want, variant + "-base", product, {"test_merge.py": form_file(["pass"])})
+        findings, got = judge(self, want, variant, product, {"test_merge.py": form_file(body)})
+        self.assertEqual(where(findings), [], "want no finding for %s: a form the check cannot judge is counted, not flagged" % want)
+        self.assertEqual(got - base, expected, "want not_judged to grow by %d for %s; it grew by %d" % (expected, want, got - base))
 
     def test_starred_target_tuple_is_counted_not_silent(self):
         want = "patch.object(*target), with target a tuple built in a loop, is counted as not judged, not silent"
@@ -930,6 +962,54 @@ class UnrelatedTests(unittest.TestCase):
         findings, not_judged = judge(self, want, "control", PRODUCT_KW, {"test_merge.py": tests})
         self.assertEqual(where(findings), [], "want no finding for a patch on json: json is not the product module merge")
         self.assertEqual(not_judged, 0, "want no not-judged count for a patch on json: json is not the product module merge")
+
+    def test_plain_assignment_of_a_product_function_is_counted_not_silent(self):
+        want = "merge.sh = lambda *a: None, a plain assignment that replaces a product function"
+        self.assert_not_judged_adds(want, "assign", ["merge.sh = lambda *a: None"], expected=1)
+
+    def test_setattr_with_a_literal_name_is_counted_not_silent(self):
+        want = 'setattr(merge, "sh", fake_sh), a setattr that replaces a product function'
+        self.assert_not_judged_adds(want, "setattr_literal", ['setattr(merge, "sh", fake_sh)'], expected=1)
+
+    def test_setattr_with_a_non_literal_name_is_counted_not_silent(self):
+        want = "setattr(merge, name, fake_sh) in a loop over a name that is not a literal"
+        self.assert_not_judged_adds(want, "setattr_name", ['for name in ("sh",):', "    setattr(merge, name, fake_sh)"],
+                                    expected=1)
+
+    def test_patch_object_with_a_double_star_dict_is_counted_not_silent(self):
+        want = 'patch.object(merge, "sh", **kwargs), where the ** dict holds the stand-in'
+        self.assert_not_judged_adds(want, "double_star", ['kwargs = {"new": fake_sh}',
+                                                          'with unittest.mock.patch.object(merge, "sh", **kwargs):',
+                                                          "    pass"], expected=1)
+
+    def test_assignment_to_an_unrelated_module_adds_nothing(self):
+        want = "json.loads = fake_sh, an assignment to an attribute of json, not of the product module merge"
+        self.assert_not_judged_adds(want, "json_assign", ["json.loads = fake_sh"], expected=0)
+
+    def test_assignment_to_a_product_constant_adds_nothing(self):
+        want = "merge.LIMIT = 3, an assignment to a name the product defines only as a constant, not a function"
+        self.assert_not_judged_adds(want, "constant_assign", ["merge.LIMIT = 3"], expected=0, product=PRODUCT_LIMIT)
+
+    def test_string_target_on_another_module_adds_nothing(self):
+        want = 'patch("json.sh", fake_sh), a string target that names json, not the product module merge'
+        self.assert_not_judged_adds(want, "string_json", ['with unittest.mock.patch("json.sh", fake_sh):', "    pass"],
+                                    expected=0)
+
+    def test_string_target_on_an_undefined_product_name_adds_nothing(self):
+        want = 'patch("merge.undefined_name", fake_sh), a string target naming a name the product does not define'
+        self.assert_not_judged_adds(want, "string_undefined",
+                                    ['with unittest.mock.patch("merge.undefined_name", fake_sh):', "    pass"], expected=0)
+
+    def test_patch_multiple_on_another_module_adds_nothing(self):
+        want = "patch.multiple(json, sh=fake_sh), a patch.multiple on json, not the product module merge"
+        self.assert_not_judged_adds(want, "multiple_json", ["with unittest.mock.patch.multiple(json, sh=fake_sh):", "    pass"],
+                                    expected=0)
+
+    def test_patch_multiple_with_an_undefined_product_name_adds_nothing(self):
+        want = "patch.multiple(merge, undefined_name=fake_sh), a keyword naming a name the product does not define"
+        self.assert_not_judged_adds(want, "multiple_undefined",
+                                    ["with unittest.mock.patch.multiple(merge, undefined_name=fake_sh):", "    pass"],
+                                    expected=0)
 
 
 class FixtureTests(unittest.TestCase):
