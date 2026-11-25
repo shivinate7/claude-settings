@@ -345,6 +345,10 @@ jobs:
         if: ${{ !cancelled() && (needs.scope.outputs.code == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_guard_log_report.py
 
+      - name: Pace numbers fixture suite
+        if: ${{ !cancelled() && (needs.scope.outputs.code == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
+        run: python3 lint/test_pace_numbers.py
+
       - name: Guard outcome claims fixture suite
         if: ${{ !cancelled() && (needs.scope.outputs.code == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_guard_outcome.py
