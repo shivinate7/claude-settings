@@ -89,7 +89,7 @@ Cost: one python start per merge report, on demand (unmeasured: no test counts s
 - test_second_end_notice_without_a_send_extends_the_span
 - test_attachment_only_notice_ends_a_span
 - test_notice_in_queue_user_and_attachment_counts_once
-- test_compaction_summary_quote_does_not_end_a_resumed_span (stays green when summaries count; see Limits)
+- test_compaction_summary_quote_does_not_end_a_resumed_span (fails when summaries count)
 - test_invalid_utf8_at_the_end_prints_one_unknown_line (bytes at the end only)
 - test_overhang_under_one_minute_prints_no_note
 - test_overhang_of_61_seconds_prints_one_minute_note
@@ -100,7 +100,6 @@ Cost: one python start per merge report, on demand (unmeasured: no test counts s
 - The reader counts agents of one session's transcript. A lane run as another session is not seen.
 - Agents started by a Workflow call are not seen. The spawn tools are `Agent` and `Task` only (`SPAWN_TOOLS`). The glossary's `agent` term counts them.
 - The foreground-agent shape is not in the one real transcript measured, where all launches were async. Its span rule rests on `test_foreground_agent_span_ends_at_its_result` alone.
-- `test_compaction_summary_quote_does_not_end_a_resumed_span` stays green when summaries count. Its quoted stop repeats the first stop's text, so the earlier copy sets the close. Measured on a copy, 02:03 CST Nov 25 2026. The case needs a quoted stop whose text no other carrier has.
 - A line that is not valid JSON is skipped without a note.
 - The reader gives the idle minutes only. The reason for them is still written by the session.
 - The cloud path is not built. A cloud session's transcript is not read.
