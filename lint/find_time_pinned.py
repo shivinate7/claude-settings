@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """List the tests whose verdict depends on wall-clock speed. Read-only. Standard library only.
 
-    python3 lint/find_time_pinned.py <root> [--json] [--check]
+    python3 lint/find_time_pinned.py <root> [--json] [--check [--base REF]]
 
 Decision test-strategy-reset, point 2: no test waits on a fixed sleep or a wall-clock bound. This
 tool lists the tests that do. It fixes none, and it writes nothing. Each finding has one category:
@@ -65,6 +65,13 @@ With `--check` the listing is the same, but the exit is 1 only when a sleep or a
 2 when only an unread file remains, and 0 when nothing else is listed: a wait-cap or a test-cap is a hang
 guard the owner keeps (item 345), so it never fails the check. Its summary counts hang guards apart and leaves
 them out of the time-pinned total and the file count.
+With `--check --base REF` the check fails only on a sleep or an elapsed-assert that sits on a line the branch adds
+since its merge base with REF, so the old ones stay until a change touches their line. Each new one prints as the
+usual row, then a line that starts with `remedy`; the summary counts the rest as `N old`. Added lines come from
+check_comment_narration.added_lines, the one home of the diff reader (a moved line is not added). A hang guard is never
+listed in this mode. A ref or a diff that cannot be read prints a line that starts with `unknown` and exits 2. An unread
+file fails (exit 2) only when the branch touches it. The `.git` folder must be at or above <root>. Limit: a statement
+that spans lines counts as added when its first line is added.
 Python only: an `.elapsed` attribute in an assert is an elapsed-assert, also inside a helper call under a bound
 (`to_ms(r.elapsed) < 100`, `assertLess(to_ms(r.elapsed), 100)`). An exact `==` or `assertEqual` on it is a value
 check, so it is not listed. JS and Swift list no `.elapsed` read, only a clock call or a name that holds one.
@@ -92,6 +99,10 @@ CHECK_FAILS = ("sleep", "elapsed-assert")  # the categories --check fails on, be
 WALK_SKIP = {".git", "node_modules", ".build", "DerivedData", "venv", ".venv"}
 JS_EXTS = (".js", ".mjs", ".cjs", ".jsx", ".ts", ".tsx", ".mts", ".cts")
 TEXT_MAX = 120
+REMEDY = {
+    "sleep": "remedy: wait on the event, or inject a fake clock; a real wait needs `time-pinned-ok: <reason>` in a comment on that line",
+    "elapsed-assert": "remedy: inject a synthetic clock and assert on it; time-pinned-ok does not keep an elapsed-assert",
+}
 
 
 # ---- which files are tests -------------------------------------------------------------------------
@@ -1423,13 +1434,44 @@ def scan_file(root, rel, kind):
     return found - held, re.split(r"\r\n|\r|\n", text), held
 
 
+def report_new_only(root, base, findings, unread, counts, kept_total):
+    """--check --base: print each sleep or elapsed-assert on an added line, then the summary; the exit code."""
+    import check_comment_narration as narration  # the one home of the added-line reader; loaded only by this mode
+    try:
+        added = narration.added_lines(base, None, cwd=root, classify=kind_of)
+    except narration.Unread as e:
+        print(f"unknown: base {base} cannot be read ({' '.join(str(e).split())})")
+        return 2
+    new = [f for f in findings if f["category"] in CHECK_FAILS and f["line"] in added.get(f["path"], (None, ()))[1]]
+    old = sum(1 for f in findings if f["category"] in CHECK_FAILS) - len(new)
+    for f in new:
+        print(f"{f['path']}:{f['line']}: {f['category']}: {f['text']}")
+        print(f"    {REMEDY[f['category']]}")
+    touched = [u for u in unread if u["path"] in added]
+    for u in unread:
+        print(f"UNREAD {u['path']}: {u['reason']}" + ("" if u in touched else " (not touched by the branch)"))
+    hang = counts["test-cap"] + counts["wait-cap"]
+    kept = f"; kept {kept_total}" if kept_total else ""
+    print(f"{len(new)} new time-pinned in {len({f['path'] for f in new})} files "
+          f"(sleep {sum(f['category'] == 'sleep' for f in new)}, "
+          f"elapsed-assert {sum(f['category'] == 'elapsed-assert' for f in new)}); {old} old (allowed until a change touches the line); "
+          f"hang guards {hang} (allowed); {len(unread)} unread{kept}")
+    if new:
+        return 1
+    return 2 if touched else 0
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("root", help="the repo root, or any folder")
     ap.add_argument("--json", action="store_true", help="print one JSON object")
     ap.add_argument("--check", action="store_true",
                     help="exit non-zero only on a sleep, an elapsed-assert or an unread file")
+    ap.add_argument("--base", metavar="REF",
+                    help="with --check: fail only on a sleep or an elapsed-assert on a line added since the merge base with REF")
     args = ap.parse_args(argv)
+    if args.base is not None and (not args.check or args.json):
+        ap.error("--base needs --check and takes no --json")
     root = os.path.abspath(args.root)
     if not os.path.isdir(root):
         print(f"unknown: the folder {root} cannot be read")
@@ -1454,6 +1496,8 @@ def main(argv=None):
             findings.append({"path": rel, "line": line, "category": category, "lang": kind,
                              "text": src[:TEXT_MAX]})
     counts = {c: sum(1 for f in findings if f["category"] == c) for c in CATEGORIES}
+    if args.base is not None:
+        return report_new_only(root, args.base, findings, unread, counts, kept_total)
     if args.json:
         print(json.dumps({"findings": findings, "unread": unread, "counts": counts}, indent=1))
     else:
