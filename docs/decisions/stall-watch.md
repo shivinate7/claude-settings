@@ -221,7 +221,7 @@ Cost (rule `outcomes-mechanize-rules`, each check states its cost): no process, 
 running agent, and one read of the transcript's end for each quiet agent not yet listed and not waiting, pinned by
 `A8_cost_one_stat_per_running_agent_and_a_read_only_when_quiet` in `hooks/test_stall_watch_stop.py`. The age rule and the
 waiting rule add no stat and no read. They use the record pass that `scan_jobs` already makes. Their extra work: `keep_waiting` adds about 1.4 ms per MB of transcript at a Stop (median 0.4 ms, p95 19 ms, max 232 ms on a 110 MB transcript; 73 transcripts of this repo's sessions, top level only, 350 MB; measured 2026-11-25, best of 3). `ci_events` costs 0.10 ms per line holding a check-in or error key, JSON parse included (2187 such lines, measured 2026-11-25); no test pins these figures. The `checked_in` parse, one JSON parse per check-in each time an agent is checked for it, is unmeasured.
-The summary test adds one split and one regex for each notice that holds the waiting text, and none for the rest (unmeasured; no test pins it).
+The summary test (`notice_summary`) is one find loop over the notice's closing summary tags, with no split and no regex, for each notice that holds the waiting text, and none for the rest (unmeasured; no test pins it).
 Each healthy agent past `AGENT_LONG` costs one blocked Stop and one check-in (its false alarm).
 P1 counts runs past 30 min, which do not split healthy runs from stalled ones, so the count of healthy agents is unmeasured.
 P2 shows that the one block of 1.5 days named only finished agents.
@@ -239,7 +239,7 @@ Limits: a session that is idle with no Stop sees nothing until its next Stop. Th
 foreground agent is never checked. A TaskStop, or a terminal notice whose summary does not end with the waiting text, closes an agent id. A resume newer than that close reopens the agent: it is listed when quiet and blocked at the age, with the 1800 s counted from the latest resume. A resume newer than a waiting notice clears the waiting flag. `hooks/test_guard.py` has no case for a resumed agent under `fg-bash-while-bg`: its only mention of that rule is the catalog line (:206). An agent stuck inside one tool call is not quiet-listed. The age rule catches it only at
 `AGENT_LONG`, so a shorter stall is missed. A model turn longer than the quiet age would list a busy agent. Measured on 5
 local agent transcripts (559 records, 2026-11-07): the longest gap between records was 206 s, under the 300 s quiet age.
-An agent label that itself ends with the waiting phrase still reads as waiting.
+An agent label that itself ends with the waiting phrase still reads as waiting. A task description that holds a summary closing tag followed by a note tag or a result tag ends the summary early (`notice_summary`), so a waiting agent with such a description reads as finished.
 
 The `--hook` path exits 0 and never refuses. The `--stop` path refuses a Stop for the age rule above, and for the CI wait
 (decision `ci-wait-reads-run-status`). A crash never refuses a call or a Stop, as advisory hooks stay fail-open
