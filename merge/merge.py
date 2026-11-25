@@ -7949,7 +7949,7 @@ STANDING_ROLE = "standing"  # ruling own-tiny-fixes-b: a coordinator, triage or 
 MERGE_ROLES = {"batch-runner", LANE_ROLE, STANDING_ROLE}  # the tiers that may run `merge <pr> --confirm` in a cloud session; the standing one only past standing_refusal, the lane one only on its own pull request
 LANE_MERGE_REPO = "shivinate7/claude-settings"  # the one repo whose pull requests a lane merges itself; the lane role covers it alone
 LOCAL_MERGE_ROLES = set(LOCAL_ROLE_TIERS)  # glossary-ok: the guard's own name; the roles a local session's role file may name; the lane role is a cloud role only
-LOCAL_STANDING_ROLE = next(role for role in LOCAL_ROLE_TIERS if role not in MERGE_ROLES)  # the one local role with no cloud tier of its own: it merges as a standing session, its record reads STANDING_ROLE, past the same checks and for the repo its file names
+LOCAL_STANDING_ROLE = next(role for role in LOCAL_ROLE_TIERS if role not in MERGE_ROLES)  # glossary-ok: the guard's own name; the one local role with no cloud tier of its own: it merges as a standing session, its record reads STANDING_ROLE, past the same checks and for the repo its file names
 
 
 def role_path():
