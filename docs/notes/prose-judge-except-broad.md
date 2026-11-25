@@ -1,0 +1,1 @@
+- prose-judge-except-broad: the call helper inside prose_judge_calls (merge/merge.py, `except Exception:` at line 4702 on main) returns None and records no error. The reviewer says the except names no type (PR 3854, merged; code checked, reviewer's reading not). Seen: 2026-11-24 x1

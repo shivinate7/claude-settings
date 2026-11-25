@@ -1,0 +1,1 @@
+- code-check-5361-comment-false: the comment at merge/merge.py line 5361 on main names red_base's refusals. A reviewer says it is false after PR 3859 (in pre_ready_rows on that branch; reviewer's report, unverified). Seen: 2026-11-24 x1
