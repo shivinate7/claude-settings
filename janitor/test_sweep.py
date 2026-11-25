@@ -1415,6 +1415,25 @@ class StaleCwdRecordTests(unittest.TestCase):
                          "trash_verdict opted in to a record whose folder is gone; it must keep the folder")
         self.assertFalse(delete)
 
+    def test_clean_merged_tree_is_kept_beside_a_record_whose_parent_folder_is_gone(self):
+        """A record whose cwd sits under a folder that is gone too may be a moved or unmounted folder. It reads
+        unknown, not gone, so the clean merged tree is kept as unreadable-subject. Its own config folder keeps the
+        class's shared record out of this read."""
+        parent = os.path.join(self.base, "gone-parent")
+        os.makedirs(parent)
+        os.rmdir(parent)
+        self.assertFalse(os.path.exists(parent), "scope: the record's parent folder must be absent")
+        self.assertTrue(os.path.isdir(self.removable), "scope: the clean tree must be a folder")
+        cfg = os.path.join(self.base, "cfg-parent-gone")
+        write(os.path.join(cfg, "sessions", "parent-gone-record.json"),
+              json.dumps({"pid": os.getpid(), "startedAt": this_process_start_ms(),
+                          "cwd": os.path.join(parent, "wt")}))
+        with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": cfg}):
+            decision = sweep.decide_worktree(self.root, self.entry_for(self.removable), attended=True)
+        self.assertEqual(decision["reason"], "unreadable-subject",
+                         "a clean merged tree was reaped beside a record whose parent folder is gone; it must be kept")
+        self.assertEqual(decision["action"], "keep")
+
 
 class StaleAgentLockTests(unittest.TestCase):
     """A claude agent lock (`claude agent agent-<id> (pid N start <UTC date>)`) is stale when its
