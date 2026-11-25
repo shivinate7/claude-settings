@@ -23,6 +23,7 @@ sys.path.insert(0, os.path.join(ROOT, "testing"))
 import tracked_tree  # noqa: E402  copies what git lists, so no fixture lists files (testing/tracked_tree.py)
 sys.path.insert(0, HERE)
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
+import check_landed_dirs as landed  # noqa: E402  the reader the form-feed cases call (lint/check_landed_dirs.py)
 FILES = ("landed-dirs.txt", "install.sh", "install.ps1")
 RUN_FOLDER = None  # made in setUpModule, so an import leaks no folder
 
@@ -262,8 +263,32 @@ class CheckLandedDirsTests(unittest.TestCase):
         self.assertIn("has an entry that is not os.path.normcase", result.stderr)
 
 
+GUARD_LITERAL = 'CONFIG_FROZEN_DIRS = (\n    os.path.normcase("hooks"),\n    os.path.normcase("lint"),\n)\n'
 
-RECORD_PATH = os.path.join(ROOT, "docs", "decisions", "builders-cannot-edit-tests.md")
+
+class GuardTupleReadTests(unittest.TestCase):
+    """The reader finds the literal by a line number, so a character that ends a line for str.splitlines but not for the
+    parser must not move the body or the offset of the literal."""
+
+    def assert_reads_the_same_tuple(self, head, plain_head):
+        entries, body, _ = landed.find_guard_tuple(plain_head + GUARD_LITERAL, "CONFIG_FROZEN_DIRS")
+        text = head + GUARD_LITERAL
+        got_entries, got_body, start = landed.find_guard_tuple(text, "CONFIG_FROZEN_DIRS")
+        self.assertEqual(got_entries, entries, "the entries differ when the head holds %r" % head)
+        self.assertEqual(got_body, body, "the body differs when the head holds %r: %r" % (head, got_body))
+        self.assertEqual(text[start:start + len(GUARD_LITERAL)], GUARD_LITERAL,
+                         "the offset does not point at the literal when the head holds %r" % head)
+
+    def test_a_form_feed_before_the_literal_reads_the_same_tuple(self):
+        # Why: a form feed ends a line for str.splitlines but not for the parser, so the body and the offset shift.
+        self.assert_reads_the_same_tuple("x = 1\x0c\n", "x = 1\n")
+
+    def test_a_line_separator_in_a_comment_before_the_literal_reads_the_same_tuple(self):
+        # Why: U+2028 ends a line for str.splitlines but not for the parser, so the same shift follows.
+        self.assert_reads_the_same_tuple("# a b\n", "# a b\n")
+
+
+RECORD_PATH =os.path.join(ROOT, "docs", "decisions", "builders-cannot-edit-tests.md")
 HELPER_HOME_HEADING = "## Where a test-support helper lives"
 
 
