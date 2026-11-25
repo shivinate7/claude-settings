@@ -458,8 +458,11 @@ Other tools, in `judge` order:
                        by `$ `. Each is cut with `split_segments`, so the verb list has one home. Passes: a span
                        whose `git -C` or `cd` target is under a session scratchpad; a line with `Must deny:` or
                        `Add a case:` before the span; a span with never, do not, don't or no in its own clause
-                       (no `;`, `.` or `,` between) within 4 words before it. Prose with no span is not read. Any
-                       role. An override lifts it. (brief-destructive-git)
+                       (no `;`, `.` or `,` between) within 4 words before it; a span whose own text holds such a
+                       negator in its clause before its first `git` word (`Never run git stash, git restore`); a
+                       span followed directly by `-free`; a span right after `ran`, `had run` or `has run`. Prose
+                       with no span is not read. A writing role only: the read-only roles in `READ_ONLY`
+                       (hooks/agent_brief.py) pass. An override lifts it. (brief-destructive-git)
   lane-effort-pin      deny. A `create_session` call tagged `cs-build:lane` whose `effort` field is not
                        exactly `medium` (LANE_EFFORT), or whose prompt's first non-blank line does not
                        start `Grant: ` (LANE_GRANT_MARKER) with the owner's words after it: a letter or digit, and no `<`
@@ -4644,7 +4647,11 @@ def prior_work_agent_hit(tool: str, tool_input) -> bool:
 # before it (a prohibition); and a part under a negating heading. A negating heading is a line that ends with ":" once
 # `*`, `_` and a leading bullet are stripped, and holds a negator with a run verb within 2 words after it ("Never run:",
 # "Do not run any of these:"). Its cover holds across blank lines, over a fence opened under it, and over bullets nested
-# under it; it ends at the next prose line that is no bullet, or at a bullet no deeper than a bullet heading. A Workflow
+# under it; it ends at the next prose line that is no bullet, or at a bullet no deeper than a bullet heading. Three more
+# passes read only a backtick span, each for a span that reports or forbids and is no order: a segment whose own text holds a
+# negator in its clause before its first `git` word (the same `_brief_prohibits`, so "Never mind, git reset" stays an
+# order, its comma ending the clause); a span followed directly by "-free"; and a span right after "ran", "had run" or
+# "has run". Any other way of naming a command stays refused. A Workflow
 # script is read through `_brief_spawns`, which counts each agent() call whatever its model. Cost: pure text work inside
 # the one guard call. No process, no file.
 try:
@@ -4659,6 +4666,8 @@ BRIEF_DESTRUCTIVE_RUN_VERBS = ("run", "use", "call", "execute", "type")
 BRIEF_DESTRUCTIVE_NOT = re.compile(r"\b(?:do|must|should|can)\s+not\b", re.IGNORECASE)
 BRIEF_DESTRUCTIVE_LIST_COMMA = re.compile(r"\x00\s*,\s*(?:(?:and|or|nor)\s+)*(?=\x00|$)", re.IGNORECASE)
 BRIEF_DESTRUCTIVE_BULLET = re.compile(r"\s*(?:[-*+]|\d+[.)])\s")
+BRIEF_DESTRUCTIVE_FREE = re.compile(r"-free\b")   # `git stash`-free: the span names what the aside leaves out
+BRIEF_DESTRUCTIVE_GIT_WORD = re.compile(r"\bgit\b")
 BRIEF_DESTRUCTIVE_SKIP = ("branch-delete", "worktree-remove", "worktree-prune")
 BRIEF_DESTRUCTIVE_REASON = (
     "The brief orders a command that throws away work in a checkout other sessions share, and no step puts it back. "
@@ -4686,8 +4695,9 @@ def _brief_heading(line: str) -> bool:
 
 
 def _brief_commands(prompt: str):
-    """Yield (command text, line text before it, covered) for each command-shaped part of a brief: a backtick span, a
-    line in a fence, and a line led by `$ `. `covered` is true for a part under a negating heading's cover.
+    """Yield (command text, line text before it, line text after it, covered) for each command-shaped part of a brief: a
+    backtick span, a line in a fence, and a line led by `$ `. Only a span has text after it; the other parts yield None
+    there, which marks them as no span. `covered` is true for a part under a negating heading's cover.
     A lone backtick opens nothing, and a line led by a triple-backtick span closed on itself is no fence."""
     fenced, covered, cover_indent = False, False, -1
     for line in prompt.replace("\x00", " ").splitlines():
@@ -4696,7 +4706,7 @@ def _brief_commands(prompt: str):
             fenced = not fenced
             continue
         if fenced:
-            yield stripped, "", covered   # a fence keeps the cover it opened under
+            yield stripped, "", None, covered   # a fence keeps the cover it opened under
             continue
         if not stripped:
             continue                      # a blank line keeps the cover
@@ -4708,9 +4718,9 @@ def _brief_commands(prompt: str):
         elif not bullet or indent <= cover_indent:
             covered = False
         if stripped.startswith("$ "):
-            yield stripped[2:], "", False
+            yield stripped[2:], "", None, False
         for span in BRIEF_DESTRUCTIVE_SPAN.finditer(line):
-            yield span.group(2).strip(), line[:span.start()], covered and not heading
+            yield span.group(2).strip(), line[:span.start()], line[span.end():], covered and not heading
 
 
 def _brief_prohibits(before: str) -> bool:
@@ -4726,6 +4736,20 @@ def _brief_prohibits(before: str) -> bool:
     words = _brief_words(re.split(r"[;.,]", listed)[-1])
     return any(word in BRIEF_DESTRUCTIVE_NEGATORS for word in words[-4:]) \
         or bool(words) and words[-1] in BRIEF_DESTRUCTIVE_NEXT_TO
+
+
+def _brief_reports(before: str, after: str) -> bool:
+    """True for a span that reports an act and orders none: "-free" follows it, or "ran", "had run" or "has run" is
+    the word or two words right before it."""
+    words = _brief_words(before)
+    return bool(BRIEF_DESTRUCTIVE_FREE.match(after)) or words[-1:] == ["ran"] \
+        or words[-2:] in (["had", "run"], ["has", "run"])
+
+
+def _brief_own_negator(segment: str) -> bool:
+    """True when a negator sits in the same clause as the segment's first `git` word, before it, inside the span itself."""
+    git = BRIEF_DESTRUCTIVE_GIT_WORD.search(segment)
+    return bool(git) and _brief_prohibits(segment[:git.start()])
 
 
 def _brief_target(segment: str, moved):
@@ -4762,14 +4786,18 @@ def brief_destructive_hit(tool: str, tool_input) -> str:
         role = role_key(spawn.get("subagent_type")).rsplit(":", 1)[-1]   # plugin prefix: my-plugin:reviewer
         if not isinstance(prompt, str) or role in read_only:
             continue
-        for command, before, covered in _brief_commands(prompt):
+        for command, before, after, covered in _brief_commands(prompt):
             if covered or BRIEF_DESTRUCTIVE_CASE_DATA.search(before) or _brief_prohibits(before):
+                continue
+            span = after is not None
+            if span and _brief_reports(before, after):
                 continue
             moved = None
             for segment in split_segments(command):
                 target, moved = _brief_target(segment, moved)
                 match = shared_tree_match(segment) if segment.strip() else None
                 if match and match[1] not in BRIEF_DESTRUCTIVE_SKIP \
+                        and not (span and _brief_own_negator(segment)) \
                         and not (target is not None and in_any_session_scratchpad(shell_abs(target, None) or target)):
                     return command
     return ""
