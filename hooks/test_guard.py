@@ -13,6 +13,11 @@ GUARD_FAMILY=<name> runs only one family of cases (FAMILIES, at the top of this 
 name, or a filter that matches no case, fails the run. GUARD_TIMING=1 prints what each fixture
 block cost.
 
+GUARD_RULE_EXACT=report prints, for each case that names a rule, a rule-mismatch line when the reason does not
+lead with that rule (the text before its first ": "), a rule-unset line for each deny or ask case that names no
+rule, and a rule-total line. It fails no case: the PASS and FAIL lines are the same as without it. Any other
+value stops the run before a case runs.
+
 GUARD_HEARTBEAT=<seconds> sets the quiet time after which the run prints a progress line to stderr,
 and appends it to STALL_WATCH_BEAT when that is set (default 60; a number above 0). A run that prints
 nothing for minutes is cut by the stall watch. A malformed value stops the run before a case runs.
@@ -211,6 +216,10 @@ GUARD_FAMILY = os.environ.get("GUARD_FAMILY", "")
 if GUARD_FAMILY and GUARD_FAMILY not in FAMILIES:
     sys.exit("GUARD_FAMILY=%r is not a family. Want one of: %s"
              % (GUARD_FAMILY, ", ".join(sorted(FAMILIES))))
+# GUARD_RULE_EXACT=report: the rule check in run_cases passes a case when its reason holds the rule anywhere. Report
+# mode prints the cases whose printed rule (the text before the first ": ") is not the wanted rule, and decides no verdict.
+RULE_EXACT_MODES = ("", "report")
+RULE_EXACT = os.environ.get("GUARD_RULE_EXACT", "")
 
 
 # The progress beat (decision stall-watch: a quiet tool owes a line at least every 120 s). The quiet clock
@@ -836,10 +845,39 @@ if _UNNAMED or _BAD_LOG:
 SKIP = "skip"
 
 
+def printed_rule(reason):
+    """The rule a printed reason leads with: the text before its first ": ", or "(none)" when it has no ": "."""
+    head, sep, _ = reason.partition(": ")
+    return " ".join(head.split()) if sep else "(none)"
+
+
+RULE_EXACT_SEEN = {"rule": 0, "mismatch": 0, "mismatch_right": 0, "unset": 0}
+
+
+def rule_exact_report(case, got, reason):
+    """GUARD_RULE_EXACT=report: one line for a case whose printed rule is not its wanted rule, and one for a deny or ask
+    case that names no rule. The verdict was decided before this runs, and it is not changed here."""
+    if case["rule"]:
+        RULE_EXACT_SEEN["rule"] += 1
+        printed = printed_rule(reason)
+        if printed != case["rule"]:
+            right = got == case["expected"]
+            RULE_EXACT_SEEN["mismatch"] += 1
+            RULE_EXACT_SEEN["mismatch_right"] += int(right)
+            say("rule-mismatch\t%s\t%s\t%s\t%s\t%s\t%s" % (
+                case["family"], case["name"], case["rule"], printed, got, case["expected"]))
+    elif case["expected"] in ("deny", "ask"):
+        RULE_EXACT_SEEN["unset"] += 1
+        say("rule-unset\t%s\t%s\t%s" % (case["family"], case["name"], case["expected"]))
+
+
 def run_cases():
     mode = os.environ.get("GUARD_TESTS", "")
     if mode not in GUARD_TESTS_MODES:
         say("GUARD_TESTS=%r: want unset, 'windows-slice' or 'macos-slice'. Nothing ran." % mode)
+        return 2
+    if RULE_EXACT not in RULE_EXACT_MODES:
+        say("GUARD_RULE_EXACT=%r: want unset or 'report'. Nothing ran." % RULE_EXACT)
         return 2
     problems = macos_arm_problems()
     if problems:
@@ -880,6 +918,8 @@ def run_cases():
         beat("case %d of %d, before it runs" % (ran, len(cases)))
         got, reason = decide(case)
         beat("case %d of %d, after it ran" % (ran, len(cases)))
+        if RULE_EXACT:
+            rule_exact_report(case, got, reason)
         ok = got == case["expected"]
         note = ""
         if ok and case.get("silent") and reason:
@@ -905,6 +945,10 @@ def run_cases():
         failed += 0 if ok else 1
         say("%s  %-6s(want %-6s)  [%-11s] %s%s" % (
             "PASS" if ok else "FAIL", got, case["expected"], case["tool"], case["name"], note))
+    if RULE_EXACT:
+        say("rule-total\t%d mismatches in %d cases with a rule, %d of them on a verdict that was right; "
+            "%d deny or ask cases name no rule" % (RULE_EXACT_SEEN["mismatch"], RULE_EXACT_SEEN["rule"],
+                                                  RULE_EXACT_SEEN["mismatch_right"], RULE_EXACT_SEEN["unset"]))
     if any((not only or only in label) and check not in FIXTURELESS_CHECKS for label, check in logs):
         materialize_all()  # a log check names its fixtures in its own code, not in a case's fields
     for label, checker in logs:
