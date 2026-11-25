@@ -3257,9 +3257,7 @@ class CitedExcerptTests(unittest.TestCase):
                          "a capital article `The` does not make `guard` prose: the excerpt starts at %r, not the file top"
                          % shown.split("\n")[0])
 
-    # A determiner or a possessive before a bare word makes it prose, as an article does. Red now: the article check reads only
-    # a, an and the, so each of these words leads its path. A builder extends that check to every, its, both, this, that, each,
-    # and to a word after a possessive (`guard's`).
+    # A determiner or a possessive before a bare word makes it prose, as an article does. Controls, green.
     def test_a_bare_word_after_every_gives_the_file_top_not_a_name(self):
         shown = self.stale.cited_excerpt("read every guard in hooks/config_watch.py", self.PAST_40)
         self.assertEqual(shown.split("\n")[0], "1: x0 = 0",
@@ -3308,6 +3306,73 @@ class CitedExcerptTests(unittest.TestCase):
         shown = self.stale.cited_excerpt(cite, self.DEEP)
         self.assertEqual(shown.split("\n")[0], "63: def deep():",
                          "a backticked name before its path starts at %r, not at its def" % shown.split("\n")[0])
+
+    # A backticked name is a name whatever word comes before it. paren_cites drops the backticks, so cite_targets sees
+    # `read the guard in PATH`, and the article makes `guard` prose. Red now on each of these.
+    def test_a_backticked_name_after_the_leads_its_path(self):
+        [cite] = self.stale.paren_cites("- the rule holds (read the `guard` in hooks/config_watch.py)")
+        shown = self.stale.cited_excerpt(cite, self.PAST_40)
+        self.assertEqual(shown.split("\n")[0], "62: guard = None",
+                         "a backticked name after `the` is taken as prose: the excerpt starts at %r, not at guard's line" % shown.split("\n")[0])
+
+    def test_a_backticked_name_after_that_leads_its_path(self):
+        [cite] = self.stale.paren_cites("- the rule holds (read that `main` in hooks/config_watch.py)")
+        shown = self.stale.cited_excerpt(cite, self.PAST_40)
+        self.assertEqual(shown.split("\n")[0], "63: def main():",
+                         "a backticked name after `that` is taken as prose: the excerpt starts at %r, not at main's def" % shown.split("\n")[0])
+
+    def test_a_backticked_name_after_its_leads_its_path(self):
+        [cite] = self.stale.paren_cites("- the rule holds (read its `main` in hooks/config_watch.py)")
+        shown = self.stale.cited_excerpt(cite, self.PAST_40)
+        self.assertEqual(shown.split("\n")[0], "63: def main():",
+                         "a backticked name after `its` is taken as prose: the excerpt starts at %r, not at main's def" % shown.split("\n")[0])
+
+    def test_a_backticked_name_after_every_leads_its_path(self):
+        [cite] = self.stale.paren_cites("- the rule holds (read every `guard` in hooks/config_watch.py)")
+        shown = self.stale.cited_excerpt(cite, self.PAST_40)
+        self.assertEqual(shown.split("\n")[0], "62: guard = None",
+                         "a backticked name after `every` is taken as prose: the excerpt starts at %r, not at guard's line" % shown.split("\n")[0])
+
+    def test_two_backticked_names_joined_by_and_after_that_both_lead_their_path(self):
+        [cite] = self.stale.paren_cites("- the rule holds (read that `main` and `guard` in hooks/config_watch.py)")
+        shown = self.stale.cited_excerpt(cite, self.PAST_40)
+        self.assertEqual(shown.split("\n")[0], "62: guard = None",
+                         "two backticked names after `that` are taken as prose: the excerpt starts at %r, not at guard's line" % shown.split("\n")[0])
+
+    def test_a_backticked_name_before_a_bare_prose_word_is_still_a_name(self):
+        # `guard` is the name; `helper` is prose after it, so the cite still leads with guard's def.
+        [cite] = self.stale.paren_cites("- the rule holds (read the `guard` helper in hooks/config_watch.py)")
+        shown = self.stale.cited_excerpt(cite, self.PAST_40)
+        self.assertEqual(shown.split("\n")[0], "62: guard = None",
+                         "a backticked name before the prose word `helper` is taken as prose: the excerpt starts at %r" % shown.split("\n")[0])
+
+    def test_a_curly_possessive_before_a_bare_word_is_prose(self):
+        # The curly apostrophe (U+2019) is a possessive, as the straight one is: `main` after it is prose.
+        [cite] = self.stale.paren_cites("- the rule holds (read Guard’s main in hooks/config_watch.py)")
+        shown = self.stale.cited_excerpt(cite, self.PAST_40)
+        self.assertEqual(shown.split("\n")[0], "1: x0 = 0",
+                         "a bare word after the curly possessive `Guard’s` is taken as a name: the excerpt starts at %r, not the file top"
+                         % shown.split("\n")[0])
+
+    # Scanner traps: a quote and an apostrophe in the row must not hide or change the backticked name after them.
+    def test_a_backtick_pair_in_a_quote_before_the_cite_leaves_a_backticked_name_a_name(self):
+        [cite] = self.stale.paren_cites('- the rule holds, "`x`" is quoted (read the `guard` in hooks/config_watch.py)')
+        shown = self.stale.cited_excerpt(cite, self.PAST_40)
+        self.assertEqual(shown.split("\n")[0], "62: guard = None",
+                         "a backticked name after a quoted code pair is taken as prose: the excerpt starts at %r" % shown.split("\n")[0])
+
+    def test_a_lone_apostrophe_before_a_backticked_name_leaves_it_a_name(self):
+        [cite] = self.stale.paren_cites("- Don't rely on it (read the `guard` in hooks/config_watch.py)")
+        shown = self.stale.cited_excerpt(cite, self.PAST_40)
+        self.assertEqual(shown.split("\n")[0], "62: guard = None",
+                         "a backticked name after `the`, past a lone apostrophe, is taken as prose: the excerpt starts at %r" % shown.split("\n")[0])
+
+    def test_a_lone_apostrophe_before_a_bare_word_after_the_leaves_it_prose(self):
+        # Control, green now and after: the bare `guard` after `the` is prose whatever the apostrophe before it says.
+        [cite] = self.stale.paren_cites("- Don't rely on it (read the guard in hooks/config_watch.py)")
+        shown = self.stale.cited_excerpt(cite, self.PAST_40)
+        self.assertEqual(shown.split("\n")[0], "1: x0 = 0",
+                         "a bare word after `the` is taken as a name past a lone apostrophe: the excerpt starts at %r" % shown.split("\n")[0])
 
 
 CONFIG = "hooks/config.py"  # the Python file the value cites name
