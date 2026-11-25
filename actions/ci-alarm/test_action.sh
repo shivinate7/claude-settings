@@ -20,7 +20,8 @@ tmp="$work/case"; mkdir -p "$tmp/bin"
 # fails the read, so an unexpected read is unknown. The dropped-start routes (pulls, check runs, issue
 # comments, and a POST of a comment) serve DROP_PULLS/<page>, one JSON document per page (--paginate serves
 # every page, without it only page 1), DROP_CHECKS/<sha> and DROP_COMMENTS/<pr>, log each api call to
-# DROP_READS and each POST to DROP_LOG, and fail a read with no fixture.
+# DROP_READS and each POST to DROP_LOG, and fail a read with no fixture. Each issue call logs `issue <subcommand>` to ISSUES
+# (a case's issue-call log, ISSUE_CALLS in t), so a case sees every issue call the alarm makes, close and list included.
 cat > "$tmp/bin/gh" <<'SH'
 #!/usr/bin/env bash
 # classify: what one api call is, for the reads log: pulls, checks <route>, comments <pr>, post <pr>, other.
@@ -83,10 +84,12 @@ contents_api() {
   exit 0
 }
 if [ "$1" = api ]; then classify "$@" >> "${DROP_READS:-/dev/null}"; fi
+if [ "$1" = issue ]; then echo "$1 $2" >> "${ISSUES:-/dev/null}"; fi
 if [ -n "${FAIL:-}" ] && [[ "$1 $2" == $FAIL ]]; then echo "gh: HTTP 500 (fake)" >&2; exit 1; fi
 if [ -n "${EMPTY:-}" ] && [[ "$1 $2" == $EMPTY ]]; then exit 0; fi
 case "$1 $2" in
   "run list")
+    echo "$*" >> "${RUN_ARGS:-/dev/null}"  # the arguments of each list read, for the fetch-size case
     want="$(printf '%s\n' "$@" | sed -n '/^--json$/{n;p;}')"
     status="$(printf '%s\n' "$@" | sed -n '/^--status$/{n;p;}')"
     jq --arg want "$want" --arg status "$status" '[.[] | select($status == "" or .status == $status) | with_entries(select(.key as $k | $want | split(",") | any(. == $k)))]' "$RUNS" 2>/dev/null || cat "$RUNS" ;;
@@ -107,8 +110,8 @@ esac
 SH
 chmod +x "$tmp/bin/gh"
 # Fixture, one home. gh_run prints one run as `gh run list --json` returns it: args are workflow,
-# conclusion (null for a run still going), createdAt, url, event, databaseId (the run id) and status
-# (completed unless given). Workflow ids: ci 1, deploy 2, alarm 3, pages 4, old 5 (deleted),
+# conclusion (null for a run still going), createdAt, url, event, databaseId (the run id), status
+# (completed unless given) and the attempt (1 unless given; served as `attempt` and as `run_attempt`, the two names of one field). Workflow ids: ci 1, deploy 2, alarm 3, pages 4, old 5 (deleted),
 # gone 6 (absent from the list), late 7 (on page two of the workflows list), dman 8 and dinact 9
 # (disabled, on page two), links 10 (on page two).
 gh_run() {
@@ -116,8 +119,8 @@ gh_run() {
   case "$1" in ci) id=1 ;; deploy) id=2 ;; alarm) id=3 ;; pages) id=4 ;; old) id=5 ;; gone) id=6 ;; late) id=7 ;;
     dman) id=8 ;; dinact) id=9 ;; links) id=10 ;; checks) id=11 ;; esac
   concl="\"$2\""; [ "$2" = null ] && concl=null
-  printf '{"workflowName":"%s","workflowDatabaseId":%s,"databaseId":%s,"conclusion":%s,"createdAt":"%s","url":"%s","event":"%s","status":"%s","headSha":"%040x"}\n' \
-    "$1" "$id" "$6" "$concl" "$3" "$4" "$5" "${7:-completed}" "$6"
+  printf '{"workflowName":"%s","workflowDatabaseId":%s,"databaseId":%s,"conclusion":%s,"createdAt":"%s","url":"%s","event":"%s","status":"%s","attempt":%s,"run_attempt":%s,"headSha":"%040x"}\n' \
+    "$1" "$id" "$6" "$concl" "$3" "$4" "$5" "${7:-completed}" "${8:-1}" "${8:-1}" "$6"
 }
 # A case starts with its runs: runs_are clears the jobs of the case before the jobs_of lines that follow it.
 runs_are() { printf '%s\n' "$@" | jq -s . > "$tmp/runs"; rm -rf "$tmp/jobs"; mkdir -p "$tmp/jobs"; }
@@ -153,9 +156,14 @@ jobs:
 YML
 bad=0
 t() { # want label [FAIL glob] [EMPTY glob] [text the issue must name] [jobs reads: "none", or the run paths read, in any order]
-  : > "$tmp/log"; : > "$tmp/reads"
-  out="$(PATH="$tmp/bin:$PATH" RUNS="$tmp/runs" WORKFLOWS="$tmp/workflows" JOBS="$tmp/jobs" READS="$tmp/reads" LOG="$tmp/log" \
-    FAIL="${3:-}" EMPTY="${4:-}" CONTENTS="$tmp/contents" CONTENTS_DEFAULT="$tmp/no-if.yml" GITHUB_REPOSITORY=o/r SELF=alarm bash "$here/alarm.sh" 2>"$tmp/err")"
+  # want: green, red, unknown (the verdict and a ::warning::), or unknown-verdict (the verdict alone). Env, per case: ALARM_DIR (a folder
+  # whose clear_rule.py is the stub below), JUDGES (the judge calls the run must make), RUN_ARGS_HAS (text the run list call must carry),
+  # ISSUE_CALLS (`none`: no issue call of any kind; else one call such as `issue create` that the calls must include), WARN_HAS (text
+  # the ::warning:: line must carry, so an unknown names its cause).
+  : > "$tmp/log"; : > "$tmp/reads"; : > "$tmp/judge"; : > "$tmp/runargs"; : > "$tmp/issues"
+  out="$(PATH="$tmp/bin:$PATH" RUNS="$tmp/runs" WORKFLOWS="$tmp/workflows" JOBS="$tmp/jobs" READS="$tmp/reads" LOG="$tmp/log" ISSUES="$tmp/issues" \
+    FAIL="${3:-}" EMPTY="${4:-}" CONTENTS="$tmp/contents" CONTENTS_DEFAULT="$tmp/no-if.yml" GITHUB_REPOSITORY=o/r SELF=alarm \
+    RUN_ARGS="$tmp/runargs" STUB_LOG="$tmp/judge" STUB_REAL="$here/clear_rule.py" bash "${ALARM_DIR:-$here}/alarm.sh" 2>"$tmp/err")"
   code=$?
   shown="$(grep -v '^::warning::' <<<"$out")" # the verdict, without annotations
   ok=0
@@ -163,6 +171,7 @@ t() { # want label [FAIL glob] [EMPTY glob] [text the issue must name] [jobs rea
     green) [ "$shown" = green ] && [ ! -s "$tmp/log" ] && ok=1 ;;
     red) [ "$shown" = red ] && grep -q ISSUE "$tmp/log" && ok=1 ;;
     unknown) [ "$shown" = unknown ] && [ ! -s "$tmp/log" ] && grep -q '::warning::' <<<"$out"$'\n'"$(cat "$tmp/err")" && ok=1 ;;
+    unknown-verdict) [ "$shown" = unknown ] && [ ! -s "$tmp/log" ] && ok=1 ;;
   esac
   [ "$code" = 0 ] || ok=0
   if [ -n "${5:-}" ] && ! grep -qF -- "$5" "$tmp/log"; then ok=0; fi
@@ -171,7 +180,16 @@ t() { # want label [FAIL glob] [EMPTY glob] [text the issue must name] [jobs rea
     got_reads="$(grep -o 'actions/runs/[0-9]*/jobs' "$tmp/reads" | sort | tr '\n' ' ')"
     [ "$expect_reads" = "$got_reads" ] || ok=0
   fi
-  if [ "$ok" = 1 ]; then echo "ok   $2"; else echo "FAIL $2 (exit $code, got: $out; jobs reads: $(tr '\n' ' ' < "$tmp/reads"))"; bad=1; fi
+  extra=""
+  judged="$(grep -c . "$tmp/judge")"
+  if [ -n "${JUDGES:-}" ] && [ "$judged" != "$JUDGES" ]; then ok=0; extra="; clear_rule judge calls $judged, want $JUDGES"; fi
+  if [ -n "${RUN_ARGS_HAS:-}" ] && ! grep -qF -- "$RUN_ARGS_HAS" "$tmp/runargs"; then ok=0; extra="; no run list call with '$RUN_ARGS_HAS'"; fi
+  if [ -n "${ISSUE_CALLS:-}" ]; then
+    if [ "$ISSUE_CALLS" = none ]; then [ -s "$tmp/issues" ] && { ok=0; extra="$extra; issue calls: $(tr '\n' ' ' < "$tmp/issues")"; }
+    elif ! grep -qxF -- "$ISSUE_CALLS" "$tmp/issues"; then ok=0; extra="$extra; no issue call '$ISSUE_CALLS'"; fi
+  fi
+  if [ -n "${WARN_HAS:-}" ] && ! grep -qF -- "$WARN_HAS" <<<"$out"; then ok=0; extra="$extra; no ::warning:: with '$WARN_HAS'"; fi
+  if [ "$ok" = 1 ]; then echo "ok   $2"; else echo "FAIL $2 (exit $code, got: $out; jobs reads: $(tr '\n' ' ' < "$tmp/reads"))$extra"; bad=1; fi
 }
 runs_are "$(gh_run ci failure 2026-01-02 u1 push 1)" "$(gh_run ci success 2026-01-01 u0 push 2)"
 t red latest-red-opens-issue
@@ -348,6 +366,103 @@ runs_are "$(gh_run checks success 2026-11-03T14:12:08Z https://runs/skipped-push
 jobs_of 62 checks-windows-merge-3:failure all-jobs-passed:skipped
 jobs_of 63 checks-windows-merge-3:skipped all-jobs-passed:skipped
 t red red-job-skipped-in-the-newer-run-is-red-when-the-workflow-read-fails "api *contents/*" "" https://runs/skipped-schedule-62
+
+# --- in flight, the one home, and controls: the alarm's verdict is clear_rule.py's judge (judge, judge_main) ---
+# ALARM_DIR's clear_rule.py is this stub: it runs the real file (STUB_REAL) and wraps its judge and judge_main. Each judge call
+# made from outside the judge is one line in STUB_LOG, so JUDGES counts the calls. STUB_JUDGE, when set, is the verdict each such
+# call returns. The stub passes argv to the real main unchanged: it names no flag, only the two module functions. STUB_MODE, when set,
+# makes the stub fail before the real file runs: crash (an exception), exit2 (status 2) or silent (no output, status 0).
+mkdir -p "$tmp/stub"; cp -R "$here/." "$tmp/stub/"
+cat > "$tmp/stub/clear_rule.py" <<'PY'
+import os
+import sys
+
+mode = os.environ.get("STUB_MODE", "")
+if mode == "crash":
+    raise RuntimeError("clear_rule stub: crash")
+if mode == "exit2":
+    sys.exit(2)
+if mode == "silent":
+    sys.exit(0)
+
+real = os.environ["STUB_REAL"]
+ns = {"__name__": "real_clear_rule", "__file__": real}
+with open(real, encoding="utf-8") as f:
+    exec(compile(f.read(), real, "exec"), ns)
+depth = [0]
+
+
+def wrap(name, forced):
+    inner = ns[name]
+
+    def wrapped(*args, **kw):
+        outer = depth[0] == 0
+        depth[0] += 1
+        try:
+            if outer:
+                with open(os.environ["STUB_LOG"], "a", encoding="utf-8") as f:
+                    f.write(name + "\n")
+                if os.environ.get("STUB_JUDGE"):
+                    return forced(os.environ["STUB_JUDGE"])
+            return inner(*args, **kw)
+        finally:
+            depth[0] -= 1
+
+    ns[name] = wrapped
+
+
+wrap("judge", lambda v: ns["Judgment"](v, [], [], [], [], [], [], None))
+wrap("judge_main", lambda v: (v, []))
+sys.exit(ns["main"](sys.argv[1:]))
+PY
+# A red run being re-run is in flight: attempt 2, no conclusion yet, above an older green run. The older green run must not decide.
+runs_are "$(gh_run ci null 2026-01-02 https://runs/rerun-2 push 2 in_progress 2)" "$(gh_run ci success 2026-01-01 https://runs/green-1 push 1)"
+jobs_of 2 checks:failure
+jobs_of 1 checks:success
+JUDGES=1 ALARM_DIR="$tmp/stub" t unknown-verdict rerun-in-flight-above-an-older-green-run-is-not-green
+runs_are "$(gh_run ci null 2026-01-02 https://runs/rerun-2 push 2 in_progress 2)" "$(gh_run ci success 2026-01-01 https://runs/green-1 schedule 1)"
+jobs_of 1 checks:success
+t unknown-verdict rerun-in-flight-above-an-older-green-run-of-another-group-is-not-green
+# One home: the verdict the alarm prints is the judge's answer, whatever the alarm's own selection of the runs would say.
+runs_are "$(gh_run ci failure 2026-01-02 https://runs/red-1 push 1)"
+STUB_JUDGE=green JUDGES=1 ALARM_DIR="$tmp/stub" t green one-home-a-green-judge-answer-decides-over-a-red-run
+runs_are "$(gh_run ci success 2026-01-02 u1 push 1)"
+jobs_of 1 checks:success
+STUB_JUDGE=unknown JUDGES=1 ALARM_DIR="$tmp/stub" t unknown-verdict one-home-an-unknown-judge-answer-decides-over-a-green-run
+# Controls, green on the old code: a plain green run is clear, a plain red run alarms and names its run, a cancelled newest run
+# over an older red run stays green (a cancelled run never alarms), and the fetch still asks for 100 runs.
+runs_are "$(gh_run ci success 2026-01-02 u1 push 1)"
+jobs_of 1 checks:success
+t green plain-green-newest-run-is-clear
+RUN_ARGS_HAS='--limit 100' t green fetch-asks-for-100-runs
+runs_are "$(gh_run ci failure 2026-01-02 https://runs/red-2 push 2)"
+t red plain-red-newest-run-alarms-and-names-its-run "" "" "- ci (failure): https://runs/red-2"
+runs_are "$(gh_run ci cancelled 2026-01-02 https://runs/cancel-2 push 2)" "$(gh_run ci failure 2026-01-01 https://runs/red-1 push 1)"
+jobs_of 2 checks:cancelled
+jobs_of 1 checks:failure
+t green cancelled-newest-run-over-an-older-red-run-is-green-with-no-issue
+# A re-run in flight is unknown, never red or green: the older run under it is the one being re-run (the judge). The run reads no jobs
+# and makes no issue call of any kind, and the warning names the re-run.
+runs_are "$(gh_run ci null 2026-01-02 https://runs/rerun-2 push 2 in_progress 2)" "$(gh_run ci failure 2026-01-01 https://runs/red-1 push 1)"
+jobs_of 2 checks:failure
+jobs_of 1 checks:failure
+ISSUE_CALLS=none WARN_HAS='is being re-run (attempt 2' t unknown rerun-in-flight-above-an-older-red-run-is-unknown-with-no-issue "" "" "" none
+# The same re-run finished red: red, and the issue names the re-run. The create call also shows the call log sees the alarm's issue calls.
+runs_are "$(gh_run ci failure 2026-01-02 https://runs/rerun-2 push 2 completed 2)" "$(gh_run ci failure 2026-01-01 https://runs/red-1 push 1)"
+jobs_of 2 checks:failure
+jobs_of 1 checks:failure
+ISSUE_CALLS='issue create' t red rerun-finished-red-opens-an-issue-that-names-the-rerun "" "" "- ci (failure): https://runs/rerun-2"
+# The same re-run finished green: green, and an open issue is left alone, with no issue call of any kind.
+runs_are "$(gh_run ci success 2026-01-02 https://runs/rerun-2 push 2 completed 2)" "$(gh_run ci failure 2026-01-01 https://runs/red-1 push 1)"
+jobs_of 2 checks:success
+jobs_of 1 checks:failure
+OPEN=42 ISSUE_CALLS=none t green rerun-finished-green-leaves-an-open-issue-alone
+# clear_rule.py fails three ways: unknown, a warning that names the cause, and no issue call. The red fixture means a fall-through reaches issue.sh.
+runs_are "$(gh_run ci failure 2026-01-02 https://runs/red-2 push 2)"
+jobs_of 2 checks:failure
+STUB_MODE=crash ALARM_DIR="$tmp/stub" ISSUE_CALLS=none WARN_HAS='clear_rule.py failed' t unknown clear-rule-that-raises-is-unknown-with-no-issue "" "" "" none
+STUB_MODE=exit2 ALARM_DIR="$tmp/stub" ISSUE_CALLS=none WARN_HAS='clear_rule.py failed' t unknown clear-rule-that-exits-2-is-unknown-with-no-issue "" "" "" none
+STUB_MODE=silent ALARM_DIR="$tmp/stub" ISSUE_CALLS=none WARN_HAS='gave no verdict' t unknown clear-rule-with-no-verdict-line-is-unknown-with-no-issue "" "" "" none
 
 # --- dropped-start: dropped.sh alarms on a pull request whose all-jobs-passed run never started ---
 # A case builds its fixtures under $dd, then drun runs dropped.sh once: CHECK unset, NOW given, fake gh.
