@@ -5682,6 +5682,47 @@ class GhHalf(Env):
         self.assertNotIn("reverted on", out, "an unknown read of main reverted the claim:\n" + out)
         self.assertFalse(self.reverted(), "an unknown read of main reverted the claim on feat")
 
+    def merge_onto_main(self, n, second=None):
+        """Adds n merges on origin/main, each on the last, and pushes main by origin. Each merge keeps main's tree. Its second parent is `second`, else the commit main's first parent names (the seed)."""
+        sh(self.other, "git", "fetch", "-q", "origin")
+        top = sh(self.other, "git", "rev-parse", "origin/main")
+        tree = sh(self.other, "git", "rev-parse", "origin/main^{tree}")
+        second = second or sh(self.other, "git", "rev-parse", "origin/main^1")
+        for i in range(n):
+            top = sh(self.other, "git", "commit-tree", tree, "-p", top, "-p", second, "-m", f"merge {i} onto main")
+        sh(self.other, "git", "push", "-q", "origin", f"{top}:refs/heads/main")
+
+    def after_the_merge_call(self, action):
+        """A patch of merge.git: the first git fetch after the merge call runs `action` first, so that fetch reads main as `action` left it. -> the patch, a context manager."""
+        real_git = merge.git
+        done = []
+        def git_after_the_merge_call(cwd, *a, input=None):
+            if MERGE_CALL in self.calls() and a[:1] == ("fetch",) and not done:
+                done.append(True)
+                action()
+            return real_git(cwd, *a, input=input)
+        return unittest.mock.patch.object(merge, "git", git_after_the_merge_call)
+
+    def test_a_405_merge_reply_with_the_pr_open_and_a_full_window_of_main_without_the_head_is_unknown_and_never_reverts(self):
+        # The merge call lands this head on main, and 51 merges land above it before the tool reads main. The newest 50 merges are others: the window is full
+        # and holds no merge of this head, so the read is unknown. Nothing is merged, and nothing is reverted.
+        self.set(merge_replies=[[rest_err(405, "Merge already in progress"), True]], read_open_after_put=True)
+        with self.after_the_merge_call(lambda: self.merge_onto_main(51)):
+            rc, out = self.go()
+        self.assertNotEqual(rc, 0, out)
+        self.assertNotIn("merge: #7 merged as ", out, "a full window with no merge of this head was read as a merge\n" + out)
+        self.assertNotIn("reverted on", out, "a full window with no merge of this head reverted the claim:\n" + out)
+        self.assertFalse(self.reverted(), "a full window with no merge of this head reverted the claim on feat")
+        self.assertNotIn("Traceback", out, "the run crashed rather than refused")
+        self.assertEqual(self.calls().count(MERGE_CALL), 1, "the merge was sent again on an unknown read\n" + out)
+
+    def test_a_405_merge_reply_with_the_head_as_the_last_merge_of_a_full_window_reads_merged(self):  # control: green now and after
+        # The head's merge is the 50th and oldest merge in the window: a full window that holds it still reads as merged.
+        self.set(merge_replies=[[rest_err(405, "Merge already in progress"), True]], read_open_after_put=True)
+        with self.after_the_merge_call(lambda: self.merge_onto_main(49)):
+            rc, out = self.go()
+        self.assert_merged_and_carries_on(rc, out)
+
     def test_a_red_check_named_http_500_is_a_refusal_before_the_claim(self):
         # the head's one checks read is red; its name carries "HTTP 500". A red head is refused before any claim, so nothing is reverted
         before = self.head()
