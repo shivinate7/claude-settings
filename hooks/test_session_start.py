@@ -28,6 +28,7 @@ RUN_FOLDER = _test_temp.run_folder()
 sys.path.insert(0, os.path.join(HERE, "..", "testing"))
 import tracked_tree  # noqa: E402  copies the repo's lint folder into the pointer clone (testing/tracked_tree.py)
 import test_ruled_store as fixture  # noqa: E402  the one home of a ruled-store fixture (lint/test_ruled_store.py)
+import test_check_tool_pins as pins_fixture  # noqa: E402  the tool-pins fake tool and python3 shim, one home (lint/test_check_tool_pins.py)
 SESSION = "session-start-cases"  # the session id every run_hook payload names
 VCS = "g" + "it"  # assembled so this file cannot itself look like the command it tests
 IDENT = ["-c", "user.email=session-start-cases@example.invalid", "-c", "user.name=session-start-cases"]
@@ -3085,6 +3086,104 @@ class SessionStartRolePickTests(unittest.TestCase):
         lane = "Pick lane for one line of work, or coordinator for a standing build."
         self.assertFalse(self.names(lane, r"\bone[ -]lane\b"))
         self.assertFalse(self.names(lane, r"\bsolo\b"))
+
+
+@unittest.skipIf(os.name == "nt", "the fake tools and the python3 shim are sh scripts; a Windows run has no shim to count starts with")
+class SessionStartToolPinsTests(SessionStartAgentWorktreeNoticeTests):
+    """The start read of the repo's tool pins (decision tool-pins): a tool behind its pin prints one line with this machine's
+    fix. The hook runs the checker with `--behind` on the checkout. Fake tools and a python3 shim lead PATH, so each case reads
+    what the hook ran, never the runner's own tools."""
+
+    def setUp(self):
+        super().setUp()
+        self.point_at()
+        shutil.copy(os.path.join(HERE, "..", "lint", "check_tool_pins.py"),
+                    os.path.join(self.root, "pointer", "lint", "check_tool_pins.py"))
+        self.bin = os.path.join(self.root, "bin")
+        self.probe_runs = os.path.join(self.root, "probe-runs.log")
+        self.python_runs = os.path.join(self.root, "python-runs.log")
+        pins_fixture.python_shim(self.bin, self.python_runs)
+
+    def pin_file(self, text):
+        self.put(os.path.join(self.primary, ".tool-versions"), text)
+
+    def probe(self, name, output, hang=False):
+        pins_fixture.fake_tool(self.bin, self.probe_runs, name, output, hang=hang)
+
+    def runs_of(self, log):
+        try:
+            with open(log, encoding="utf-8") as handle:
+                return [line.strip() for line in handle if line.strip()]
+        except OSError:
+            return []
+
+    def checker_starts(self):
+        return [line for line in self.runs_of(self.python_runs) if "check_tool_pins.py" in line]
+
+    def pin_lines(self, lines):
+        return [line for line in lines if "pinprobe" in line]
+
+    def test_a_tool_behind_its_pin_prints_one_line_with_this_machines_fix_at_startup(self):
+        self.pin_file(pins_fixture.pin_file("pinprobe", "9.0"))
+        self.probe("pinprobe", "pinprobe 8.1.0")
+        hits = self.pin_lines(self.run_hook(path_dir=self.bin, source="startup"))
+        self.assertEqual(len(hits), 1, "the start read did not print one line for a tool behind its pin: %r" % hits)
+        self.assertIn("8.1.0", hits[0], "the start line does not name the version found: %s" % hits[0])
+        self.assertIn(pins_fixture.fix_mark("pinprobe"), hits[0],
+                      "the start line does not carry this machine's fix: %s" % hits[0])
+
+    def test_a_tool_newer_than_its_pin_prints_no_pin_line_at_startup(self):
+        self.pin_file(pins_fixture.pin_file("pinprobe", "9.0"))
+        self.probe("pinprobe", "pinprobe 9.2.0")
+        hits = self.pin_lines(self.run_hook(path_dir=self.bin, source="startup"))
+        self.assertEqual(hits, [], "a tool newer than its pin printed a start line: %r" % hits)
+
+    def test_a_repo_with_no_pin_file_starts_no_checker_process(self):
+        self.run_hook(path_dir=self.bin, source="startup")
+        # Control: the shim logs the hook's own interpreter starts, so an empty count below means no checker start.
+        self.assertTrue(self.runs_of(self.python_runs), "control: the hook made no python start the shim could log")
+        self.assertEqual(self.checker_starts(), [], "a repo with no pin file started the checker: %r" % self.checker_starts())
+
+    def test_a_repo_with_a_pin_file_starts_one_checker_and_one_version_command_per_pin(self):
+        self.pin_file(pins_fixture.pin_file("pinprobe", "9.0") + "secondprobe 1.0\n")
+        self.probe("pinprobe", "pinprobe 9.0.0")
+        self.probe("secondprobe", "secondprobe 1.0.0")
+        self.run_hook(path_dir=self.bin, source="startup")
+        self.assertEqual(len(self.checker_starts()), 1,
+                         "a repo with a pin file did not start the checker exactly once: %r" % self.checker_starts())
+        self.assertEqual(sorted(self.runs_of(self.probe_runs)), ["pinprobe", "secondprobe"],
+                         "the start read ran a version command other than one per pin: %r" % self.runs_of(self.probe_runs))
+
+    def test_a_resume_start_reads_no_pin(self):
+        self.pin_file(pins_fixture.pin_file("pinprobe", "9.0"))
+        self.probe("pinprobe", "pinprobe 8.1.0")
+        lines = self.run_hook(path_dir=self.bin, source="resume")
+        self.assertEqual(self.pin_lines(lines), [], "a resume start printed a pin line: %r" % lines)
+        self.assertEqual(self.checker_starts(), [], "a resume start started the checker")
+
+    def test_a_compact_start_reads_no_pin(self):
+        self.pin_file(pins_fixture.pin_file("pinprobe", "9.0"))
+        self.probe("pinprobe", "pinprobe 8.1.0")
+        lines = self.run_hook(path_dir=self.bin, source="compact")
+        self.assertEqual(self.pin_lines(lines), [], "a compact start printed a pin line: %r" % lines)
+        self.assertEqual(self.checker_starts(), [], "a compact start started the checker")
+
+    def test_a_cloud_start_prints_no_pin_line(self):
+        self.pin_file(pins_fixture.pin_file("pinprobe", "9.0"))
+        self.probe("pinprobe", "pinprobe 8.1.0")
+        lines = self.run_hook(remote="true", path_dir=self.bin, source="startup")
+        self.assertEqual(self.pin_lines(lines), [], "a cloud start printed a pin line: %r" % lines)
+
+    def test_a_hung_version_read_ends_and_reads_unknown_at_startup(self):
+        self.pin_file(pins_fixture.pin_file("pinprobe", "9.0"))
+        self.probe("pinprobe", "", hang=True)
+        try:
+            lines = self.run_hook(path_dir=self.bin, source="startup")
+        except subprocess.TimeoutExpired:
+            self.fail("the start read hung on a version command: the hook did not end")
+        hits = self.pin_lines(lines)
+        self.assertEqual(len(hits), 1, "the hung read printed no one start line: %r" % lines)
+        self.assertIn("unknown", hits[0], "the hung read is not named unknown: %s" % hits[0])
 
 
 if __name__ == "__main__":
