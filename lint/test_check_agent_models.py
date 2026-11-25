@@ -19,7 +19,9 @@ in it, or a backticked PASS/FAIL/PARTIAL header that names a model. A body whose
 names its file and line as file:line.
 Every agent file withholds the claude-code-remote server: disallowedTools: names the whole server (`mcp__claude-code-remote__*`
 or bare `mcp__claude-code-remote`), or tools: is an allow-list with no entry for it. Only the frontmatter counts, never the
-body or a description.
+body or a description. The glob `mcp__*` counts as withholding the server. The seven roles builder, test-author,
+record-writer, reviewer, Explore, Plan and refuter withhold every MCP tool: `mcp__*` in disallowedTools, or a tools:
+allow-list with no MCP name. designer and design-reviewer keep the server withheld and nothing more.
 An agent file's `effort:` must equal the first word of its role's Effort cell in the same record. A cell may hold a word
 and a note after it, as the lane row does. A role with no row is not compared. A file with no effort value fails where its
 row names one, and so does a file whose effort is only a comment, a decoy line or a null. The failure names the file, the
@@ -1052,6 +1054,86 @@ class SessionToolsRepo(unittest.TestCase):
                 self.assertTrue(server_withheld(keys),
                                 "agents/%s can reach the claude-code-remote server: disallowedTools: names no remote "
                                 "entry, and it has no tools: allow-list" % name)
+
+
+# Every role but the design pair withholds every MCP tool, so an agent never answers a permission prompt for an MCP call
+# (rule agent-no-mcp-tools in hooks/guard.py). The MCP glob also withholds the remote server. Each fixture is written as
+# its real file is (the row's model pin and effort, the name as the file names it), so only the MCP fault can fail it.
+MCP_ROLES = ("builder", "test-author", "record-writer", "reviewer", "Explore", "Plan", "refuter")
+DESIGN_ROLES = ("designer", "design-reviewer")
+MCP_GLOB = "mcp__*"
+
+
+def role_with(role, *lines, body="body\n"):
+    """A fixture agents/<role>.md for a role with a row: its name, the row's model pin and effort, then the given lines."""
+    model, effort = ROW_PINS[role]
+    return "---\n%s\n---\n%s" % ("\n".join(("name: %s" % role, "model: %s" % model, "effort: %s" % effort) + lines), body)
+
+
+def role_verdict(role, *lines):
+    return verdict("agents/%s.md" % role.lower(), text=role_with(role, *lines))
+
+
+def withholds_every_mcp(keys):
+    """True when the agent reaches no MCP tool: disallowedTools holds the MCP glob, or tools: is an allow-list with no MCP
+    name. It reads the files, not the check, so the real-folder case is red before the check is built."""
+    if MCP_GLOB in tokens(keys.get("disallowedTools", "")):
+        return True
+    if "tools" in keys:
+        return not any(item.startswith("mcp__") for item in tokens(keys["tools"]))
+    return False
+
+
+class McpTools(unittest.TestCase):
+    def test_every_mcp_glob_withholds_the_remote_server_too(self):
+        # Today's check reads the server's own name, so it refuses the glob form. The glob names every MCP tool, the server too.
+        for role in MCP_ROLES:
+            with self.subTest(role=role):
+                code, out = role_verdict(role, "disallowedTools: Edit, Write, NotebookEdit, %s" % MCP_GLOB)
+                self.assertEqual((code, out), (0, ""), "%s with the MCP glob is flagged: %r" % (role, out))
+
+    def test_a_role_that_withholds_only_the_remote_server_is_flagged(self):
+        for role in MCP_ROLES:
+            with self.subTest(role=role):
+                code, out = role_verdict(role, "disallowedTools: Edit, Write, NotebookEdit, %s__*" % REMOTE)
+                self.assertEqual(code, 1, "%s withholds only the remote server and passes the check: %r" % (role, out))
+                self.assertTrue(names(out, "%s.md" % role.lower()), "no line names %s.md: %r" % (role.lower(), out))
+
+    def test_designer_and_design_reviewer_with_only_the_remote_withheld_pass(self):
+        for role in DESIGN_ROLES:
+            with self.subTest(role=role):
+                self.assertEqual(role_verdict(role, "disallowedTools: %s__*" % REMOTE), (0, ""),
+                                 "%s with only the remote server withheld is flagged" % role)
+
+    def test_allow_list_with_no_mcp_name_passes(self):
+        self.assertEqual(role_verdict("reviewer", "tools: Read, Grep, Glob"), (0, ""),
+                         "a tools: allow-list with no MCP name is flagged")
+
+    def test_allow_list_naming_an_mcp_tool_is_flagged(self):
+        code, out = role_verdict("reviewer", "tools: Read, Grep, mcp__Claude_Browser__navigate")
+        self.assertEqual(code, 1, "a tools: allow-list that names an MCP tool passes the check: %r" % out)
+        self.assertTrue(names(out, "reviewer.md"), "no line names reviewer.md: %r" % out)
+
+    def test_full_size_deny_list_ending_in_the_mcp_glob_passes(self):
+        refuse = ", ".join(["Edit", "Write", "NotebookEdit", "Bash", "Read", "Glob", "Grep", "WebFetch", "WebSearch",
+                            "Task", "TodoWrite", MCP_GLOB])
+        self.assertEqual(role_verdict("builder", "disallowedTools: %s" % refuse), (0, ""),
+                         "a full-size deny list that ends in the MCP glob is flagged")
+
+    def test_every_real_agent_file_except_the_design_pair_withholds_every_mcp_tool(self):
+        folder = os.path.join(ROOT, "agents")
+        files = sorted(name for name in os.listdir(folder) if name.endswith(".md"))
+        self.assertTrue(files, "agents/ holds no agent file to read")
+        for name in files:
+            if name[:-len(".md")] in DESIGN_ROLES:
+                continue
+            with self.subTest(agent=name):
+                with open(os.path.join(folder, name), encoding="utf-8-sig") as handle:
+                    keys, _, problem = agent_parts(handle.read())
+                self.assertIsNone(problem, "%s: %s" % (name, problem))
+                self.assertTrue(withholds_every_mcp(keys),
+                                "agents/%s reaches an MCP tool: disallowedTools has no %s and it has no tools: allow-list "
+                                "with no MCP name" % (name, MCP_GLOB))
 
 
 def tearDownModule():
