@@ -15,8 +15,9 @@ the hook prints one JSON object on stdout and exits 0:
   The two standing git lines are pinned in full, and they are the same for every type. One bans git stash, with no
   worktree condition. The other bans git reset with one of the discard flags in RESET_DISCARD_FLAGS (guard_shared_tree),
   git checkout of a path and git restore, only outside the agent's own worktree: a folder under .claude/worktrees
-  (guard.agent_owned_worktree). The guard allows those discarding acts only in such a worktree, and refuses them in the
-  main checkout and in a hand-made worktree (decision agent-worktree-discard-is-noted). A plain, soft or mixed reset is not named.
+  (guard.agent_owned_worktree). The guard allows those discarding acts in such a worktree. In a hand-made worktree it
+  refuses a whole-tree discard and allows a checkout or restore of named files. The main checkout refuses them all
+  (decision agent-worktree-discard-is-noted). A plain, soft or mixed reset is not named.
 - The push line, the commit-trailer line and the record-path line appear for builder,
   test-author, record-writer, designer and any other type; never for reviewer, Explore, Plan,
   claude-code-guide, design-reviewer or refuter, which only read.
