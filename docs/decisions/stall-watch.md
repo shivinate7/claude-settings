@@ -223,6 +223,7 @@ blocked Stop and one check-in (its false alarms).
 - P1 [notes] Launch to final finish of a background agent: 95th percentile 32.5 min over 9196 launches in 8 days. Over 30 min:
   520 in 8 days (about 65 a day), and 21 on Nov 24 in 7 sessions. Over 45 min: 180 in 8 days, and 10 on Nov 24. Source: the lane
   plan (agent report, Nov 24, 2026); the command behind it is not on record. Checked never.
+
 Limits: a session that is idle with no Stop sees nothing until its next Stop. The age rule runs only at a Stop, and a
 foreground agent is never checked. A TaskStop, or a terminal notice without the waiting text, closes an agent id for the
 whole transcript. So an agent resumed under that id is never listed or blocked (debt `agent-resume-reads-closed`, an agent
