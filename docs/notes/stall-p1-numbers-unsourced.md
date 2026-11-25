@@ -1,0 +1,1 @@
+- stall-p1-numbers-unsourced: docs/decisions/stall-watch.md:223 (P1) gives 520 in 8 days over 30 min and 180 over 45 min. No command is on record, and the record says "Checked never", so these counts are unmeasured. The 1800 s limit's cost estimate rests on them. Decision: stall-watch (the stall watch decision). Seen: 2026-11-24 x1

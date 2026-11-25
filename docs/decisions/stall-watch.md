@@ -197,7 +197,7 @@ read is listed.
 Age rule (`AGENT_LONG`, 1800 s, a consultant's pick, undoable). It rests on the owner's ruling of 20:27 CST Nov 24, 2026
 (question QQ, option c: one check-in per long agent, no whole-suite run guard). `STALL_WATCH_LONG` sets another age.
 In `stop()`, a background agent whose launch is at least that old blocks the Stop, whether busy or quiet, inside an open
-call or not, with its transcript found or not. The launch time is the first record that names the agent id (`scan_jobs`).
+call or not, with its transcript found or not. The launch time is set from the launch record (`scan_jobs`). A resume record (`toolUseResult.resumedAgentId`) reopens a closed agent, and the 1800 s limit counts from the latest resume. A notice or TaskStop closes an agent only if it is newer than its latest launch or resume.
 An agent with no readable launch time does not block. The block names each such agent,
 `Agent "<description>" (<id>) has run <N> min and has not finished.`, and adds `; it is waiting on its own background work`
 when its notice carried the waiting text. It then gives `AGENT_CHECKIN_REMEDY`: set one one-time check-in, at most 30 minutes
