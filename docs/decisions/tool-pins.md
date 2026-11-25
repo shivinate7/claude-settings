@@ -31,13 +31,13 @@ Reported, not read from a CI log or a run:
 ## What is built
 
 - File format, `.tool-versions`:
-  - One `<tool> <version>` per line. `parse` in `lint/check_tool_pins.py` refuses any other line. A file with no pin fails.
+  - One `<tool> <version>` per line. `lint/check_tool_pins.py` `parse` refuses any other line; a file with no pin fails.
   - A comment sits on its own line. The file's header says actions/setup-python reads the python line with a strict pattern. Not checked here.
-  - `# read: <tool> = <command>` gives a tool its own version command. The default is `<tool> --version`. The command runs with no shell (the Windows path is unrun).
+  - `# read: <tool> = <command>` gives a tool its own version command. The default is `<tool> --version`. `lint/check_tool_pins.py` `run_version_command` runs it with no shell (the Windows path is unrun).
   - `# match: <tool> = <regex>` names the version. The regex has one group, and the group is the version. Both `read` and `match` are case-insensitive.
   - A UTF-8 BOM is ignored.
 - Version: the first dotted number in the output, or a bare number when none is dotted. A number inside a path token is never the version.
-- Precision: `matches` in `lint/check_tool_pins.py` matches a pin at the precision it states. `3.15` accepts 3.15.2. `3` accepts 3.2.1. `2.56` accepts 2.56.1. `2.105` rejects 2.10.5. A pre-release (3.15.0rc1) matches only a pin that states it.
+- Precision: `lint/check_tool_pins.py` `matches` accepts a pin at the precision it states. `3.15` accepts 3.15.2. `3` accepts 3.2.1. `2.56` accepts 2.56.1. `2.105` rejects 2.10.5. A pre-release (3.15.0rc1) matches only a pin that states it.
 - `--local` prints a mismatch as a note and exits 0. A tool that is not found, whose command fails, or that prints no version reads `unknown` and exits 1, also with `--local`.
 - Cost: one version command per pin, per run, pinned by `test_one_process_per_pin_and_no_network` in `lint/test_check_tool_pins.py`. The case proves the process count, not the network. No file written. Runs only when invoked.
 
@@ -50,7 +50,7 @@ Reported, not read from a CI log or a run:
   - No CI job runs the check. Only its fixture suite runs.
   - The check must also run in one Windows job and one macOS job.
   - Other repos take the check through the lint action they already call.
-  - Where the check runs (session start, lane lint, ready run, PR run, daily; cloud, Windows, Mac) is planned, not built: an Opus plan and its refuter, on the owner's word, 10:47 CST Nov 25.
+  - Where the check runs (session start, lane lint, ready run, PR run, daily; cloud, Windows, Mac) is planned, not built: an Opus plan and its refuter, on the owner's grant, 10:47 CST Nov 25.
   - Who moves a pin when a runner image moves a tool: the owner's open question QAG.
 - Machines: the Mac has Homebrew git 2.56.1 since 10:21 CST, 2026-11-25. The Windows upgrade is the owner's act.
 - Debt `gh-version-unpinned` stays open until one `gh` line lands in `.tool-versions`. The pin value needs a read of CI's gh first.
