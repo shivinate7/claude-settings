@@ -25,6 +25,7 @@ import unittest
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
+import check_tool_pins  # noqa: E402  the one text reader (parse_text), which the ready run calls on a head's pin file
 
 CHECK = os.path.join(HERE, "check_tool_pins.py")
 RUN_TIMEOUT = 60  # a hang guard well above a run of a few process starts
@@ -77,10 +78,15 @@ def fake_tool(folder, log, name, output, hang=False):
     return path
 
 
-def python_shim(folder, log, real=None):
+def python_shim(folder, log, real=None, env=None):
     """A python3 in `folder` that appends its argv to `log` on each start, then runs the real interpreter (`real`, else this
-    one) with the same argv. A case counts the lines that name a script. POSIX only."""
-    body = "#!/bin/sh\n" + "printf '%s\\n' \"$*\" >> " + shlex.quote(log) + "\n" + "exec " + shlex.quote(real or sys.executable) + " \"$@\"\n"
+    one) with the same argv. A case counts the lines that name a script. With `env`, each line also ends with that environment
+    variable's value, or `unset` when it is not set. POSIX only."""
+    if env is None:
+        record = "printf '%s\\n' \"$*\" >> " + shlex.quote(log)
+    else:
+        record = "printf '%s %s\\n' \"$*\" \"${" + env + ":-unset}\" >> " + shlex.quote(log)
+    body = "#!/bin/sh\n" + record + "\n" + "exec " + shlex.quote(real or sys.executable) + " \"$@\"\n"
     os.makedirs(folder, exist_ok=True)
     path = os.path.join(folder, "python3")
     with open(path, "w", encoding="utf-8") as f:
@@ -489,6 +495,21 @@ class EncodingTests(ToolPinsCase):
             f.write(b"\xef\xbb\xbfpython 3.15\n")
         rc, out = self.run_check("--file", path)
         self.assertEqual(rc, 0, "a UTF-8 BOM at the file start must not hide the python pin: exit %d: %s" % (rc, out))
+
+
+class ReadTextTests(unittest.TestCase):
+    """The ready run reads a head's pin file as text (parse_text), not as a path (parse). Both take a byte-order mark at the start the same way."""
+
+    def tools(self, text):
+        pins = check_tool_pins.parse_text(text, "lane-101:.tool-versions")[0]
+        return [tool for tool, _, _ in pins]
+
+    def test_a_byte_order_mark_at_the_start_of_the_text_does_not_rename_the_tool(self):
+        self.assertEqual(self.tools("﻿python 3.15\n"), ["python"],
+                         "a byte-order mark at the start of the text renamed the tool, so its pin names no tool the file pins")
+
+    def test_control_the_same_text_without_a_byte_order_mark_reads_the_tool(self):
+        self.assertEqual(self.tools("python 3.15\n"), ["python"], "control: a plain pin line does not read its tool")
 
 
 class MajorOnlyPinTests(ToolPinsCase):
