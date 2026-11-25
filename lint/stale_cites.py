@@ -982,6 +982,7 @@ def has_source(rest):
 
 SYMBOL_WORD = re.compile(r"([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*)(?:\(\))?\Z")  # a name, or a dotted Class.method
 FILE_WORD = re.compile(r"/|\.(?:py|mjs|cjs|js|ts|sh|md|json|ya?ml|toml|txt|cfg|ini|html|css)\Z")  # a word that is a file, not Class.method
+CITE_VERBS = ("read", "test")  # the words that open a cite, never a name
 CITE_TOKEN = re.compile(r"([^\s,;]+)([\s,;]*)")  # a word and the separator after it
 
 
@@ -995,7 +996,8 @@ def cite_targets(kind, rest):
         return [(node.group(1), rest, [rest.rsplit("::", 1)[-1]])] if node else []
     if kind != "read":
         return []
-    tokens = [(word.rstrip("."), sep) for word, sep in CITE_TOKEN.findall(rest) if word.rstrip(".")]
+    raw = [(word, sep) for word, sep in CITE_TOKEN.findall(rest) if word.rstrip(".")]
+    tokens = [(word.rstrip("."), sep) for word, sep in raw]
     found, collecting = [], False
     for index, (word, sep) in enumerate(tokens):
         if SOURCE.match(word) and not (collecting and SYMBOL_WORD.match(word) and not FILE_WORD.search(word)):
@@ -1004,16 +1006,30 @@ def cite_targets(kind, rest):
             collecting = not named
             continue
         symbol = SYMBOL_WORD.match(word)
-        if not (collecting and symbol):
-            collecting = False
+        if not (collecting and symbol) or word in CITE_VERBS:
+            collecting = False  # a cite verb opens the next cite; it is never a name
+            continue
+        if raw[index - 1][0].endswith(".") and word[:1].isupper():
+            collecting = False  # a capitalised word after a sentence end starts new prose
             continue
         following = tokens[index + 1][0] if index + 1 < len(tokens) else ""
-        if not re.search(r"[,;]", sep) and following[:1].islower() and not (SOURCE.match(following) and FILE_WORD.search(following)):
-            collecting = False  # a name and more lower-case words: prose
+        words_follow = not re.search(r"[,;]", sep) and following and not (SOURCE.match(following) and FILE_WORD.search(following))
+        after_comma = "," in tokens[index - 1][1]
+        if words_follow and (following[:1].islower() or after_comma):
+            collecting = False  # a name and more lower-case words, or a name after a comma and more words: prose
             continue
         if symbol.group(1) not in found[-1][2]:
             found[-1][2].append(symbol.group(1))
     return found
+
+
+def targets_by_path(targets):
+    """[(path, word, symbols)] with each path once: the first word the cite wrote for it, and the names of all its targets, in cite order."""
+    merged = {}
+    for path, word, symbols in targets:
+        entry = merged.setdefault(path, (path, word, []))
+        entry[2].extend(name for name in symbols if name not in entry[2])
+    return list(merged.values())
 
 
 def backing_path(kind, rest):
@@ -1099,15 +1115,16 @@ def cited_excerpt(cite, text, limit=40, row_chars=None):
     targets = cite_targets(kind, rest)
     if not targets:
         return None
+    targets = targets_by_path(targets)
     if isinstance(text, str):
         return excerpt_rows(kind, text, targets[0][2], limit, row_chars, targets[0][1])
     blocks = {}
     for path, word, symbol in targets:
-        if path in text and path not in blocks:
+        if path in text:
             blocks[path] = excerpt_rows(kind, text[path], symbol, limit, row_chars, word)
     if not blocks:
         return None
-    if len({t[0] for t in targets}) < 2:
+    if len(targets) < 2:
         return next(iter(blocks.values()))
     return "\n".join("== %s\n%s" % block for block in blocks.items())
 
