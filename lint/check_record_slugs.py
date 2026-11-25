@@ -263,13 +263,19 @@ def new_note_lines(root, added, moved):
 # One sentence per line in a decision record (decision record-prose-one-sentence-line). A line over PROSE_LIMIT characters
 # holds one sentence, so two lanes that add sentences to one ruling add different lines and git merges them clean.
 PROSE_LIMIT = 200
-PROSE_FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
+PROSE_FENCE = re.compile(r"^ {0,3}(`{3,}(?=[^`]*$)|~{3,})")  # a backtick fence's info string holds no backtick: "```x```" is a code span
 PROSE_HEADING = re.compile(r"^ {0,3}#{1,6}(?:\s|$)")
 PROSE_TABLE = re.compile(r"^\s*\|")
 PROSE_QUOTE_MARK = re.compile(r"^ {0,3}>[ \t]?")  # the blockquote marker
 PROSE_LIST_MARK = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s+")
 PROSE_QUOTE = re.compile(r'^(?:"[^"]*"|\u201c[^\u201d]*\u201d)$')  # the whole line is one quote
 CODE_SPAN = re.compile(r"`[^`\n]*`")
+# A quote the writer puts in a line: its opening mark follows no word character and its closing mark precedes none, so 5"
+# or Don't pairs with nothing. Its text, minus a stop right before the closing mark, is one sentence (QUOTE_STOP).
+QUOTE = re.compile(r'(?<!\w)"[^"\n]*"(?!\w)|“[^”\n]*”')
+QUOTE_STOP = re.compile(r"[.!?](?!.\Z)")  # not the stop that is the last character before the closing mark
+# "etc." and "No." before a capital word end a sentence; ste_lint protects both, so the dot is swapped for "!" first.
+ABBREV_END = re.compile(r"\b(etc|No)\.(?= [A-Z])")
 MONTH_DOT =re.compile(r"\b(Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sept?|Oct|Nov|Dec)\.(?= \d)")  # "Nov. 25": ste_lint's splitter breaks here
 
 
@@ -291,11 +297,15 @@ def fenced(lines):
 
 def sentence_count(text):
     """How many sentences `text` holds, by ste_lint.split_sentences, the one splitter (it keeps e.g., i.e., 3.15, merge.py
-    whole). A month abbreviation before a day number, and a stop inside an inline code span, are no sentence end, so the
-    split reads them with their dot hidden. ste_lint loads here, not at import: hooks/agent_brief.py imports this module
-    for AGENT_FORM_RULES on every agent start and needs no splitter."""
+    whole). It reads four things its own way. A month abbreviation before a day number, a stop inside an inline code span and
+    a stop inside a quote (but not one right before the closing mark) are no sentence end, so the split reads them with
+    their dot hidden. "etc." and "No." before a capital word are an end, which the splitter protects, so each dot is
+    swapped for a "!". ste_lint loads here, not at import: hooks/agent_brief.py imports this module for AGENT_FORM_RULES on
+    every agent start and needs no splitter."""
     import ste_lint  # the one sentence splitter (lint/ste_lint.py split_sentences)
     hidden = CODE_SPAN.sub(lambda m: re.sub(r"[.!?]", ste_lint._DOT, m.group(0)), text)
+    hidden = QUOTE.sub(lambda m: QUOTE_STOP.sub(ste_lint._DOT, m.group(0)), hidden)
+    hidden = ABBREV_END.sub(lambda m: m.group(1) + "!", hidden)
     return len(ste_lint.split_sentences(MONTH_DOT.sub(lambda m: m.group(1) + ste_lint._DOT, hidden)))
 
 
