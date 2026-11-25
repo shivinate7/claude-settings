@@ -3,11 +3,11 @@ id: pending
 slug: tests-set-config
 ---
 
-# A test file must not remove the config folder at import and leave it unset
+# A test file must not remove `CLAUDE_CONFIG_DIR` at import and leave it unset
 
 ## The ruling
 
-A test file must not pop, delete or `os.environ.clear()` `CLAUDE_CONFIG_DIR` at import and leave it unset. A case that reads the config folder either sets the variable, or uses `isolated_config(run)`, which points it at a fresh folder.
+A test file must not pop, delete or `os.environ.clear()` `CLAUDE_CONFIG_DIR` at import and leave it unset. A case that reads the config folder either sets the variable, or uses `isolated_config(run)`, which points it at a fresh folder. An import-time removal is cleared only by a set at import (at module level, or in a function the module calls at import) or by a set in `setUpModule()`. A set in one case does not clear it.
 
 Mistake: `merge/test_merge.py:65` pops `CLAUDE_CONFIG_DIR` at import, in a loop over five names, and never sets it. A builder run of `python3 lint/check_tests_set_config.py` on 2026-11-24 found it: exit 1, one finding.
 
@@ -34,7 +34,9 @@ Limits:
 - `os.putenv` counts as a set, but it also leaves `os.environ` unchanged. A `pop` then a `putenv` is clean, and `os.environ.get` returns None.
 - A set made by a function imported from another module. The file is flagged, though the set runs at import.
 - A helper that calls a helper defined after it. The helper is not seen as a set, so its import-time call is flagged.
-- The check is not in CI or in `merge.readyChecks` yet. `merge/test_merge.py` must set the variable first. Its case `test_repo_names_the_incident_file` expects that file as a finding, so the case fails once the file is fixed. Re-point it then.
+- The check is not in CI or in `merge.readyChecks` yet. `merge/test_merge.py` must set the variable first. The case `test_repo_names_the_incident_file` in `lint/test_tests_set_config.py` expects that file as a finding, so the case fails once the file is fixed. Re-point it then.
+- Known false alarms, until the next commit on this branch fixes them. Each form below is not read as a set, so the file is flagged though it sets the variable at import: `os.environ.update(...)` with a dict held in a name (a literal dict or a keyword argument is read); `os.environ |= {...}`; `patch.dict(...).start()`; and `stack.enter_context(isolated_config(...))`.
+- Run time: about 9-14 s on this repo, because an imported module is parsed once per importing file (reviewer measure, 589 parses over 225 files, 2026-11-25).
 
 Kind: process
 Home: lint/check_tests_set_config.py
