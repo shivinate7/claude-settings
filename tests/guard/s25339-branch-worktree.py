@@ -17,6 +17,8 @@ for _label, _check in (
 # so it stays out of FIXTURELESS_CHECKS and runs with the fixture build.
 LOG_CHECKS_EXTRA.append(("log: a forced remove of a clean tree, with a removed record folder, is allowed and not noted",
                          stale_record_forced_remove_quiet_case))
+LOG_CHECKS_EXTRA.append(("log: a forced remove, a record under an absent parent, is noted as unconfirmed",
+                         stale_record_parent_gone_forced_remove_noted_case))
 # The three process cases of section 3975 read the fixture WTCLEAN (built in section 442) and start a sleep child,
 # so they stay out of FIXTURELESS_CHECKS and run with the fixture build.
 LOG_CHECKS_EXTRA.append(("log: a live process in a clean tree refuses the remove when its record's folder is gone",

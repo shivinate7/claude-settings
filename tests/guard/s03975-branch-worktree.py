@@ -146,6 +146,36 @@ def _remove_decision(cfg, target):
     return read_decision(result.stdout)
 
 
+def stale_record_parent_gone_forced_remove_noted_case():
+    """A forced `git worktree remove` of a clean, unlocked tree, with a record whose cwd sits under a folder that is
+    gone too. A missing parent may be a moved or unmounted folder, so the record reads unknown, not gone: the forced
+    remove is allowed silently, with a `subject-unread` note. Scope first: the parent must be absent."""
+    parent = _removed_folder("stale-parent-gone-parent")
+    if os.path.exists(parent):
+        return False, "fixture: the parent folder must be absent"
+    cfg = _record_config("stale-parent-gone-cfg", [(os.getpid(), os.path.join(parent, "wt"), 1)])
+    log = os.path.join(cfg, "guard.log")
+    if os.path.exists(log):
+        os.remove(log)
+    env = dict(os.environ)
+    env.pop("CLAUDE_CODE_REMOTE", None)
+    env.pop("CLAUDE_CODE_SESSION_ID", None)
+    env["CLAUDE_CONFIG_DIR"] = cfg
+    payload = {"tool_name": "Bash", "tool_input": {"command": VCS + " worktree remove --force " + slash(WTCLEAN)},
+               "cwd": WTMAIN}
+    result = subprocess.run([sys.executable, GUARD], input=json.dumps(payload), capture_output=True,
+                            text=True, env=env, timeout=60)
+    if result.returncode != 0:
+        return False, "guard exited %d" % result.returncode
+    if result.stdout.strip():
+        return False, "expected an allow, got %r" % result.stdout.strip()[:120]
+    text = open(log, encoding="utf-8").read() if os.path.exists(log) else ""
+    if "subject-unread" not in text:
+        return False, ("a record under an absent parent was read as a gone folder: the forced remove is not noted as "
+                       "unconfirmed, got %r" % text.strip()[:160])
+    return True, "a record under an absent parent reads unknown, so the forced remove is allowed with a subject-unread note"
+
+
 def stale_record_live_process_in_tree_case():
     """A live process whose cwd is the clean tree, and a session record of that process whose cwd folder is gone.
     The record stands in no tree, but the process does, so `git worktree remove` is refused for the live session
