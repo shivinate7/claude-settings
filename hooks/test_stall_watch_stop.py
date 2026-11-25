@@ -4762,6 +4762,166 @@ def CI124_merge_tool_without_confirm_prints_no_line():
                                             ids=[RET_A], tool="CronCreate", not_named=[call_id], says=["delete"])]
 
 
+def cancel_line_problems(out):
+    """The problems with out holding a cancel line: a Stop notice in hookSpecificOutput.additionalContext that
+    names a delete. Other keys of the same output, such as the job listing's systemMessage, are not judged here."""
+    problems = []
+    for line in out.splitlines():
+        try:
+            body = json.loads(line)
+        except ValueError:
+            continue
+        spec = body.get("hookSpecificOutput") if isinstance(body, dict) else None
+        if isinstance(spec, dict) and isinstance(spec.get("additionalContext"), str) \
+                and "delete" in spec["additionalContext"]:
+            problems.append("cancel line printed, want none: %r" % spec["additionalContext"][:200])
+    return problems
+
+
+@case
+def CI125_queued_green_verdict_does_not_end_the_wait_before_the_merge():
+    """CI125. a ready call, a check-in, then a queued green verdict, then a merge of the PR in the same turn: the
+    verdict is the mark that the wait is green, but the merge still closes the wait, so the cancel line prints.
+    Control: the same verdict with no merge prints nothing, so the line comes from the merge"""
+    recs, call_id = cron_set(RET_A)
+    base = [ready()] + recs
+    problems = cancel_line(base + [queued(GREEN), gh_merge()], CI_PR, ids=[RET_A], tool="CronCreate",
+                           not_named=[call_id], says=["delete"])
+    return problems + ["control: " + p for p in expect_silent(base + [queued(GREEN)])]
+
+
+@case
+def CI126_dry_run_merge_does_not_close_the_wait():
+    """CI126. bin/merge N without --confirm is a preview that merged nothing, so it leaves the CI wait open: the
+    --confirm merge after it closes the wait, and the cancel line prints. Control: the --confirm merge alone prints
+    the same line"""
+    recs, call_id = cron_set(RET_A)
+    dry = merge_bin(CI_PR, confirm=False)
+    confirmed = merge_bin(CI_PR)
+    problems = cancel_line([ready()] + recs + answered(dry, "dry run, nothing merged")
+                           + answered(confirmed, "merged as %s" % CI_SHA),
+                           CI_PR, ids=[RET_A], tool="CronCreate", not_named=[call_id], says=["delete"])
+    alone = merge_bin(CI_PR)
+    return problems + ["control, --confirm alone: " + p
+                       for p in cancel_line([ready()] + recs + answered(alone, "merged as %s" % CI_SHA), CI_PR,
+                                            ids=[RET_A], tool="CronCreate", not_named=[call_id], says=["delete"])]
+
+
+@case
+def CI127_bare_ready_wait_is_not_closed_by_a_merge_of_another_pr():
+    """CI127. a bare gh pr ready opens a wait on this branch's PR, which the transcript does not name, and its
+    check-in is set. A merge of another PR prints no line for that check-in, and the wait stays open: a red verdict
+    after the merge voids the check-in, so the Stop blocks and names no PR. Control: the bare wait with its check-in
+    prints nothing, and a red verdict blocks it with no PR number"""
+    recs, _ = cron_set(RET_A)
+    bare = [ready(command="gh pr ready")] + recs
+    merged_other = gh_merge(CI_OTHER_PR)
+    problems = ["merge of PR %s: " % CI_OTHER_PR + p for p in expect_silent(bare + [merged_other])]
+    problems += ["after that merge, red verdict: " + p
+                 for p in expect_block(bare + [merged_other, queued(RED)], pr=None, not_named=[CI_OTHER_PR])]
+    return problems + ["control, no merge: " + p for p in expect_silent(bare)] \
+        + ["control, red verdict: " + p
+           for p in expect_block(bare + [queued(RED)], pr=None, not_named=[CI_OTHER_PR])]
+
+
+@case
+def CI128_background_merge_closes_the_wait_only_on_a_successful_result():
+    """CI128. a gh pr merge started with run_in_background: its acknowledgement is not a merge, so the Stop after it
+    prints no line, and a merge whose result is failed prints none. Control: the same merge with a completed
+    result prints the line"""
+    recs, call_id = cron_set(RET_A)
+    job = "bgm4217"
+    base = [ready()] + recs + paused_job(job, "gh pr merge %s --squash" % CI_PR)
+    rc_problems, out = ci_run(base)
+    problems = rc_problems + ["background merge acknowledged: " + p for p in cancel_line_problems(out)]
+    failed = attachment_notice(job, "failed", summary='Background command "gh pr merge %s --squash" failed with exit '
+                                                      'code 1' % CI_PR, result="merge failed: not mergeable")
+    rc_problems, out = ci_run(base + [failed])
+    problems += rc_problems + ["background merge failed: " + p for p in cancel_line_problems(out)]
+    completed = attachment_notice(job, "completed", summary='Background command "gh pr merge %s --squash" completed'
+                                                            % CI_PR, result="Merged pull request #%s" % CI_PR)
+    return problems + ["control, completed: " + p
+                       for p in cancel_line(base + [completed], CI_PR, ids=[RET_A], tool="CronCreate",
+                                            not_named=[call_id], says=["delete"])]
+
+
+@case
+def CI129_user_prompt_with_tool_result_text_starts_a_turn():
+    """CI129. a user prompt that holds the words tool_result and no CI key still starts a turn, so the earlier merge's
+    line does not print again at the Stop of that later turn. Control: the merge's own turn prints the line"""
+    recs, call_id = cron_set(RET_A)
+    own = [prompt("merge when green"), ready()] + recs + [gh_merge()]
+    problems = ["later turn: " + p for p in expect_silent(own + [prompt("read the tool_result field")])]
+    return problems + ["control, own turn: " + p
+                       for p in cancel_line(own, CI_PR, ids=[RET_A], tool="CronCreate", not_named=[call_id],
+                                            says=["delete"])]
+
+
+def stop_with_reader(transcript_path, reader, stop_hook_active=False):
+    """The Stop check run in this process, with stall_watch's pr_state seam set to reader. reader(repo, number)
+    returns "open", "merged" or "closed", or raises for a failed read. Returns what the check printed. The module
+    is loaded from MODULE, so the reader is the test's own and no network is touched."""
+    spec = importlib.util.spec_from_file_location("stall_watch_seam", MODULE)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    mod.pr_state = reader
+    saved_stdin, saved_now = sys.stdin, os.environ.get("STALL_WATCH_NOW")
+    sys.stdin = io.StringIO(json.dumps({"transcript_path": transcript_path, "stop_hook_active": stop_hook_active}))
+    os.environ["STALL_WATCH_NOW"] = str(NOW)
+    buf = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(buf):
+            mod.stop()
+    finally:
+        sys.stdin = saved_stdin
+        if saved_now is None:
+            os.environ.pop("STALL_WATCH_NOW", None)
+        else:
+            os.environ["STALL_WATCH_NOW"] = saved_now
+    return buf.getvalue()
+
+
+@case
+def CI130_pr_merged_by_hand_closes_the_wait_before_the_ask():
+    """CI130. the owner merged the PR by hand, so no merge is in the transcript. Before it asks for a check-in, the
+    hook reads the PR's state through pr_state (an injected reader here). merged or closed closes the wait: no ask
+    prints, and a check-in still set gets the delete line. A failed read prints one unknown: line, and the ask shows
+    at most once in the turn, so a Stop again with stop_hook_active set prints nothing. Control: an open PR still
+    gets the ask"""
+    recs, call_id = cron_set(RET_A)
+    bare = transcript([ready()])
+    checked = transcript([ready()] + recs)
+    calls = []
+
+    def reader(state):
+        def read(repo, number):
+            calls.append(str(number))
+            return state
+        return read
+
+    def failing(repo, number):
+        calls.append(str(number))
+        raise OSError("pr view failed")
+
+    problems = []
+    for state in ("merged", "closed"):
+        out = stop_with_reader(bare, reader(state))
+        problems += expect(out.strip() == "", f"{state} PR with no check-in: the Stop printed, want no ask: {out[:200]!r}")
+        out = stop_with_reader(checked, reader(state))
+        problems += ["%s PR with a check-in set: %s" % (state, p)
+                     for p in cancel_problems(out, CI_PR, ids=[RET_A], tool="CronCreate", not_named=[call_id],
+                                              says=["delete"])]
+    problems += expect(CI_PR in calls, f"the PR state was not read before the ask: reads {calls!r}")
+    out = stop_with_reader(bare, failing)
+    unknown = [line for line in out.splitlines() if "unknown:" in line]
+    problems += expect(len(unknown) == 1, f"a failed read, want one unknown: line: {out[:200]!r}")
+    problems += expect(out.count('"decision"') <= 1, f"a failed read asked more than once in the turn: {out[:200]!r}")
+    again = stop_with_reader(bare, failing, stop_hook_active=True)
+    problems += expect(again.strip() == "", f"a failed read, Stop again in the turn: want nothing: {again[:200]!r}")
+    return problems + ["control, open PR: " + p for p in block_problems(stop_with_reader(bare, reader("open")),
+                                                                        pr=CI_PR)]
+
+
 def paused_job(job_id, command):
     """A Bash call started with run_in_background that runs `command`, and its result."""
     cid = "toolu_" + job_id
