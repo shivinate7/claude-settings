@@ -17,8 +17,10 @@ the same file and the same `@@` block. A token deleted in another file or in ano
 reflow cannot hide a new word beside an old one. Each
 deleted token excuses at most one added token. A caller opts in by passing `take_move` the number of the hunk it
 is reading, counted from 1 over every `@@` row of the diff, in the order `deleted_texts` counts them; with no hunk
-number a line is a move only when its whole text was deleted. A reflowed line does not use up an exact deleted
-copy, and an exact copy does not use up tokens, so the two budgets are separate.
+number a line is a move only when its whole text was deleted. One budget serves both: an exact copy spends the
+tokens of the deleted line it matches, in the hunk that deleted it, and a reflow spends the tokens it holds. So a
+reflow and an exact copy, in any file, cannot both take the same deleted word. An exact copy of a line whose
+tokens a reflow already spent is no move.
 
 Readers of a diff that use this home: check_comment_narration.added_lines and check_glossary.patch_lines.
 Cost: one pass over a diff text the caller already holds. No process, no file.
@@ -36,11 +38,12 @@ def tokens(text):
 
 
 class Deleted:
-    """What a diff deletes: `lines`, a Counter of each deleted text, and `hunks`, a dict of hunk number to a
-    Counter of the tokens that hunk deletes (a hunk that deletes nothing has no entry)."""
+    """What a diff deletes: `lines`, a dict of each deleted text to the list of hunk numbers that deleted a copy
+    of it, and `hunks`, a dict of hunk number to a Counter of the tokens that hunk has left to excuse (a hunk
+    that deletes nothing has no entry)."""
 
     def __init__(self):
-        self.lines = Counter()
+        self.lines = {}
         self.hunks = {}
 
 
@@ -71,24 +74,28 @@ def deleted_texts(diff, scanned):
             header = False
             hunk += 1
         elif not header and keep and row.startswith("-"):
-            left.lines[row[1:]] += 1
+            left.lines.setdefault(row[1:], []).append(hunk)
             left.hunks.setdefault(hunk, Counter()).update(tokens(row[1:]))
     return left
+
+
+def spend(pool, need):
+    """True when `pool` holds every token of `need`, and takes them out of it."""
+    if any(pool[t] < n for t, n in need.items()):
+        return False
+    pool.subtract(need)
+    return True
 
 
 def take_move(left, text, hunk=None):
     """True when `left` still holds a deleted copy of the added line `text`, and uses that copy up.
 
-    With a `hunk` number, a line that is a reflow of what that hunk deletes is a move too (module docstring),
-    and uses up the tokens it holds."""
-    if left.lines[text] > 0:
-        left.lines[text] -= 1
-        return True
-    pool = left.hunks.get(hunk)
-    if pool is None:
-        return False
+    An exact copy spends its own tokens from the hunk that deleted it. With a `hunk` number, a line that is a
+    reflow of what that hunk deletes is a move too (module docstring), and spends the tokens it holds."""
     need = Counter(tokens(text))
-    if any(pool[t] < n for t, n in need.items()):
-        return False
-    pool.subtract(need)
-    return True
+    for origin in left.lines.get(text, ()):
+        if spend(left.hunks[origin], need):
+            left.lines[text].remove(origin)
+            return True
+    pool = left.hunks.get(hunk)
+    return pool is not None and spend(pool, need)
