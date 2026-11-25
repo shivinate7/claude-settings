@@ -5739,6 +5739,16 @@ class GhHalf(Env):
         self.assertIn("reverted on feat", out, "the refused merge did not revert the claim:\n" + out)
         self.assertTrue(self.reverted(), "the refused merge did not leave the claim reverted on feat")
 
+    def test_a_lost_merge_reply_with_main_holding_an_older_head_of_the_branch_is_not_read_as_merged(self):  # control: green now and after
+        # The merge lands an older head of this branch on main, and its reply is lost with the pull request still open. That merge is not this head's:
+        # nothing reads as merged, and the claim is kept. A lost reply is resent, so the merge call count is not asserted here.
+        before = self.head()  # the branch head before the claim push: an older head of this branch
+        rc, out = self.merge_reply_with_pr_open(NET_TLS, True, lands_sha=before)
+        self.assertNotIn("merge: #7 merged as ", out, "a merge of an older head of this branch was read as this head's merge\n" + out)
+        self.assertNotEqual(rc, 0, out)
+        self.assertNotIn("reverted on", out, "a merge of an older head of this branch reverted the claim:\n" + out)
+        self.assertFalse(self.reverted(), "a merge of an older head of this branch reverted the claim on feat")
+
     def test_a_red_check_named_http_500_is_a_refusal_before_the_claim(self):
         # the head's one checks read is red; its name carries "HTTP 500". A red head is refused before any claim, so nothing is reverted
         before = self.head()
