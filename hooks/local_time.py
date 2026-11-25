@@ -404,6 +404,32 @@ def mail_lines(raw):
         print(text)
 
 
+def cwd_gone_line(raw):
+    """Prints one line when the payload's cwd no longer exists: the session's worktree was removed under it.
+    One stat, no child, no file. Any other stat error (a refused search, a bad path) means the check cannot
+    tell, so it prints nothing. The remedy text is guard.py's SESSION_HOME_REASON, imported only here so a turn
+    with a present cwd loads no guard."""
+    try:
+        cwd = json.loads(raw.decode("utf-8")).get("cwd")
+    except (ValueError, AttributeError):
+        return
+    if not isinstance(cwd, str) or not cwd:
+        return
+    try:
+        os.stat(cwd)
+    except (FileNotFoundError, NotADirectoryError):
+        pass
+    except (OSError, ValueError):
+        return
+    else:
+        return
+    try:
+        from guard import SESSION_HOME_REASON
+        print("Session folder gone: %s. %s" % (cwd, SESSION_HOME_REASON))
+    except Exception:  # the folder is known gone, so the plain line still goes out
+        print("Session folder gone: %s. Enter a new worktree (EnterWorktree, with a name and no path) before you write." % cwd)
+
+
 OLD_FLAG_ENDS = "2026-11-09"
 # Printed after the time line only, never in the capture stamp. The helper is bin/now-central.
 NOW_CENTRAL_POINTER = " Later times: run ~/.claude/bin/now-central, never from memory."
@@ -430,6 +456,7 @@ def main(argv):
                 capture(raw, stamp[len("Local time: "):])
             except Exception as e:  # a capture error never stops the grant
                 print("local_time: capture: %s" % e, file=sys.stderr)
+            cwd_gone_line(raw)
             grant_override(raw, now)
             mail_lines(raw)
     except Exception as e:  # advisory hook: fail open; one stderr line shows in --debug
