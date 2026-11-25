@@ -1144,6 +1144,8 @@ def _refused(records, i):
     for rec in records[i + 1:]:
         if is_stop_feedback(rec):
             return True
+        if rec.get("type") == "user" and rec.get("isMeta") and isinstance((rec.get("message") or {}).get("content"), str):
+            continue
         if rec.get("type") == "assistant" or is_incoming(rec):
             return False
     return False
@@ -1152,16 +1154,20 @@ def _refused(records, i):
 def records_since_report(records, text):
     """The records after the session's previous report, else all of them. `text` is the reply being judged:
     its own record is not a previous report. A report is the module's own shape test, `report_shape_ok`.
-    A report the Stop hook refused is no previous report: the session's correction answers it."""
-    texts = [(i, _reply_text(rec)) for i, rec in enumerate(records)]
-    texts = [(i, reply) for i, reply in texts if reply is not None]
-    if texts and block_text(texts[-1][1]) == block_text(text):
-        texts.pop()
-    start = 0
-    for i, reply in texts:
+    A report the Stop hook refused is no previous report: the session's correction answers it.
+    The scan runs backward and stops at that report, so a long transcript reads only its tail."""
+    own_pending = True  # the newest reply is the one being judged when its text is `text`
+    for i in range(len(records) - 1, -1, -1):
+        reply = _reply_text(records[i])
+        if reply is None:
+            continue
+        if own_pending:
+            own_pending = False
+            if block_text(reply) == block_text(text):
+                continue
         if report_shape_ok(reply) and not _refused(records, i):
-            start = i + 1
-    return records[start:]
+            return records[i + 1:]
+    return records[:]
 
 
 # The words a wrong-name refusal carries; done_models_problem writes them and main() reads them.
@@ -1180,7 +1186,8 @@ def done_models_problem(text, spawned, every=None, window=None):
       of them, so Done cannot name only an older run's model for work this window's agents did. An unknown
       window spawn never refuses a name, since it may have run it.
     The missing-role check keeps the turn's spawns. A role Done names with no spawn in the window passes the
-    second check.
+    second check. In a turn with no spawn, Done may relay a peer's agents, so only a role with a spawn in the
+    window is judged; the others are skipped.
     """
     every = every or {}
     if not spawned and not every:
@@ -1188,6 +1195,8 @@ def done_models_problem(text, spawned, every=None, window=None):
     done = " ".join(done_items(block_text(text, keep_indent=True)))
     named = {(r.lower(), m.lower()) for roles, m in ROLE_MODEL_RE.findall(done)
              for r in ROLE_RE.findall(roles)}
+    if not spawned and window is not None:
+        named = {(r, m) for r, m in named if r in window}
     # A running role Done leaves out is not yet claimed; one Done names must carry a model.
     required = spawned.finished | {r for r in spawned if re.search(r"\b" + r + r"\b", done, re.I)}
     missing = sorted(r for r in required if not any(nr == r for nr, _ in named))
