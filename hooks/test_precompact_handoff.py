@@ -3763,17 +3763,20 @@ def run_goal_order_cases():
 
 
 def case_f3_audit_brief_done_names_answered_items():
-    """F3, the brief wording: the audit brief's DONE definition counts an item as done when its work landed on main, or
-    when the item is answered, closed or withdrawn (the consultant's pick, undoable). Rule 4 stays. Red on the old brief,
-    whose DONE line names landed work only. --audit-brief prints the brief, with the payload's transcript path."""
+    """F3, the brief wording: the audit brief's DONE line counts an item as done when its work landed on main, or when
+    its question or feedback id is answered, closed or withdrawn (the consultant's pick, undoable). Only questions and
+    feedback ids can be answered, so the line scopes that word to them. Red on the old brief, whose DONE line says
+    "the item" and so counts any kind of item as answered. --audit-brief prints the brief, with the payload's transcript
+    path."""
     c = Case("f3-brief")
     try:
         p = c.run(["--audit-brief"], {"session_id": c.session_id, "hook_event_name": "PreCompact",
                                       "transcript_path": os.path.join(c.repo, "transcript.jsonl"), "cwd": c.repo})
         check("F3: --audit-brief exits 0", p.returncode == 0, "rc=%r err=%r" % (p.returncode, p.stderr[-160:]))
         text = " ".join(p.stdout.split())
-        phrase = "work landed on main, or the item is answered, closed or withdrawn"
-        check("F3: the audit brief's DONE definition counts answered, closed or withdrawn items as done",
+        phrase = ("DONE: handoff lines whose work landed on main, or whose question or feedback id is answered, "
+                  "closed or withdrawn.")
+        check("F3: the audit brief's DONE line scopes answered, closed or withdrawn to questions and feedback ids",
               phrase in text, "the DONE line says %r" % text[text.find("DONE:"):][:140])
     finally:
         c.cleanup()
