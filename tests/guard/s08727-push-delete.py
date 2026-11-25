@@ -1798,44 +1798,44 @@ _PARENT = os.path.realpath(ROOT)
 _GRAND = os.path.dirname(_PARENT)
 
 
-def _spellings(path):
-    """The (kind, text) spellings of one folder that this platform reads."""
-    if os.name != "nt":
+NO_DRIVE_SPELLING = "a drive-letter spelling names no folder on this platform, so only the plain path runs"
+NO_POSIX_SPELLING = "Windows spells the working folder and its parents by drive, so the POSIX spelling does not run here"
+
+
+def _spellings(path, nt=(os.name == "nt")):
+    """The (kind, text) spellings of one folder, as the host `nt` names reads them. Each row below asks for
+    both hosts, so a kind added to either branch is listed for both: run on its own host, SKIP on the other."""
+    if not nt:
         return [("posix", path)]
     forward = path.replace("\\", "/")
     return [("C:/", forward), ("C:\\", path), ("/c/", "/" + forward[0].lower() + forward[2:])]
 
 
-for _label, _folder in (("the working folder", _CWD), ("its parent", _PARENT)):
-    for _kind, _text in _spellings(_folder):
-        rm_parent("Bash rm -r %s as %s" % (_label, _kind), 'rm -r "%s"' % _text)
-        if _kind != "/c/":   # `/c/x` is a Git Bash path: PowerShell does not read it
-            rm_parent("PowerShell Remove-Item -Recurse %s as %s" % (_label, _kind),
-                      'Remove-Item -Recurse "%s"' % _text, tool="PowerShell")
-for _kind, _text in _spellings(_GRAND):
-    rm_parent("Bash rm -rf its grandparent as " + _kind, 'rm -rf "%s"' % _text)
-for _kind, _text in _spellings(_PARENT)[:1]:
-    rm_parent("Bash rm -r its parent with a trailing slash as " + _kind, 'rm -r "%s/"' % _text)
-rm_parent("rm -r the working folder named through its parent", "rm -r ../nogit")
-# The spellings this host does not read are dropped by the loops above. Each dropped case gets its own
-# SKIP row, under the label the other host gives it (the loops' own strings), so a host that loses a case shows it.
-NO_DRIVE_SPELLING = "a drive-letter spelling names no folder on this platform, so only the plain path runs"
-NO_POSIX_SPELLING = "Windows spells the working folder and its parents by drive, so the POSIX spelling does not run here"
-if os.name != "nt":
-    for _label in ("the working folder", "its parent"):
-        for _kind in ("C:/", "C:\\", "/c/"):
-            skip_case("rm-parent: Bash rm -r %s as %s" % (_label, _kind), NO_DRIVE_SPELLING)
+# Every folder case, for both hosts, in one list: (name, tool, command, runs here, spelling kind). A row
+# that does not run here has junk text (a POSIX path cut into drive form), and only its name is used.
+# One loop registers a run for each row that runs here and a SKIP row for each that does not.
+_FOLDER_ROWS = []
+for _nt in (False, True):
+    _runs = _nt == (os.name == "nt")
+    for _label, _folder in (("the working folder", _CWD), ("its parent", _PARENT)):
+        for _kind, _text in _spellings(_folder, nt=_nt):
+            _FOLDER_ROWS.append(("Bash rm -r %s as %s" % (_label, _kind), "Bash",
+                                 'rm -r "%s"' % _text, _runs, _kind))
             if _kind != "/c/":   # `/c/x` is a Git Bash path: PowerShell does not read it
-                skip_case("rm-parent: PowerShell Remove-Item -Recurse %s as %s" % (_label, _kind), NO_DRIVE_SPELLING)
-    for _kind in ("C:/", "C:\\", "/c/"):
-        skip_case("rm-parent: Bash rm -rf its grandparent as " + _kind, NO_DRIVE_SPELLING)
-    skip_case("rm-parent: Bash rm -r its parent with a trailing slash as C:/", NO_DRIVE_SPELLING)
-else:
-    for _label in ("the working folder", "its parent"):
-        skip_case("rm-parent: Bash rm -r %s as posix" % _label, NO_POSIX_SPELLING)
-        skip_case("rm-parent: PowerShell Remove-Item -Recurse %s as posix" % _label, NO_POSIX_SPELLING)
-    skip_case("rm-parent: Bash rm -rf its grandparent as posix", NO_POSIX_SPELLING)
-    skip_case("rm-parent: Bash rm -r its parent with a trailing slash as posix", NO_POSIX_SPELLING)
+                _FOLDER_ROWS.append(("PowerShell Remove-Item -Recurse %s as %s" % (_label, _kind), "PowerShell",
+                                     'Remove-Item -Recurse "%s"' % _text, _runs, _kind))
+    for _kind, _text in _spellings(_GRAND, nt=_nt):
+        _FOLDER_ROWS.append(("Bash rm -rf its grandparent as " + _kind, "Bash",
+                             'rm -rf "%s"' % _text, _runs, _kind))
+    for _kind, _text in _spellings(_PARENT, nt=_nt)[:1]:
+        _FOLDER_ROWS.append(("Bash rm -r its parent with a trailing slash as " + _kind, "Bash",
+                             'rm -r "%s/"' % _text, _runs, _kind))
+for _name, _tool, _command, _runs, _kind in _FOLDER_ROWS:
+    if _runs:
+        rm_parent(_name, _command, tool=_tool)
+    else:
+        skip_case("rm-parent: " + _name, NO_POSIX_SPELLING if _kind == "posix" else NO_DRIVE_SPELLING)
+rm_parent("rm -r the working folder named through its parent", "rm -r ../nogit")
 
 # ALLOWED: a named folder, a sibling that is not a parent, a folder whose name merely starts with a
 # dot or the working folder's name, a call that is not recursive, and a delete that follows a folder
