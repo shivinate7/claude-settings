@@ -179,7 +179,7 @@ jobs:
           done <<< "$list"
           exit "$failed"
 
-      # The macOS twin of the step above: the same body, with the macOS command map. Each leg's step reads its own map,
+      # The macOS twin of the step above: the same body without the PowerShell arm, with the macOS command map. Each leg's step reads its own map,
       # and a step gated to the other system never runs.
       - name: Run the touched macOS tests
         if: ${{ runner.os == 'macOS' }}
