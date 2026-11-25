@@ -79,7 +79,8 @@ _N_OF_3 = r"[ \t]+(\d)[ \t]+of[ \t]+3\b"
 _ANY_ROUND_SHAPE = r"(?:Round|Try)[ \t]+\d[ \t]+of[ \t]+3\b"
 BRIEF_MARKERS = (
     ("round", r"(?im)^[ \t]*round" + _N_OF_3, "line-start"),
-    # `Try N of 3` counts at a line start only, until note try-marker-sunset.
+    # `Try N of 3` is scanned at a line start, so marker_hits reports it.
+    # No refusal reads it: step_up_reason and reviewer_round_models read `round` rows only, and a builder's row is sonnet.
     ("try", r"(?im)^[ \t]*try" + _N_OF_3, "line-start"),
     # The first-line round row reads a first line that starts with no marker in any case (the whole lookahead
     # ignores case, as the line-start rows do, and leaves that line to them). On it, the leftmost marker-shaped text counts, and only when it is `Round`: the tempered
