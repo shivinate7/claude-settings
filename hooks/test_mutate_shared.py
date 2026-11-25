@@ -36,6 +36,10 @@ The eighth part pins the resume of a shard: each mutant's verdict is saved as th
 MUTATE_VERDICT_DIR names, and a rerun skips each mutant judged at the same key (its id, the guarded file, the test
 file and the tool version). The cases drive `mutate_guard.main()` over a fixture target, so the key reads real files.
 The ninth part pins the saved-verdict key (`mutate_guard.verdict_digest`): an edit to any file a copied guard reads, testing/ included, changes it.
+
+The tenth part pins the CI bound on a guard mutant's suite run: in CI it is 1.5 times the time of the control that runs the
+mutant's own case filter, never under a 60 s floor, never over the 3600 s cap. A local run, a run with no control time and a
+full-suite run keep the cap. The cases drive `main` with a stubbed suite run and a synthetic clock.
 """
 import contextlib
 import functools
@@ -1099,6 +1103,252 @@ class GuardTimeoutTests(unittest.TestCase):
         self.assertRegex(summary[-1], r"\b1 timeout", "the summary does not count the timeout apart: %r" % summary[-1])
         self.assertTrue([line for line in lines if line.startswith("KILLED") and KILL_LABEL in line],
                         "the mutant after the hung one was not scored KILLED: the run did not go on: %r" % lines)
+
+
+# The CI bound on one guard mutant's suite run (decision `ci-job-caps`; restart plan R3). In CI a filtered suite run
+# is cut at BOUND_FACTOR times the measured time of its matching control: the clean-layout control with the same case
+# filter, run in the same process. The bound never falls under BOUND_FLOOR, so a fast control cannot time out a healthy
+# mutant, and never passes SUITE_CAP. A local run keeps SUITE_CAP, and so does a run with no control time. A full-suite
+# run (no case filter, the stage-1 fallback) has no matching control, so it keeps SUITE_CAP too.
+SUITE_CAP = 3600  # seconds: run_suite's cap, the interim cap (decision `ci-job-caps`)
+BOUND_FACTOR = 1.5
+BOUND_FLOOR = 60  # seconds: 20 times the ~3 s a filtered stage-1 run takes (mutate_shared.staged_suite's docstring)
+BOUND_OVERHEAD = 3  # seconds a cut run takes past its cap, so the elapsed time never equals the bound
+BOUND_RUN_LIMIT = 30.0  # real seconds main must return in; the stubbed suite runs take none
+SYNTHETIC_START = 1000.0  # the monotonic reading a case starts from; only the stubbed suite runs move it
+CONTROL_STEM = mutate_shared.safe_name(mutate_guard.control_name("guard"))  # the control copy's folder stem, as lay_out names it
+BOUND_MUTANT_LABEL = "bound-mutant"
+BOUND_MUTANT_REQUIRED = "bound-mutant-required"
+BOUND_MUTANT = timeout_entry(BOUND_MUTANT_LABEL, "BOUND_MUTANT_MARK", BOUND_MUTANT_REQUIRED)
+FAST_REQUIRED = "bound-fast-required"
+SLOW_REQUIRED = "bound-slow-required"
+BOUND_FAST = timeout_entry("bound-fast", "BOUND_FAST_MARK", FAST_REQUIRED)
+BOUND_SLOW = timeout_entry("bound-slow", "BOUND_SLOW_MARK", SLOW_REQUIRED)
+
+
+def bound_for(control_seconds):
+    """The bound a CI suite run of a mutant with a matching control of `control_seconds` must read: 1.5 times it,
+    never under the floor, never over the cap."""
+    return min(SUITE_CAP, max(BOUND_FLOOR, BOUND_FACTOR * control_seconds))
+
+
+class MonotonicClock:
+    """Stands in for the `time` module in mutate_guard and mutate_shared. monotonic() and time() read `now`, which only a
+    stubbed suite run moves; every other attribute is the real module's."""
+
+    def __init__(self):
+        self.now = SYNTHETIC_START
+
+    def monotonic(self):
+        return self.now
+
+    def time(self):
+        return self.now
+
+    def __getattr__(self, name):
+        return getattr(time, name)
+
+
+class BoundSuiteRun:
+    """Stands in for `_nowindow.run` for the guard suite's child. `plan` maps (kind, case filter) to the simulated seconds
+    of that run, kind being "control" or "mutant"; a run the plan does not name takes one second. A run past its `timeout`
+    advances the clock by the cap plus BOUND_OVERHEAD and raises TimeoutExpired, as the real child is cut. `names_stage1`
+    False makes a mutant's filtered run print no case line, so its verdict falls back to the full run. Every other child
+    (git) runs for real. `calls` records (kind, case filter, timeout) for each suite run, in order."""
+
+    def __init__(self, clock, suite, real_run):
+        self.clock = clock
+        self.suite = suite
+        self.real_run = real_run
+        self.plan = {}
+        self.names_stage1 = True
+        self.calls = []
+
+    def __call__(self, *args, **kwargs):
+        command = list(args[0]) if args else list(kwargs.get("args", []))
+        if command[:2] != [sys.executable, self.suite]:
+            return self.real_run(*args, **kwargs)
+        env = kwargs.get("env") or {}
+        only = env.get("MUTATE_ONLY")
+        kind = "control" if CONTROL_STEM in env.get("GUARD_UNDER_TEST", "") else "mutant"
+        cap = kwargs.get("timeout")
+        self.calls.append((kind, only, cap))
+        seconds = self.plan.get((kind, only), 1)
+        if cap is not None and seconds > cap:
+            self.clock.now += cap + BOUND_OVERHEAD
+            raise subprocess.TimeoutExpired(command, cap)
+        self.clock.now += seconds
+        names_case = kind == "control" or only is None or self.names_stage1
+        text = "PASS  allow (want allow) [Bash] %s\n" % (only or "the full suite") if names_case else ""
+        return subprocess.CompletedProcess(command, 0, stdout=text, stderr="")
+
+
+class GuardBoundTests(unittest.TestCase):
+    """The CI bound on a guard mutant's suite run, driven through `main` over fixture mutants. Each case names its cause
+    when it fails. The stub suite runs take no real time, and no case sleeps."""
+
+    def setUp(self):
+        self.run = _test_temp.run_folder()
+        self.addCleanup(shutil.rmtree, self.run, True)
+        write_files(self.run, {"bound_suite.py": "# never run: the stub suite run answers for it\n"})
+        self.suite = os.path.join(self.run, "bound_suite.py")
+        self.patch(mock.patch.dict(os.environ))
+        for name in ("GITHUB_ACTIONS", "MUTATE_FULL", "MUTATE_ONLY", "MUTATE_SHARD", "MUTATE_VERDICT_DIR"):
+            os.environ.pop(name, None)
+        os.environ["MUTATE_JOBS"] = "1"  # one worker: each control's job runs before its mutants, in order
+        path, _suite, variable, stem = mutate_guard.TARGETS["guard"]
+        self.patch(mock.patch.dict(mutate_guard.TARGETS, {"guard": (path, self.suite, variable, stem)}))
+        self.clock = MonotonicClock()
+        self.patch(mock.patch.object(mutate_guard, "time", self.clock))
+        self.patch(mock.patch.object(mutate_shared, "time", self.clock))
+        self.suite_run = BoundSuiteRun(self.clock, self.suite, _nowindow.run)
+        self.patch(mock.patch.object(_nowindow, "run", self.suite_run))
+        # The stub suite runs no real folder, so the guard copy's git listing is stubbed as in GuardTimeoutTests.
+        self.patch(mock.patch.object(tracked_tree, "copy_tracked"))
+
+    def patch(self, patcher):
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def set_ci(self, on):
+        if on:
+            os.environ["GITHUB_ACTIONS"] = "true"
+        else:
+            os.environ.pop("GITHUB_ACTIONS", None)
+
+    def runs_of(self, kind, only):
+        """The timeout each suite run of `kind` with case filter `only` was given, in order."""
+        return [cap for run_kind, run_only, cap in self.suite_run.calls if run_kind == kind and run_only == only]
+
+    def judge(self, entries):
+        """Run `main` over `entries` on the stubbed suite runs. Return (stdout lines, the error main raised or None)."""
+        _code, lines, error = run_main_outcome_on(mutate_guard, self.run, entries, mutate_guard.run_suite,
+                                                  limit=BOUND_RUN_LIMIT)
+        return lines, error
+
+    def timeouts_of(self, lines, label):
+        return [line for line in lines if line.startswith("TIMEOUT") and label in line]
+
+    def test_ci_mutant_run_is_cut_at_one_and_a_half_times_its_matching_control(self):
+        self.set_ci(True)
+        self.suite_run.plan = {("control", BOUND_MUTANT_REQUIRED): 100, ("mutant", BOUND_MUTANT_REQUIRED): 120}
+        lines, error = self.judge([BOUND_MUTANT])
+        self.assertIsNone(error, "main raised instead of scoring the mutant: %r" % (error,))
+        # Scope before subject: the control ran once, with the mutant's own case filter.
+        self.assertEqual(len(self.runs_of("control", BOUND_MUTANT_REQUIRED)), 1,
+                         "scope: the control with the mutant's case filter did not run once: %r" % (self.suite_run.calls,))
+        self.assertEqual(self.runs_of("mutant", BOUND_MUTANT_REQUIRED), [bound_for(100)],
+                         "the mutant's suite run was cut at %r s, not at 1.5 times its matching control's 100 s (%r s)"
+                         % (self.runs_of("mutant", BOUND_MUTANT_REQUIRED), bound_for(100)))
+
+    def test_ci_bound_comes_from_the_control_with_the_mutants_own_case_filter(self):
+        self.set_ci(True)
+        self.suite_run.plan = {("control", FAST_REQUIRED): 2, ("control", SLOW_REQUIRED): 100,
+                               ("mutant", SLOW_REQUIRED): 100, ("mutant", FAST_REQUIRED): 2}
+        lines, error = self.judge([BOUND_FAST, BOUND_SLOW])
+        self.assertIsNone(error, "main raised instead of scoring the mutants: %r" % (error,))
+        # Scope before subject: the slow mutant's filtered run happened once.
+        self.assertEqual(len(self.runs_of("mutant", SLOW_REQUIRED)), 1,
+                         "scope: the slow mutant's filtered run did not happen once: %r" % (self.suite_run.calls,))
+        self.assertEqual(self.runs_of("mutant", SLOW_REQUIRED), [bound_for(100)],
+                         "the slow mutant's run was cut at %r s: its bound must be 1.5 times the control that runs its own "
+                         "case (100 s), not the fast control of another case (2 s)"
+                         % (self.runs_of("mutant", SLOW_REQUIRED),))
+
+    def test_ci_bound_never_falls_under_the_floor(self):
+        self.set_ci(True)
+        self.suite_run.plan = {("control", BOUND_MUTANT_REQUIRED): 2, ("mutant", BOUND_MUTANT_REQUIRED): 30}
+        lines, error = self.judge([BOUND_MUTANT])
+        self.assertIsNone(error, "main raised instead of scoring the mutant: %r" % (error,))
+        self.assertEqual(len(self.runs_of("control", BOUND_MUTANT_REQUIRED)), 1,
+                         "scope: the matching control did not run once: %r" % (self.suite_run.calls,))
+        self.assertEqual(self.runs_of("mutant", BOUND_MUTANT_REQUIRED), [BOUND_FLOOR],
+                         "the mutant's run was cut at %r s: 1.5 times a 2 s control is 3 s, which must not go under the "
+                         "%s s floor" % (self.runs_of("mutant", BOUND_MUTANT_REQUIRED), BOUND_FLOOR))
+
+    def test_ci_bound_never_passes_the_cap(self):
+        self.set_ci(True)
+        self.suite_run.plan = {("control", BOUND_MUTANT_REQUIRED): 2500, ("mutant", BOUND_MUTANT_REQUIRED): 100}
+        lines, error = self.judge([BOUND_MUTANT])
+        self.assertIsNone(error, "main raised instead of scoring the mutant: %r" % (error,))
+        self.assertEqual(len(self.runs_of("mutant", BOUND_MUTANT_REQUIRED)), 1,
+                         "scope: the mutant's filtered run did not happen once: %r" % (self.suite_run.calls,))
+        self.assertEqual(self.runs_of("mutant", BOUND_MUTANT_REQUIRED), [SUITE_CAP],
+                         "the mutant's run was given %r s: 1.5 times a 2500 s control is 3750 s, past the %s s cap"
+                         % (self.runs_of("mutant", BOUND_MUTANT_REQUIRED), SUITE_CAP))
+
+    def test_ci_mutant_past_its_bound_prints_one_timeout_line_with_four_facts(self):
+        self.set_ci(True)
+        self.suite_run.plan = {("control", BOUND_MUTANT_REQUIRED): 100, ("mutant", BOUND_MUTANT_REQUIRED): 200}
+        lines, error = self.judge([BOUND_MUTANT])
+        self.assertIsNone(error, "main raised instead of scoring the mutant: %r" % (error,))
+        self.assertEqual(len(self.runs_of("mutant", BOUND_MUTANT_REQUIRED)), 1,
+                         "scope: the mutant's filtered run did not happen once: %r" % (self.suite_run.calls,))
+        timeouts = self.timeouts_of(lines, BOUND_MUTANT_LABEL)
+        self.assertEqual(len(timeouts), 1,
+                         "no TIMEOUT line names the mutant past its bound of %r s: %r" % (bound_for(100), lines))
+        numbers = [float(found) for found in re.findall(r"\d+(?:\.\d+)?", timeouts[0])]
+        self.assertIn(float(bound_for(100)), numbers,
+                      "its TIMEOUT line does not give the bound, %r s: %r" % (bound_for(100), timeouts[0]))
+        self.assertIn(100.0, numbers, "its TIMEOUT line does not give the control time, 100 s: %r" % (timeouts[0],))
+
+    def test_ci_mutant_under_its_bound_is_not_timed_out(self):
+        self.set_ci(True)
+        self.suite_run.plan = {("control", BOUND_MUTANT_REQUIRED): 100, ("mutant", BOUND_MUTANT_REQUIRED): 120}
+        lines, error = self.judge([BOUND_MUTANT])
+        self.assertIsNone(error, "main raised instead of scoring the mutant: %r" % (error,))
+        self.assertEqual(len(self.runs_of("mutant", BOUND_MUTANT_REQUIRED)), 1,
+                         "scope: the mutant's filtered run did not happen once: %r" % (self.suite_run.calls,))
+        self.assertEqual(self.timeouts_of(lines, BOUND_MUTANT_LABEL), [],
+                         "a mutant under its bound reads TIMEOUT: %r" % (lines,))
+        self.assertTrue([line for line in lines if line.startswith("SURVIVED") and BOUND_MUTANT_LABEL in line],
+                        "the mutant under its bound has no SURVIVED verdict line: %r" % (lines,))
+
+    def test_local_run_keeps_the_cap(self):
+        self.set_ci(False)
+        self.suite_run.plan = {("control", BOUND_MUTANT_REQUIRED): 100, ("mutant", BOUND_MUTANT_REQUIRED): 200}
+        lines, error = self.judge([BOUND_MUTANT])
+        self.assertIsNone(error, "main raised instead of scoring the mutant: %r" % (error,))
+        self.assertEqual(len(self.runs_of("control", BOUND_MUTANT_REQUIRED)), 1,
+                         "scope: the control did not run once: %r" % (self.suite_run.calls,))
+        self.assertEqual(self.runs_of("mutant", BOUND_MUTANT_REQUIRED), [SUITE_CAP],
+                         "a local run gave its mutant %r s: the bound applies in CI only, so the local cap is %s s"
+                         % (self.runs_of("mutant", BOUND_MUTANT_REQUIRED), SUITE_CAP))
+        self.assertEqual(self.timeouts_of(lines, BOUND_MUTANT_LABEL), [],
+                         "a local run cut a mutant that is under the cap: %r" % (lines,))
+
+    def test_no_control_time_keeps_the_cap(self):
+        self.set_ci(True)
+        alias = "uncontrolled"  # a target no control has run for, so no control time exists for it in this process
+        path, suite, variable, stem = mutate_guard.TARGETS["guard"]
+        self.patch(mock.patch.dict(mutate_guard.TARGETS, {alias: (path, suite, variable, stem)}))
+        copy_path = os.path.join(self.run, "uncontrolled_copy", "hooks", "guard.py")
+        self.patch(mock.patch.object(mutate_guard, "lay_out", return_value=copy_path))
+        entry = (BOUND_MUTANT_LABEL, TIMEOUT_ANCHOR, TIMEOUT_ANCHOR + "  # UNCONTROLLED_MARK", alias, "uncontrolled-required")
+        self.suite_run.plan = {("mutant", "uncontrolled-required"): 200}
+        result = mutate_guard.run_mutant({}, self.run, entry)
+        self.assertEqual(len(self.runs_of("mutant", "uncontrolled-required")), 1,
+                         "scope: the mutant's filtered run did not happen once: %r" % (self.suite_run.calls,))
+        self.assertEqual(self.runs_of("mutant", "uncontrolled-required"), [SUITE_CAP],
+                         "a mutant with no control time was given %r s: with no control time the cap stands"
+                         % (self.runs_of("mutant", "uncontrolled-required"),))
+        self.assertNotEqual(result[1], mutate_shared.TIMED_OUT,
+                            "a mutant under the cap with no control time reads TIMEOUT: %r" % (result,))
+
+    def test_a_stage_one_miss_runs_the_full_suite_at_the_cap(self):
+        self.set_ci(True)
+        self.suite_run.names_stage1 = False  # the filtered run names no case, so the verdict falls back to the full run
+        self.suite_run.plan = {("control", BOUND_MUTANT_REQUIRED): 100, ("mutant", BOUND_MUTANT_REQUIRED): 1,
+                               ("mutant", None): 400}
+        lines, error = self.judge([BOUND_MUTANT])
+        self.assertIsNone(error, "main raised instead of scoring the mutant: %r" % (error,))
+        self.assertEqual(len(self.runs_of("mutant", BOUND_MUTANT_REQUIRED)), 1,
+                         "scope: the mutant's filtered run did not happen once: %r" % (self.suite_run.calls,))
+        self.assertEqual(self.runs_of("mutant", None), [SUITE_CAP],
+                         "the full-suite run after a stage-1 miss was given %r s: no control measures the full suite, "
+                         "so it keeps the %s s cap" % (self.runs_of("mutant", None), SUITE_CAP))
+        self.assertEqual(self.timeouts_of(lines, BOUND_MUTANT_LABEL), [],
+                         "the full-suite run after a stage-1 miss read TIMEOUT: %r" % (lines,))
 
 
 class ControlTimeoutTests(unittest.TestCase):
