@@ -13,7 +13,7 @@ A mutant names an anchor: the exact text it replaces. Two tables hold mutants: `
 - A guard-table "guard" or "audit" mutant is found across the guard modules by `find_anchor` in `hooks/mutate_shared.py`. No match is stale. Two or more are ambiguous.
 - Any other guard-table target is read in its own file (`TARGETS`). The anchor must occur there once.
 - A sweep row names one file in `SOURCES`. Its anchor is matched in that file by `find_anchor`. A row whose target is not in `SOURCES` is unknown.
-- It prints one `FAIL` line for each bad mutant. The line names the label and the target, and the file or folder searched, when it searched one. A sweep line also names `janitor/mutate_sweep.py`. A row with too few fields prints `FAIL malformed row`, naming its label or `row N` and its table; any failing run ends with the closing line `mutant anchor census failed: N of M mutants have a bad row or anchor`. The run then exits 1. With no bad mutant it prints `PASS mutant anchor census: N mutants` and exits 0.
+- It prints one `FAIL` line for each bad mutant. The line names the label and the target, and the file or folder searched, when it searched one. A sweep line also names `janitor/mutate_sweep.py`. A row with too few fields prints `FAIL malformed row`, naming it `label (row N)` when it has a label, or `row N` (0-based) when it has none, and its table; any failing run ends with the closing line `mutant anchor census failed: N of M mutants have a bad row or anchor`. The run then exits 1. With no bad mutant it prints `PASS mutant anchor census: N mutants` and exits 0.
 - It does not check the required-case name or the mutant file names. The mutation runs do.
 - CI runs it as step "Mutant anchor census" of the checks job. The step runs on a pull request that changes code, and on every run that is not a pull request. The step is also in `merge.readyChecks` of `.github/stamp.json`, so a lane runs it before it goes ready.
 - The fixture suite `lint/test_check_mutant_anchors.py` runs as the step "Mutant anchor census fixture suite". Each case builds its own guard folder, target file and `janitor/sweep.py` in a run folder, and sets its own tables. Each fail case holds a clean mutant in the same table and checks that the clean one is not reported.
@@ -29,7 +29,7 @@ Cost: it runs once in each pull request run that changes code, and once in each 
 ## Known limits
 
 - The census reads anchors only. A mutant whose anchor sits once can still survive every case. The mutation runs judge that.
-- The census reads two tables, the guard and sweep tables. `lint/test_all_jobs_passed.py` holds three more anchor tables (`MUTATIONS`, `DAILY_DEFECTS`, `CHILD_MUTATIONS`), and that suite's own tests check each. `hooks/mutate_shared.py` is the helper, and `hooks/mutate_js.mjs` makes its mutants from a parse tree.
+- The census reads two tables, the guard and sweep tables. `lint/test_all_jobs_passed.py` has its own mutation tables (`MUTATIONS`, `DAILY_DEFECTS`, `CHILD_MUTATIONS`, `CHILD_ACTION_DEFECTS`), and its `CHILD_FALSE_ALARMS` has the same row shape. Its tests check that each anchor still occurs. Only `DAILY_DEFECTS` also checks that its anchor occurs once. `hooks/mutate_shared.py` is the helper, and `hooks/mutate_js.mjs` makes its mutants from a parse tree.
 
 Kind: process
 Home: lint/check_mutant_anchors.py
