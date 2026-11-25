@@ -1,0 +1,1 @@
+- unstarted-code-need-bare-symbol: "lint-stub needs PR #3916's `reap_refs`", and "lint-stub needs PR #3916's code `reap_refs`" with no colon after code, are refused, since a code need names its symbol after "code:" or a noun from the code's list (`_CODE_NEED_RE`) (decision `guard-remedy-not-to-owner`, the Unstarted guard). Seen: 2026-11-25 x1

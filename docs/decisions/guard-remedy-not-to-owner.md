@@ -59,26 +59,27 @@ Text: `UNSTARTED_FILE_REASON`. It applies when an Unstarted item waits on anothe
 - Start the lane now. It settles a conflict at its merge of main. This is the consultant's reading, not the owner's words (see Source below).
 - A bare "Unstarted:" line owns the bullets under it, and each top-level bullet is one item.
 - Otherwise the item is the rest of its "Unstarted:" line, its wrapped lines and its indented sub-bullets, up to a blank line, a bold report label or a sibling bullet.
-- Within an item, a comma, a semicolon or a sentence end starts a new item only when the clause has a waiting word, and one to three words before it that are not a pronoun (it, its, they, their, them, which, both, he, she, these, those).
+- Within an item, a comma, a semicolon or a sentence end starts a new item only when the clause has a waiting word, and one to three words before it, the first of which is not a pronoun (it, its, they, their, them, which, both, he, she, these, those).
 - A leading also, and, plus, then, that or this is skipped before that test.
 - Any other clause joins the item before it.
 - An item that begins with "none" or "nothing" takes no clause, so each later clause starts its own item.
-- The waiting words are wait, await, need, blocked, block, until, till, after, once, when, behind, before, first, follow, pending, depend, hold, held, gated and stuck, with any ending for wait and await.
-- The PR words are PR, PRs, pull request, pull requests, merge, merges, merged, merging, land, lands, landed, landing, and "#" followed by digits.
-- A hyphen ends a word here, so "pr-reader" and "checkin-cancel-on-merge" hold PR words.
-- A PR word is judged only beside a waiting word in the same item.
+- The waiting words are wait and await (any ending), need or needs, blocked, block or blocks, until, till, after, once, when, behind, before, first, follow or follows, pending, depend, depends or dependent, hold, holds, holding or held, gated, stuck, "stacked on", "based on", and "start" or "starts" before at, on or with.
+- A PR is named by its number ("PR #<n>", "PR <n>", "pull request <n>" or "#<n>"), or by a definite noun: "the PR", "that PR", "the stamp lane's PR". "a PR" and "its own PR" name no PR.
+- The merge words are merge, merges, merged, merging, land, lands, landed and landing, each as a whole word that is no part of a name, and not followed by a noun such as tool, rules, queue, policy or page (the list is in `_MERGE_WORD_RE`).
+- A hyphen joins a word here, so "pr-reader" and "checkin-cancel-on-merge" hold no PR word.
+- A PR word is judged only beside a waiting word in the same clause. A clause ends at a comma, a semicolon or a line end.
 - An item with no PR word passes, whatever it waits on: the owner's grant or ruling, a test only the owner can run, the load brake, or a lane not briefed yet.
-- An item with a PR word and no waiting word passes.
-- An item with a PR word and a waiting word passes only when the same item holds one of the two accepted wordings, and the owner, the load brake or a test only the owner can run does not exempt it.
-- Accepted wording one: "needs PR #<n>'s code: `symbol`", with the symbol in backticks.
-- The code reads "needs", then "code:", then a backticked name, with no backtick or semicolon between them.
+- A PR word with no waiting word passes, unless the clause orders the item: "PR #<n> must merge", "PR #<n> blocks", or "first", "before", "ahead" or "prior" after the PR with no review word between, or "merges first" or "lands before". "PR #<n> awaits review" passes.
+- An item with a PR word and a waiting word passes only when the item holds one of the two accepted wordings. A code need covers only a wait on the PR it names. A wait that names no PR is covered by any code need. A code need that names no PR covers any wait.
+- An owner word (owner, grant, ruling, pick and the like) also passes when it is about a PR, as in "waits on the owner's grant on PR #<n>", or when it names a merge with no PR number, as in "waits on the owner's pick for the merge". No "and", "or", "then" or "plus" may stand between them. A PR already merged, with its time after it, passes too. The load brake and a test only the owner can run do not exempt a wait.
+- Accepted wording one: "needs PR #<n>'s code: `symbol`"; "needs PR #<n>'s" followed by a noun from the code's list (`_CODE_NEED_RE`) and then `symbol`; or "needs `symbol` from PR #<n>", where "in", "of" or "out of" may stand for "from". The symbol is in backticks.
+- No backtick or semicolon may stand between "needs" and the symbol.
 - The name is no symbol when it is a common word, a build file name such as Makefile, or a name with a source suffix from the code's short list (such as .py or .md).
-- Accepted wording two: "measured conflict in <file>" or "merge-tree shows a conflict in <file>", naming the file.
-- The code also takes "measured conflicts in" and "measured a conflict in", and the file is any file name after the phrase in the same item.
+- Accepted wording two: "measured conflict in", "measured conflicts in", "measured a conflict in", "conflict measured in", "conflicts measured in" or "merge-tree shows a conflict in", then a file name in the same item.
 - No other phrasing of a measured conflict counts.
 - A code need with no symbol, a measured conflict with no file, and a wait that names only a shared file are refused.
 - "Unstarted: none" passes, even when it adds "all merged". "none" in bold or in parentheses, and "nothing", read the same way.
-- Open false alarms and holes in this check: debt `unstarted-pr-word-false-alarm`, and the notes `unstarted-pr-wait-no-word-passes`, `unstarted-joined-wait-passes`, `unstarted-code-need-split` and `unstarted-phrase-and-suffix-gaps`.
+- Open false alarms and holes in this check are the notes `unstarted-code-need-split`, `unstarted-code-need-bare-symbol`, `unstarted-review-wait-refused`, `unstarted-pr-wait-no-word-passes`, `unstarted-joined-wait-passes`, `unstarted-phrase-and-suffix-gaps` and `unstarted-file-alarms-misses`.
 - Source: owner, 2026-11-25 10:47 CST, "fix this", on the guard accepting a wait on PR N whenever an item named a shared file.
 - On 2026-11-23 11:40 CST the owner asked whether such waits went against the parallelism mandate. That was a question, not a ruling.
 - On 2026-11-24 10:30 CST the owner asked why only two check-in waits ran. (Reported, not quoted.)
