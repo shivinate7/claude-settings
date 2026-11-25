@@ -267,6 +267,9 @@ RPR_SHARED_GUARD = os.path.join(RPR_SHARED_BEHIND, "hooks", "guard.py")
 RPR_SHARED_NOW_GUARD = os.path.join(RPR_SHARED_NOW, "hooks", "guard.py")
 RPR_SHARED_AHEAD_GUARD = os.path.join(RPR_SHARED_AHEAD, "hooks", "guard.py")
 RPR_SHARED_DIVERGED_GUARD = os.path.join(RPR_SHARED_DIVERGED, "hooks", "guard.py")
+RPR_SHARED_STABLE_BEHIND = os.path.join(RPR, "shared-stable-behind")  # its HEAD is origin/stable, and origin/main is one commit past it
+RPR_SHARED_STABLE_BEHIND_GUARD = os.path.join(RPR_SHARED_STABLE_BEHIND, "hooks", "guard.py")
+RPR_SHARED_ENV = {"CLAUDE_SETTINGS_REF": None}  # the install's ref variable is unset, so the ref a checkout follows is stable
 RPR_SHARED_CAUSE = ("behind origin/main", "install_from_main.sh")  # the cause, then the remedy: reinstall from main
 RPR_SHARED_WRITE = ("bring the shared checkout", "pull it")  # the old remedy: a session writes in the shared checkout
 RPR_SHARED_LACKS = RPR_UNKNOWN_LACKS + ("gh pr ready",)  # the refused command is no remedy
@@ -276,7 +279,9 @@ RPR_SHARED_NO_STALE = RPR_SHARED_CAUSE + RPR_SHARED_WRITE  # a head ahead of or 
 def _rpr_shared_checkout(folder, relation):
     """A checkout with a copy of the guard family and merge/merge.py, committed on origin/main. Its HEAD stands in
     `relation` to origin/main: "behind" (origin/main gets one more commit), "now" (the same commit), "ahead" (HEAD gets
-    one local commit, origin/main stays) or "diverged" (origin/main and HEAD each get a commit the other lacks)."""
+    one local commit, origin/main stays), "diverged" (origin/main and HEAD each get a commit the other lacks) or
+    "stable-behind" (origin/stable stays at HEAD, and origin/main gets one more commit). A "behind" checkout's origin/stable
+    moves to origin/main's tip, so the ref it follows is the one that is behind."""
     os.makedirs(RPR, exist_ok=True)
     origin, seed = folder + "-origin.git", folder + "-seed"
     _rpr_git(RPR, "init", "-q", "--bare", "-b", "main", origin)
@@ -289,11 +294,15 @@ def _rpr_shared_checkout(folder, relation):
     _rpr_git(seed, "commit", "-q", "-m", "the shared checkout's tool")
     _rpr_git(seed, "push", "-q", "origin", "main")
     _rpr_git(RPR, "clone", "-q", origin, folder)
-    if relation in ("behind", "diverged"):
+    if relation in ("behind", "diverged", "stable-behind"):
+        if relation == "stable-behind":  # origin/stable stays on the first commit, the one HEAD holds
+            _rpr_git(seed, "push", "-q", "origin", "main:refs/heads/stable")
         write(os.path.join(seed, "merge", "merge.py"), RPR_TOOL_V2)
         _rpr_git(seed, "add", "-A")
         _rpr_git(seed, "commit", "-q", "-m", "the tool moves on")
         _rpr_git(seed, "push", "-q", "origin", "main")
+        if relation == "behind":  # the install follows origin/stable, so this checkout's stable is main's new tip
+            _rpr_git(seed, "push", "-q", "origin", "main:refs/heads/stable")
         _rpr_git(folder, "fetch", "-q", "origin")
     if relation in ("ahead", "diverged"):
         write(os.path.join(folder, "merge", "merge.py"), RPR_TOOL_V3)
@@ -303,7 +312,11 @@ def _rpr_shared_checkout(folder, relation):
 
     def ancestor(a, b):
         return run_vcs(folder, "merge-base", "--is-ancestor", a, b).returncode == 0
-    shape = {"behind": ancestor("HEAD", "origin/main") and head != main,
+    if relation == "behind":  # scope before subject: the ref the install follows is main's tip, so HEAD is behind that ref
+        _rpr_need(_rpr_git(folder, "rev-parse", "origin/stable") == main, "the behind checkout's origin/stable is not origin/main")
+    stable_behind = (relation == "stable-behind" and head == _rpr_git(folder, "rev-parse", "origin/stable")
+                     and ancestor("HEAD", "origin/main") and head != main)
+    shape = {"stable-behind": stable_behind, "behind": ancestor("HEAD", "origin/main") and head != main,
              "now": head == main,
              "ahead": ancestor("origin/main", "HEAD") and head != main,
              "diverged": not ancestor("HEAD", "origin/main") and not ancestor("origin/main", "HEAD")}
@@ -338,22 +351,37 @@ lazy_fixture([RPR_SHARED_GUARD], _build_shared_behind)
 lazy_fixture([RPR_SHARED_NOW_GUARD], _build_shared_now)
 lazy_fixture([RPR_SHARED_AHEAD_GUARD], _build_shared_ahead)
 lazy_fixture([RPR_SHARED_DIVERGED_GUARD], _build_shared_diverged)
+
+
+def _build_shared_stable_behind():
+    _rpr_shared_checkout(RPR_SHARED_STABLE_BEHIND, "stable-behind")
+
+
+lazy_fixture([RPR_SHARED_STABLE_BEHIND_GUARD], _build_shared_stable_behind)
+# RE-POINTED (owner, 14:27 CST Nov 25, "(b) Stay on stable + a PR check": "this is approved"). The install follows origin/stable,
+# not origin/main, so this checkout's origin/stable is pushed at main's tip: HEAD is behind the ref it follows, and the cause holds.
 add("records-page-ready: a read that fails in a merge tool behind origin/main names that cause and the reinstall",
     "deny", rule=RPR_RULE, tool="Bash", cwd=RPR_REPO, env_path=_rpr_env(GHREADY_STALE), config=MERGECFG,
-    carries=RPR_SHARED_CAUSE, lacks=RPR_SHARED_LACKS, guard=RPR_SHARED_GUARD, command="gh pr ready 12")
+    carries=RPR_SHARED_CAUSE, lacks=RPR_SHARED_LACKS, guard=RPR_SHARED_GUARD, command="gh pr ready 12", env=RPR_SHARED_ENV)
 add("records-page-ready: a merge tool behind origin/main gets no remedy that writes in the shared checkout",
     "deny", rule=RPR_RULE, tool="Bash", cwd=RPR_REPO, env_path=_rpr_env(GHREADY_STALE), config=MERGECFG,
-    carries=("behind origin/main",), lacks=RPR_SHARED_WRITE, guard=RPR_SHARED_GUARD, command="gh pr ready 12")
+    carries=("behind origin/main",), lacks=RPR_SHARED_WRITE, guard=RPR_SHARED_GUARD, command="gh pr ready 12", env=RPR_SHARED_ENV)
 add("records-page-ready: a read that fails in a merge tool ahead of origin/main names no stale cause",
     "deny", rule=RPR_RULE, tool="Bash", cwd=RPR_REPO, env_path=_rpr_env(GHREADY_STALE), config=MERGECFG,
-    carries=("unknown",), lacks=RPR_SHARED_NO_STALE, guard=RPR_SHARED_AHEAD_GUARD, command="gh pr ready 12")
+    carries=("unknown",), lacks=RPR_SHARED_NO_STALE, guard=RPR_SHARED_AHEAD_GUARD, command="gh pr ready 12", env=RPR_SHARED_ENV)
 add("records-page-ready: a read that fails in a merge tool diverged from origin/main names no stale cause",
     "deny", rule=RPR_RULE, tool="Bash", cwd=RPR_REPO, env_path=_rpr_env(GHREADY_STALE), config=MERGECFG,
-    carries=("unknown",), lacks=RPR_SHARED_NO_STALE, guard=RPR_SHARED_DIVERGED_GUARD, command="gh pr ready 12")
+    carries=("unknown",), lacks=RPR_SHARED_NO_STALE, guard=RPR_SHARED_DIVERGED_GUARD, command="gh pr ready 12", env=RPR_SHARED_ENV)
 add("records-page-ready: a read that fails in a merge tool at origin/main keeps the retry remedy",
     "deny", rule=RPR_RULE, tool="Bash", cwd=RPR_REPO, env_path=_rpr_env(GHREADY_STALE), config=MERGECFG,
     carries=("retry when the read works",), lacks=("behind origin/main",), guard=RPR_SHARED_NOW_GUARD,
-    command="gh pr ready 12")
+    command="gh pr ready 12", env=RPR_SHARED_ENV)
+# T3. The installed copy stands at origin/stable, and origin/main is one commit past it. The reinstall would land on the same
+# commit, so the behind cause and its reinstall remedy are wrong here: the read's failure keeps the plain unknown reason.
+add("records-page-ready: a read that fails in a merge tool at origin/stable, with origin/main ahead, names no behind cause",
+    "deny", rule=RPR_RULE, tool="Bash", cwd=RPR_REPO, env_path=_rpr_env(GHREADY_STALE), config=MERGECFG,
+    carries=("unknown",), lacks=RPR_SHARED_NO_STALE, guard=RPR_SHARED_STABLE_BEHIND_GUARD, command="gh pr ready 12",
+    env=RPR_SHARED_ENV)
 
 
 def _rpr_no_read(tool_input):
