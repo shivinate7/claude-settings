@@ -190,5 +190,50 @@ class Flags(unittest.TestCase):
         self.assertIn("unknown", none.stdout.lower(), "an empty folder did not print unknown: %r" % none.stdout[-200:])
 
 
+class Literal(unittest.TestCase):
+    """The flag thresholds by literal value: 10 times the group median, and 1.0 s. No constant is read here."""
+
+    def test_nine_point_nine_times_not_flagged(self):
+        decisive_control(self)
+        folder = fresh(self)
+        # median 0.5 s, probe 4.95 s: 9.9 times the median, over the 1.0 s floor, so only the ratio can keep it out
+        write_job(folder, "nine", group_rows("lint/fixture_nine.py", 0.5, NORMAL, "nine_point_nine_probe", 4.95))
+        result = run_reader(folder)
+        self.assertNotIn("nine_point_nine_probe", result.stdout,
+                         "a case at 9.9 times its group median (4.95 s over 0.5 s) was flagged")
+
+    def test_ten_times_and_one_second_flagged(self):
+        decisive_control(self)
+        folder = fresh(self)
+        # median 0.1 s, probe 1.0 s: exactly 10 times the median and exactly the 1.0 s floor
+        write_job(folder, "edge", group_rows("lint/fixture_edge_literal.py", 0.1, NORMAL, "ten_x_one_second_probe", 1.0))
+        result = run_reader(folder)
+        self.assertIn("ten_x_one_second_probe", result.stdout,
+                      "a case at 10 times its group median (1.0 s over 0.1 s) and at the 1.0 s floor was not flagged")
+
+    def test_ten_times_under_one_second_not_flagged(self):
+        decisive_control(self)
+        folder = fresh(self)
+        # median 0.05 s, probe 0.5 s: 10 times the median, under the 1.0 s floor
+        write_job(folder, "floor", group_rows("lint/fixture_floor_literal.py", 0.05, NORMAL, "ten_x_under_floor_probe", 0.5))
+        result = run_reader(folder)
+        self.assertNotIn("ten_x_under_floor_probe", result.stdout,
+                         "a case at 10 times its group median (0.5 s over 0.05 s) but under 1.0 s was flagged")
+
+    def test_skipped_rows_left_out_of_the_median(self):
+        decisive_control(self)
+        folder = fresh(self)
+        suite = "lint/fixture_skip_median.py"
+        # four passes at 0.5 s and a probe at 4.9 s (9.8 times the median): not flagged. Six skips at 0 s would
+        # drop the median to 0 s if they counted, and then the probe would be flagged.
+        rows = [row(suite, suite, "T.skip_normal_%d" % i, 0.5) for i in range(4)]
+        rows.append(row(suite, suite, "T.skip_probe", 4.9))
+        rows += [row(suite, suite, "T.skipped_%d" % i, 0.0, outcome="skip") for i in range(6)]
+        write_job(folder, "skips", rows)
+        result = run_reader(folder)
+        self.assertNotIn("skip_probe", result.stdout,
+                         "a case at 9.8 times its group median was flagged: the skipped rows moved the median")
+
+
 if __name__ == "__main__":
     unittest.main()
