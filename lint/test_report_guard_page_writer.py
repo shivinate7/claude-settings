@@ -37,13 +37,20 @@ DESKTOP_WRITER = "local_6f1c2a7e-0b8d-4c3e-9a51-2d7f4e8b9c01"  # the page writer
 DESKTOP_PEER = "local_3e4d5c6b-7a89-4b0c-9d1e-2f3a4b5c6d7e"  # a desktop session that sends a peer message
 CLOUD_PEER = "session_peer1"  # a cloud session that sends a peer message
 MSG_ID = "5c1e9d20-3b7a-4f8e-a6d4-0b2c9e7f1a35"  # the message id a desktop send's result names
+# The two measured wordings of a queued desktop send, each the sentence the app puts after "Message queued for session".
+QUEUED_HOLDING = "that session is holding it (a turn is in progress there, or its host or process is away) and runs it when that clears."
+QUEUED_BEHIND = "that session accepted it behind other work and runs it when that finishes."
+QUEUED_WORDINGS = (("holding", QUEUED_HOLDING), ("behind other work", QUEUED_BEHIND))
 
 
-def desktop_result(delivery, ok=True):
+def desktop_result(delivery, ok=True, wording=QUEUED_HOLDING):
     """A desktop send's tool result text, in the measured form: JSON whose message ends with the delivery state
-    (delivered, queued or undelivered) and the message id."""
+    (delivered, queued or undelivered) and the message id. A queued result carries `wording`, one of QUEUED_WORDINGS."""
     if delivery == "delivered":
         middle = "Message delivered to session %s (\"triage\"); its turn has started on it." % DESKTOP_WRITER
+    elif delivery == "queued":
+        middle = ("Message queued for session %s (\"triage\"): %s Don't wait on it; check back with list_events if the "
+                  "outcome matters." % (DESKTOP_WRITER, wording))
     else:
         middle = "Message to session %s (\"triage\")." % DESKTOP_WRITER
     text = "Forwarded to Claude Desktop's session messaging: %s (delivery: %s; message_id: %s)" % (middle, delivery, MSG_ID)
@@ -86,12 +93,13 @@ class PickFixture(trg.SameTurnWriter):
         self.addCleanup(env.stop)
         os.environ.pop(REMOTE_ENV, None)
 
-    def question_refusal(self, root, acts):
-        """The refusal question_problem gives a pick asked after `acts` in the same turn, judged from `root`."""
-        records = [trg.human("decide"), *acts, trg.assistant_text(self.reply(self.PICK))]
+    def question_refusal(self, root, acts, before=()):
+        """The refusal question_problem gives a pick asked after `acts` in the same turn, judged from `root`. `before`
+        holds the records of earlier turns, ahead of the turn's own owner message, so the turn starts after them."""
+        records = [*before, trg.human("decide"), *acts, trg.assistant_text(self.reply(self.PICK))]
         hook = {"hook_event_name": "Stop", "transcript_path": trg.write_transcript(records, self.run_dir),
                 "stop_hook_active": False, "cwd": root}
-        refusal, _note = trg.RG.question_problem(records, records[1:], self.reply(self.PICK), hook)
+        refusal, _note = trg.RG.question_problem(records, records[len(before) + 1:], self.reply(self.PICK), hook)
         return refusal
 
 
@@ -318,6 +326,120 @@ class DesktopSendTests(PickFixture, unittest.TestCase):
                          result=desktop_result("undelivered"))
         refusal = self.page_read_refusal(root, send)
         self.assertNotEqual(refusal, "", "a delivery marker in the send's input passed as delivery on the page-read path")
+
+    def checkin(self, recurring=False):
+        """The scheduling call that sets a check-in: CronCreate, whose `recurring` input says whether it repeats. A
+        one-time check-in has recurring false."""
+        return self.call("CronCreate", {"cron": "17 9 25 11 *", "prompt": "Read the target session and verify the send.",
+                                        "recurring": recurring}, result="Scheduled.")
+
+    def queued_send(self, marker, is_error=False):
+        """A SendMessage to the desktop writer whose result is the queued form, with `marker`, one of QUEUED_WORDINGS."""
+        return self.send(to=DESKTOP_WRITER, result=desktop_result("queued", wording=marker), is_error=is_error)
+
+    def test_desktop_queued_send_with_a_same_turn_checkin_counts(self):
+        # Catches:a queued desktop send refused although the same turn set a one-time check-in for it
+        # (CronCreate with recurring false), so a send the rule counts still reads as not sent.
+        root = self.desktop_root()
+        for label, marker in QUEUED_WORDINGS:
+            with self.subTest(wording=label):
+                refusal = self.question_refusal(root, [*self.queued_send(marker), *self.checkin()])
+                self.assertEqual(refusal, "", "a queued desktop send with a same-turn one-time check-in was refused: %s" % refusal)
+
+    def test_desktop_queued_send_refusal_tells_the_session_to_checkin_and_verify(self):
+        # Catches:the refusal for a queued send with no same-turn check-in saying only that the send
+        # was not sent to the page writer, so the session is not told to set a one-time check-in or to read the target
+        # session to verify that the send left queued.
+        root = self.desktop_root()
+        for label, marker in QUEUED_WORDINGS:
+            with self.subTest(wording=label):
+                refusal = self.question_refusal(root, self.queued_send(marker))
+                self.assertNotEqual(refusal, "", "scope: a queued send with no check-in passed, so its refusal text is not read")
+                self.assertIn("check-in", refusal, "the refusal for a queued send does not tell the session to set a one-time check-in")
+                self.assertIn("verify", refusal, "the refusal for a queued send does not tell the session to verify the send")
+
+    def test_desktop_queued_send_without_a_checkin_is_refused(self):
+        # Control, green on the old code. Catches: a queued send counted as sent on its wording alone, with no check-in
+        # and no reply from the target.
+        root = self.desktop_root()
+        for label, marker in QUEUED_WORDINGS:
+            with self.subTest(wording=label):
+                refusal = self.question_refusal(root, self.queued_send(marker))
+                self.assertNotEqual(refusal, "", "a queued desktop send with no check-in passed the pick check")
+
+    def test_desktop_queued_send_with_a_recurring_checkin_is_refused(self):
+        # Control, green on the old code. Catches: a recurring schedule call counted as the one-time check-in, so a send
+        # whose check-in repeats is taken as a set check-in.
+        root = self.desktop_root()
+        for label, marker in QUEUED_WORDINGS:
+            with self.subTest(wording=label):
+                refusal = self.question_refusal(root, [*self.queued_send(marker), *self.checkin(recurring=True)])
+                self.assertNotEqual(refusal, "", "a queued desktop send with a recurring schedule call passed the pick check")
+
+    def test_desktop_queued_send_with_a_checkin_from_an_earlier_turn_is_refused(self):
+        # Control, green on the old code. Catches: a check-in set in an earlier turn counted for this turn's queued send.
+        root = self.desktop_root()
+        for label, marker in QUEUED_WORDINGS:
+            with self.subTest(wording=label):
+                before = [trg.human("earlier"), *self.checkin(), trg.assistant_text("Done.")]
+                refusal = self.question_refusal(root, self.queued_send(marker), before=before)
+                self.assertNotEqual(refusal, "", "a check-in from an earlier turn counted for a queued send in this turn")
+
+    def test_desktop_queued_send_then_a_reply_from_the_target_counts(self):
+        # Catches:a queued desktop send refused although its target later sent a message back, which
+        # shows the send reached it. Both peer shapes name the target: the desktop tag's from attribute and the cloud origin.
+        root = self.desktop_root()
+        replies = (("desktop peer", desktop_peer_record(DESKTOP_WRITER)),
+                   ("cloud peer", trg.peer_msg("Two ways", from_session=DESKTOP_WRITER)))
+        for label, marker in QUEUED_WORDINGS:
+            for shape, reply in replies:
+                with self.subTest(wording=label, reply=shape):
+                    self.assertEqual(transcript.peer_sender(reply), DESKTOP_WRITER,
+                                     "scope: the reply does not name the target as its sender")
+                    refusal = self.question_refusal(root, [*self.queued_send(marker), reply])
+                    self.assertEqual(refusal, "", "a queued desktop send, then a reply from its target, was refused: %s" % refusal)
+
+    def test_desktop_queued_send_then_a_reply_from_another_session_is_refused(self):
+        # Control, green on the old code. Catches: any peer message counted as the target's reply, so a reply from a
+        # different session passes for a queued send.
+        root = self.desktop_root()
+        for label, marker in QUEUED_WORDINGS:
+            with self.subTest(wording=label):
+                reply = desktop_peer_record(OTHER_ID)
+                self.assertEqual(transcript.peer_sender(reply), OTHER_ID, "scope: the reply does not name the other session")
+                refusal = self.question_refusal(root, [*self.queued_send(marker), reply])
+                self.assertNotEqual(refusal, "", "a reply from another session counted as the target's reply for a queued send")
+
+    def test_desktop_queued_send_with_a_same_turn_checkin_counts_on_the_page_read_path(self):
+        # Catches:the page-read writer path refusing a queued send that the same turn's one-time
+        # check-in covers, as it refuses the send alone.
+        root = self.page_read_repo()
+        for label, marker in QUEUED_WORDINGS:
+            for shape, send in self.page_read_sends(desktop_result("queued", wording=marker)):
+                with self.subTest(wording=label, shape=shape):
+                    refusal = self.page_read_refusal(root, [*send, *self.checkin()])
+                    self.assertEqual(refusal, "", "a queued desktop %s with a same-turn one-time check-in to the writer the page "
+                                     "read names was refused: %s" % (shape, refusal))
+
+    def test_desktop_queued_send_then_a_reply_from_the_target_counts_on_the_page_read_path(self):
+        # Catches:the page-read writer path refusing a queued send whose target later sent a message back.
+        root = self.page_read_repo()
+        for label, marker in QUEUED_WORDINGS:
+            with self.subTest(wording=label):
+                refusal = self.page_read_refusal(root, [*self.queued_send(marker), desktop_peer_record(DESKTOP_WRITER)])
+                self.assertEqual(refusal, "", "a queued desktop send, then a reply from the writer the page read names, was refused: %s"
+                                 % refusal)
+
+    def test_failed_or_refused_queued_send_with_a_checkin_still_does_not_count(self):
+        # Control, green on the old code. Catches: a one-time check-in rescuing a send whose result is an error or a refusal.
+        root = self.desktop_root()
+        refused = "Refused: the send guard blocked this message; no session was reached."
+        shapes = (("error", self.queued_send(QUEUED_HOLDING, is_error=True)),
+                  ("refusal", self.send(to=DESKTOP_WRITER, result=refused, is_error=True)))
+        for label, send in shapes:
+            with self.subTest(shape=label):
+                refusal = self.question_refusal(root, [*send, *self.checkin()])
+                self.assertNotEqual(refusal, "", "a %s on a queued desktop send, with a same-turn check-in, passed the pick check" % label)
 
     def test_cloud_send_body_to_a_session_writer_still_passes(self):
         # Control, green on the old code. Catches: the cloud body {"status":"delivered"} stopped passing under SendMessage
