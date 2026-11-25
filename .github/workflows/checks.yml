@@ -1480,6 +1480,7 @@ jobs:
           job: checks-install-checkout-3
 
   # The merge tool git-half fixture suite, split off checks-merge-install for wall time (step ci-merge-install-split): 10.7 min (same audit).
+  # The suite runs in 4 shards, shard 1 here and shards 2 to 4 in checks-merge-git-2 to -4 (MERGE_SHARD, merge/test_merge.py; the Windows shards use the same switch).
   checks-merge-git:
     runs-on: ubuntu-latest
     needs: scope
@@ -1499,8 +1500,10 @@ jobs:
         with:
           python-version: "3.15"
 
-      - name: Merge tool git-half fixture suite
+      - name: Merge tool git-half fixture suite (shard 1 of 4)
         if: ${{ needs.scope.outputs.code == 'true' }}
+        env:
+          MERGE_SHARD: 1/4
         run: python3 merge/test_merge.py
 
       # A red job wakes the watching session at once; ci-done names any the step could not.
@@ -1509,6 +1512,102 @@ jobs:
         uses: $/actions/ci-done-comment
         with:
           job: checks-merge-git
+
+  checks-merge-git-2:
+    runs-on: ubuntu-latest
+    needs: scope
+    if: ${{ needs.scope.outputs.records_only_skip != 'true' }}
+    # 75, the old checks-merge-install cap (interim stopgap, decision ci-job-caps). Unmeasured for this job: a draft lane PR runs no CI, so a measured cap waits for the batch run.
+    timeout-minutes: 75
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
+        with:
+          python-version: "3.15"
+
+      - name: Merge tool git-half fixture suite (shard 2 of 4)
+        if: ${{ needs.scope.outputs.code == 'true' }}
+        env:
+          MERGE_SHARD: 2/4
+        run: python3 merge/test_merge.py
+
+      # A red job wakes the watching session at once; ci-done names any the step could not.
+      - name: Wake the batch runner (red job)
+        if: ${{ failure() && github.event_name == 'pull_request' }}
+        uses: $/actions/ci-done-comment
+        with:
+          job: checks-merge-git-2
+
+  checks-merge-git-3:
+    runs-on: ubuntu-latest
+    needs: scope
+    if: ${{ needs.scope.outputs.records_only_skip != 'true' }}
+    # 75, the old checks-merge-install cap (interim stopgap, decision ci-job-caps). Unmeasured for this job: a draft lane PR runs no CI, so a measured cap waits for the batch run.
+    timeout-minutes: 75
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
+        with:
+          python-version: "3.15"
+
+      - name: Merge tool git-half fixture suite (shard 3 of 4)
+        if: ${{ needs.scope.outputs.code == 'true' }}
+        env:
+          MERGE_SHARD: 3/4
+        run: python3 merge/test_merge.py
+
+      # A red job wakes the watching session at once; ci-done names any the step could not.
+      - name: Wake the batch runner (red job)
+        if: ${{ failure() && github.event_name == 'pull_request' }}
+        uses: $/actions/ci-done-comment
+        with:
+          job: checks-merge-git-3
+
+  checks-merge-git-4:
+    runs-on: ubuntu-latest
+    needs: scope
+    if: ${{ needs.scope.outputs.records_only_skip != 'true' }}
+    # 75, the old checks-merge-install cap (interim stopgap, decision ci-job-caps). Unmeasured for this job: a draft lane PR runs no CI, so a measured cap waits for the batch run.
+    timeout-minutes: 75
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
+        with:
+          python-version: "3.15"
+
+      - name: Merge tool git-half fixture suite (shard 4 of 4)
+        if: ${{ needs.scope.outputs.code == 'true' }}
+        env:
+          MERGE_SHARD: 4/4
+        run: python3 merge/test_merge.py
+
+      # A red job wakes the watching session at once; ci-done names any the step could not.
+      - name: Wake the batch runner (red job)
+        if: ${{ failure() && github.event_name == 'pull_request' }}
+        uses: $/actions/ci-done-comment
+        with:
+          job: checks-merge-git-4
 
   # The guard fixture suite, shard 1 of 4. checks-guard-2 to checks-guard-4 run shards 2 to 4; hooks/test_guard.py holds the shard switch.
   checks-guard:
@@ -3581,6 +3680,9 @@ jobs:
       - checks-install-checkout-2
       - checks-install-checkout-3
       - checks-merge-git
+      - checks-merge-git-2
+      - checks-merge-git-3
+      - checks-merge-git-4
       - checks-guard
       - checks-guard-2
       - checks-guard-3
@@ -3629,6 +3731,9 @@ jobs:
       - checks-install-checkout-2
       - checks-install-checkout-3
       - checks-merge-git
+      - checks-merge-git-2
+      - checks-merge-git-3
+      - checks-merge-git-4
       - checks-guard
       - checks-guard-2
       - checks-guard-3
