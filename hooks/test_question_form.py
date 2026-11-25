@@ -4121,7 +4121,7 @@ def case_named_rulings_empty_text_names_nothing():
 
 
 def case_based_on_ruling_kind_still_reads():
-    # Control, green on origin/main: the Based on line parser still reads (ruling) as a kind, so the new reader has its line.
+    # Control: the Based on line parser still reads a ruling line as its kind, which the named-ruling reader relies on.
     kinds = [m.group(1).strip().lower() for m in question_form.BASED_LINE.finditer(APPS_RULING_LINE)]
     check("named rulings control: BASED_LINE still reads a (ruling) line as kind ruling", kinds == ["ruling"], kinds)
 

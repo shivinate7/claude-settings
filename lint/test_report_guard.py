@@ -5409,7 +5409,7 @@ class PastRulingRelay(SameTurnWriter, unittest.TestCase):
         out, _ = self.stop(self.decided, records=records)
         self.assertNotIn("question-keys", self.reason(out), out)
 
-    # The named ruling and the refusal text (owner, 10:36 and 10:42 CST 2026-11-24). A Based on (ruling) line that names a
+    # The named ruling and the refusal text, as the owner ruled them on the past-ruling guard. A Based on (ruling) line that names a
     # listed ruling passes by code, whatever the judge answers. A refusal gives the listed id, the ruling's date from its
     # listed line, one sentence of what the ruling decides, and the remedy line. It never says "settles" and never carries
     # an order to the session. The judge's answers are the stub's, so no model runs.
