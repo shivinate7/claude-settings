@@ -34,7 +34,7 @@ The script lint/conflict_hotspots.py (branch conflict-hotspots, in flight) will 
 - Of the 122 conflict hunks the plan agent stated, 15 were list lines, 28 were long Markdown lines and 80 were other code, per its replay with the three-argument `git merge-tree`, hunks sorted by form.
 - The three counts sum to 123, not 122.
 - The source does not say which count is off.
-- merge/test_merge.py had 0 conflicts in 42 merges where both sides touched it.
+- merge/test_merge.py had 0 conflicts in 42 merges where both sides touched it, per the same audit agent's replay as the 57 of 308 figure.
 
 ## Consultant picks
 
