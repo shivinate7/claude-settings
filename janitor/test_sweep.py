@@ -1439,6 +1439,15 @@ class StaleCwdRecordTests(unittest.TestCase):
                          "a clean merged tree was reaped beside a record whose parent folder is gone; it must be kept")
         self.assertEqual(decision["action"], "keep")
 
+    def test_a_read_with_no_flag_beside_a_gone_record_answers_unknown(self):
+        """The default of `absent_is_out` is off. The husk read and verdict and the branch-cut holder reads in
+        janitor/sweep.py pass no flag, so beside a removed record's folder they must read unknown, never out. The
+        flagged read of the same target answers out, which shows the record is the gone one."""
+        self.assert_record_stands_nowhere()
+        self.assertIs(sweep.git_reads.worktree_live_session(self.removable, absent_is_out=True), False,
+                      "scope: the flagged read must answer out for the gone record")
+        self.assertIsNone(sweep.git_reads.worktree_live_session(self.removable),
+                          "a flagless read beside a gone record answered out; the default must keep it unknown")
 
     # Helpers for the two acts beside a gone record. Each case builds its own worktree, so no case dirties `self.removable`.
 
