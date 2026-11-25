@@ -366,6 +366,12 @@ class ScanScope(unittest.TestCase):
         self.assertEqual(retired_hits(repo), ["GLOSSARY.md.bak:1: %s" % PLANTED,
                                               "skills/impeccable-old/a.md:1: %s" % PLANTED])
 
+    def test_marker_pair_in_another_file_is_still_a_hit(self):
+        """The markers exempt lines of this file only. A pair around a retired name in README.md is a hit."""
+        repo = make_repo({"README.md": "%s\nNOTE = \"%s\"\n%s\n" % (BLOCK_BEGIN, PLANTED, BLOCK_END)})
+        self.assertIn("README.md", tracked(repo), "the fixture does not track README.md")
+        self.assertEqual(retired_hits(repo), ["README.md:2: %s" % PLANTED])
+
 
 def tearDownModule():
     shutil.rmtree(RUN_FOLDER, ignore_errors=True)  # test-temp-standard: teardown removes the run folder
