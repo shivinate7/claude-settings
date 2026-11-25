@@ -13,6 +13,10 @@ An agent's span opens at its Agent (or Task) tool_use and closes at the first ta
 task-id with an ending status. A SendMessage to the agent after the close opens a new span. Spans are
 clipped to the window. A file it cannot read, an empty file, or a window holding no record prints one
 `unknown: <reason>` line and exits 0.
+
+The covered span runs from the transcript's first to its last timestamped record. Window minutes outside it are
+not idle: the idle line then ends with a note that says how many minutes were left out. A window with no
+minute inside the span prints one `unknown:` line.
 """
 import argparse
 import os
@@ -136,11 +140,22 @@ def numbers(records, begin, finish):
     return len(counted), most, len(still), int((finish - begin - busy) // 60)
 
 
-def window_time(text):
+def window_moment(text):
     moment = datetime.fromisoformat(text)
     if moment.tzinfo is None:
         raise ValueError("a window time needs a UTC offset, such as 2026-11-01T16:55:00-06:00")
-    return moment.timestamp()
+    return moment
+
+
+def covered_span(records):
+    """(earliest, latest) timestamp of the records that carry one, or None when none does."""
+    moments = [t for t in map(record_time, records) if t is not None]
+    return (min(moments), max(moments)) if moments else None
+
+
+def edge_text(moment, zone):
+    """A span edge written in the window's own offset, to the second."""
+    return datetime.fromtimestamp(moment, zone).isoformat(timespec="seconds")
 
 
 def main(argv):
@@ -149,7 +164,8 @@ def main(argv):
     ap.add_argument("--between", nargs=2, metavar=("START", "END"), required=True)
     args = ap.parse_args(argv)
     try:
-        begin, finish = (window_time(t) for t in args.between)
+        first, last = (window_moment(t) for t in args.between)
+        begin, finish = first.timestamp(), last.timestamp()
     except ValueError as err:
         ap.error(str(err))
     try:
@@ -163,9 +179,22 @@ def main(argv):
     if not any(begin <= (record_time(r) or float("-inf")) <= finish for r in records):
         print("unknown: the transcript holds no record in the window")
         return 0
-    agents, most, still, idle = numbers(records, begin, finish)
+    # Only the part of the window inside the transcript's span can be judged idle; the rest is reported, not counted.
+    cover_from, cover_to = covered_span(records)
+    lo, hi = max(begin, cover_from), min(finish, cover_to)
+    if lo >= hi:
+        print("unknown: the window has no minute inside the transcript's span")
+        return 0
+    notes = []
+    if begin < cover_from:
+        notes.append("transcript covers from %s on; %d min before it not counted"
+                     % (edge_text(cover_from, first.tzinfo), (cover_from - begin) // 60))
+    if finish > cover_to:
+        notes.append("transcript covers until %s; %d min after it not counted"
+                     % (edge_text(cover_to, first.tzinfo), (finish - cover_to) // 60))
+    agents, most, still, idle = numbers(records, lo, hi)
     print("agents run: %d, most at once: %d%s" % (agents, most, " (%d still running)" % still if still else ""))
-    print("minutes with no agent running: %d" % idle)
+    print("minutes with no agent running: %d%s" % (idle, "".join(" (%s)" % n for n in notes)))
     return 0
 
 
