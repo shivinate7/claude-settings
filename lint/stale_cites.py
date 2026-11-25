@@ -980,27 +980,39 @@ def has_source(rest):
     return any(SOURCE.match(word.rstrip(".")) for word in re.split(r"[\s,;]+", rest) if word)
 
 
-SYMBOL_WORD = re.compile(r"([A-Za-z_]\w*)(?:\(\))?\Z")
+SYMBOL_WORD = re.compile(r"([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*)(?:\(\))?\Z")  # a name, or a dotted Class.method
+FILE_WORD = re.compile(r"/|\.(?:py|mjs|cjs|js|ts|sh|md|json|ya?ml|toml|txt|cfg|ini|html|css)\Z")  # a word that is a file, not Class.method
+CITE_TOKEN = re.compile(r"([^\s,;]+)([\s,;]*)")  # a word and the separator after it
 
 
 def cite_targets(kind, rest):
-    """[(path, word, symbol)] for each file a `read` or `test` backing points at, in the order the cite names them. `word` is the path
-    word as written (it may carry a `:N-M` line range); `symbol` is the name a `path::name` or a following bare word gives, else None.
-    Empty for any other kind."""
+    """[(path, word, symbols)] for each file a `read` or `test` backing points at, in the order the cite names them. `word` is the path
+    word as written (it may carry a `:N-M` line range, which belongs to that path); `symbols` is the list of names a `path::name` gives, or
+    the names that follow the path (`path ALPHA, beta`; a dotted `Class.method` is one name), else empty. A name followed by a space and
+    more lower-case words is prose, not a symbol. Empty for any other kind."""
     if kind == "test":
         node = TEST_CITE.match(rest)
-        return [(node.group(1), rest, rest.rsplit("::", 1)[-1])] if node else []
+        return [(node.group(1), rest, [rest.rsplit("::", 1)[-1]])] if node else []
     if kind != "read":
         return []
-    words = [w.rstrip(".") for w in re.split(r"[\s,;]+", rest) if w]
-    found = []
-    for index, word in enumerate(words):
-        if not SOURCE.match(word):
+    tokens = [(word.rstrip("."), sep) for word, sep in CITE_TOKEN.findall(rest) if word.rstrip(".")]
+    found, collecting = [], False
+    for index, (word, sep) in enumerate(tokens):
+        if SOURCE.match(word) and not (collecting and SYMBOL_WORD.match(word) and not FILE_WORD.search(word)):
+            named = re.findall(r"::(\w+)", word)
+            found.append((re.split(r"::?\d*", word, maxsplit=1)[0], word, named[-1:]))
+            collecting = not named
             continue
-        named = re.findall(r"::(\w+)", word)
-        after = SYMBOL_WORD.match(words[index + 1]) if index + 1 < len(words) else None
-        symbol = named[-1] if named else (after.group(1) if after else None)
-        found.append((re.split(r"::?\d*", word, maxsplit=1)[0], word, symbol))
+        symbol = SYMBOL_WORD.match(word)
+        if not (collecting and symbol):
+            collecting = False
+            continue
+        following = tokens[index + 1][0] if index + 1 < len(tokens) else ""
+        if not re.search(r"[,;]", sep) and following[:1].islower() and not (SOURCE.match(following) and FILE_WORD.search(following)):
+            collecting = False  # a name and more lower-case words: prose
+            continue
+        if symbol.group(1) not in found[-1][2]:
+            found[-1][2].append(symbol.group(1))
     return found
 
 
@@ -1010,54 +1022,75 @@ def backing_path(kind, rest):
     return targets[0][0] if targets else None
 
 
+def assigned_names(node):
+    """The plain names a statement binds: an assignment's targets, tuple targets unpacked; empty for any other statement."""
+    if isinstance(node, ast.Assign):
+        targets = node.targets
+    elif isinstance(node, ast.AnnAssign):
+        targets = [node.target]
+    else:
+        return []
+    bound = [t for target in targets for t in (target.elts if isinstance(target, ast.Tuple) else [target])]
+    return [t.id for t in bound if isinstance(t, ast.Name)]
+
+
 def defined_line(text, name):
     """The first line where `name` is a def or class in the Python `text`, or a module-level assignment (a constant), found through the AST
-    so a comment, a docstring or a string that names it is never the answer. 0 when the text parses and defines no such name; None when
+    so a comment, a docstring or a string that names it is never the answer. A dotted `Class.method` is the def, class or assignment
+    `method` in the body of a class `Class`, nested as far as the name goes. 0 when the text parses and defines no such name; None when
     it is not Python."""
     try:
         tree = ast.parse(text)
     except (SyntaxError, ValueError):
         return None
     kinds = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
-    lines = [n.lineno for n in ast.walk(tree) if isinstance(n, kinds) and n.name == name]
-    for node in tree.body:
-        if isinstance(node, ast.Assign):
-            targets = node.targets
-        elif isinstance(node, ast.AnnAssign):
-            targets = [node.target]
-        else:
-            continue
-        bound = [t for target in targets for t in (target.elts if isinstance(target, ast.Tuple) else [target])]
-        if any(isinstance(t, ast.Name) and t.id == name for t in bound):
-            lines.append(node.lineno)
+    first, *inner = name.split(".")
+    if not inner:
+        lines = [n.lineno for n in ast.walk(tree) if isinstance(n, kinds) and n.name == name]
+        lines += [node.lineno for node in tree.body if name in assigned_names(node)]
+        return min(lines, default=0)
+    scopes = [n for n in ast.walk(tree) if isinstance(n, ast.ClassDef) and n.name == first]
+    for part in inner[:-1]:
+        scopes = [n for scope in scopes for n in scope.body if isinstance(n, ast.ClassDef) and n.name == part]
+    last = inner[-1]
+    lines = [n.lineno for scope in scopes for n in scope.body
+             if (isinstance(n, kinds) and n.name == last) or last in assigned_names(n)]
     return min(lines, default=0)
 
 
-def excerpt_rows(kind, text, symbol, limit, row_chars, anchor_in):
-    """The numbered rows of one file's `text` that one cite target points at. `anchor_in` is the text searched for a line number."""
+def excerpt_rows(kind, text, symbols, limit, row_chars, anchor_in):
+    """The numbered rows of one file's `text` that one cite target points at. `anchor_in` is the path word, searched for a line number.
+    With several `symbols` that the file defines, `limit` rows are shared among them, `limit // count` from each definition."""
     rows = text.replace("\r\n", "\n").split("\n")
-    first, last = 1, limit
     anchor = re.search(r"[\w./@+~-]:(\d+)(?:-(\d+))?\b", anchor_in) if kind == "read" else None
     if anchor:
-        first = int(anchor.group(1))
+        first = max(int(anchor.group(1)), 1)
         last = max(int(anchor.group(2) or first), first)
-    elif symbol:
-        line = defined_line("\n".join(rows), symbol)
-        if line is None and kind == "test":  # not Python: the first row that names it
-            line = next((n for n, row in enumerate(rows, 1) if re.search(r"\b%s\b" % re.escape(symbol), row)), 0)
-        first = line or 1
-        last = first + limit - 1
-    first = max(first, 1)
-    last = min(last, first + limit - 1, len(rows))
+        shown = range(first, min(last, first + limit - 1, len(rows)) + 1)
+    else:
+        source = "\n".join(rows)
+        starts = set()
+        for symbol in symbols[:limit]:
+            line = defined_line(source, symbol)
+            if line is None and kind == "test":  # not Python: the first row that names it
+                line = next((n for n, row in enumerate(rows, 1) if re.search(r"\b%s\b" % re.escape(symbol), row)), 0)
+            if line:
+                starts.add(line)
+        share = limit // len(starts) if starts else limit
+        shown = sorted({n for line in starts for n in range(line, line + share)} or range(1, limit + 1))
+        shown = [n for n in shown if n <= len(rows)]
     cut = (lambda row: cut_row(row, row_chars)) if row_chars else (lambda row: row)
-    return "\n".join("%d: %s" % (n, cut(rows[n - 1])) for n in range(first, last + 1))
+    return "\n".join("%d: %s" % (n, cut(rows[n - 1])) for n in shown)
 
 
 def cited_excerpt(cite, text, limit=40, row_chars=None):
     """The numbered lines of a backing file's `text` that `cite` points at, at most `limit`: a `read path:N` or
-    `path:N-M` gives those lines, and a `read path name`, `read path::name` or `test path::name` gives the lines from where `name`
-    is defined (a def, a class, a method or a module-level assignment), up to `limit` rows from there. A name the file does not define,
-    a file that is not Python, and any other cite with a backing path give the top of the file. A cite with no backing path gives None.
+    `path:N-M` gives those lines (the range belongs to the path it follows), and a `read path name`, `read path::name` or `test path::name`
+    gives the lines from where `name` is defined (a def, a class, a method, a dotted `Class.method` or a module-level assignment), up to
+    `limit` rows from there. A cite of several names (`read path ALPHA, beta`) shares the `limit` rows of its path among the names the file
+    defines, `limit // count` rows from each; rows that overlap show once, in line order. A name followed by lower-case prose words is no name.
+    A name the file does not define, a `read` of a file that is not Python, and any other cite with a backing path give the top of the file;
+    a `test path::name` of a file that is not Python starts at the first row that names the symbol. A cite with no backing path gives None.
     `text` is one file's text, read for the cite's first path; or a {path: text} mapping, which gives one block per cited path found in
     it, each opened by a `== path` row and capped at `limit` rows (a cite of one path gives that block bare). A prose judge sends this
     beside the line, so the model reads what the line cites. With `row_chars`, each row is cut to that many characters with the cut
@@ -1067,7 +1100,7 @@ def cited_excerpt(cite, text, limit=40, row_chars=None):
     if not targets:
         return None
     if isinstance(text, str):
-        return excerpt_rows(kind, text, targets[0][2], limit, row_chars, rest)
+        return excerpt_rows(kind, text, targets[0][2], limit, row_chars, targets[0][1])
     blocks = {}
     for path, word, symbol in targets:
         if path in text and path not in blocks:
