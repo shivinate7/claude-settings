@@ -318,6 +318,23 @@ MUTATIONS = [
      '        return {"path": path, "action": "keep", "reason": "unreadable-subject"}',
      "test_refusal_unreadable_subject_worktree",
      "posix"),
+    # The opt-in that lets a removed record folder stand in no tree (StaleCwdRecordTests). Ignoring it leaves
+    # the absent folder unreadable for the removal verdict, which then keeps a clean merged tree. The deleted-cwd
+    # case is the one that must die.
+    ("liveness: worktree_live_session ignores the absent_is_out opt-in for a removed record folder",
+     "git_reads",
+     '            if under is None and absent_is_out and target_identity is not None and _folder_is_gone(cwd_resolved):\n'
+     '                under = False\n',
+     '            if False:\n'
+     '                under = False\n',
+     "test_clean_merged_tree_is_reaped_beside_a_record_whose_folder_is_gone"),
+    # The default of the opt-in. Defaulting it to True lets the orphan reap and trash_verdict, which have no
+    # dirty check and must keep a folder beside such a record, read the removed folder as out and act.
+    ("liveness: worktree_live_session defaults the absent_is_out opt-in to True",
+     "git_reads",
+     'def worktree_live_session(target: str, absent_is_out: bool = False):',
+     'def worktree_live_session(target: str, absent_is_out: bool = True):',
+     "test_orphaned_listener_stays_kept_beside_such_a_record"),
     # only_on="linux": AgentEndDeadHostLockTests is skipped off Linux (the live lock's start ticks are
     # read from /proc), so this suite's case cannot prove this mutant on Windows or macOS.
     # The finish gate on a live-form lock whose host is dead (decision when-a-worktree-may-be-removed,
