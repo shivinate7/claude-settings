@@ -820,16 +820,22 @@ class GuardSetManifest(FlagAsserts, unittest.TestCase):
     PROBE = "hooks/zz_manifest_probe.py"
     ARM_FLAGS = ["checks_windows", "checks_windows_rest", "checks_macos", "code", "guard", "sweep"]  # what an edit to guard.py sets
 
+    @staticmethod
+    def arm(got):
+        """The job and suite flags the guard arm sets. `shoot` is left out: the export suite's own arm names guard.py and the
+        shared modules it imports, and it can name no module that only the manifest names."""
+        return {n: got[n] for n in ALL if n != "shoot"}
+
     def guard_py_edit(self, guard_set):
-        """The flags an edit to hooks/guard.py sets in a base with this manifest. The scope of every case: the arm's own flags."""
+        """The arm's flags for an edit to hooks/guard.py in a base with this manifest. The scope of every case: the arm's own flags."""
         want = run(["hooks/guard.py"], existing=["hooks/guard.py"], guard_set=guard_set)
         self.assertFlags(want, want_true=self.ARM_FLAGS)
-        return want
+        return self.arm(want)
 
     def test_a_module_named_only_in_the_manifest_sets_the_flags_guard_py_sets(self):
         want = self.guard_py_edit(["zz_manifest_probe.py"])
         got = run([self.PROBE], existing=[self.PROBE], guard_set=["zz_manifest_probe.py"])
-        self.assertEqual(got, want, f"{self.PROBE} is named in the manifest and sets other flags than guard.py: {got}")
+        self.assertEqual(self.arm(got), want, f"{self.PROBE} is named in the manifest and sets other flags than guard.py: {got}")
 
     def test_a_module_the_manifest_does_not_name_sets_no_guard_arm_flags(self):
         self.guard_py_edit(["zz_manifest_probe.py"])
@@ -839,12 +845,12 @@ class GuardSetManifest(FlagAsserts, unittest.TestCase):
     def test_a_module_the_manifest_names_sets_the_flags_guard_py_sets(self):  # control: the arm names it in the old code too
         want = self.guard_py_edit(["git_reads.py"])
         got = run(["hooks/git_reads.py"], existing=["hooks/git_reads.py"], guard_set=["git_reads.py"])
-        self.assertEqual(got, want, f"hooks/git_reads.py is named in the manifest and sets other flags than guard.py: {got}")
+        self.assertEqual(self.arm(got), want, f"hooks/git_reads.py is named in the manifest and sets other flags than guard.py: {got}")
 
     def test_an_edit_to_the_manifest_sets_the_flags_guard_py_sets(self):
         want = self.guard_py_edit(["git_reads.py"])
         got = run([GUARD_SET_REL], existing=[GUARD_SET_REL], contents={GUARD_SET_REL: "git_reads.py\n"})
-        self.assertEqual(got, want, f"an edit to {GUARD_SET_REL} sets other flags than guard.py: {got}")
+        self.assertEqual(self.arm(got), want, f"an edit to {GUARD_SET_REL} sets other flags than guard.py: {got}")
 
     def test_an_empty_manifest_turns_every_flag_on(self):
         self.guard_py_edit(["git_reads.py"])  # scope: the same edit scopes down with a manifest that has entries
