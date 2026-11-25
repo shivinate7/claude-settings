@@ -734,7 +734,8 @@ class Pages:
             except (OSError, ValueError) as e:
                 self.unread = "the transcript cannot be read: %s" % (" ".join(str(e).split())
                                                                       or type(e).__name__)
-            self.failed = _transcript.failed_tool_use_ids(self.records)
+            self.failed = (_transcript.failed_tool_use_ids(self.records)
+                           | _transcript.undelivered_tool_use_ids(self.records))
             for i, rec in enumerate(self.records):
                 text = _transcript.owner_text(rec, MACHINE_TAGS)
                 if text is not None:
@@ -764,7 +765,8 @@ class Pages:
         return anchors[k - 1] + 1
 
     def _uses_after(self, start):
-        """The tool_use blocks after `start` whose result is no error; a failed send proves nothing."""
+        """The tool_use blocks after `start` whose result is no error and no queued or undelivered desktop send; a
+        failed or undelivered send proves nothing. A send with no result yet still counts."""
         return (use for r in self.records[start:] if r.get("type") == "assistant"
                 for use in _transcript.tool_uses(r) if use.get("id") not in self.failed)
 

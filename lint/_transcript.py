@@ -12,8 +12,9 @@ import os
 import re
 
 SEND_TOOLS = ("mcp__claude-code-remote__send_message", "mcp__ccd_session_mgmt__send_message", "SendMessage")
-# The text a desktop send's tool result holds when the message reached its session. "queued" and "undelivered" differ here.
-DESKTOP_DELIVERED = "(delivery: delivered;"
+# A desktop send's tool result ends with "(delivery: <state>; message_id: ...)". The state is delivered, queued or undelivered.
+DESKTOP_DELIVERY = "(delivery: "
+DESKTOP_DELIVERED = DESKTOP_DELIVERY + "delivered;"  # the state that means the message reached its session
 CLAUDE_ARTIFACTS_DB = "mcp__claude-artifacts__db_"  # the claude-artifacts page db tools; the verb is the tool name's tail, never an input action
 # The tool-name prefixes of the page db tools, for `name.startswith(ARTIFACT_DATA)`. read_artifact is no db tool, so it never matches.
 ARTIFACT_DATA = ("ArtifactData", "mcp__ArtifactData", CLAUDE_ARTIFACTS_DB)
@@ -436,6 +437,21 @@ def delivered_tool_use_ids(records):
             if isinstance(body, dict) and body.get("status") == "delivered":
                 delivered.add(use_id)
     return delivered
+
+
+def undelivered_tool_use_ids(records):
+    """The tool_use ids of desktop sends whose result carries a delivery state other than delivered (queued or
+    undelivered). A send with no result, or a result with no delivery state, is not read here. The send's input
+    never counts, only its result."""
+    undelivered = set()
+    for r in records:
+        if r.get("type") != "user":
+            continue
+        for b in tool_results(r):
+            text = result_text(b)
+            if isinstance(b.get("tool_use_id"), str) and DESKTOP_DELIVERY in text and DESKTOP_DELIVERED not in text:
+                undelivered.add(b["tool_use_id"])
+    return undelivered
 
 
 def inactive_tool_use_ids(records):

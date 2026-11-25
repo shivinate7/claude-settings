@@ -190,7 +190,7 @@ import sys
 HERE = os.path.dirname(os.path.realpath(__file__))
 sys.path.insert(0, HERE)
 from _transcript import (  # noqa: E402
-    ARTIFACT_DATA, SEND_TOOLS, delivered_tool_use_ids, inactive_tool_use_ids, is_last_human, items_write, last_incoming_index, last_reply, page_read_ran, page_writer_id, peer_sender, tool_verb,
+    ARTIFACT_DATA, SEND_TOOLS, delivered_tool_use_ids, inactive_tool_use_ids, is_last_human, items_write, last_incoming_index, last_reply, page_read_ran, page_writer_id, peer_sender, tool_verb, undelivered_tool_use_ids,
     read_transcript, records_after_last_human, send_targets, tool_results, tool_uses)
 import layout  # noqa: E402
 import _clause  # noqa: E402
@@ -1588,6 +1588,8 @@ def question_problem(records, turn, text, hook):
     ack of a send this turn made to the writer or the parent starts no turn.
     Owner-facing: a send to the page writer, or an items write to this repo's page. The writer is the newest
     meta/page read's; with no such read at all, the layout's `page-writer` (its ack starts no turn either).
+    A send to the newest read's writer does not count when its desktop result says queued or undelivered
+    (`undelivered_tool_use_ids`). Delivery is not required there: a send with no result still counts.
     The key's writer counts only for a send whose own result shows delivery (`delivered_tool_use_ids`) or a
     failure of `session_inactive` (`inactive_tool_use_ids`: the writer is gone, the attempt meets the duty); a
     send with no result, any other failed result or a non-delivered one does not. A transcript writer counts on the send alone.
@@ -1605,7 +1607,8 @@ def question_problem(records, turn, text, hook):
     writer = page_writer_id(records)
     acks = {writer: {writer}} if writer else {}
     uses, sends = _turn_acts(records, turn, acks)
-    if writer and any(writer in t for t in sends):
+    undelivered = undelivered_tool_use_ids(records)
+    if writer and any(writer in t and u.get("id") not in undelivered for u, t in zip(uses, sends)):
         return "", ""
     _hooks_on_path()
     from override import remote_session_id
