@@ -720,7 +720,26 @@ def _print_crash_refuse():
             "(decision guard-hooks-fail-closed, a guard with a missing part refuses the call)")}}))
 
 
+def _forget_bytecode():
+    """Delete the bytecode cache of every .py file in the folders the guard loads from. A cache that is corrupt
+    stops the import that reads it, and the retry below would read the same bytes again; the next import then
+    recompiles the source and writes a good one. guard_launch.py keeps these caches even where the host asks for
+    none, so a broken one must heal here, not stay until a reinstall."""
+    for folder in {_HERE, _SET_DIR}:
+        try:
+            names = os.listdir(folder)
+        except OSError:
+            continue
+        for name in names:
+            if name.endswith(".py"):
+                try:
+                    os.remove(importlib.util.cache_from_source(os.path.join(folder, name)))
+                except (OSError, ValueError):
+                    pass   # no cache there, or none that can be removed: the import compiles the source
+
+
 _load_deadline = time.monotonic() + _LOAD_WAIT_SECONDS
+_forgot_bytecode = False
 _loading = "guard_core"   # the module being loaded, for the fallback line below
 while True:
     try:
@@ -847,6 +866,9 @@ while True:
         break
     except Exception as exc:
         if time.monotonic() < _load_deadline:
+            if not _forgot_bytecode:
+                _forgot_bytecode = True
+                _forget_bytecode()
             time.sleep(_LOAD_STEP_SECONDS)
             for _name in ("git_reads", "guard_core", "reread_check", "precompact_handoff", "proc_env") + _FAMILY_MODULES:
                 sys.modules.pop(_name, None)

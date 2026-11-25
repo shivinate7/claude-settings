@@ -258,7 +258,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "g=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/guard.py\"; [ -f \"$g\" ] || exit 0; for p in python3 python; do c=$(command -v \"$p\" 2>/dev/null) || continue; case \"$c\" in */WindowsApps/*) continue;; esac; exec \"$c\" \"$g\"; done; exit 0",
+            "command": "g=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/guard.py\"; [ -f \"$g\" ] || exit 0; l=\"${g%guard.py}guard_launch.py\"; [ -f \"$l\" ] && g=\"$l\"; for p in python3 python; do c=$(command -v \"$p\" 2>/dev/null) || continue; case \"$c\" in */WindowsApps/*) continue;; esac; exec \"$c\" \"$g\"; done; exit 0",
             "timeout": 20
           }
         ]
@@ -270,7 +270,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "g=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/guard.py\"; [ -f \"$g\" ] || { echo \"claude-settings guard not runnable (script missing). From the claude-settings checkout run: sh install.sh (Windows: powershell -ExecutionPolicy Bypass -File ./install.ps1)\" >&2; exit 2; }; for p in python3 python; do c=$(command -v \"$p\" 2>/dev/null) || continue; case \"$c\" in */WindowsApps/*) continue;; esac; exec \"$c\" \"$g\"; done; echo \"claude-settings guard not runnable (no python). Install Python 3, then from the claude-settings checkout run: sh install.sh (Windows: powershell -ExecutionPolicy Bypass -File ./install.ps1)\" >&2; exit 2",
+            "command": "g=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/guard.py\"; [ -f \"$g\" ] || { echo \"claude-settings guard not runnable (script missing). From the claude-settings checkout run: sh install.sh (Windows: powershell -ExecutionPolicy Bypass -File ./install.ps1)\" >&2; exit 2; }; l=\"${g%guard.py}guard_launch.py\"; [ -f \"$l\" ] && g=\"$l\"; for p in python3 python; do c=$(command -v \"$p\" 2>/dev/null) || continue; case \"$c\" in */WindowsApps/*) continue;; esac; exec \"$c\" \"$g\"; done; echo \"claude-settings guard not runnable (no python). Install Python 3, then from the claude-settings checkout run: sh install.sh (Windows: powershell -ExecutionPolicy Bypass -File ./install.ps1)\" >&2; exit 2",
             "timeout": 60
           }
         ]
