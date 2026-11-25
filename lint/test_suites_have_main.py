@@ -8,7 +8,9 @@ TestCase named only in a string or a comment is no class, and a script with no T
 
 The fixtures are built in the run folder, one folder per case, each holding only its own file.
 """
+import contextlib
 import importlib.util
+import io
 import os
 import shutil
 import sys
@@ -18,6 +20,8 @@ HERE = os.path.dirname(os.path.realpath(__file__))
 REPO = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
 import _test_temp  # noqa: E402  the one home of the run folder and its sweep (lint/_test_temp.py)
+sys.path.insert(0, os.path.join(REPO, "testing"))
+import cost_probe  # noqa: E402  the one home of run_class (testing/cost_probe.py)
 
 CHECKER = os.path.join(REPO, "lint", "check_suites_have_main.py")
 SUFFIX = "defines a TestCase but never calls unittest.main"
@@ -190,6 +194,18 @@ class FixtureCases(unittest.TestCase):
     def test_run_class_in_a_case_run_cases_reaches_by_name_is_clean(self):
         found = checker().problems(fixture("run_class_in_listed_case", RUN_CLASS_IN_A_LISTED_CASE))
         self.assertEqual(found, [], "a TestCase run by run_class in a case function that run_cases reaches by name is reported: %r" % found)
+
+
+class RunClassCases(unittest.TestCase):
+    def test_class_with_no_test_methods_fails_the_run(self):
+        class NoTestMethods(unittest.TestCase):
+            pass
+
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            ok = cost_probe.run_class(NoTestMethods)
+        self.assertIs(ok, False, "run_class of a TestCase class with no test methods returned %r, want False: nothing ran" % ok)
+        self.assertIn("NoTestMethods", out.getvalue(), "run_class printed no line naming the class: %r" % out.getvalue())
 
 
 class RepoRun(unittest.TestCase):
