@@ -369,6 +369,14 @@ class RedRunTrackedCopyCases(RedRunFixture):
         self.assertEqual(got, ["data.txt", "mod.py", "zz_new.py"],
                          "--add left probe/zz_new.py out of the copy's listing of probe/: it lists %s" % (got,))
 
+    def test_add_of_a_folder_lists_each_file_under_it_in_the_copys_listing(self):
+        sha = self.helper_commit()
+        write(os.path.join(self.repo, "probe", "extra", "a.py"), "a = 1\n")
+        write(os.path.join(self.repo, "probe", "extra", "sub", "b.py"), "b = 2\n")
+        got = self.probe_listing(sha, "--add", "probe/extra")
+        self.assertEqual(got, ["data.txt", "extra/a.py", "extra/sub/b.py", "mod.py"],
+                         "--add probe/extra left a file under that folder out of the copy's listing of probe/: it lists %s" % (got,))
+
 
 if __name__ == "__main__":
     unittest.main()
