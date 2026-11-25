@@ -461,8 +461,7 @@ Other tools, in `judge` order:
                        before it ends in a negator that governs a run verb (`Never run`, `Do not use`, `You cannot
                        run`), or in avoid, without or no; a span that is whole a negator, a run verb and such a list
                        (`Never run git stash, git restore`); a span of `git` and one subcommand followed directly
-                       by `-free`; a span right after a report (`The lane ran`, `had run`, `has run`) whose clause
-                       is only a who and the verb. Any other shape is refused as an order. Prose with no span is not read. A writing role only: the read-only roles in `READ_ONLY`
+                       by `-free`. Any other shape is refused as an order. Prose with no span is not read. A writing role only: the read-only roles in `READ_ONLY`
                        (hooks/agent_brief.py) pass. An override lifts it. (brief-destructive-git)
   lane-effort-pin      deny. A `create_session` call tagged `cs-build:lane` whose `effort` field is not
                        exactly `medium` (LANE_EFFORT), or whose prompt's first non-blank line does not
