@@ -147,6 +147,18 @@ COMPREHENSION_SWEEP_THEN_SET = ("import os\n\nfor n in [n for n in os.environ if
                                 "os.environ['CLAUDE_CONFIG_DIR'] = '/tmp/config'\n\n\ndef test_a():\n    assert True\n")
 LOOP_OVER_NAME_STRING_CONTROL = ("import os\n\nfor n in ['os.environ']:\n    os.environ.pop(n, None)\n\n\ndef test_a():\n    assert True\n")
 
+ENTER_CONTEXT_ATTRIBUTE_AT_IMPORT = ("import os\nfrom contextlib import ExitStack\nimport _test_temp\n\nRUN = 'run'\nSTACK = ExitStack()\n"
+                                     "os.environ.pop('CLAUDE_CONFIG_DIR', None)\nSTACK.enter_context(_test_temp.isolated_config(RUN))\n\n\n"
+                                     "def test_a():\n    assert True\n")
+SETDEFAULT_AT_IMPORT = ("import os\n\nos.environ.pop('CLAUDE_CONFIG_DIR', None)\nos.environ.setdefault('CLAUDE_CONFIG_DIR', '/tmp/config')\n\n\n"
+                        "def test_a():\n    assert True\n")
+SET_IN_PATCH_DICT_AT_IMPORT = ("import os\nfrom unittest import mock\n\nos.environ.pop('CLAUDE_CONFIG_DIR', None)\n"
+                               "with mock.patch.dict(os.environ, {'CLAUDE_CONFIG_DIR': '/tmp/config'}):\n"
+                               "    os.environ['CLAUDE_CONFIG_DIR'] = '/tmp/config'\n\n\ndef test_a():\n    assert True\n")
+POP_IN_PATCH_DICT_AT_IMPORT = ("import os\nfrom unittest import mock\n\n"
+                               "with mock.patch.dict(os.environ, {'CLAUDE_CONFIG_DIR': '/tmp/config'}):\n"
+                               "    os.environ.pop('CLAUDE_CONFIG_DIR', None)\n\n\ndef test_a():\n    assert True\n")
+
 
 def tree_of(files):
     """A fresh folder under the run folder, holding each file of `files`: a dict of a path under the folder to source. A path's
@@ -287,6 +299,24 @@ class TestsSetConfig(unittest.TestCase):
     def test_patch_dict_started_at_import_is_clean(self):
         self.assertEqual(problems_of(PATCH_DICT_START_AT_IMPORT), [],
                          "a pop that a patch.dict(os.environ, ...).start() at import follows is named as a problem")
+
+    def test_enter_context_of_attribute_isolated_config_at_import_is_clean(self):
+        self.assertEqual(problems_of(ENTER_CONTEXT_ATTRIBUTE_AT_IMPORT), [],
+                         "a pop that an import-time STACK.enter_context(_test_temp.isolated_config(RUN)) follows is named as a problem")
+
+    def test_setdefault_of_config_var_at_import_is_clean(self):
+        self.assertEqual(problems_of(SETDEFAULT_AT_IMPORT), [],
+                         "a pop that an import-time os.environ.setdefault(CLAUDE_CONFIG_DIR, ...) follows is named as a problem")
+
+    def test_set_inside_import_time_patch_dict_does_not_clear_a_pop(self):
+        found = problems_of(SET_IN_PATCH_DICT_AT_IMPORT)
+        self.assertTrue(len(found) == 1 and found[0].startswith("test_case.py:"),
+                        "a set inside an import-time with patch.dict(os.environ, ...) block clears a module-level pop, "
+                        "though patch.dict undoes it at exit: %r" % found)
+
+    def test_pop_inside_import_time_patch_dict_is_not_a_removal(self):
+        self.assertEqual(problems_of(POP_IN_PATCH_DICT_AT_IMPORT), [],
+                         "a pop inside an import-time with patch.dict(os.environ, ...) block, which undoes it at exit, is named as a problem")
 
     def test_helper_calling_a_later_defined_setter_at_import_is_clean(self):
         self.assertEqual(problems_of(HELPER_CALLS_LATER_HELPER), [],
