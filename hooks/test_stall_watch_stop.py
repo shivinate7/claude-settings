@@ -609,17 +609,23 @@ def quiet_env_sets_the_age():
     return problems
 
 
-def stop_watch_rows():
-    """The settings.json Stop rows that run stall_watch.py --stop. Raises OSError or ValueError when the file
-    cannot be read."""
+def stall_watch_rows(event, mode):
+    """The settings.json rows of event that run stall_watch.py with mode (--stop or --post), as (matcher, hook)
+    pairs. The matcher is None for an entry without one. Raises OSError or ValueError when the file cannot be read."""
     with open(SETTINGS, encoding="utf-8") as f:
         cfg = json.load(f)
     rows = []
-    for entry in cfg.get("hooks", {}).get("Stop", []):
+    for entry in cfg.get("hooks", {}).get(event, []):
         for h in entry.get("hooks", []):
-            if re.search(r"stall_watch\.py.*--stop\b", h.get("command", "")):
-                rows.append(h)
+            if re.search(r"stall_watch\.py.*" + re.escape(mode) + r"\b", h.get("command", "")):
+                rows.append((entry.get("matcher"), h))
     return rows
+
+
+def stop_watch_rows():
+    """The settings.json Stop rows that run stall_watch.py --stop. Raises OSError or ValueError when the file
+    cannot be read."""
+    return [h for _, h in stall_watch_rows("Stop", "--stop")]
 
 
 @case
@@ -5213,15 +5219,21 @@ def bash_command(rec):
     return rec["message"]["content"][0]["input"]["command"]
 
 
+def post_payload(source, command, stdout="", stderr=""):
+    """The PostToolUse payload of one Bash call of command whose result is stdout and stderr, over the transcript
+    source (records, or a path)."""
+    path = source if isinstance(source, str) else transcript(source)
+    return {"session_id": "test-stall-watch-post", "hook_event_name": "PostToolUse", "tool_name": "Bash",
+            "tool_input": {"command": command},
+            "tool_response": {"stdout": stdout, "stderr": stderr, "interrupted": False},
+            "cwd": SCRATCH, "transcript_path": path}
+
+
 def post_run(source, command, stdout="", stderr=""):
     """Run the PostToolUse mode on one Bash call of command whose result is stdout and stderr, over the transcript
     source (records, or a path). Return (rc, stdout, stderr, gh calls). The gh calls are the growth of the stub's log,
     as gh_reads counts them, so a call that reached no stub is not counted."""
-    path = source if isinstance(source, str) else transcript(source)
-    payload = {"session_id": "test-stall-watch-post", "hook_event_name": "PostToolUse", "tool_name": "Bash",
-               "tool_input": {"command": command},
-               "tool_response": {"stdout": stdout, "stderr": stderr, "interrupted": False},
-               "cwd": SCRATCH, "transcript_path": path}
+    payload = post_payload(source, command, stdout, stderr)
     env = gh_stubbed({k: v for k, v in os.environ.items() if not k.startswith("STALL_WATCH_")})
     env["STALL_WATCH_NOW"] = str(NOW)
     before = len(stub_calls(GH_STUB_LOG))
@@ -5260,6 +5272,43 @@ def post_silent_problems(out):
     """The problems with a PostToolUse run that prints a cancel note where none is due."""
     note = post_note(out)
     return expect(note == "", f"a PostToolUse note printed where none is due: {note!r}")
+
+
+def post_row_or_problems():
+    """The settings.json PostToolUse row that runs stall_watch.py --post, as (matcher, hook), or None, with the
+    problems found reading it. The row is read only when exactly one row runs the mode (scope before subject, P7)."""
+    try:
+        rows = stall_watch_rows("PostToolUse", POST_MODE)
+    except (OSError, ValueError) as e:
+        return None, [f"cannot read {SETTINGS}: {e}"]
+    problems = expect(len(rows) == 1, f"{len(rows)} PostToolUse rows run stall_watch.py --post, want 1")
+    return (rows[0] if len(rows) == 1 else None), problems
+
+
+def post_row_run(row_command, payload):
+    """Run the PostToolUse row's command text under bash, as the harness runs a hook: the payload's JSON line is the
+    shell's stdin, CLAUDE_CONFIG_DIR names a scratch config whose hooks folder is this checkout's, and a stub python3
+    and a stub python first on PATH log each start, then exec the real interpreter. Return (rc, stdout, stderr,
+    starts), starts being the number of python starts the row made."""
+    folder = new_dir()
+    cfg = os.path.join(folder, "config")
+    stubs = os.path.join(folder, "stub-bin")
+    starts = os.path.join(folder, "starts.log")
+    os.makedirs(cfg)
+    os.makedirs(stubs)
+    os.symlink(HERE, os.path.join(cfg, "hooks"))
+    for name in ("python3", "python"):
+        stub_tool(stubs, name, "exec %s \"$@\"" % shlex.quote(PY), starts)
+    env = gh_stubbed({k: v for k, v in os.environ.items()
+                      if not k.startswith("STALL_WATCH_") and k != "CLAUDE_CONFIG_DIR"})
+    env["CLAUDE_CONFIG_DIR"] = cfg
+    env["PATH"] = stubs + os.pathsep + env.get("PATH", "")
+    env["STALL_WATCH_NOW"] = str(NOW)
+    line = (json.dumps(payload) + "\n").encode("utf-8")
+    proc = subprocess.run(["bash", "-c", row_command], input=line, capture_output=True, env=env, cwd=SCRATCH,
+                          timeout=20)
+    return (proc.returncode, proc.stdout.decode("utf-8", "replace"), proc.stderr.decode("utf-8", "replace"),
+            len(stub_calls(starts)))
 
 
 @case
@@ -5350,6 +5399,65 @@ def CI138_merge_of_another_pr_posts_no_cancel_note():
     records = [prompt("merge when green"), ready()] + recs + answered(other, "merged as %s" % CI_SHA)
     rc, out, err, calls = post_run(records, bash_command(other), stdout="merged as %s" % CI_SHA)
     return post_silent_problems(out)
+
+
+@case
+def CI139_post_row_starts_no_python_for_a_call_without_merge():
+    """CI139. cost: the settings.json PostToolUse row that runs stall_watch.py --post, run under bash, starts no python
+    for a Bash call whose payload line holds no "merge". Its shell exits 0 before the python loop, so the stub python3
+    and python log no start. The payload is checked first to hold no merge, so the zero is a fact about this payload,
+    over the open CI wait of CI133"""
+    if os.name != "posix" or shutil.which("bash") is None:
+        raise Skip("needs sh and bash for the row's shell and the python stubs, which this host lacks")
+    row, problems = post_row_or_problems()
+    if row is None:
+        return problems
+    recs, _ = cron_set(RET_A)
+    payload = post_payload([prompt("merge when green"), ready()] + recs, "ls")
+    problems += expect("merge" not in json.dumps(payload), "the payload names merge, so the zero proves nothing")
+    rc, out, err, starts = post_row_run(row[1]["command"], payload)
+    problems += expect(rc == 0, f"exit {rc}, want 0: {err.strip()[:200]}")
+    return problems + expect(starts == 0, f"the row started python {starts} times for a call with no merge, want 0")
+
+
+@case
+def CI140_merge_confirm_starts_python_once_and_the_row_prints_the_cancel_note():
+    """CI140. the settings.json PostToolUse row that runs stall_watch.py --post, run under bash, starts python once for
+    bin/merge N --confirm (result "merged as <sha>") that closes a CI wait with an unfired CronCreate check-in, and the
+    real hook prints that cancel note on the row's stdout. It is the merge of CI134, read through the row instead of
+    the hook's own mode"""
+    if os.name != "posix" or shutil.which("bash") is None:
+        raise Skip("needs sh and bash for the row's shell and the python stubs, which this host lacks")
+    row, problems = post_row_or_problems()
+    if row is None:
+        return problems
+    recs, call_id = cron_set(RET_A)
+    merge = merge_bin(CI_PR)
+    records = [prompt("merge when green"), ready()] + recs + answered(merge, "merged as %s" % CI_SHA)
+    payload = post_payload(records, bash_command(merge), stdout="merged as %s" % CI_SHA)
+    rc, out, err, starts = post_row_run(row[1]["command"], payload)
+    problems += expect(rc == 0, f"exit {rc}, want 0: {err.strip()[:200]}")
+    problems += expect(starts == 1, f"the row started python {starts} times for the merge, want 1")
+    if starts == 1:
+        problems += post_cancel_problems(out, CI_PR, ids=[RET_A], tool="CronCreate", not_named=[call_id],
+                                         says=["delete"])
+    return problems
+
+
+@case
+def CI141_post_row_matcher_covers_bash_and_powershell():
+    """CI141. the settings.json PostToolUse row that runs stall_watch.py --post has a matcher that matches the whole
+    tool name Bash and the whole tool name PowerShell, the two tools a merge can run in"""
+    row, problems = post_row_or_problems()
+    if row is None:
+        return problems
+    matcher = row[0]
+    if not isinstance(matcher, str):
+        return [f"the row has no matcher string: {matcher!r}"]
+    for name in ("Bash", "PowerShell"):
+        problems += expect(re.fullmatch(matcher, name) is not None,
+                           f"the row's matcher {matcher!r} does not match {name}, which a merge can run in")
+    return problems
 
 
 if __name__ == "__main__":
