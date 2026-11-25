@@ -4697,5 +4697,19 @@ class ChecksShardCases(unittest.TestCase):
         self.assertEqual(proof_wrong(ref), [], "the older proof sweep refuses a proof that reads every tree it names")
 
 
+class FixturelessFamilyJob(unittest.TestCase):
+    """F2. The fixtureless family is opt-in: an unfiltered run does not reach its fresh check, so one job must name the family
+    as GUARD_FAMILY=fixtureless and run the guard runner. Named failure: no job runs the family, so the fresh check never runs
+    in CI, and a member that reads an unbuilt fixture goes unseen."""
+
+    def test_one_step_runs_the_fixtureless_family(self):
+        with open(CHECKS, encoding="utf-8") as f:
+            jobs = all_jobs(f.read())
+        homes = [(name, st) for name, job in jobs.items() for st in job["steps"]
+                 if (st.get("env") or {}).get("GUARD_FAMILY") == "fixtureless" and st.get("run") == "python3 hooks/test_guard.py"]
+        self.assertEqual(len(homes), 1, "want one step that runs python3 hooks/test_guard.py with GUARD_FAMILY=fixtureless, "
+                                        "found %d: %s" % (len(homes), [name for name, _ in homes]))
+
+
 if __name__ == "__main__":
     unittest.main()
