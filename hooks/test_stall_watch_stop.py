@@ -2117,6 +2117,28 @@ def A13e_checkin_made_before_the_crossing_that_does_not_fire_in_the_window_still
 
 
 @case
+def A13f_checkin_set_at_minute_29_with_delay_180_does_not_clear_the_block_when_the_stop_is_at_minute_180():
+    """A13f. a background agent launched 180 min before the Stop, still writing, with a send_later check-in made at
+    minute 29, before the crossing at minute 30, whose delay_minutes is 180 or whose `at` is 180 min after its call. It
+    fires at minute 209, 29 min after the Stop at minute 180, so a Stop that reads the fire time alone lets it count.
+    The remedy limits the delay set, 30 minutes at most, so the check-in does not count: the Stop still blocks and
+    names the agent"""
+    aid = agent_id(57)
+    variants = (("delay_minutes 180", agent_checkin(9060, aid, delay=180)),
+                ("an at 180 minutes after the call", agent_checkin(9060, aid, at_time=at_text(9060, 180))))
+    problems = []
+    for label, extra in variants:
+        folder = new_dir()
+        launch, spec = background_agent(folder, aid, agent_step("n4"), 10)
+        rc, out, err = run_stop(transcript(stamped(launch, 10800) + extra, agents=[spec], folder=folder))
+        problems += expect(rc == 0, f"{label}: exit {rc}, want 0: {err.strip()[:200]}")
+        problems += expect(aid in block_text(out),
+                           f"a check-in set at minute 29 with {label} cleared the block of agent {aid} at minute 180, "
+                           f"though the remedy allows 30 minutes ahead at most: {out[:200]!r}")
+    return problems
+
+
+@case
 def A14_waiting_agent_quiet_for_10_min_at_15_min_gets_no_quiet_row():
     """A14. a background agent launched 15 min before the Stop, quiet for 10 min, whose completed notice says it
     is waiting on its own background work: no quiet row, since a waiting agent is silent by design. Control: a
