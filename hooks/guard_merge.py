@@ -236,7 +236,10 @@ def merge_check(selector, repo: str, where: str):
     if module is None:
         return "unknown", "the merge tool's check reader could not be loaded"
     where = os.path.normpath(where) if where else ""   # a `cd` target may carry either separator
-    host = module.Host(required=pinned_required(where) or "protection", repo=repo or None, cwd=where or None)
+    pinned = pinned_required(where)
+    if isinstance(pinned, UnknownPin):
+        return "unknown", pinned.reason()
+    host = module.Host(required=pinned or "protection", repo=repo or None, cwd=where or None)
     # No ignore list: this head counts every check, so an ignored red check on it still refuses.
     # The other ready pull requests on the base may not have CI running (decision no-merge-during-batch-ci), but an ignored check or run never counts.
     try:
@@ -289,9 +292,20 @@ def uses_merge_tool(where: str) -> bool:
     return bool(_merge_configs(where))
 
 
+class UnknownPin:
+    """A stamp `merge.requiredChecks` string the loaded merge tool does not pin. The merge tool the guard loaded may be older
+    than the stamp, so the string's meaning is unread: a read that cannot run is unknown, never "no pin"."""
+
+    def __init__(self, name: str):
+        self.name = name
+
+    def reason(self) -> str:
+        return "merge.requiredChecks %r is not a string the loaded merge tool pins" % self.name
+
+
 def pinned_required(where: str):
     """The repo's pinned `merge.requiredChecks`: the string "none", another of the merge tool's PINNED_STRINGS ("first-proof"), or a non-empty list of names; else None,
-    and the batch read takes the names from the branch protection. "none" is the merge tool's value for a repo
+    and the batch read takes the names from the branch protection. Any other string is an UnknownPin, which merge_check refuses as unknown. "none" is the merge tool's value for a repo
     that requires no check (decision private-repos-no-ci), so a head with no check and no run reads green here too: it is read with no load of the tool.
     "first-proof" is its value for a repo whose CI is live: the merge tool's own head_read then needs the rollup (decision merge-needs-current-base).
     That string is the merge tool's constant, never a copy: with the tool unloadable it is not pinned, and merge_check reads that as unknown."""
@@ -302,8 +316,8 @@ def pinned_required(where: str):
             return names
         if isinstance(names, str) and names != "protection":  # the default pins nothing and loads nothing
             module = merge_module()
-            if module is not None and names in module.PINNED_STRINGS:
-                return names
+            if module is not None:  # an unloadable tool stays None: merge_check reads that as unknown
+                return names if names in getattr(module, "PINNED_STRINGS", ()) else UnknownPin(names)
         if isinstance(names, list) and names and all(isinstance(k, str) and k for k in names):
             return names
     return None
@@ -315,7 +329,7 @@ def waits_on_no_ci(where: str) -> bool:
     if pinned == "none":
         return True
     module = merge_module()
-    return isinstance(pinned, str) and module is not None and module.waits_on_no_check(pinned)
+    return isinstance(pinned, str) and module is not None and module.waits_on_no_check(pinned)  # an UnknownPin is no str: it waits on CI, and _ready_push_pulls warns
 
 
 def ignored_checks(module, where: str):
@@ -488,21 +502,22 @@ READY_PAGE_BEHIND_REASON = (
 
 
 def merge_tool_behind_main() -> bool:
-    """True when the checkout that holds the loaded merge tool is behind origin/main (its HEAD is an ancestor of
-    origin/main and not equal to it). Any read that fails is False: the plain unknown reason then stands."""
+    """True when the checkout that holds the loaded merge tool is behind the ref its install follows (its HEAD is an
+    ancestor of that ref's local tip and not equal to it). The ref is stale_install.followed_ref's: the install record's
+    ref, else the pin's own. Any read that fails is False: the plain unknown reason then stands."""
     module = merge_module()
     path = getattr(module, "__file__", None)
     if not path:
         return False
     root = os.path.dirname(os.path.dirname(os.path.realpath(path)))
-    ref = resolve_default_base(root) or "origin/main"  # the short ref name already holds the remote
-    if not ref.startswith("origin/"):
+    try:
+        import stale_install  # the one home of "the ref the installed copy follows"; imported here, so a call with no unknown read loads nothing
+        record, _ = stale_install.load_record()
+        _, _, tip = stale_install.followed_ref({"source": root, "ref": record["ref"] if record else stale_install.PIN_REF})
+        head = stale_install.local_sha(root, "HEAD")
+        return bool(tip and head and head != tip and stale_install.covered(root, head, tip))
+    except Exception:  # an unreadable ref is the plain unknown reason
         return False
-    head, tip = _git(root, "rev-parse", "HEAD"), _git(root, "rev-parse", ref)
-    if not head or not tip or head.returncode or tip.returncode or head.stdout.strip() == tip.stdout.strip():
-        return False
-    ancestor = _git(root, "merge-base", "--is-ancestor", "HEAD", ref)
-    return ancestor is not None and ancestor.returncode == 0
 
 
 def ready_page_calls(tool: str, tool_input: dict, command: str):
@@ -631,9 +646,12 @@ def _ready_push_pulls(where: str):
     module = merge_module()
     if module is None:
         return None, "the merge tool could not be loaded"
+    pinned = pinned_required(where)
+    if isinstance(pinned, UnknownPin):  # a kept warn-and-pass (READY_PUSH_WARNING): refusing every push on an unread pin would block them all
+        return None, pinned.reason()
     try:
         with module.shared_deadline(READY_PUSH_LIST_SECONDS):
-            host = module.Host(required=pinned_required(where) or "protection", cwd=os.path.normpath(where))
+            host = module.Host(required=pinned or "protection", cwd=os.path.normpath(where))
             return host, host.open_prs()
     except subprocess.TimeoutExpired:  # its text names the resolved program path
         return None, "a read timed out after %d s" % READY_PUSH_LIST_SECONDS
