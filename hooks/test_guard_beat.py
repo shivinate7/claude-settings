@@ -378,17 +378,41 @@ def planted_guard(folder):
     return path
 
 
+FAIL_CLOSED_CALL = "        _question_form_module()\n"   # guard.py main(): the fail-closed writer, a refusal that logs a deny row
+BROKEN_QUESTION_FORM = 'raise ImportError("this copy of the module was replaced by the case")\n'
+
+
+def planted_fail_closed_guard(folder):
+    """A copy of this repository's guard whose judge call is the fail-closed writer's own call, _question_form_module, with
+    the copy's question_form.py unimportable. The copy refuses as guard-crash (decision install-hooks-whole) and logs its
+    row as `deny`, not `crash`, which is the row decide must read too. -> the copy's guard.py."""
+    mutate_shared.guard_tree(folder)
+    path = os.path.join(folder, "guard.py")
+    with open(path, encoding="utf-8") as handle:
+        text = handle.read()
+    if text.count(JUDGE_CALL) != 1:
+        raise RuntimeError("guard.py holds %d judge calls, want 1, so no refusal can be planted" % text.count(JUDGE_CALL))
+    with open(path, "w", encoding="utf-8") as handle:
+        handle.write(text.replace(JUDGE_CALL, FAIL_CLOSED_CALL))
+    with open(os.path.join(folder, "question_form.py"), "w", encoding="utf-8") as handle:
+        handle.write(BROKEN_QUESTION_FORM)
+    return path
+
+
 def printed_lines(text, prefix, name):
     return [line for line in text.splitlines() if line.startswith(prefix) and name in line]
 
 
 class CrashScan(unittest.TestCase):
-    """L2: an allow case fails when its guard run logged a crash row (decide). One run holds four cases: a planted crash
-    (the proof), and three controls: an intact guard, a crash row written before the run, and a case that declares its crash."""
+    """L2: an allow case fails when its guard run logged a crash row (decide), and a row of either writer counts: the
+    fail-open `crash` row and the fail-closed `deny` row under rule guard-crash. One run holds six cases: a planted crash
+    and a planted refusal (the proofs), and four controls: an intact guard, a crash row written before the run, and two
+    cases that declare their crash."""
 
     @classmethod
     def setUpClass(cls):
         planted = planted_guard(os.path.join(RUN_FOLDER, "planted-guard"))
+        refusing = planted_fail_closed_guard(os.path.join(RUN_FOLDER, "refusing-guard"))
         old_row = os.path.join(RUN_FOLDER, "old-row-config")
         os.makedirs(old_row, exist_ok=True)
         with open(os.path.join(old_row, "guard.log"), "w", encoding="utf-8") as handle:
@@ -398,6 +422,10 @@ class CrashScan(unittest.TestCase):
             'add(%r, "allow", command="echo hi")' % (CRASH_PROOF + " intact"),
             'add(%r, "allow", command="echo hi", config=%r)' % (CRASH_PROOF + " old row", old_row),
             'add(%r, "allow", command="echo hi", guard=%r, crash=True)' % (CRASH_PROOF + " declared", planted),
+            'add(%r, "deny", rule="guard-crash", command="echo hi", guard=%r, carries=("guard-crash",))'
+            % (CRASH_PROOF + " refused as guard-crash", refusing),
+            'add(%r, "deny", rule="guard-crash", command="echo hi", guard=%r, carries=("guard-crash",), crash=True)'
+            % (CRASH_PROOF + " crash declared", refusing),
         ]) + "\n"
         cls.proof = suite_run(section_set("crash-scan", body), CRASH_PROOF)
 
@@ -420,6 +448,16 @@ class CrashScan(unittest.TestCase):
     def test_control_a_case_that_declares_its_crash_passes_beside_its_row(self):
         self.assertTrue(printed_lines(self.proof.out, "PASS", CRASH_PROOF + " declared"),
                         "the case that declares its crash failed beside its row")
+
+    def test_a_refusal_by_the_fail_closed_writer_fails_its_case(self):
+        lines = printed_lines(self.proof.out, "FAIL", CRASH_PROOF + " refused as guard-crash")
+        self.assertTrue(lines, "the case the fail-closed guard refuses printed no FAIL line (rc %d): its deny row was not read"
+                        % self.proof.rc)
+        self.assertIn("the guard logged a crash row", lines[0], "the FAIL line does not name the crash row: %s" % lines[0])
+
+    def test_control_a_refusal_that_declares_its_crash_passes_beside_its_row(self):
+        self.assertTrue(printed_lines(self.proof.out, "PASS", CRASH_PROOF + " crash declared"),
+                        "the refusal that declares its crash failed beside its row")
 
 
 class RegistrationHygiene(unittest.TestCase):
