@@ -15,11 +15,12 @@ Built-today lines in this record were not re-read by the edit of 2026-11-12 11:2
 - `all-jobs-passed` needs every job that runs on a pull request, except `ci-done`, which needs it. It fails
   when a needed job failed, was cancelled or was skipped. `lint/test_all_jobs_passed.py` goes red when such a
   job is missing from its `needs`.
-- `all-jobs-passed` runs only on a pull request. The five Windows shard jobs run only off a pull request, so
-  they are not in its `needs`. On main their own job results are the verdict.
+- `all-jobs-passed` runs only on a pull request. The 13 Windows shard jobs run only on a daily schedule and a
+  manual dispatch (decision `windows-prs-run-marked-tests`), so they are not in its `needs`. On main their own
+  job results are the verdict.
 - A job that a scope flag turns off skips its steps, not the job, so it ends green, not skipped. Cost: a
-  pull request that turns every flag off starts 11 runners (6 Windows, 2 macOS, 3 Linux) that skip every
-  step.
+  pull request that turns every flag off still starts its 7 Windows base jobs, which skip every step. No
+  macOS job starts on a pull request.
 - A draft PR runs no CI: `scope` skips on a draft, and every other job skips with it.
 - A merge needs a pull request and no approval.
 - Today's classic protection has `strict` false (`strict` requires the branch to be up to date with main).
