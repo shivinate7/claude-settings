@@ -59,7 +59,7 @@ import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_
 MAX_5MIN = 100.0   # a grant needs the 5-minute load under this
 MAX_1MIN = 60.0    # a grant needs the 1-minute load under this
 SLOT2_5MIN = 60.0  # slot 2 needs the 5-minute load under this
-# The name of the device each slot boots: the one home of the phone names (skills/ios-apps/SKILL.md, Phone simulators).
+# The name of the device each slot boots: the one home of the phone names (this table).
 # A take looks each name up in the device list (resolve) and records the id it finds in the lease; the guard matches a
 # lease to an MCP launch by that recorded id (hooks/guard.py sim_lease_holds), and `take --udid` prints it.
 SLOT_NAME = {"1": "iPhone Duo", "2": "iPhone Duo 2", "pro": "iPhone 18 Pro"}

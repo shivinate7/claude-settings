@@ -7072,6 +7072,8 @@ def sim_boot_refusal(tool: str, names: list, remedies: dict = None, session: str
                    "A launch of the shut-down simulator %s boots it outside the one lock: the Mac "
                    "shares one simulator across repos, and `sim-test` holds that lock. Run `sim-test`, "
                    "which boots it under the lock, or launch a simulator that is already booted. "
+                   "A lease taken before leases held a device grants no launch: take it again with "
+                   "`sim-lease take --device duo|pro --pid PID --session ID`. "
                    "(decision sim-test-is-the-one-boot-path)" % name, name)
         elif (remedies or {}).get(name):
             refuse(tool, "deny", "simulator-boot-route",
