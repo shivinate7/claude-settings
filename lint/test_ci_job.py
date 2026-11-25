@@ -1314,7 +1314,9 @@ class LintMode(unittest.TestCase):
                     failure_only = True  # the red-job wake step runs only after a failed job: a lint run reads it `not run` (decision ci-wait-reads-run-status)
                 m = re.match(r"^        run: (python3 (?:lint|actions)/\S+\.py\b.*|bin/ste-changed\b.*|"
                              r"pipx run [\w.-]+==[\w.]+ [^|&;]*)$", line)
-                if m and "mutate" not in m.group(1):
+                # The tool-pins step is no lint step: --lint plans it as a lane lint's own --local read of the checker, never as this
+                # step (bin/ci-job is_lint leaves it out, via runs_tool_pins). So the want-list skips it through that same test.
+                if m and "mutate" not in m.group(1) and not ci_job.runs_tool_pins([m.group(1)]):
                     want.append(name)
                 m = re.match(r"^        uses: (\S+)(?: #.*)?\s*$", line)
                 if failure_only:
