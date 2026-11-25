@@ -32,13 +32,9 @@ pull request whose run passed (decision push-skip-on-proven-tree; checks.yml, jo
 push-skip job. `empty_without_evidence` is that test; a caller walks past such a run to the group's newest run that is not, and when the
 group has none keeps the newest run. A schedule run is left as it is.
 
-Command (alarm.sh): clear_rule.py --event EVENT --workflow FILE R_JOBS_JSON N_JOBS_JSON. Each jobs file is a JSON array of job objects
-from the jobs API. Exit 0 when N clears R, 1 when it does not, 2 on an unreadable input. With --red-stays (no --event or --workflow):
-exit 0 when step one finds a certain red, else 1. With --rule-events: print the events the empty-run rule judges, as a JSON array. With
---empty-run --event EVENT JOBS_JSON: exit 0 when the run is empty without evidence, else 1.
-With --judge RUNS_JSON --flows FLOWS_JSON --repo OWNER/REPO [--self NAME] (the one call alarm.sh makes): RUNS_JSON is the array that `gh run list --json workflowName,workflowDatabaseId,
+The one command (alarm.sh makes this one call): clear_rule.py --judge RUNS_JSON --flows FLOWS_JSON --repo OWNER/REPO [--self NAME]. RUNS_JSON is the array that `gh run list --json workflowName,workflowDatabaseId,
 databaseId,conclusion,createdAt,url,event,headSha,status,attempt` prints (in-flight runs included), FLOWS_JSON the workflow objects of the workflows API. This file reads the jobs of a run and a
-workflow file itself, with `gh api`. It prints `green`, `red` or `unknown` on line one, then the red runs (`- workflow (conclusion): url`) or the reason it is unknown. Exit 2 on an unreadable input.
+workflow file itself, with `gh api`. It prints `green`, `red` or `unknown` on line one, then the red runs (`- workflow (conclusion): url`) or the reason it is unknown. Exit 0 on a verdict, 2 on an unreadable input or any other command line.
 """
 import argparse
 import collections
@@ -574,22 +570,12 @@ def alarm_verdict(rows, workflows, repo, own):
 
 def main(argv):
     p = argparse.ArgumentParser()
-    p.add_argument("--event")
-    p.add_argument("--workflow")
-    p.add_argument("--red-stays", action="store_true", help="step one only: exit 0 when a red job of R is missing from N or not passed in N, else 1; reads no workflow")
-    p.add_argument("--rule-events", action="store_true", help="print the events the empty-run rule judges, as a JSON array")
-    p.add_argument("--empty-run", action="store_true", help="exit 0 when the one jobs file is an empty run without evidence (needs --event), else 1")
     p.add_argument("--judge", metavar="RUNS_JSON", help="print the alarm's verdict from the file of runs (needs --flows and --repo)")
     p.add_argument("--flows", metavar="FLOWS_JSON")
     p.add_argument("--repo")
     p.add_argument("--self", dest="own", default="", help="the alarm's own workflow name, left out of the runs")
-    p.add_argument("r_jobs", nargs="?")
-    p.add_argument("n_jobs", nargs="?")
     a = p.parse_args(argv)
     try:
-        if a.rule_events:
-            print(json.dumps(rule_events()))
-            return 0
         if a.judge:
             if not a.flows or not a.repo:
                 raise ValueError("--judge needs --flows and --repo")
@@ -600,24 +586,7 @@ def main(argv):
             verdict, lines = alarm_verdict(rows, workflows, a.repo, a.own)
             print("\n".join([verdict, *lines]))
             return 0
-        if a.empty_run:
-            if not a.event or not a.r_jobs or a.n_jobs:
-                raise ValueError("--empty-run needs --event and one jobs file")
-            with open(a.r_jobs, encoding="utf-8") as f:
-                return 0 if empty_without_evidence(json.load(f), a.event) else 1
-        if not a.r_jobs or not a.n_jobs:
-            raise ValueError("two jobs files are needed")
-        with open(a.r_jobs, encoding="utf-8") as f:
-            r_jobs = json.load(f)
-        with open(a.n_jobs, encoding="utf-8") as f:
-            n_jobs = json.load(f)
-        if a.red_stays:
-            return 0 if red_stays(r_jobs, n_jobs) else 1
-        if not a.event or not a.workflow:
-            raise ValueError("--event and --workflow are needed unless --red-stays is given")
-        with open(a.workflow, encoding="utf-8") as f:
-            text = f.read()
-        return 0 if clears(r_jobs, n_jobs, a.event, text) else 1
+        raise ValueError("--judge is the only command")
     except (OSError, ValueError, KeyError, TypeError, AttributeError) as e:
         print(f"clear_rule: {e}", file=sys.stderr)
         return 2
