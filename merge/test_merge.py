@@ -5723,6 +5723,22 @@ class GhHalf(Env):
             rc, out = self.go()
         self.assert_merged_and_carries_on(rc, out)
 
+    def test_a_405_merge_reply_with_the_pr_open_and_main_holding_a_merge_stacked_on_the_head_is_not_this_pr_merged(self):  # control: green now and after
+        # Another branch is stacked on this head: its commit is a child of the head, and main holds a merge of that child, not of the head. The merge refused, so the claim is reverted.
+        self.set(merge_replies=[[rest_err(405, "Merge already in progress"), False]], read_open_after_put=True)
+        def stacked_merge_on_main():
+            sh(self.other, "git", "fetch", "-q", "origin")
+            head = sh(self.other, "git", "rev-parse", "origin/feat")
+            stacked = sh(self.other, "git", "commit-tree", sh(self.other, "git", "rev-parse", "origin/feat^{tree}"), "-p", head, "-m", "stacked on the head")
+            sh(self.other, "git", "push", "-q", "origin", f"{stacked}:refs/heads/stacked")
+            self.merge_onto_main(1, second=stacked)
+        with self.after_the_merge_call(stacked_merge_on_main):
+            rc, out = self.go()
+        self.assertNotIn("merge: #7 merged as ", out, "a merge stacked on this head was read as this head's merge\n" + out)
+        self.assertEqual(rc, 1, out)
+        self.assertIn("reverted on feat", out, "the refused merge did not revert the claim:\n" + out)
+        self.assertTrue(self.reverted(), "the refused merge did not leave the claim reverted on feat")
+
     def test_a_red_check_named_http_500_is_a_refusal_before_the_claim(self):
         # the head's one checks read is red; its name carries "HTTP 500". A red head is refused before any claim, so nothing is reverted
         before = self.head()
