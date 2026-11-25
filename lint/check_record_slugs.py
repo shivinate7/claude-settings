@@ -20,6 +20,12 @@ added, renamed or edited note file whose line is not in that form, or that sits 
 note is flat), is refused. The folder's README is not a note. A
 deleted note file passes.
 
+Also fails on a line the branch adds to a decision record (the decisions folder of lint/layout.json) that is over PROSE_LIMIT
+characters and holds more than one sentence (decision record-prose-one-sentence-line): a ruling kept on one long line
+conflicts whenever two lanes add to it. An added line is one whose count at HEAD is over its count at the merge base, the
+rule of the notes check above, so an old long line left alone, moved or renamed is never judged. A heading, a table row,
+fenced code, a one-sentence list item and a line that is one quote are exempt. Sentences are split by ste_lint.split_sentences.
+
 Also fails on the Seen field (decision notes-sightings-expiry, a note counts its sightings and expires). A note's line
 may end with `Seen: YYYY-MM-DD xN`. An added note file needs a valid field: a calendar date no later than today and no
 more than SEEN_EXPIRY_DAYS old, N of 1 or more. N of 2 or more is refused: the note is a debt, so move it to a debt file
@@ -28,7 +34,7 @@ field that copy had; its date is not judged. A debt file's `Seen:` line (column 
 calendar date no later than today with N of 1 or more, at any age. Today is FIXED_TODAY (ISO) when set, else the clock.
 
     python3 lint/check_record_slugs.py [file ...]
-        # files given: check those, skip git, so only the slug length of a note file is read
+        # files given: check those, skip git, so only the slug length of a note file is read (no prose check)
     python3 lint/check_record_slugs.py --next-debt
         # the slug of the open debt to fix next: highest Seen count, then oldest Seen date, then slug
     python3 lint/check_record_slugs.py --debt-flow START END
@@ -221,13 +227,13 @@ def bad_note_form(root, files, folder):
     return out
 
 
-def new_note_lines(root, added, moved):
-    """The lines the branch adds to the old notes file, in the file's order: a line whose count at HEAD is over its count
-    at the merge base. A blank line is not a note. A moved line, or one of two swapped, is held already. Raises Unknown
-    when git cannot show a file."""
-    frozen = set(layout.candidates(root, "debt-notes"))
-    touched = (frozen & set(added)) | {new for status, old, new in moved if status != "D" and new in frozen}
-    out, base = [], None
+def added_line_numbers(root, wanted, added, moved):
+    """{path: (the lines at HEAD, the 1-based numbers of the lines the branch adds)} for each file `wanted` accepts that the
+    branch adds, edits or renames: an added line is one whose count at HEAD is over its count at the merge base (the old path
+    on a rename). A blank line is never added. A moved line, or one of two swapped, is held already. Raises Unknown when git
+    cannot show a file."""
+    touched = {f for f in added if wanted(f)} | {new for status, old, new in moved if status != "D" and wanted(new)}
+    out, base = {}, None
     for path in sorted(touched):
         was = [old for status, old, new in moved if new == path]  # the path it had at the base: a rename names it
         if path in added or not was:
@@ -235,13 +241,101 @@ def new_note_lines(root, added, moved):
         else:
             base = base or merge_base(root)
             held = collections.Counter(show(root, base, was[0]))
-        seen = collections.Counter()
-        for l in show(root, "HEAD", path):
+        lines, seen, numbers = show(root, "HEAD", path), collections.Counter(), []
+        for n, l in enumerate(lines, 1):
             if not l.strip():
                 continue
             seen[l] += 1
             if seen[l] > held[l]:
-                out.append(l)
+                numbers.append(n)
+        out[path] = (lines, numbers)
+    return out
+
+
+def new_note_lines(root, added, moved):
+    """The lines the branch adds to the old notes file, in the file's order (added_line_numbers). A blank line is not a
+    note. Raises Unknown when git cannot show a file."""
+    frozen = set(layout.candidates(root, "debt-notes"))
+    return [lines[n - 1] for lines, numbers in added_line_numbers(root, frozen.__contains__, added, moved).values()
+            for n in numbers]
+
+
+# One sentence per line in a decision record (decision record-prose-one-sentence-line). A line over PROSE_LIMIT characters
+# holds one sentence, so two lanes that add sentences to one ruling add different lines and git merges them clean.
+PROSE_LIMIT = 200
+PROSE_FENCE = re.compile(r"^ {0,3}(`{3,}(?=[^`]*$)|~{3,})")  # a backtick fence's info string holds no backtick: "```x```" is a code span
+PROSE_HEADING = re.compile(r"^ {0,3}#{1,6}(?:\s|$)")
+PROSE_TABLE = re.compile(r"^\s*\|")
+PROSE_QUOTE_MARK = re.compile(r"^ {0,3}>[ \t]?")  # the blockquote marker
+PROSE_LIST_MARK = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s+")
+PROSE_QUOTE = re.compile(r'^(?:"[^"]*"|\u201c[^\u201d]*\u201d)$')  # the whole line is one quote
+CODE_SPAN = re.compile(r"`[^`\n]*`")
+# A quote the writer puts in a line: its opening mark follows no word character and its closing mark precedes none, so 5"
+# or Don't pairs with nothing. Its text, minus a stop right before the closing mark, is one sentence (QUOTE_STOP).
+QUOTE = re.compile(r'(?<!\w)"[^"\n]*"(?!\w)|“[^”\n]*”')
+QUOTE_STOP = re.compile(r"[.!?](?!.\Z)")  # not the stop that is the last character before the closing mark
+# "etc." and "No." before a capital word end a sentence; ste_lint protects both, so the dot is swapped for "!" first.
+ABBREV_END = re.compile(r"\b(etc|No)\.(?= [A-Z])")
+MONTH_DOT =re.compile(r"\b(Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sept?|Oct|Nov|Dec)\.(?= \d)")  # "Nov. 25": ste_lint's splitter breaks here
+
+
+def fenced(lines):
+    """One flag per line: True for a fence line and for each line inside a fenced code block, read over the whole file. A
+    fence closes on its own mark, at least as long, with nothing after it; one never closed runs to the end."""
+    flags, mark = [], None
+    for line in lines:
+        m = PROSE_FENCE.match(line)
+        if mark is None:
+            mark = m.group(1) if m else None
+            flags.append(bool(m))
+        else:
+            flags.append(True)
+            if m and m.group(1)[0] == mark[0] and len(m.group(1)) >= len(mark) and not line[m.end():].strip():
+                mark = None
+    return flags
+
+
+def sentence_count(text):
+    """How many sentences `text` holds, by ste_lint.split_sentences, the one splitter (it keeps e.g., i.e., 3.15, merge.py
+    whole). It reads four things its own way. A month abbreviation before a day number, a stop inside an inline code span and
+    a stop inside a quote (but not one right before the closing mark) are no sentence end, so the split reads them with
+    their dot hidden. "etc." and "No." before a capital word are an end, which the splitter protects, so each dot is
+    swapped for a "!". ste_lint loads here, not at import: hooks/agent_brief.py imports this module for AGENT_FORM_RULES on
+    every agent start and needs no splitter."""
+    import ste_lint  # the one sentence splitter (lint/ste_lint.py split_sentences)
+    hidden = CODE_SPAN.sub(lambda m: re.sub(r"[.!?]", ste_lint._DOT, m.group(0)), text)
+    hidden = QUOTE.sub(lambda m: QUOTE_STOP.sub(ste_lint._DOT, m.group(0)), hidden)
+    hidden = ABBREV_END.sub(lambda m: m.group(1) + "!", hidden)
+    return len(ste_lint.split_sentences(MONTH_DOT.sub(lambda m: m.group(1) + ste_lint._DOT, hidden)))
+
+
+def prose_problem(line):
+    """The reason a line the branch adds breaks the one-sentence rule, else ''. Not judged: a line of PROSE_LIMIT characters
+    or fewer, a heading, a table row, and a line that is one quote. A list item or blockquote is judged by its text."""
+    if len(line) <= PROSE_LIMIT or PROSE_HEADING.match(line) or PROSE_TABLE.match(line):
+        return ""
+    text = PROSE_LIST_MARK.sub("", PROSE_QUOTE_MARK.sub("", line), count=1).strip()
+    count = sentence_count(text)
+    if count < 2 or PROSE_QUOTE.match(text):
+        return ""
+    return "%d characters and %d sentences" % (len(line), count)
+
+
+def decision_dirs(root):
+    """The decision folders of `root` as path prefixes (layout.candidates, so a tree not rolled out is read where it is)."""
+    return tuple(folder + "/" for folder in layout.candidates(root, "decisions"))
+
+
+def prose_failures(root, added, moved):
+    """[(path, line number, why)] for each line the branch adds to a decision record that holds more than one sentence and
+    is over PROSE_LIMIT characters, in path and line order. Raises Unknown when git cannot show a file, layout.LayoutError
+    when the layout cannot be read."""
+    dirs = decision_dirs(root)
+    found = added_line_numbers(root, lambda f: f.startswith(dirs) and f.endswith(".md"), added, moved)
+    out = []
+    for path, (lines, numbers) in found.items():
+        flags = fenced(lines) if numbers else []
+        out += [(path, n, why) for n in numbers if not flags[n - 1] for why in [prose_problem(lines[n - 1])] if why]
     return out
 
 
@@ -483,7 +577,7 @@ def main(args):
         print("check_record_slugs: FAIL: guard test section file %s: %s" % (message, f))
     try:
         if args:  # files given: git is not read, so the feel-fix and note checks do not run
-            files, feel, bad_form, new_lines, renamed, seen = args, [], [], [], [], []
+            files, feel, bad_form, new_lines, renamed, seen, prose = args, [], [], [], [], [], []
         else:
             files, moved = changes(ROOT)
             feel = unchecked_feel_debts(ROOT, moved)
@@ -491,6 +585,7 @@ def main(args):
             edited = [new for status, old, new in moved if status == "M"]
             bad_form = bad_note_form(ROOT, files + renamed + edited, folder)
             new_lines = new_note_lines(ROOT, files, moved)
+            prose = prose_failures(ROOT, files, moved)
             now = today()
             seen = [("a note", f, why) for f, why in
                     note_seen_failures(ROOT, now, files, moved, folder, skip={f for f, _why in bad_form})]
@@ -522,12 +617,15 @@ def main(args):
         print("check_record_slugs: FAIL: a new or edited note line is refused: %s" % line[:CLIP])
     if new_lines or bad_form or bad_long_note:  # the remedy is the note form only: it never names the old notes file
         print("check_record_slugs: note rule: " + layout.fill_note_paths(ROOT, AGENT_FORM_RULES[0]))
+    for f, n, why in prose:
+        print("check_record_slugs: FAIL: %s:%d: %s: one sentence per line in a decision record (a line over %d characters "
+              "holds one sentence)" % (f, n, why, PROSE_LIMIT))
     for kind, f, why in seen:
         print("check_record_slugs: FAIL: %s %s: %s" % (kind, why, f))
     for f, how in feel:
         print("check_record_slugs: FAIL: feel-fix debt %s with no device check: %s"
               % ("deleted" if how == "deleted" else "lost its Feel line", f))
-    return 1 if bad or bad_form or new_lines or seen or feel or sections else 0
+    return 1 if bad or bad_form or new_lines or seen or feel or sections or prose else 0
 
 
 if __name__ == "__main__":
