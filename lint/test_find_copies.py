@@ -24,6 +24,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _test_temp  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+import tree_export  # noqa: E402  the name an export writes its manifest under (hooks/tree_export.py, MANIFEST)
 MODULE = os.environ.get("FIND_COPIES_UNDER_TEST") or os.path.join(HERE, "find_copies.py")
 RUN_FOLDER = _test_temp.run_folder()  # test-temp-standard (one run folder per test run)
 
@@ -510,6 +512,17 @@ class FindCopiesTest(unittest.TestCase):
         proc = run(self.parent, os.path.join(self.tmp.name, "nowhere"))
         self.assertEqual(proc.returncode, 2)
         self.assertIn("unknown", proc.stdout + proc.stderr)
+
+    def test_a_child_holding_the_export_manifest_reads_the_same_as_one_without_it(self):
+        # A parent that is an exported copy holds the manifest too, as the default parent does when the checker runs from a copy.
+        manifest = "".join(f"lint/check_{i}.py\n" for i in range(20))
+        self.assertGreaterEqual(len(manifest.encode()), module_under_test().MIN_BYTES,
+                                "fixture: the manifest is under MIN_BYTES, so the checker skips it as boilerplate")
+        write(self.parent, tree_export.MANIFEST, manifest)
+        before = self.findings()
+        write(self.child, tree_export.MANIFEST, manifest)
+        after = self.findings()
+        self.assertEqual(after, before, "a child that holds the export manifest reads other than one without it: the manifest is reported")
 
     def own_template_run(self, text, *extra):
         # Scope first (P7): the fixture clears the floors, and the control shows the scan reached the child.
