@@ -515,6 +515,7 @@ def alarm_runs(rows, workflows, own):
 def gh_api(args):
     """The stdout of `gh api ARGS`, or None when gh fails."""
     try:
+        # nowindow: reached only by --judge, which alarm.sh (a bash step on a CI runner) calls; the action imports only the standard library and cannot load hooks/_nowindow.py
         done = subprocess.run(["gh", "api", *args], capture_output=True, text=True)
     except OSError:
         return None
