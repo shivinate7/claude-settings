@@ -240,6 +240,10 @@ if LINKS_MADE:
        cwd=TRAPLN)
     sh("ln: -sf over a link to a file replaces the link, as -f says",
        "ln -sf /opt/tool/other linkfile", "allow", cwd=TRAPLN)
+else:
+    skip_case("ln: -sf over a link to a directory descends into it", NO_LINK_HERE)
+    skip_case("ln: -sfn replaces a link to a directory", NO_LINK_HERE)
+    skip_case("ln: -sf over a link to a file replaces the link, as -f says", NO_LINK_HERE)
 sh("ln: a free name", "ln -s /opt/tool/x brand-new", "allow", cwd=TRAPLN)
 sh("ln: a trailing slash says the destination is a directory",
    "ln -s /opt/tool/x realdir/", "allow", cwd=TRAPLN)

@@ -1129,6 +1129,8 @@ UNDERTESTS = os.path.join(ROOT, "tests", "clone")   # a repo whose own folder si
 
 
 LINKS_MADE = False  # set by build_fixtures; True only where os.symlink works
+# The skip reason of every case that needs a symlink. Sections load in number order, and this one first.
+NO_LINK_HERE = "this host gives no symlink, so the link case does not run here"
 
 
 # Lazy fixtures. A block that runs git or builds a repo is a builder, run the first time a case

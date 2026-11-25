@@ -550,6 +550,7 @@ sh("rm-var: a quoted variable then a variable is refused",
 sh("rm-var: a variable then a trailing slash is refused",
    "rm -rf $S/", "deny", "rm-var-unguarded", cwd=NOGIT,
    carries=("literal path",), lacks=("${S:?}",))
+NO_GITBASH_DRIVE = "a Git Bash drive spelling (/c/...) is a Windows path form, so this case does not run here"
 # Windows only: a Git Bash drive spelling (/c/Users/<name>) names the real home, so the variable
 # is the home folder or the drive root and the remedy is the literal path, never ${S:?}.
 if os.name == "nt":
@@ -561,6 +562,9 @@ if os.name == "nt":
     sh("rm-var: a variable set to the drive root in Git Bash spelling names a literal path",
        "S=/%s; rm -rf $S/" % _home[0].lower(), "deny", "rm-var-unguarded", cwd=NOGIT,
        carries=("literal path",), lacks=("${S:?}",))
+else:
+    skip_case("rm-var: a variable set to the home folder in Git Bash spelling names a literal path", NO_GITBASH_DRIVE)
+    skip_case("rm-var: a variable set to the drive root in Git Bash spelling names a literal path", NO_GITBASH_DRIVE)
 # Not refused (ruling item 1): a literal follows the slash, so Claude Code does not prompt.
 sh("rm-var: a quoted $ROOT with a literal dist is not refused",
    'rm -rf "$ROOT/dist"', "allow", cwd=NOGIT)
@@ -836,6 +840,7 @@ sh("rm-var: a prefix assignment before the rm names a literal path, not ${OLDPWD
 sh("rm-var: a binding after the rm names a literal path, not ${OLDPWD:?}",
    "rm -rf $OLDPWD/; OLDPWD=/tmp", "deny", "rm-var-unguarded", cwd=NOGIT,
    carries=("literal path",), lacks=("${OLDPWD:?}",))
+NO_MACOS_FOLD = "the home folder is case-folded only on macOS, so this spelling names it only there"
 # macOS only: the home folder's file system is case-folded, so an upper or lower spelling of it
 # is the home folder and must name a literal path. The case is not registered elsewhere.
 if sys.platform == "darwin":
@@ -845,6 +850,9 @@ if sys.platform == "darwin":
     sh("rm-var: the home path lower-cased in a variable names a literal path on macOS",
        "D=%s; rm -rf $D/" % HOME.lower(), "deny", "rm-var-unguarded", cwd=NOGIT,
        carries=("literal path",), lacks=("${D:?}", HOME))
+else:
+    skip_case("rm-var: the home path upper-cased in a variable names a literal path on macOS", NO_MACOS_FOLD)
+    skip_case("rm-var: the home path lower-cased in a variable names a literal path on macOS", NO_MACOS_FOLD)
 # The cwd spelled through a symlink is the cwd, so it names a literal path. Registered only where
 # the fixture can build the link (no symlink privilege means no case, and the report says so).
 CWDLINK = os.path.join(ROOT, "nogit-link")
@@ -856,6 +864,8 @@ if CWDLINK:
     sh("rm-var: the cwd spelled through a symlink names a literal path, not ${D:?}",
        "D=%s; rm -rf $D/" % CWDLINK, "deny", "rm-var-unguarded", cwd=NOGIT,
        carries=("literal path",), lacks=("${D:?}", CWDLINK))
+else:
+    skip_case("rm-var: the cwd spelled through a symlink names a literal path, not ${D:?}", NO_LINK_HERE)
 # Ruling item 1 (decision rm-on-a-variable-needs-a-guard): a binding written AFTER a wrapper
 # still comes before no rm in the wrapper's own text, so the name must get the literal-path reason,
 # never ${NAME:?}.

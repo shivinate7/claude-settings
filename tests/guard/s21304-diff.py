@@ -124,6 +124,9 @@ COMMIT, PUSH = VCS + " commit -m x", VCS + " push origin work"
 BDIFF = "builder-diff"
 for _name, _change in BUILDER_RED:
     if getattr(_change, "needs_link", False) and not LINKS_MADE:
+        skip_case("builder-diff: commit with a %s change is denied" % _name, NO_LINK_HERE)
+        skip_case("builder-diff: push with a %s change is denied" % _name, NO_LINK_HERE)
+        skip_case("builder-diff: stop with a %s change is blocked" % _name, NO_LINK_HERE)
         continue
     _repo = diff_repo("b-" + _name, _change)
     sh("builder-diff: commit with a %s change is denied" % _name, COMMIT, "deny", rule=BDIFF,
@@ -616,6 +619,8 @@ LOG_FAMILY[FETCH_NO_RETRY_LABEL] = "octopus-push"
 FIXTURELESS_CHECKS.add(octopus_fetch_no_retry_case)
 for _name, _change in BUILDER_GREEN:
     if getattr(_change, "needs_link", False) and not LINKS_MADE:
+        skip_case("builder-diff: commit with %s is allowed" % _name, NO_LINK_HERE)
+        skip_case("builder-diff: stop with %s is allowed" % _name, NO_LINK_HERE)
         continue
     _repo = diff_repo("g-" + _name, _change)
     sh("builder-diff: commit with %s is allowed" % _name, COMMIT, "allow", cwd=_repo,

@@ -218,6 +218,15 @@ if LINKS_MADE:
        VCS + " worktree remove " + slash(WTCTRLFILE), "deny", "shared-tree", cwd=LINKMAIN)
     sh("worktree remove: a link next to a tracked change still denies",
        VCS + " worktree remove " + slash(WTCTRLTRACKED), "deny", "shared-tree", cwd=LINKMAIN)
+else:
+    for _link_case in (
+            "worktree remove: a detached tree whose only untracked entry links outside it passes",
+            "worktree remove: the same link-only tree passes with the force flag",
+            "worktree remove: a detached tree whose only untracked entry links to a file inside it passes",
+            "worktree remove: the same in-tree link passes with the force flag",
+            "worktree remove: a link next to an untracked real file still denies",
+            "worktree remove: a link next to a tracked change still denies"):
+        skip_case(_link_case, NO_LINK_HERE)
 sh("worktree remove: a real untracked node_modules directory holding a file still denies",
    VCS + " worktree remove " + slash(WTCTRLDIR), "deny", "shared-tree", cwd=LINKMAIN)
 if LINKS_MADE:
@@ -225,6 +234,8 @@ if LINKS_MADE:
     # directory is the work and it denies.
     sh("worktree remove: a link inside an untracked real directory still denies",
        VCS + " worktree remove " + slash(WTCTRLNESTED), "deny", "shared-tree", cwd=LINKMAIN)
+else:
+    skip_case("worktree remove: a link inside an untracked real directory still denies", NO_LINK_HERE)
 
 
 # --------------------------------------------------------------------------- git_reads.branch_is_ancestor in a shallow clone
