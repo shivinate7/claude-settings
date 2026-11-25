@@ -10,7 +10,7 @@
 # Exit 0 is also FAIL (`cut`) for a pytest argv (`pytest`, `py.test`, `python -m pytest`, also through `env`, `uv run`, `uvx` and `bash -c`) with `-q` or a line-start session header, and no line-start summary: the run stopped early. A `-qq` run (no summary line) is complete when a line of progress chars ends `[100%]` (any padding, colour codes ignored), or, with `--co`, when it prints a `<file>: <count>` line. A `bash -c` script is read by its own scanner: a newline, `;`, `&`, `|` or `do`/`then`/`else`/`{`/`!` starts a command, a `#` starts a comment only at a word start, and heredoc text is no command.
 # A run with no $VERDICT_LOG deletes verdict-*.log files older than 1 day from the temp folder: regular files whose first line is our own header only; errors skipped.
 # $VERDICT_HANG_SECONDS=N (off when unset, and on Windows): a child with no new output byte and no CPU advance in any process under it for N s is stopped (where reaped children's CPU cannot be read, as on macOS, a process not seen at the first silent wake also counts as work, since a step that works through short children shows only as new pids): print its process tree and the log tail, end the tree (TERM, then KILL), print one `HANG ...` line, exit 124. It reads the process table (hooks/_nowindow.py) only on a silent wake, never while the child prints (decision hang-stop).
-# A PASS or SKIP also prints, after its line, each output line that starts with a READY_PASS_KEPT prefix, word for word, and no other log line: the merge guard reads the merge tool's ready-pass line from the transcript (hooks/guard_merge.py _ready_pass_shas). A FAIL and a HANG print as before.
+# A PASS, SKIP or FAIL also prints, after its line, each output line that starts with a READY_PASS_KEPT prefix, word for word, and no other log line: the merge guard reads the merge tool's ready-pass line from the transcript (hooks/guard_merge.py _ready_pass_shas), and a run that prints it can still exit 1. A FAIL with $VERDICT_FULL_LOG=1 prints the whole log, which holds those lines. A HANG prints as before.
 # Killed by signal N: exit 128+N. Ctrl-C: exit 130. Windows: bin/verdict.cmd.
 import codecs, os, re, shutil, signal, subprocess, sys, tempfile, time
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "hooks"))
@@ -23,6 +23,9 @@ CASE_NAME = re.compile(r"(?:\x1b\[[0-9;]*m)*(?:FAIL|FAILED|ERROR)\b")  # a line 
 READY_PASS_KEPT = ("merge: the ready checks (",)  # the fixed prefix of merge/merge.py READY_PASS_FMT and READY_PASS_SKIPPED_FMT; lint/test_verdict.py checks it against both
 READY_LINE = re.compile(rb"^(?:" + b"|".join(re.escape(k.encode()) for k in READY_PASS_KEPT) + rb")[^\n]*", re.M)
 CHUNK, OVERLAP = 1 << 20, 256  # OVERLAP > longest marker
+KEPT_B = tuple(k.encode() for k in READY_PASS_KEPT)
+KEPT_CARRY = 64 << 10  # a kept line longer than this is dropped, so a log with no newline is never held whole
+def kept_start(tail): return any(k.startswith(tail) or tail.startswith(k) for k in KEPT_B)  # could this unfinished line still turn out to be a kept line?
 KEEP = 86400
 HEADER = b"=== verdict run "
 EXEC = re.compile(r"Executed (\d+) tests?|Test run with (\d+) tests?\b.{0,100}?\bpassed after")  # XCTest summary, Swift Testing summary
@@ -299,6 +302,7 @@ def main(argv):
     if rc < 0: note, rc = f" killed by signal {-rc}", 128 - rc
     fail = zero = ran = marked = started = summed = done = False; lines = []
     ready = {}  # absolute byte offset of a kept line -> the line
+    carry, carry_at, skip, scanned = b"", start, False, start  # the unfinished last line of the bytes scanned so far and where it starts; skip: the rest of a dropped line; scanned: the first byte not yet read for kept lines
     summaries, xct, marks, ut = {}, {}, {}, {}  # absolute byte offset of a match -> its count; a match in the chunk overlap is read twice, counted once
     try:
         with open(log, "rb") as f:
@@ -318,8 +322,17 @@ def main(argv):
                         else: summaries[pos + m.start()] = count(m.group(2) or m.group(3) or m.group(4))
                 for m in SKIP_LINE.finditer(raw):
                     if pos == start or m.start(): marks[pos + m.start()] = 1
-                for m in READY_LINE.finditer(raw):
-                    if pos == start or m.start(): ready[pos + m.start()] = m.group().decode("utf-8", errors="replace").rstrip("\r")  # a later chunk overwrites a line cut at its edge
+                # Kept lines are read line by line over the bytes this chunk adds (it re-reads OVERLAP bytes), so a line that crosses a chunk edge is read whole from the carry.
+                data, base = carry + raw[scanned - pos:], carry_at if carry else scanned
+                scanned, carry = pos + len(raw), b""
+                if skip:
+                    nl = data.find(b"\n")
+                    data, base, skip = (data[nl + 1:], base + nl + 1, False) if nl >= 0 else (b"", base, True)
+                cut = data.rfind(b"\n") + 1
+                for m in READY_LINE.finditer(data, 0, cut): ready[base + m.start()] = m.group().decode("utf-8", errors="replace").rstrip("\r")
+                if cut < len(data):
+                    if len(data) - cut <= KEPT_CARRY and kept_start(data[cut:]): carry, carry_at = data[cut:], base + cut
+                    else: skip = True
                 started = started or any(pos == start or m.start() for m in PY_START.finditer(raw))  # a later chunk's index 0 may be mid-line
                 summed = summed or any(pos == start or m.start() for m in PY_SUMMARY.finditer(raw))
                 done = done or (qlevel > 1 and (seen(PY_DONE, raw, pos, start) or (collect and seen(PY_COUNTS, raw, pos, start))))
@@ -329,6 +342,7 @@ def main(argv):
                 for m in UT_RAN.finditer(raw):  # a later chunk's index 0 may be mid-line; the previous chunk holds that line whole. A later chunk overwrites a match cut at its edge
                     if pos == start or m.start(): ut[pos + m.start()] = (m[1] != b"0", m[2] is not None and not UT_SKIPS.search(m[3]))
                 pos += CHUNK - OVERLAP if pos + CHUNK < end else CHUNK
+            if carry and READY_LINE.match(carry): ready[carry_at] = carry.decode("utf-8", errors="replace").rstrip("\r")  # the run's last line, with no newline
             f.seek(max(start, end - TAIL))
             lines = rd(end - f.tell()).decode("utf-8", errors="replace").splitlines()
     except (OSError, ValueError):
@@ -349,6 +363,9 @@ def main(argv):
     if full_log():
         print_log(log, first, end)
         return rc
+    kept = [ready[k] for k in sorted(ready)]
+    for l in kept: print(l)
+    lines = [l for l in lines if l.rstrip("\r") not in kept]  # a kept line the excerpt tail holds prints once
     hot = [i for i, l in enumerate(lines) if HOT.search(l)]
     keep = set((hot or range(len(lines)))[-CAP:])
     names = [i for i, l in enumerate(lines) if i not in keep and CASE_NAME.match(l)][-NAMES:]  # a failing case's name line stays even when a long run's hot lines push it out of the last CAP
