@@ -61,6 +61,16 @@ LOG_CHECKS = (
      worktree_live_session_two_spellings_case),
     ("liveness: worktree_live_session answers None when the identity fallback can't tell",
      worktree_live_session_path_unresolvable_case),
+    ("liveness: worktree_live_session answers False for a live record whose folder was removed, with the opt-in",
+     worktree_live_session_absent_folder_case),
+    ("liveness: worktree_live_session answers False for a record whose cwd sits under a removed folder, "
+     "with the opt-in", worktree_live_session_removed_parent_case),
+    ("liveness: worktree_live_session answers None for permission denied on a record's cwd, with or "
+     "without the opt-in", worktree_live_session_permission_denied_case),
+    ("liveness: worktree_live_session answers None for an absent target, with the opt-in",
+     worktree_live_session_absent_target_case),
+    ("liveness: worktree_live_session answers None for a removed record folder without the opt-in",
+     worktree_live_session_removed_folder_default_case),
     ("liveness: session_is_live reads an implied backwards clock step as unreadable, not dead",
      session_is_live_backwards_clock_step_case),
     ("worktree-home: orchestrator, no-record, home, outside-home, edit, read, removed-home, "

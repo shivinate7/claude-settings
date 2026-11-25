@@ -78,6 +78,41 @@ sh("worktree remove: a session record for a pid that is no longer running does n
    VCS + " worktree remove " + slash(WTDEADSESSION), "allow", cwd=WTMAIN, config=WTDEADCFG)
 sh("worktree remove: a live pid whose recorded start time does not match does not deny",
    VCS + " worktree remove " + slash(WTSTALESTART), "allow", cwd=WTMAIN, config=WTSTALESTARTCFG)
+# A RECORD WHOSE FOLDER IS GONE. WTSTALECFG's one record names this runner's live pid, but its cwd was removed:
+# the record stands in no tree, so a clean, unlocked tree passes (owner, 20:53 CST 11-24, 2026). An unforced
+# remove of an unread subject is allowed silently on the old code too, so the decision alone cannot tell the
+# two apart. The forced form is the one that can: the old code notes it as unconfirmed, the new code does not.
+sh("worktree remove: a clean tree passes when a session record's folder is gone",
+   VCS + " worktree remove " + slash(WTCLEAN), "allow", cwd=WTMAIN, config=WTSTALECFG)
+
+
+def stale_record_forced_remove_quiet_case():
+    """A forced `git worktree remove` of a clean, unlocked tree, with a record whose folder is gone in the config
+    folder, is allowed silently and writes no `subject-unread` note. Its subject is read and empty, so nothing is
+    unconfirmed. On the old code the record reads as unreadable and the forced remove is noted as unconfirmed."""
+    log = os.path.join(WTSTALECFG, "guard.log")
+    if os.path.exists(log):
+        os.remove(log)
+    env = dict(os.environ)
+    env.pop("CLAUDE_CODE_REMOTE", None)
+    env.pop("CLAUDE_CODE_SESSION_ID", None)
+    env["CLAUDE_CONFIG_DIR"] = WTSTALECFG
+    payload = {"tool_name": "Bash", "tool_input": {"command": VCS + " worktree remove --force " + slash(WTCLEAN)},
+               "cwd": WTMAIN}
+    try:
+        result = subprocess.run([sys.executable, GUARD], input=json.dumps(payload), capture_output=True,
+                                text=True, env=env, timeout=60)
+        if result.returncode != 0:
+            return False, "guard exited %d" % result.returncode
+        if result.stdout.strip():
+            return False, "expected a silent allow, got %r" % result.stdout.strip()[:120]
+        text = open(log, encoding="utf-8").read() if os.path.exists(log) else ""
+    finally:
+        if os.path.exists(log):
+            os.remove(log)
+    if "subject-unread" in text:
+        return False, "a forced remove of a clean tree was noted as unconfirmed: %r" % text.strip()[:160]
+    return True, "a forced remove of a clean tree is allowed with no unconfirmed note"
 
 # BASE COPIES. Each case is a tree in the state built by _build_base_copies. Case 1 is the incident: its
 # staged files are the base copy, an ancestor of HEAD, and nothing else is wrong, so it passes. Cases 2 to 5

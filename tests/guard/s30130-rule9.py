@@ -1092,6 +1092,152 @@ def worktree_live_session_path_unresolvable_case():
     return (not problems), "; ".join(problems) if problems else "unresolvable identity propagates as None"
 
 
+# ------------------------------------------------------------ a session record whose folder is gone
+#
+# A removal verdict opts in with `worktree_live_session(target, absent_is_out=True)`: a record whose cwd
+# the disk no longer holds stands in no tree (owner, 20:53 CST 11-24, 2026). Without the opt-in the answer
+# is unchanged. `_stale_answer` calls the opt-in and, on code that has no such keyword, reads the default
+# answer instead, so a missing opt-in reads as the verdict it gets, never as a TypeError.
+
+def _made_folder(name):
+    """A folder under this run's ROOT, made when it is not there yet."""
+    path = os.path.join(ROOT, name)
+    os.makedirs(path, exist_ok=True)
+    return path
+
+
+def _removed_folder(name):
+    """A folder made under this run's ROOT and then removed: a session record's folder that is gone."""
+    path = _made_folder(name)
+    shutil.rmtree(path)
+    return path
+
+
+def _stale_answer(guard, target):
+    """-> (answer, accepted). `worktree_live_session(target, absent_is_out=True)`; on code without the
+    keyword, the default answer with accepted False. Only a TypeError that names the keyword is caught."""
+    try:
+        return guard.worktree_live_session(target, absent_is_out=True), True
+    except TypeError as error:
+        if "absent_is_out" not in str(error):
+            raise
+        return guard.worktree_live_session(target), False
+
+
+def _opt_in_note(accepted):
+    return "" if accepted else " (absent_is_out is not accepted on this code)"
+
+
+def worktree_live_session_absent_folder_case():
+    """With the opt-in, a live session whose folder was made and then removed stands in no tree, so the
+    answer is False, never None. Scope first: the record's folder is absent and the target is a folder,
+    so only the record can decide the answer."""
+    guard = _load_guard_module()
+    gone = _removed_folder("stale-live-gone")
+    tree = _made_folder("stale-live-tree")
+    try:
+        if os.path.exists(gone) or not os.path.isdir(tree):
+            return False, "fixture: the record's folder must be absent and the target a folder"
+        sys.modules["git_reads"].session_records = lambda: [{"pid": 1, "startedAt": 1, "cwd": gone}]
+        sys.modules["git_reads"].session_is_live = lambda record: True
+        got, accepted = _stale_answer(guard, tree)
+    finally:
+        shutil.rmtree(tree, ignore_errors=True)
+    if got is not False:
+        return False, ("a live record whose folder was removed reads as %r, not False: the removed "
+                       "folder is taken as unreadable%s" % (got, _opt_in_note(accepted)))
+    return True, "a live record whose folder was removed stands in no tree"
+
+
+def worktree_live_session_removed_parent_case():
+    """With the opt-in, a record whose cwd sits under a removed folder (`<removed>/a/b`) stands in no
+    tree, so the answer is False. Scope first: the cwd and its parent are absent, the target a folder."""
+    guard = _load_guard_module()
+    gone = _removed_folder("stale-parent-gone")
+    cwd = os.path.join(gone, "a", "b")
+    tree = _made_folder("stale-parent-tree")
+    try:
+        if os.path.exists(gone) or not os.path.isdir(tree):
+            return False, "fixture: the record's parent must be absent and the target a folder"
+        sys.modules["git_reads"].session_records = lambda: [{"pid": 1, "startedAt": 1, "cwd": cwd}]
+        sys.modules["git_reads"].session_is_live = lambda record: True
+        got, accepted = _stale_answer(guard, tree)
+    finally:
+        shutil.rmtree(tree, ignore_errors=True)
+    if got is not False:
+        return False, ("a record under a removed folder reads as %r, not False: the removed folder is "
+                       "taken as unreadable%s" % (got, _opt_in_note(accepted)))
+    return True, "a record under a removed folder stands in no tree"
+
+
+def worktree_live_session_permission_denied_case():
+    """A record whose cwd sits below a folder this user cannot search: the read cannot tell, so the
+    answer is None with or without the opt-in. A PermissionError is never read as a removed folder."""
+    if os.name == "nt" or not hasattr(os, "geteuid"):
+        return SKIP, "a mode-000 folder is a POSIX permission check"
+    if os.geteuid() == 0:
+        return SKIP, "root searches a mode-000 folder, so no permission error can be read"
+    guard = _load_guard_module()
+    locked = _made_folder("stale-denied-parent")
+    cwd = os.path.join(locked, "wt")
+    tree = _made_folder("stale-denied-tree")
+    try:
+        os.makedirs(cwd, exist_ok=True)
+        os.chmod(locked, 0o000)
+        try:
+            os.stat(cwd)
+        except PermissionError:
+            pass
+        else:
+            return SKIP, "this filesystem does not deny a stat below a mode-000 folder"
+        sys.modules["git_reads"].session_records = lambda: [{"pid": 1, "startedAt": 1, "cwd": cwd}]
+        sys.modules["git_reads"].session_is_live = lambda record: True
+        got, accepted = _stale_answer(guard, tree)
+    finally:
+        os.chmod(locked, 0o755)
+        shutil.rmtree(locked, ignore_errors=True)
+        shutil.rmtree(tree, ignore_errors=True)
+    if got is not None:
+        return False, ("a record under a folder this user cannot search reads as %r, not None%s"
+                       % (got, _opt_in_note(accepted)))
+    return True, "a record under a folder this user cannot search stays unreadable (None)"
+
+
+def worktree_live_session_absent_target_case():
+    """A target that is itself gone stays None with the opt-in: no record can match a folder that is not
+    there. The record's own cwd is a folder that exists and sits outside the target."""
+    guard = _load_guard_module()
+    target = os.path.join(ROOT, "stale-absent-target")
+    cwd = _made_folder("stale-absent-cwd")
+    try:
+        if os.path.exists(target):
+            return False, "fixture: the target must be absent"
+        sys.modules["git_reads"].session_records = lambda: [{"pid": 1, "startedAt": 1, "cwd": cwd}]
+        sys.modules["git_reads"].session_is_live = lambda record: True
+        got, accepted = _stale_answer(guard, target)
+    finally:
+        shutil.rmtree(cwd, ignore_errors=True)
+    if got is not None:
+        return False, "an absent target reads as %r, not None%s" % (got, _opt_in_note(accepted))
+    return True, "an absent target stays unreadable (None) with the opt-in"
+
+
+def worktree_live_session_removed_folder_default_case():
+    """Without the opt-in, a record whose folder is gone still answers None: the default is unchanged."""
+    guard = _load_guard_module()
+    gone = _removed_folder("stale-default-gone")
+    tree = _made_folder("stale-default-tree")
+    try:
+        sys.modules["git_reads"].session_records = lambda: [{"pid": 1, "startedAt": 1, "cwd": gone}]
+        sys.modules["git_reads"].session_is_live = lambda record: True
+        got = guard.worktree_live_session(tree)
+    finally:
+        shutil.rmtree(tree, ignore_errors=True)
+    if got is not None:
+        return False, "without the opt-in a removed record folder reads as %r, not None" % (got,)
+    return True, "without the opt-in a removed record folder still reads None"
+
+
 def session_is_live_backwards_clock_step_case():
     """A backwards clock step landing between the two ORIGINAL measurements (the kernel's own
     process-creation FILETIME, fixed forever once recorded, and the record's `startedAt`,

@@ -13,6 +13,10 @@ for _label, _check in (
         ("branch delete, shallow clone: the on-remote proof allows", git_reads_branch_on_remote_shallow_case)):
     FIXTURELESS_CHECKS.add(_check)
     LOG_CHECKS_EXTRA.append((_label, _check))
+# The forced-remove check of the stale-record case in section 3975 reads the fixture WTSTALECFG (built in section 442),
+# so it stays out of FIXTURELESS_CHECKS and runs with the fixture build.
+LOG_CHECKS_EXTRA.append(("log: a forced remove of a clean tree, with a removed record folder, is allowed and not noted",
+                         stale_record_forced_remove_quiet_case))
 
 
 # --------------------------------------------------------------------------- a port question departs or is not asked

@@ -458,6 +458,7 @@ WTPRUNESTALE = os.path.join(ROOT, "wtprunestale")
 WTLIVECFG = os.path.join(ROOT, "wtlivecfg")
 WTDEADCFG = os.path.join(ROOT, "wtdeadcfg")
 WTSTALESTARTCFG = os.path.join(ROOT, "wtstalestartcfg")
+WTSTALECFG = os.path.join(ROOT, "wtstalecfg")  # a record whose cwd folder was removed: it stands in no tree
 
 # BASE COPIES (the base-copies incident, Nov 1 22:41 CST). A worktree whose staged files are byte-equal to
 # its branch base, with no unpushed commit, must remove. BCINC is that state: its branch moved onto P1 with
@@ -2539,6 +2540,19 @@ def _build_worktrees():
         }),
     )
 
+    # A RECORD WHOSE FOLDER IS GONE: this runner's own live pid, with a cwd that was made and then removed.
+    # Such a record stands in no tree (owner, 20:53 CST 11-24, 2026), so WTCLEAN passes past it.
+    stale_gone = os.path.join(ROOT, "wtstale-gone")
+    os.makedirs(stale_gone)
+    shutil.rmtree(stale_gone)
+    os.makedirs(os.path.join(WTSTALECFG, "sessions"), exist_ok=True)
+    write(
+        os.path.join(WTSTALECFG, "sessions", "%d.json" % self_pid),
+        json.dumps({
+            "pid": self_pid, "cwd": slash(os.path.join(stale_gone, "wt")), "startedAt": self_start_ms,
+        }),
+    )
+
     # WTPRUNE is its own repository, so pruning it can never touch WTMAIN's own worktrees.
     # WTPRUNESTALE is added and then its directory is removed out from under git, the same shape
     # `is_worktree`'s own comment measures elsewhere in this file: a stale administrative record
@@ -2796,7 +2810,7 @@ lazy_fixture([PUSHFEAT, PUSHMAIN, PUSHTRUNK, PUSHTRUNKLOCAL, PUSHNOHEAD, PUSHDET
               PUSHALLNOAGENT, PUSHALLAGENT, PUSHALLAGENTWT, PUSHALLAGENTCLAUDE, PUSHALLAGENTAHEAD, PUSHALLBROKEN],
              _build_push)
 lazy_fixture([WTMAIN, WTCLEAN, WTDIRTY, WTLOCKED, WTLIVE, WTDEADSESSION, WTSTALESTART, WTPRUNE,
-              WTPRUNESTALE, WTLIVECFG, WTDEADCFG, WTSTALESTARTCFG], _build_worktrees)
+              WTPRUNESTALE, WTLIVECFG, WTDEADCFG, WTSTALESTARTCFG, WTSTALECFG], _build_worktrees)
 lazy_fixture([LINKMAIN, LINKOUT, WTLINKDIR, WTLINKFILE, WTCTRLFILE, WTCTRLTRACKED, WTCTRLDIR,
               WTCTRLNESTED], _build_links)
 
