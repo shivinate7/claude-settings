@@ -25,12 +25,14 @@ The hook prints these lines, in this order. A line marked every type goes to eve
 - (writing types only) End each commit message with: Co-Authored-By: <model> <noreply@anthropic.com>
 - (writing types only) Name no record path in a commit message. The only exception is the Drops-lines: trailer.
 - (writing types only) Before each commit, run git diff --cached --stat; if it names a file you did not change this round, commit nothing and report it (decision `lanes-start-in-tool-worktrees`: lanes start only in the tool's own worktrees).
+- (writing types only) Commit test evidence (a test-result bundle, a kept red run) in your worktree. Never leave it untracked there.
 - (writing types only) Before you end, stop each server you started, by the $! from the same call or through the harness.
 - (every type, when this repo's layout reads) First note rule: a new or edited note is its own file, the note folder then <slug>.md, one line `- <slug>: <text>`. The slug is the file name, within the length MAX in lint/check_record_slugs.py sets, and not digits only. Second note rule: the old notes file takes deletes only: add no line to it and edit none.
 - (every type, when .github/stamp.json sets cite.form) Cite a record in this repo's form, one form per record kind, joined by commas. Any other wrapper around a slug stays dead text.
 
+- The commit-evidence line: asked whether untracked evidence in an agent worktree (test-result bundles) is saved outside the worktree or committed, the owner said at 14:12 CST 2026-11-23: "Commit it". Lane pick the owner may reverse: every agent that can write gets the line, a read-only agent does not.
 - The type is the text after the last `:`, so `my-plugin:reviewer` counts as `reviewer`. The builder scope line says `A mutant goes to a test-author.` Owner ruling, 2026-11-08 17:19 CST (waiting-page item 447 a): mutants are test content.
-- Readers (the six read-only types above) get the six every-type lines, plus the note and cite lines when they apply. They never commit or push, so they get no push, trailer, record-path, diff or server line. Writers and the general case get all eleven fixed lines, plus the note and cite lines when they apply.
+- Readers (the six read-only types above) get the six every-type lines, plus the note and cite lines when they apply. They never commit or push, so they get no push, trailer, record-path, diff or server line. Writers and the general case get all twelve fixed lines, plus the note and cite lines when they apply.
 - The hook is advisory. On an internal error it prints no context, writes one `agent_brief:` line to stderr, and exits 0. When the shared-tree module (`guard_shared_tree`) cannot be imported, the hook prints every other standing line and no reset line.
 
 Why: a brief that forgot one line let an agent stash, or push in the wrong form. `additionalContext` on SubagentStart lands in the agent's context before its first prompt.
