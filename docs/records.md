@@ -331,6 +331,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `workflow-args-shape-check` | The guard refuses a `Workflow` call whose `args` is a placeholder (rule `workflow-args-shape-check`). | [`docs/decisions/workflow-args-shape-check.md`](../docs/decisions/workflow-args-shape-check.md) |
 | `worktree-setup-is-per-repo` | Each repo sets up the untracked state (node_modules, venv, caches) of a worktree itself. | [`docs/decisions/worktree-setup-is-per-repo.md`](../docs/decisions/worktree-setup-is-per-repo.md) |
 | `wsl-allow-list` | The guard allows a WSL command only when every condition holds: | [`docs/decisions/wsl-allow-list.md`](../docs/decisions/wsl-allow-list.md) |
+| `zero-cases-fail` | A suite run directly must exit 1 when it runs no case. | [`docs/decisions/zero-cases-fail.md`](../docs/decisions/zero-cases-fail.md) |
 
 ## Build designs
 
