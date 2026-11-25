@@ -1161,6 +1161,10 @@ def records_since_report(records, text):
     return records[start:]
 
 
+# The words a wrong-name refusal carries; done_models_problem writes them and main() reads them.
+WRONG_NAME_MARK = " matches no "
+
+
 def done_models_problem(text, spawned, window=None):
     """Name what Done gets wrong about the spawned roles' models, else ''.
 
@@ -1184,7 +1188,7 @@ def done_models_problem(text, spawned, window=None):
     for role, model in sorted(named):
         ran = {m for m in (spawned if window is None else window).get(role, ()) if m}
         if ran and model not in ran:
-            return f"'{role} {model}' matches no {role} spawn, which ran " + ", ".join(sorted(ran))
+            return f"'{role} {model}'{WRONG_NAME_MARK}{role} spawn, which ran " + ", ".join(sorted(ran))
     return ""
 
 
@@ -3287,7 +3291,8 @@ def rewrite_problems(hook):
         if marker is None:
             return []
         with open(marker, encoding="utf-8") as f:
-            idx = int(f.read().strip())
+            idx, _, kind = f.read().strip().partition(" ")
+        idx = int(idx)
         os.remove(marker)
         path = hook.get("transcript_path")
         if not path or not os.path.exists(path):
@@ -3307,6 +3312,8 @@ def rewrite_problems(hook):
         spawned = spawn_models(records[idx + 1:])
         reasons = []
         models = done_models_problem(text, spawned, spawn_models(records_since_report(records, text)))
+        if kind == NAMES_MARKER:  # the correction of a wrong-name refusal: only the wrong name is judged again
+            return [MODELS_REASON % models] if WRONG_NAME_MARK in models else []
         if models:
             reasons.append(MODELS_REASON % models)
         if unstarted_problem(text, spawned):
@@ -3326,13 +3333,17 @@ def rewrite_problems(hook):
         return []
 
 
-def write_marker(hook, idx):
+# The marker's second word after a wrong-name refusal; a missing-report marker holds the index alone.
+NAMES_MARKER = "names"
+
+
+def write_marker(hook, idx, kind=""):
     try:
         marker = _marker_path(hook)
         if marker is not None:
             os.makedirs(os.path.dirname(marker), exist_ok=True)
             with open(marker, "w", encoding="utf-8") as f:
-                f.write(str(idx))
+                f.write(("%s %s" % (idx, kind)).strip())
     except Exception:
         pass
 
@@ -3920,10 +3931,13 @@ def main():
         reasons.append(refusal)
     if reasons:
         reason = " ".join(reasons) + " (rule reports-order-of-labels)"
-        # A model refusal leaves the same marker as a missing report: the harness's feedback record then counts as the
-        # last human message, so only the marker lets the correction's rewrite read this turn's spawns.
-        if not shape_ok or models:
+        # A wrong-name refusal leaves the same marker as a missing report: the harness's feedback record then counts as
+        # the last human message, so only the marker lets the correction's rewrite read this turn's spawns. A
+        # "no model named" refusal leaves none, as on main. Its correction is judged for the wrong name alone.
+        if not shape_ok:
             write_marker(hook, last_human_idx)
+        elif WRONG_NAME_MARK in models:
+            write_marker(hook, last_human_idx, NAMES_MARKER)
         finish({"decision": "block", "reason": reason}, missing_report=not shape_ok)
     else:
         finish({"systemMessage": note} if note else None)
