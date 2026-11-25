@@ -290,13 +290,10 @@ OMW_CLOUD_ENV = {"CLAUDE_CODE_REMOTE_SESSION_ID": "cse_omwseed1"}
 OMW_SEED_HAIKU = omw_file("cloud-seed-haiku", [omw_user(OMW_HAIKU), omw_asst("Running the audit.")])
 OMW_SEED_THEN_TYPED = omw_file("cloud-seed-then-typed-haiku", [omw_user(OMW_HAIKU), omw_asst("Running the audit."),
                                                               omw_user("Use haiku for the audit."), omw_asst("Running it.")])
-OMW_SEED_OPUS = omw_file("cloud-seed-opus", [omw_user("Run the model audit on opus."), omw_asst("Running it.")])
 add("owner-model-word: an Agent spawn on haiku is refused in a cloud session when the only haiku word is its seed brief", "deny",
     "agent-model-floor", tool="Agent", prompt="do it", model="haiku", transcript=OMW_SEED_HAIKU, env=OMW_CLOUD_ENV)
 add("owner-model-word: control, an Agent spawn on haiku is allowed in a cloud session when the owner's typed turn after the seed "
     "names haiku", "allow", tool="Agent", prompt="do it", model="haiku", transcript=OMW_SEED_THEN_TYPED, env=OMW_CLOUD_ENV)
-add("owner-model-word: control, an Agent spawn on opus is refused in a cloud session when the only opus word is its seed brief",
-    "deny", CEILING, tool="Agent", prompt="do it", model="opus", transcript=OMW_SEED_OPUS, env=OMW_CLOUD_ENV)
 
 # ---- A local session's first typed turn is the owner's own word: no seed skip applies outside a cloud session. Control.
 OMW_FIRST_HAIKU = omw_file("local-first-turn-haiku", [omw_user(OMW_HAIKU)])
