@@ -40,6 +40,11 @@ source allows, with one stderr line.
 
 Fail open. Any other model error, odd answer or unreadable input allows, with one stderr line.
 
+A third plain ask, model_ask(), reads the owner's choice of one model of MODEL_FAMILIES (decision agent-model-cap, the
+owner's model name). It tells a no from an error, because override.grant_model_ask keeps a held model on a no and ends it
+on an error. override.grant_model_ask calls it only for an owner prompt that names a model other than opus. Cost: one
+haiku call (low effort, OPUS_ASK_TIMEOUT s), none for any other prompt.
+
 Two exceptions, opus_ask() and override_ask(): the owner's plain asks (decision owner-override) fail CLOSED. Each
 grants an override, so a model error, a timeout or an odd answer grants nothing, with one stderr line. Both are thin
 wrappers on _ask_judge, which holds the one call, and differ only in their prompt head. override.grant_opus_ask calls

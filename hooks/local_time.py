@@ -375,9 +375,11 @@ def grant_override(raw, at):
     role named means every role (decision owner-override). A prompt neither grants goes last to
     override.grant_override_ask, the plain override ask (`yes override that`): one model call, only for an owner
     prompt that holds the whole word `override` outside code spans and passes its gates, none otherwise. It also gives
-    the result of a first-word `override` prompt that grant() deferred because its rest holds a length. At most one
-    judge call per prompt. Those calls are why the settings.json row has "timeout": 30. Any failure is one stderr
-    line, no override."""
+    the result of a first-word `override` prompt that grant() deferred because its rest holds a length. Between the two
+    sits override.grant_model_ask, the plain model ask (`use sonnet for the audit`): one model call, only for an owner
+    prompt that names a model other than opus. His end words (`no sonnet`, `sonnet off`) end a held model in grant()
+    with no call. At most one judge call per prompt. Those calls are why the settings.json row has "timeout": 30. Any
+    failure is one stderr line, no override."""
     try:
         hook = json.loads(raw.decode("utf-8"))
         import override

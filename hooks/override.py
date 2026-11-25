@@ -68,6 +68,16 @@ rule's settings-write ask, and it reaches agents.
       `opus-grant` line.
     - Two or more lengths, a decimal (`1.5h`) or a compound (`1h30m`): no grant. One length sets the time: `<n>m`, `<n>h`, or spelled: hour(s), hr(s),
       min(s), minute(s). None: DEFAULT_ASK_LENGTH.
+A held model (decision agent-model-cap, the owner's model name) is the same file with more keys: `model` (a family of
+MODEL_FAMILIES; a file with none holds Opus), `at`, `said` and, for an ask with no length of its own, `end` "report". A
+plain Opus ask writes it, and so does the model ask (grant_model_ask, call_judge.model_ask): a model word other than
+opus in an owner prompt, judged once. A hold with `end` "report" ends at the session's next report or at `until`
+(DEFAULT_ASK_LENGTH after it was set), whichever comes first; the one reader, model_override, tells that from the
+transcript, and the guard and the turn-end model line both call it. It lifts a spawn only on its own model, so a held
+sonnet lifts no Opus ceiling. A held model ends on a judge yes for another model (the file is replaced), on a judge
+error or timeout (the file is deleted), and on his end words `no <model>` and `<model> off` (no judge call). A judge no
+keeps it. Cost: a prompt that names no model makes no call and reads no file; one that names a model other than opus
+costs one tail read, one Haiku call and one file write or delete.
 A step grant also lifts that ask, and nothing else: the owner's grant that triage writes on the lane's
 roadmap step (decision agent-model-cap). take() reads it only on an Opus spawn refusal that no Opus override
 lifted, from the local ref origin/roadmap in the call's cwd, never fetched: one git grep for the lane id,
@@ -455,10 +465,11 @@ def latest_owner_text(transcript):
     return None
 
 
-def _records_backward(transcript):
+def _records_backward(transcript, only=None):
     """Each JSON record of the transcript at path `transcript`, last first, read in SEED_READ_MAX chunks from the end
     and only as far as the caller goes: the one backward reader (the owner's last turn, the report after a hold). A
-    missing or unreadable file, or no path, yields nothing."""
+    missing or unreadable file, or no path, yields nothing. `only` is a compiled bytes pattern: a line that does not
+    match it is skipped unparsed, so a caller that wants one kind of record pays no parse for the rest."""
     if not isinstance(transcript, str):  # no transcript_path in the payload; an int would open a descriptor
         return
     try:
@@ -471,6 +482,8 @@ def _records_backward(transcript):
                 # lines[0] may be a cut line: it joins the next chunk back
                 carry, body = (lines[0], lines[1:]) if start else (b"", lines)
                 for line in reversed(body):
+                    if only is not None and not only.search(line):
+                        continue
                     try:
                         yield json.loads(line)
                     except ValueError:
@@ -911,11 +924,12 @@ def _lower_roles(role):
 
 
 def _read_hold(path):
-    """The session's pass file at `path` as a dict {model, until, role, end, at, said}, None when it is absent, OPUS_UNREAD
-    when it cannot be read or has the wrong shape. `model` is the family it holds, Opus when the file has none (a keyword
-    grant writes none). `role` is None, one role or a list, lower case; the roles of an Opus file must be OPUS_ROLES,
-    those of another model's file any names (MODEL_ROLES: Explore too). `end` is None or HOLD_END_REPORT; `at` is None
-    when the file has none or none that reads."""
+    """The session's pass file at `path` as a dict {model, until, role, end, at, said, judged}, None when it is absent,
+    OPUS_UNREAD when it cannot be read or has the wrong shape. `model` is the family it holds, Opus when the file has none
+    (a keyword grant writes none); `judged` is true only when the file names its model, as a judged plain ask writes it.
+    `role` is None, one role or a list, lower case; the roles of an Opus file must be OPUS_ROLES, those of another
+    model's file any names (MODEL_ROLES: Explore too). `end` is None or HOLD_END_REPORT; `at` is None when the file has
+    none or none that reads."""
     try:
         with open(path, "rb") as handle:
             data = json.loads(handle.read().decode("utf-8"))
@@ -933,15 +947,18 @@ def _read_hold(path):
         return OPUS_UNREAD
     said = data.get("said")
     return {"model": model, "until": until, "role": _lower_roles(role), "end": data.get("end"),
-            "at": _parse_when(data.get("at")), "said": said if isinstance(said, str) else ""}
+            "at": _parse_when(data.get("at")), "said": said if isinstance(said, str) else "",
+            "judged": "model" in data}
 
 
 REPORT_BLOCK = re.compile(r"^\s*>", re.M)  # a report is a block of `>` lines, so a reply with none is no report
+ASSISTANT_LINE = re.compile(rb'"type":\s*"assistant"')  # the transcript lines that can hold a reply, found before any parse
 
 
 def _assistant_text(rec):
     """The text blocks of an assistant record joined by newlines, else ""."""
-    content = (rec.get("message") or {}).get("content") if isinstance(rec.get("message"), dict) else None
+    message = rec.get("message")
+    content = message.get("content") if isinstance(message, dict) else None
     if isinstance(content, list):
         return "\n".join(b["text"] for b in content if isinstance(b, dict) and isinstance(b.get("text"), str))
     return content if isinstance(content, str) else ""
@@ -964,7 +981,7 @@ def _report_since(at, transcript, records=None, report_ok=None):
     `records` the caller already holds, and stop at the first record stamped at or before `at`, so the cost is the
     replies since the hold. An agent's own record (isSidechain) is no report of the session. A read that cannot run, or
     a shape test that cannot load, finds no report: the hold stays until `until`."""
-    for rec in reversed(records) if records is not None else _records_backward(transcript):
+    for rec in reversed(records) if records is not None else _records_backward(transcript, ASSISTANT_LINE):
         if not isinstance(rec, dict):
             continue
         stamp = _parse_when(rec.get("timestamp"))
