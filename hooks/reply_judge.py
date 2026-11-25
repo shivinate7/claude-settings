@@ -58,7 +58,7 @@ import sys
 HERE = os.path.dirname(os.path.realpath(__file__))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
-from shared_names import GH_DEFAULT_LOGIN, GH_FALLBACK_LOGIN  # noqa: E402  stdlib only; the one home of the gh logins
+from shared_names import GH_DEFAULT_LOGIN, GH_FALLBACK_LOGIN, SETTINGS_REPO  # noqa: E402  stdlib only; the one home of the gh logins
 
 # The widening words come from question_form.WIDENS_TEXT, the one home. If the import fails, the prompt
 # keeps its sentence without the quoted words, one stderr line says so, and the hook still runs.
@@ -180,8 +180,9 @@ INSTRUCTIONS = (
     "style-question-form: flag a reply whose recommended option widens what a shared tool accepts, "
     "such as a second accepted form, an allow-list entry or a per-repo exception. "
     + WIDENS_LABEL_SENTENCE +
-    "Widening means a shared tool is made so that one repo's differing form passes. "
+    "Widening means a shared tool is made so that the differing form of a repo other than " + SETTINGS_REPO + " passes. "
     "Never flag a change to the shared tool that every repo gets alike, with no repo named as its reason. "
+    "Also never flag a change that names only " + SETTINGS_REPO + ", the tool's home, as where it applies. "
     "Never flag an option where the repo changes to match the shared format. "
     "Judge only options the reply offers the owner to pick; never flag a reply that describes the rule itself. "
     "verification-counts-from-rest: flag a reply that names a search's total, such as total_count or a search result total, "
