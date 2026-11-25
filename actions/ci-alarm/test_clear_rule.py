@@ -550,6 +550,51 @@ class RedMainJudge(unittest.TestCase):
                                           {3: [job_row("scope", "success")], 2: [job_row("scope", "success"), job_row("checks", "failure")]}),
                          ("red", [(2, ["checks"])]), "an empty green push run hides the older red push run")
 
+    # Superseded runs (decision test-strategy-reset, line 28, as rewritten by the replaced-runs lane). A push run cancelled before any job
+    # started is superseded when a newer run of its file and group is on the page, in any status. The judge steps over it, as it steps over
+    # an empty run. Shape assumed by these cases, unmeasured on GitHub: a replaced run has no job rows; a job that started has started_at.
+    def test_the_superseded_test_has_one_home_in_clear_rule(self):
+        """One home for "superseded": the judge, push-skip's base walk and `merge --main-run` all ask clear_rule.superseded_run. Red on origin/main: no home yet."""
+        self.assertTrue(callable(getattr(clear_rule, "superseded_run", None)),
+                        "clear_rule has no superseded_run: each reader still judges a cancelled run alone")
+
+    def test_fixed_a_cancelled_run_with_no_job_that_a_newer_run_replaced_passes_over_to_the_green_run_below(self):
+        page = [page_run(4, None, status="in_progress"), page_run(3, "cancelled"), page_run(2, "cancelled"), page_run(1, "success")]
+        jobs = {3: [], 2: [], 1: [job_row("scope", "success"), job_row("checks", "success")]}
+        self.assertEqual(self.judge_fixed(page, jobs), ("green", []),
+                         "a cancelled run with no job, replaced by a newer run of its group, is passed over: the green run below is the verdict")
+
+    def test_control_a_cancelled_run_with_no_job_and_no_newer_run_judges_unknown(self):
+        """Control, unknown on the old code: a cancel with no newer run is a human cancel, never superseded."""
+        jobs = {2: [], 1: [job_row("scope", "success"), job_row("checks", "success")]}
+        self.assertEqual(self.judge_fixed([page_run(2, "cancelled"), page_run(1, "success")], jobs), ("unknown", []),
+                         "a cancelled run with no newer run is judged unknown, not passed over")
+
+    def test_control_a_replaced_run_whose_replacement_is_a_cancel_with_no_job_is_not_proven(self):
+        """Control, unknown on the old code: the newest cancel has no newer run, so it stays unknown and the green run below proves nothing."""
+        jobs = {3: [], 2: [], 1: [job_row("scope", "success"), job_row("checks", "success")]}
+        self.assertEqual(self.judge_fixed([page_run(3, "cancelled"), page_run(2, "cancelled"), page_run(1, "success")], jobs), ("unknown", []),
+                         "a run replaced by a cancelled run that no run replaced is proven by the green run below it")
+
+    def test_control_a_cancel_after_a_job_started_stays_unknown_though_a_newer_run_is_in_flight(self):
+        """Control, unknown on the old code: a job that started makes the cancel a real cancel, not a replaced run."""
+        jobs = {3: [job_row("scope", "success"), job_row("checks", "cancelled", minutes=2)], 1: [job_row("scope", "success"), job_row("checks", "success")]}
+        self.assertEqual(self.judge_fixed([page_run(4, None, status="in_progress"), page_run(3, "cancelled"), page_run(1, "success")], jobs),
+                         ("unknown", []), "a cancelled run whose job started is passed over as if it were replaced")
+
+    def test_fixed_a_superseded_cancel_over_an_older_red_run_reads_red(self):
+        """Red on the old code: the newest run of a group is its verdict, so the cancel hides the red run below it. Once the cancel is passed over, the red run blocks main (decision no-merge-onto-red-main)."""
+        jobs = {3: [], 2: [job_row("scope", "success"), job_row("checks", "failure")], 1: [job_row("scope", "success"), job_row("checks", "success")]}
+        self.assertEqual(self.judge_fixed([page_run(4, None, status="in_progress"), page_run(3, "cancelled"), page_run(2, "failure"),
+                                           page_run(1, "success")], jobs),
+                         ("red", [(2, ["checks"])]), "a replaced run over a red run hides the red run")
+
+    def test_control_a_failed_jobs_read_of_a_superseded_candidate_is_unknown(self):
+        """Control, unknown on the old code: a read that fails stays unknown and refuses; it never becomes a skipped run."""
+        jobs = {1: [job_row("scope", "success"), job_row("checks", "success")]}  # run 3 has no entry, so its jobs read fails
+        self.assertEqual(self.judge_fixed([page_run(4, None, status="in_progress"), page_run(3, "cancelled"), page_run(1, "success")], jobs),
+                         ("unknown", []), "a failed jobs read of a cancelled run gives a green verdict below it")
+
     def test_control_the_scripted_host_reads_a_red_job_red_through_base_state(self):
         """Control, green on the old code: the cases above compare with base_state, so base_state must show a red job red on this host."""
         verdict, red = base_judgment([page_run(2, "failure")], {2: [job_row("checks", "failure")]})
