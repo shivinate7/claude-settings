@@ -60,75 +60,165 @@ if [ -n "$files" ]; then
   while IFS= read -r f; do
     case "$f" in
       # Fail safe: this script, green-head.sh (its line is GREEN_HEAD), the workflow, and git settings that change every checkout.
-      .github/scripts/ci-scope.sh|.github/scripts/green-head.sh|.github/workflows/checks.yml|.gitattributes) on="$on $ALL " ;;
+      .gitattributes|\
+      .github/scripts/ci-scope.sh|\
+      .github/scripts/green-head.sh|\
+      .github/workflows/checks.yml) on="$on $ALL " ;;
       # Guard and its installers' inputs: test_guard, the janitor suites and config_watch run guard.py.
       # guard_<family>.py modules are guard.py; guard_test_* is not (it falls to hooks/* below).
       hooks/guard_test_*) on="$on $R $Z $X code guard " ;;
-      hooks/guard.py|hooks/guard_*.py|hooks/shared_names.py|hooks/git_reads.py|hooks/question_form.py|hooks/own_session.py|hooks/precompact_handoff.py|hooks/merge_options.py|hooks/override.py|hooks/_nowindow.py|hooks/proc_env.py|hooks/reread_check.py|hooks/call_judge.py|hooks/decision_watch.py|hooks/feedback_guard.py|hooks/local_time.py|hooks/ruling_home.py|hooks/route_match.py|hooks/reply_judge.py|hooks/stall_watch.py|hooks/agent_brief.py|hooks/mail.py|hooks/ci_wait_cap.py|hooks/ci_wake.py|hooks/required_check.py|hooks/session_role.py|hooks/answered_claims.py|hooks/ci_wait_cap.json|hooks/route_rows.json|hooks/precompact_handoff_prompt.md|hooks/wait_common.py|hooks/mutate_shared.py) on="$on $W $R $Z $X code guard sweep " ;;
+      hooks/_nowindow.py|\
+      hooks/agent_brief.py|\
+      hooks/answered_claims.py|\
+      hooks/call_judge.py|\
+      hooks/ci_wait_cap.json|\
+      hooks/ci_wait_cap.py|\
+      hooks/ci_wake.py|\
+      hooks/decision_watch.py|\
+      hooks/feedback_guard.py|\
+      hooks/git_reads.py|\
+      hooks/guard.py|\
+      hooks/guard_*.py|\
+      hooks/local_time.py|\
+      hooks/mail.py|\
+      hooks/merge_options.py|\
+      hooks/mutate_shared.py|\
+      hooks/override.py|\
+      hooks/own_session.py|\
+      hooks/precompact_handoff.py|\
+      hooks/precompact_handoff_prompt.md|\
+      hooks/proc_env.py|\
+      hooks/question_form.py|\
+      hooks/reply_judge.py|\
+      hooks/required_check.py|\
+      hooks/reread_check.py|\
+      hooks/route_match.py|\
+      hooks/route_rows.json|\
+      hooks/ruling_home.py|\
+      hooks/session_role.py|\
+      hooks/shared_names.py|\
+      hooks/stall_watch.py|\
+      hooks/wait_common.py) on="$on $W $R $Z $X code guard sweep " ;;
       # settings.json: the same jobs, plus merge/test_merge.py (CloudAllow reads it).
       settings.json) on="$on $M $W $R $Z $X code guard sweep " ;;
       landed-dirs.txt) on="$on $W $R $Z $X $S code guard " ;;
       # tests/guard/*: section files of hooks/test_guard.py, so the same flags (not under hooks/, so no shell_macos).
-      hooks/test_guard.py|hooks/mutate_guard.py|tests/guard/*) on="$on $W $X code guard " ;;
+      hooks/mutate_guard.py|\
+      hooks/test_guard.py|\
+      tests/guard/*) on="$on $W $X code guard " ;;
       # install.sh and session_start.sh: the checkout-detection suite and test_guard read them.
-      hooks/test_install_src.sh|hooks/test_install_windows.sh) on="$on $W $X $S code guard " ;;
+      hooks/test_install_src.sh|\
+      hooks/test_install_windows.sh) on="$on $W $X $S code guard " ;;
       # install.sh: also read by merge/test_merge.py (CloudAllow reads its settings step).
       install.sh) on="$on $M $W $X $S code guard " ;;
       hooks/session_start.sh) on="$on $W $R $Z $X $S code guard " ;;
-      hooks/test_mutate_shared.py|hooks/test_mutate_report.py|hooks/test_mutate_js.py|hooks/test_mutate_replay.py|hooks/test_mutate_ci.py|hooks/mutate_js.mjs) on="$on code guard " ;;
+      hooks/mutate_js.mjs|\
+      hooks/test_mutate_ci.py|\
+      hooks/test_mutate_js.py|\
+      hooks/test_mutate_replay.py|\
+      hooks/test_mutate_report.py|\
+      hooks/test_mutate_shared.py) on="$on code guard " ;;
       # Hook modules and suites that run on the rest and macOS jobs.
       # guard_log_report.py: decision_watch imports it at run time, as it does _transcript.py.
       # _clause.py: report_guard.py imports it, and test_clause.py is its suite.
-      hooks/*|lint/_transcript.py|lint/_clause.py|lint/test_clause.py|lint/guard_log_report.py|lint/ste_lint.py|lint/ui_suffixes.py|lint/report_guard.py|lint/ruling_census.py|lint/test_report_guard.py|lint/test_report_guard_route.py|lint/test_report_guard_stamped.py|lint/test_report_guard_landing.py|lint/test_report_guard_remedy.py|lint/test_report_guard_refusal.py|lint/test_report_guard_handoff.py|lint/test_report_guard_cannot.py|lint/test_report_guard_review.py|lint/test_ruling_census.py|lint/check_unknown_reads_contract.py)
-        on="$on $R $Z $X code guard "; case "$f" in lint/_transcript.py|lint/guard_log_report.py) on="$on $M " ;; esac ;;
+      hooks/*|\
+      lint/_clause.py|\
+      lint/_transcript.py|\
+      lint/check_unknown_reads_contract.py|\
+      lint/guard_log_report.py|\
+      lint/report_guard.py|\
+      lint/ruling_census.py|\
+      lint/ste_lint.py|\
+      lint/test_clause.py|\
+      lint/test_report_guard.py|\
+      lint/test_report_guard_cannot.py|\
+      lint/test_report_guard_handoff.py|\
+      lint/test_report_guard_landing.py|\
+      lint/test_report_guard_refusal.py|\
+      lint/test_report_guard_remedy.py|\
+      lint/test_report_guard_review.py|\
+      lint/test_report_guard_route.py|\
+      lint/test_report_guard_stamped.py|\
+      lint/test_ruling_census.py|\
+      lint/ui_suffixes.py)
+        on="$on $R $Z $X code guard "; case "$f" in lint/_transcript.py|\
+          lint/guard_log_report.py) on="$on $M " ;; esac ;;
       # bin/claude-janitor: test_install_src reads it.
       bin/claude-janitor) on="$on $W $S $R $Z $X code guard sweep " ;;
       janitor/*) on="$on $R $Z $X code sweep " ;;
-      bin/verdict|bin/verdict.cmd|lint/test_verdict.py) on="$on $R $Z $X code " ;;
+      bin/verdict|\
+      bin/verdict.cmd|\
+      lint/test_verdict.py) on="$on $R $Z $X code " ;;
       # The fixture copy helpers: suites in every job copy the repo's modules through them.
-      testing/tracked_tree.py|testing/tracked_tree.sh|testing/TrackedTree.ps1|testing/SharedRead.ps1) on="$on $ALL " ;;
+      testing/SharedRead.ps1|\
+      testing/TrackedTree.ps1|\
+      testing/tracked_tree.py|\
+      testing/tracked_tree.sh) on="$on $ALL " ;;
       # The test-run signing opt-out helper: suites in every job import it.
-      lint/_test_git.py|lint/_test_git.sh|lint/_test_git.mjs) on="$on $ALL " ;;
+      lint/_test_git.mjs|\
+      lint/_test_git.py|\
+      lint/_test_git.sh) on="$on $ALL " ;;
       bin/ci-job) on="$on code " ;;
       # bin/ios-ship: macOS only. Its suite runs in the shell-macos job, under /bin/bash 3.2.
-      bin/ios-ship|lint/test_ios_ship.sh) on="$on $S code " ;;
+      bin/ios-ship|\
+      lint/test_ios_ship.sh) on="$on $S code " ;;
       # bin/sim-test: macOS only, like bin/ios-ship. Its suite runs in the shell-macos job, and runs the real bin/sim-lease
       # beside the script, so an edit to bin/sim-lease turns the same job on. bin/sim-lease is also a guard-suite read file
       # (GUARD_READ_FILES in hooks/mutate_guard.py), so it sets `guard` too.
-      bin/sim-test|lint/test_sim_test.sh) on="$on $S code " ;;
+      bin/sim-test|\
+      lint/test_sim_test.sh) on="$on $S code " ;;
       bin/sim-lease) on="$on $S code guard " ;;
       # bin/duo-fold: macOS only (bash 3.2 script for the iPhone Duo). Its suite runs in the shell-macos job.
-      bin/duo-fold|lint/test_duo_fold.sh) on="$on $S code " ;;
+      bin/duo-fold|\
+      lint/test_duo_fold.sh) on="$on $S code " ;;
       # bin/shoot: its suite installs Playwright and Chromium, so only these paths run it.
-      bin/shoot|lint/test_shoot.mjs|testing/skip-locally-fail-in-ci.mjs|testing/page_session_role_sort.test.mjs) on="$on code shoot " ;;
+      bin/shoot|\
+      lint/test_shoot.mjs|\
+      testing/page_session_role_sort.test.mjs|\
+      testing/skip-locally-fail-in-ci.mjs) on="$on code shoot " ;;
       # actions/playwright-setup has four callers: checks-shoot and checks-waiting-page (shoot), checks-guard and checks-guard-2 (checks_guard). Both guard jobs also
       # install the Playwright that .github/shoot pins (package-dir), so that dir takes this arm too. Set checks_guard
       # directly: the guard flag would also start the guard suites, which this action does not touch. A .md edit runs none of the four jobs.
       actions/playwright-setup/*.md) ;;
-      actions/playwright-setup/*|.github/shoot/*) on="$on code shoot checks_guard " ;;
+      .github/shoot/*|\
+      actions/playwright-setup/*) on="$on code shoot checks_guard " ;;
       # merge.py: guard.py loads it. layout.json: guard.py reads it; layout.py: ste_lint.py and hook_catalog.py (merge.py) import it.
       # check_silent_undo.py: merge.py imports it.
       merge/merge.py) on="$on $M $W $X code guard " ;;
-      lint/layout.json|lint/layout.py) on="$on $M $R $Z $W $X code guard " ;;
+      lint/layout.json|\
+      lint/layout.py) on="$on $M $R $Z $W $X code guard " ;;
       lint/check_silent_undo.py) on="$on $M code " ;;
-      merge/*|bin/merge|bin/merge.cmd|.github/stamp.json) on="$on $M $S code " ;;
+      .github/stamp.json|\
+      bin/merge|\
+      bin/merge.cmd|\
+      merge/*) on="$on $M $S code " ;;
       actions/stamp/*.md) ;;
       actions/stamp/*) on="$on $R $Z $X $M code " ;;
       # Mod tests: the mod-tests.sh step in checks, checks-windows and checks-macos reads mods/.
       # A non-.md path also sets `code`: the whole-tree readers (retired names, retired repo, glossary, hook catalog) run on `code` or a doc flag.
       mods/*) on="$on $W $X mods "; case "$f" in *.md) ;; *) on="$on code " ;; esac ;;
-      install.ps1|install.test.ps1|install-no-gap.test.ps1|install-bin-eol.test.ps1|install-set.test.ps1) on="$on $P code " ;;
+      install-bin-eol.test.ps1|\
+      install-no-gap.test.ps1|\
+      install-set.test.ps1|\
+      install.ps1|\
+      install.test.ps1) on="$on $P code " ;;
       # decision-watch.test.mjs imports lint/test_scanner_traps.mjs, so the mod-tests.sh step runs it too.
       lint/test_scanner_traps.mjs) on="$on $W $X mods code " ;;
       # .gitignore: skills/plain-english-map/tests/typescript-home.test.mjs reads it, so it runs the mod step. `code` stays for the lints.
       .gitignore) on="$on $W $X mods code " ;;
       # bin/rm: the shim imports hooks/guard_rm_var.py (hooks/* above); it runs on posix jobs.
-      bin/rm|lint/test_rm_shim.py) on="$on $X code " ;;
+      bin/rm|\
+      lint/test_rm_shim.py) on="$on $X code " ;;
       # The CI alarm's events and clear rule: GUARD_READ_FILES (hooks/mutate_guard.py) lists them, so the guard suite reads them;
       # merge/merge.py reads both, and merge/test_merge.py imports it, so it sets checks_windows_merge, which runs that suite.
-      actions/ci-alarm/events.json|actions/ci-alarm/clear_rule.py) on="$on $M code guard " ;;
+      actions/ci-alarm/clear_rule.py|\
+      actions/ci-alarm/events.json) on="$on $M code guard " ;;
       # Linux `checks` job only: the lints and opt-in templates.
-      actions/*|githooks/*|testing/*|lint/*|.github/dependabot.yml) on="$on code " ;;
+      .github/dependabot.yml|\
+      actions/*|\
+      githooks/*|\
+      lint/*|\
+      testing/*) on="$on code " ;;
       # Map skill .md files: its tests read them, so this arm turns on `mods` before the *.md arm.
       skills/plain-english-map/*.md) on="$on $W $X mods " ;;
       # Docs: nothing runs on them but the lints in `checks`. (hooks/*.md, the precompact prompt, matches hooks/* above.)
@@ -146,7 +236,52 @@ if [ -n "$files" ]; then
     # runs beside the others on its own runner, so it adds billed minutes and no wall time.
     case "$f" in
       hooks/guard_test_*) ;;
-      hooks/guard.py|hooks/guard_*.py|hooks/git_reads.py|hooks/own_session.py|hooks/precompact_handoff.py|hooks/shared_names.py|hooks/question_form.py|hooks/_nowindow.py|lint/report_guard.py|lint/_clause.py|lint/check_red_run.py|lint/layout.py|lint/layout.json|lint/_test_temp.py|skills/waiting-page/SKILL.md|skills/waiting-page/reference/*|skills/waiting-page/export_page.py|hooks/answered_claims.py|hooks/call_judge.py|hooks/ci_wake.py|hooks/required_check.py|hooks/decision_watch.py|hooks/feedback_guard.py|hooks/local_time.py|hooks/override.py|hooks/proc_env.py|hooks/session_role.py|hooks/reply_judge.py|hooks/reread_check.py|hooks/route_match.py|hooks/ruling_home.py|janitor/sweep.py|janitor/temp_sweep.py|lint/_transcript.py|lint/guard_log_report.py|lint/rule_audit.py|lint/ruled_store.py|hooks/mail.py|hooks/merge_options.py|hooks/agent_brief.py|lint/check_record_slugs.py|lint/_guard_sections.py|hooks/stall_watch.py|hooks/ci_wait_cap.py|hooks/ci_wait_cap.json|hooks/wait_common.py) on="$on shoot " ;;
+      hooks/_nowindow.py|\
+      hooks/agent_brief.py|\
+      hooks/answered_claims.py|\
+      hooks/call_judge.py|\
+      hooks/ci_wait_cap.json|\
+      hooks/ci_wait_cap.py|\
+      hooks/ci_wake.py|\
+      hooks/decision_watch.py|\
+      hooks/feedback_guard.py|\
+      hooks/git_reads.py|\
+      hooks/guard.py|\
+      hooks/guard_*.py|\
+      hooks/local_time.py|\
+      hooks/mail.py|\
+      hooks/merge_options.py|\
+      hooks/override.py|\
+      hooks/own_session.py|\
+      hooks/precompact_handoff.py|\
+      hooks/proc_env.py|\
+      hooks/question_form.py|\
+      hooks/reply_judge.py|\
+      hooks/required_check.py|\
+      hooks/reread_check.py|\
+      hooks/route_match.py|\
+      hooks/ruling_home.py|\
+      hooks/session_role.py|\
+      hooks/shared_names.py|\
+      hooks/stall_watch.py|\
+      hooks/wait_common.py|\
+      janitor/sweep.py|\
+      janitor/temp_sweep.py|\
+      lint/_clause.py|\
+      lint/_guard_sections.py|\
+      lint/_test_temp.py|\
+      lint/_transcript.py|\
+      lint/check_record_slugs.py|\
+      lint/check_red_run.py|\
+      lint/guard_log_report.py|\
+      lint/layout.json|\
+      lint/layout.py|\
+      lint/report_guard.py|\
+      lint/rule_audit.py|\
+      lint/ruled_store.py|\
+      skills/waiting-page/SKILL.md|\
+      skills/waiting-page/export_page.py|\
+      skills/waiting-page/reference/*) on="$on shoot " ;;
     esac
     # The four pull-request lint steps of the `checks` job. This is a third case, so the flags each path sets above stay as
     # they are. A path the table above does not name has set every flag already (the `*)` arm).
@@ -155,20 +290,34 @@ if [ -n "$files" ]; then
         # check_red_run.py judges a .md under a test folder as a test path (hooks/guard.py is_test_rel: TEST_DIRS, an Xcode `*Tests`
         # folder, a `.spec.` name). nocasematch: is_test_rel lowercases a name before it compares.
         shopt -s nocasematch
-        case "/$f" in */tests/*|*/test/*|*/__tests__/*|*/testdata/*|*/__snapshots__/*|*/test_support/*|*/testing/*|*.spec.*) on="$on lint_red_run " ;; esac
+        case "/$f" in *.spec.*|\
+          */__snapshots__/*|\
+          */__tests__/*|\
+          */test/*|\
+          */test_support/*|\
+          */testdata/*|\
+          */testing/*|\
+          */tests/*) on="$on lint_red_run " ;; esac
         shopt -u nocasematch
         case "/$f" in */[A-Z]*Tests/*) on="$on lint_red_run " ;; esac
         case "$f" in
           docs/decisions/*) on="$on lint_ruling_kind " ;;
           docs/plans/*) on="$on lint_plan_refuter " ;;
-          CLAUDE.md|output-styles/shiv-stylisms.md) on="$on lint_ruling_kind " ;;
+          CLAUDE.md|\
+          output-styles/shiv-stylisms.md) on="$on lint_ruling_kind " ;;
         esac ;;
       # The lints find the plans and decisions folders through layout.py, layout.json and the extras file.
-      lint/layout.py|lint/layout.json|.claude/layout-extras.json) on="$on $LINTS " ;;
+      .claude/layout-extras.json|\
+      lint/layout.json|\
+      lint/layout.py) on="$on $LINTS " ;;
       # check_plan_refuter.py imports guard_core.py (REFUTER_ROLE), which imports git_reads.py and shared_names.py; _nowindow.py runs its git.
       # The guard family and its two shared modules take one flag set (the guard-sibling cases pin it), so hooks/guard.py and every guard_<family>.py carry it too.
       hooks/guard_test_*) on="$on lint_red_run lint_comment_narration " ;;
-      hooks/guard.py|hooks/guard_*.py|hooks/git_reads.py|hooks/shared_names.py|hooks/_nowindow.py) on="$on lint_red_run lint_comment_narration lint_plan_refuter " ;;
+      hooks/_nowindow.py|\
+      hooks/git_reads.py|\
+      hooks/guard.py|\
+      hooks/guard_*.py|\
+      hooks/shared_names.py) on="$on lint_red_run lint_comment_narration lint_plan_refuter " ;;
       lint/check_plan_refuter.py) on="$on lint_red_run lint_comment_narration lint_plan_refuter " ;;
       lint/check_ruling_kind.py) on="$on lint_red_run lint_comment_narration lint_ruling_kind " ;;
       # Every other path that is not .md: the red-run check and the narration check read it.
@@ -183,11 +332,14 @@ if [ -n "$files" ]; then
         on="$on doc_any "
         case "$f" in
           docs/decisions/*) on="$on doc_decisions " ;;
-          CLAUDE.md|.claude/CLAUDE.md|output-styles/*) on="$on doc_rules " ;;
+          .claude/CLAUDE.md|\
+          CLAUDE.md|\
+          output-styles/*) on="$on doc_rules " ;;
           skills/*) on="$on doc_skills " ;;
           agents/*/*.md) ;;
           agents/*.md) on="$on doc_agents " ;;
-          GLOSSARY.md|README.md) on="$on doc_glossary " ;;
+          GLOSSARY.md|\
+          README.md) on="$on doc_glossary " ;;
           docs/map/*) on="$on doc_map " ;;
           docs/*) on="$on doc_other " ;;
           mods/*/*/*.md) ;;
@@ -202,7 +354,21 @@ if [ -n "$files" ]; then
       # The guard suite reads the real agents folder (hooks/guard.py role_agent_keys): a top-level agents file turns the guard on, so a new one needs no edit here. The empty nested arm comes first because bash's `*` matches `/`.
       agents/*/*.md) ;;
       agents/*.md) on="$on guard checks_guard " ;;
-      bin/sim-test|docs/decisions/agent-model-cap.md|merge/install_from_main.sh|janitor/sweep.py|janitor/temp_sweep.py|lint/_guard_sections.py|lint/check_record_slugs.py|lint/check_red_run.py|lint/check_skill_model_rows.py|lint/hook_catalog.py|lint/rule_audit.py|lint/ruled_store.py|lint/stale_cites.py|skills/impeccable/SKILL.md|testing/shallow_clone.py) on="$on guard checks_guard " ;;
+      bin/sim-test|\
+      docs/decisions/agent-model-cap.md|\
+      janitor/sweep.py|\
+      janitor/temp_sweep.py|\
+      lint/_guard_sections.py|\
+      lint/check_record_slugs.py|\
+      lint/check_red_run.py|\
+      lint/check_skill_model_rows.py|\
+      lint/hook_catalog.py|\
+      lint/rule_audit.py|\
+      lint/ruled_store.py|\
+      lint/stale_cites.py|\
+      merge/install_from_main.sh|\
+      skills/impeccable/SKILL.md|\
+      testing/shallow_clone.py) on="$on guard checks_guard " ;;
     esac
   done <<< "$files"
   # SCOPE_FILES (the header) skips the guard-inputs pass below, which reads every changed path of the range, and keeps the landed-dir read.
@@ -218,7 +384,11 @@ if [ -n "$files" ]; then
     n=0
     while IFS= read -r -d '' f; do
       n=$((n + 1))
-      case "$f" in .github/guard-inputs.txt|.github/scripts/ci-scope.sh|.github/scripts/green-head.sh|.github/workflows/checks.yml|.gitattributes) on="$on windows_guard "; continue ;; esac
+      case "$f" in .gitattributes|\
+        .github/guard-inputs.txt|\
+        .github/scripts/ci-scope.sh|\
+        .github/scripts/green-head.sh|\
+        .github/workflows/checks.yml) on="$on windows_guard "; continue ;; esac
       while IFS= read -r g; do
         # shellcheck disable=SC2254  # the list's globs are the case patterns
         case "$f" in $g) on="$on windows_guard "; break ;; esac
@@ -287,8 +457,13 @@ if [ -z "${SCOPE_FILES:-}" ] && { [ "$whole_read" = 1 ] || [ "${EVENT:-}" = push
   while IFS= read -r f; do
     case "$f" in
       docs/records.md) ;;
-      .github/scripts/ci-scope.sh|.github/scripts/green-head.sh|lint/comment_only.py|lint/check_comment_narration.py|hooks/_nowindow.py) delta_ok=false ;;
-      *.py|*.sh) set -- "$@" "$f"; skip_comment=true ;;
+      .github/scripts/ci-scope.sh|\
+      .github/scripts/green-head.sh|\
+      hooks/_nowindow.py|\
+      lint/check_comment_narration.py|\
+      lint/comment_only.py) delta_ok=false ;;
+      *.py|\
+      *.sh) set -- "$@" "$f"; skip_comment=true ;;
       *) delta_ok=false ;;
     esac
   done <<< "$delta"
