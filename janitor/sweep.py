@@ -992,8 +992,7 @@ def decide_worktree(where: str, entry: dict, attended: bool = False, agent_rule:
                     "host_lock": True, "lock_reason": host_holder,
                     "reason": "removable: finished agent's marked processes stopped, host lock lifted"}
     if inside:
-        return {"path": path, "action": "keep",
-                "reason": "process-inside: pid %s" % ", ".join(str(p) for p in sorted(inside))}
+        return {"path": path, "action": "keep", "reason": process_inside_reason(inside)}
     if host_lock:
         return {"path": path, "action": "reap", "unlock": True, "host_lock": True,
                 "lock_reason": host_holder, "reason": "removable: finished agent, host lock lifted"}
@@ -3004,8 +3003,7 @@ def husk_verdict(root: str, path: str, entries, names):
     if live:
         return {"path": path, "action": "keep", "reason": "live-session"}
     if inside:
-        return {"path": path, "action": "keep", "reason": "process-inside: pid %s"
-                % ", ".join(str(p) for p in sorted(inside))}
+        return {"path": path, "action": "keep", "reason": process_inside_reason(inside)}
     return {"path": path, "action": "husk", "reason": "only " + ", ".join(sorted(contents))}
 
 
@@ -3114,21 +3112,79 @@ def untrash_name(basename: str):
     return basename.rsplit(".reap-trash-", 1)[0] if is_trash_name(basename) else None
 
 
+def has_nested_git(path: str):
+    """True when a `.git` folder or file sits anywhere under the folder PATH, False when none does, None
+    when a folder under it could not be read. A nested repo or a linked worktree's pointer file holds work
+    the parent repo's status reads as one untracked line. The walk stops at the first hit and follows no link."""
+    unreadable = []
+    for _, dirnames, filenames in os.walk(path, followlinks=False, onerror=unreadable.append):
+        if ".git" in dirnames or ".git" in filenames:
+            return True
+    return None if unreadable else False
+
+
+def _trash_siblings(parent: str, base: str, original: str):
+    """The other trash names beside BASE that a reap made from ORIGINAL, or None when PARENT cannot be listed."""
+    try:
+        names = os.listdir(parent)
+    except OSError:
+        return None
+    return [n for n in names if n != base and untrash_name(n) == original]
+
+
+def _own_trash_lines(parent: str, base: str, original: str, lines):
+    """The status LINES that belong to the trash folder BASE, or None when a line cannot be placed. A line
+    under the trash name is its own. A tracked file the rename moved away from the original name is listed
+    as deleted there, and belongs to the trash folder that now holds that file. Sibling trash folders from
+    one original name list their moved files under the same original name, so a deletion whose file sits in
+    a sibling and not in BASE is the sibling's. A line that cannot be placed counts as BASE's: it keeps."""
+    answer = git_reads._git(parent, "rev-parse", "--show-prefix")
+    if answer is None or answer.returncode != 0:
+        return None
+    prefix = answer.stdout.strip()
+    own_dir, original_dir = prefix + base + "/", prefix + original + "/"
+    siblings = None
+    mine = []
+    for line in lines:
+        text = line[3:]
+        if (line[:2] == "??" or text.startswith(own_dir) or text == own_dir[:-1] or text.startswith('"')
+                or " -> " in text or not text.startswith(original_dir) or "D" not in line[:2]):
+            mine.append(line)
+            continue
+        rel = text[len(original_dir):]
+        if os.path.lexists(os.path.join(parent, base, rel)):
+            mine.append(line)
+            continue
+        if siblings is None:
+            siblings = _trash_siblings(parent, base, original)
+            if siblings is None:
+                return None
+        if not any(os.path.lexists(os.path.join(parent, n, rel)) for n in siblings):
+            mine.append(line)
+    return mine
+
+
 def trash_dirty(path: str):
     """True when the trash folder PATH holds work, False when it holds none, None when git cannot say.
     The reap renames a build folder whole and deletes it whatever it holds (decision
     build-dirs-reaped-at-agent-end), so an untracked path under the trash name is build output, not work.
     What is work is a path git tracks: a staged or changed file, or a tracked file the rename moved away
-    from the build name (listed as deleted there). The read is limited to the trash name and the name it
-    had before the rename."""
+    from the build name (listed as deleted there), judged on this folder's own lines only. A `.git` folder
+    or file anywhere inside is work too: the parent repo cannot see it. The read is limited to the trash
+    name and the name it had before the rename."""
     parent, base = os.path.split(os.path.normpath(path))
     original = untrash_name(base)
     if original is None:
         return None
     lines = read_dirty(parent, (base, original))
-    if lines is None:
-        return None
-    return any(line[:2] != "??" for line in lines)
+    if lines is not None:
+        lines = _own_trash_lines(parent, base, original, lines)
+    if lines is not None and any(line[:2] != "??" for line in lines):
+        return True
+    nested = has_nested_git(path)
+    if nested:
+        return True
+    return None if lines is None or nested is None else False
 
 
 def trash_verdict(path: str):
