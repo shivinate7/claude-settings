@@ -392,6 +392,21 @@ class DescendsFromTest(unittest.TestCase):
         self.assertIn(CLIMB_CYCLE_B, self.asked, "scope: the climb never walked the loop, so the case proves nothing")
         self.assertIsNone(descends, "a parent chain that revisits a pid reads None (unknown), not False")
 
+    def test_a_parent_loop_stops_at_its_first_revisit(self):
+        """The climb ends at the first pid it sees twice, so a two-pid loop costs three parent reads. Only the revisit exit ends it that
+        early: the depth bound would let it walk the loop MAX_CLIMB times."""
+        tool, sweep, parents = self.fake_climb(alive={CLIMB_HOLDER})
+        parents[CLIMB_HOLDER] = CLIMB_CYCLE_A
+        parents[CLIMB_CYCLE_A] = CLIMB_CYCLE_B
+        parents[CLIMB_CYCLE_B] = CLIMB_CYCLE_A
+        self.assertGreater(sweep.MAX_CLIMB, 8, "scope: the depth bound must sit well above the read count, or the count proves nothing")
+        descends = tool._descends_from(sweep, CLIMB_HOLDER, CLIMB_OWNER)
+        self.assertIn(CLIMB_CYCLE_B, self.asked, "scope: the climb never walked the loop, so the case proves nothing")
+        self.assertIsNone(descends, "a parent loop reads None (unknown) at its first revisit")
+        self.assertLessEqual(len(self.asked), 4,
+                             "a parent loop of two pids stops at its first revisit after 3 parent reads; the climb asked %d pids (depth bound %d)"
+                             % (len(self.asked), sweep.MAX_CLIMB))
+
     def test_a_dead_owners_folder_is_kept_when_a_pid_in_a_parent_loop_holds_it(self):
         """A live unreadable pid whose parent chain loops reads unknown, so it keeps the folder of a dead owner: the loop may be
         stale parent numbers, and the owner may sit above it. The folder goes only when a readable chain proves no owner above."""
