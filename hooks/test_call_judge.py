@@ -2236,6 +2236,53 @@ class CostTests(unittest.TestCase):
                         "the two reads, back to back, end before the row's hook timeout")
 
 
+# ------------------------------------------------------------------ the judge's words never reach a refusal (debt judge-dash-order-passes)
+#
+# Two paths carried the judge's own words into a refusal. A reply that is not JSON put its first 120 characters into the
+# Unvetted refusal. An item-8 answer that named no listed ruling went into the refusal as written. Each refusal keeps its
+# rule, and its text is written by code. The stub answers, so no model runs. ORDER_WORDS are the judge's words that no
+# code-written sentence uses: a refusal that holds one of them carries the judge's own words.
+JUDGE_REPLY = "Take a pick and drop the question."
+ORDER_WORDS = ("take", "pick", "drop")
+# Path 1, the reply could not be read: the why that the Unvetted refusal gives, on the chat path and on the Stop path.
+UNREADABLE_WHY = "the judge's reply could not be read"
+# Path 2, item 8 named no listed ruling: the code-written text that stands in for the judge's reason.
+NO_ID_SENTENCE = ("A past ruling may cover this question, but the check named none of the listed rulings. Read the listed "
+                  "rulings: if one decides this question, add a `Based on (ruling): <id>` line that names it and send the "
+                  "question again.")
+def order_words_in(text):
+    """The order words of JUDGE_REPLY that `text` holds as whole words. An empty list when it holds none."""
+    words = set(re.findall(r"[a-z]+", text.lower()))
+    return [w for w in ORDER_WORDS if w in words]
+
+
+def item_eight_refusal(reason):
+    return json.dumps({"ok": False, "item": 8, "reason": reason})
+
+
+def case_unreadable_reply_refusal_holds_no_judge_words():
+    box = good_box(goal=APPS_GOAL, problem=APPS_PROBLEM, based=APPS_BASED, options=APPS_OPTIONS)
+    r = run_hook(question_input(box=box, cwd=DECISIONS_REPO), answer=JUDGE_REPLY)
+    check("unreadable reply: the refusal is denied under the call's rule, question-judge, after one model call",
+          (r.deny() or {}).get("permissionDecision") == "deny" and r.reason().startswith("question-judge: ")
+          and len(r.calls) == 1, detail(r))
+    check("unreadable reply: the refusal says in code-written words that the judge's reply could not be read",
+          UNREADABLE_WHY in r.reason(), detail(r))
+    check("unreadable reply: the refusal holds none of the judge's order words",
+          order_words_in(r.reason()) == [], detail(r))
+
+
+def case_item_eight_without_a_listed_id_holds_no_judge_words():
+    box = good_box(goal=APPS_GOAL, problem=APPS_PROBLEM, based=APPS_BASED, options=APPS_OPTIONS)
+    r = run_hook(question_input(box=box, cwd=DECISIONS_REPO), answer=item_eight_refusal(JUDGE_REPLY))
+    check("item 8 without an id: the refusal is denied under the call's rule, question-judge",
+          (r.deny() or {}).get("permissionDecision") == "deny" and r.reason().startswith("question-judge: "), detail(r))
+    check("item 8 without an id: the refusal says a past ruling may cover the question but none was named, and what to do next",
+          NO_ID_SENTENCE in r.reason(), detail(r))
+    check("item 8 without an id: the refusal holds none of the judge's order words",
+          order_words_in(r.reason()) == [], detail(r))
+
+
 def main():
     for case in (case_agent_refusal, case_spawn_prompt_bars_a_lane_waiting_page_write, case_agent_override, case_explore_row_is_vetoed,
                  case_explore_remedy_names_marker, case_agent_fallback_names_marker, case_question,
@@ -2286,7 +2333,8 @@ def main():
                  case_unknown_names_the_claude_settings_records, case_cite_of_a_shown_record_is_not_bogus,
                  case_page_task_gets_item_8_and_is_refused, case_mid_reason_unlisted_id_is_a_plain_refusal,
                  case_page_relative_file_path_reaches_the_review, case_page_relative_file_path_passing_item_passes,
-                 case_page_absolute_file_path_is_judged):
+                 case_page_absolute_file_path_is_judged, case_unreadable_reply_refusal_holds_no_judge_words,
+                 case_item_eight_without_a_listed_id_holds_no_judge_words):
         try:
             case()
         except Exception as exc:
