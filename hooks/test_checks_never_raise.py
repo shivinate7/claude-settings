@@ -9,7 +9,8 @@ Run from the repository root:
 
     python3 hooks/test_checks_never_raise.py
 
-`--exit-cases` runs only the exit cases of main(), with the fuzz stubbed, in a few seconds.
+`--exit-cases` runs only the exit cases of main() and the PATH check of sweep_proof, with the self-test, the sweep
+proof, the fuzz, the fixture proof and the annotation proof stubbed (EXIT_STUBS). The PATH check stubs only the sweep itself.
 
 Standard library only. The checks are read from the dispatch in hooks/guard.py: each call that
 `judge_shell` and `judge` make, and each hook-module function that those callees call through an
@@ -973,24 +974,71 @@ def quoted_data_property():
     return failing
 
 EXIT_STUBS = ("self_test", "sweep_proof", "run_checks", "quoted_data_property", "fixture_proof", "annotation_proof")
-# (case, the self-test passes, the sweep passes, sweep reached, fuzz runs, exit code): the exit of main(), one row each
+# (case, the self-test passes, the sweep passes, sweep reached, fuzz runs, the fuzz reports a failing row, exit code):
+# the exit of main(), one row each
 EXIT_CASES = (
-    ("a failed self-test stops the run", False, True, False, False, 1),
-    ("a failed sweep is counted and the fuzz still runs", True, False, True, True, 1),
-    ("a clean self-test and sweep run the fuzz and exit 0", True, True, True, True, 0),
+    ("a failed self-test stops the run", False, True, False, False, False, 1),
+    ("a failed sweep is counted and the fuzz still runs", True, False, True, True, False, 1),
+    ("a clean self-test and sweep run the fuzz and exit 0", True, True, True, True, False, 0),
+    ("a failing fuzz row is counted and the run exits 1", True, True, True, True, True, 1),
 )
 
 
-def exit_proof():
-    """True when each EXIT_CASES row holds, with the self-test, the sweep and the fuzz stubbed, so no fuzz runs.
+class _SweepRaises(Exception):
+    """The error the sweep stub raises, so path_restore_proof catches that error and no other."""
 
-    The fixture and annotation proofs read the run folder, which main() removes when it ends, so they are stubbed too:
-    the exit code then depends on the self-test and the sweep alone. A miss prints one FAIL line that names its cause.
+
+def path_restore_proof():
+    """Return the problems of sweep_proof's PATH restore: PATH must be NO_TOOLS after the sweep returns and after it raises.
+
+    The sweep itself is stubbed, since the real one asks lsof which folders are held. sweep_proof runs its sweep on
+    HOST_PATH, so each stub call must see HOST_PATH, and the stub is called once per case.
+    """
+    problems = []
+    seen = []
+
+    def sweep_returns(temp_root, own, now=None):
+        seen.append(os.environ["PATH"])
+
+    def sweep_raises(temp_root, own, now=None):
+        seen.append(os.environ["PATH"])
+        raise _SweepRaises()
+
+    real_sweep = _test_temp.sweep
+    try:
+        for label, stub in (("the sweep returns", sweep_returns), ("the sweep raises", sweep_raises)):
+            del seen[:]
+            _test_temp.sweep = stub
+            os.environ["PATH"] = NO_TOOLS
+            shutil.rmtree(os.path.join(RUN, "sweep"), ignore_errors=True)   # sweep_proof makes its folders; a stub keeps them
+            with contextlib.redirect_stdout(io.StringIO()):
+                try:
+                    sweep_proof()
+                except _SweepRaises:
+                    pass
+            if len(seen) != 1 or seen[0] != HOST_PATH:
+                problems.append("%s: the sweep was not called once, on the host PATH (%d calls)" % (label, len(seen)))
+            if os.environ["PATH"] != NO_TOOLS:
+                problems.append("%s: PATH is not the empty-tools PATH after sweep_proof returns" % label)
+    finally:
+        _test_temp.sweep = real_sweep
+        os.environ["PATH"] = NO_TOOLS
+        shutil.rmtree(RUN, ignore_errors=True)   # the run folder ends here, as main() ends it
+    return problems
+
+
+def exit_proof():
+    """True when each EXIT_CASES row holds and sweep_proof restores PATH, with the self-test, the sweep proof, the fuzz and
+    the fixture and annotation proofs stubbed (EXIT_STUBS).
+
+    The fixture and annotation proofs read the run folder, which main() removes when it ends, so they are stubbed too.
+    A row's fuzz stub returns one failing row when the row says so, so the exit code then depends on the self-test, the
+    sweep and the failing fuzz rows alone. A miss prints one FAIL line that names its cause.
     """
     failing = []
     saved = {name: globals()[name] for name in EXIT_STUBS}
     try:
-        for case, self_ok, sweep_ok, want_sweep, want_fuzz, want_rc in EXIT_CASES:
+        for case, self_ok, sweep_ok, want_sweep, want_fuzz, fuzz_fails, want_rc in EXIT_CASES:
             seen = {"sweep": 0, "fuzz": 0}
 
             def sweep_stub():
@@ -999,7 +1047,8 @@ def exit_proof():
 
             def fuzz_stub(*args, **kwargs):
                 seen["fuzz"] += 1
-                return []
+                failing_row = ("exit case", 1, 1, ["Bash"], ("exit case input", "Bash", "a failing row the exit case reports"))
+                return [failing_row] if fuzz_fails else []
 
             globals().update(self_test=lambda: self_ok, sweep_proof=sweep_stub, run_checks=fuzz_stub,
                              quoted_data_property=lambda: 0, fixture_proof=lambda: [], annotation_proof=lambda: [])
@@ -1013,6 +1062,7 @@ def exit_proof():
                 failing.append("%s: exit code %d, want %d" % (case, rc, want_rc))
     finally:
         globals().update(saved)
+    failing.extend("path restore: " + problem for problem in path_restore_proof())
     for problem in failing:
         print("FAIL exit: %s" % problem)
     print("exit cases: %s (%d cases, the fuzz stubbed)" % ("FAILED" if failing else "ok", len(EXIT_CASES)))
