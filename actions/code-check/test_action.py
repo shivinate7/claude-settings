@@ -5,6 +5,7 @@ a listed module renamed off the list is red, a shrink against --main (current ma
 Swift, .entitlements and zsh files have rows and zsh skips ShellCheck, web app data and image files have rows, archive, sheet, model and node config files have rows, an excluded folder is not scanned, an .astro type error is red and a clean Astro project green, and the
 standard's table is whole (every layer runs or has a one-line reason). The comment check reads only added
 lines; with no base it is skipped with a reason, and with a base outside the clone it is unknown, never red.
+Every package.json and package-lock.json in the repo states the typescript version lint/code_check_standard.json pins, exactly.
 A .mjs file's broken or extensionless relative import, and TS-only syntax in it, is red; its builtin, bare, JSON, .cjs and type-error imports, a JSDoc type, and npm notice lines on stderr are not; a .js or .cjs file is not checked, and a clean .mjs with no tsc on PATH is red.
 The tools run from PATH (CODE_CHECK_TOOLS=path), so ruff, mypy, shellcheck (the --pins specs, via pipx) and
 astro-check (the tools/ lockfile, via npm ci, bin on PATH) must be installed. Without astro-check the Astro tests
@@ -30,6 +31,34 @@ NEEDS_TSC = unittest.skipUnless(shutil.which("tsc") or os.environ.get("CI"),
                                 "tsc not on PATH; npm ci --ignore-scripts --prefix actions/code-check/tools (CI does)")
 with open(STANDARD, encoding="utf-8") as f:
     TS_PIN = json.load(f)["tools"]["typescript"]
+REPO = os.path.normpath(os.path.join(HERE, "..", ".."))
+# Where a package file may state typescript. The walk skips node_modules and other checkouts' files (.claude);
+# .github stays in, since .github/shoot is tracked.
+PIN_KEYS = ("dependencies", "devDependencies", "optionalDependencies", "peerDependencies")
+PIN_SKIP = ("node_modules", ".git", ".claude")
+
+
+def pin_files(root):
+    """The package.json and package-lock.json files under root, relative to it. Walks the tree, not git: bin/red-run's copy has no .git."""
+    found = []
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if d not in PIN_SKIP]
+        found += [os.path.relpath(os.path.join(dirpath, n), root) for n in filenames if n in ("package.json", "package-lock.json")]
+    return sorted(found)
+
+
+def stated_typescript(path):
+    """The typescript versions one package file states: the declared ranges, and for a lock the root's installed copy."""
+    with open(path, encoding="utf-8") as f:
+        doc = json.load(f)
+    if os.path.basename(path) == "package-lock.json":
+        packages = doc.get("packages", {})
+        top = packages.get("", {})
+        stated = [top[k]["typescript"] for k in PIN_KEYS if "typescript" in top.get(k, {})]
+        if "node_modules/typescript" in packages:
+            stated.append(packages["node_modules/typescript"]["version"])
+        return stated
+    return [doc[k]["typescript"] for k in PIN_KEYS if "typescript" in doc.get(k, {})]
 
 
 def git(cwd, *a):
@@ -317,6 +346,34 @@ class CodeCheck(unittest.TestCase):
         self.assertEqual(lock[""]["dependencies"], want)
         for name, version in want.items():
             self.assertEqual(lock["node_modules/" + name]["version"], version, name)
+
+    def test_every_package_file_states_the_standard_typescript(self):
+        files = pin_files(REPO)
+        # Scope first: the walk must reach both the root and the tools pins, or an empty mismatch list proves nothing.
+        self.assertIn("package.json", files)
+        self.assertIn(os.path.join("actions", "code-check", "tools", "package.json"), files)
+        stated = {f: stated_typescript(os.path.join(REPO, f)) for f in files}
+        self.assertTrue(any(stated.values()), "no package file states typescript")
+        mismatches = [f + " states typescript " + v for f, vs in stated.items() for v in vs if v != TS_PIN]
+        self.assertEqual(mismatches, [], "every typescript pin must be exactly lint/code_check_standard.json's " + TS_PIN)
+
+    def test_agreeing_tools_package_files_state_the_standard_typescript(self):
+        tools = os.path.join(REPO, "actions", "code-check", "tools")
+        for name in ("package.json", "package-lock.json"):
+            with self.subTest(name=name):
+                stated = stated_typescript(os.path.join(tools, name))
+                self.assertTrue(stated)
+                self.assertEqual(set(stated), {TS_PIN})
+
+    def test_package_file_with_no_typescript_entry_states_none(self):
+        with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as d:
+            for name, text in (("empty", "{}"), ("other", '{"dependencies": {"ruff": "0.17.3"}}')):
+                path = os.path.join(d, name, "package.json")
+                os.makedirs(os.path.dirname(path))
+                with open(path, "w", encoding="utf-8") as f:
+                    f.write(text)
+                with self.subTest(name=name):
+                    self.assertEqual(stated_typescript(path), [])
 
     def test_format_layer_waits_for_o2(self):
         std = json.load(open(STANDARD, encoding="utf-8"))
