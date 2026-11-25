@@ -266,11 +266,21 @@ MUTATIONS = [
      '    if False:\n        return False', "guard",
      'worktree remove: a locked tree denies even though it is clean'),
     ("worktree-remove: a live session no longer denies",
-     '    live = worktree_live_session(target)\n    if live is None:\n        return None\n'
-     '    if live:\n        return False',
-     '    live = worktree_live_session(target)\n    if live is None:\n        return None\n'
-     '    if False:\n        return False', "guard",
+     '    live = worktree_live_session(target, absent_is_out=True)\n    if live:\n        return False',
+     '    live = worktree_live_session(target, absent_is_out=True)\n    if False:\n        return False', "guard",
      'worktree remove: a live session standing in a clean tree still denies'),
+    ("worktree-remove: a live process in the tree is ignored when its record's folder is gone",
+     '    standing = _process_stands_in(target)\n    if standing:\n        return False',
+     '    standing = _process_stands_in(target)\n    if False:\n        return False', "guard",
+     'log: a live process in a clean tree refuses the remove'),
+    ("worktree-remove: a process read that fails no longer refuses when a record's folder is gone",
+     '    if standing is None:\n        return False',
+     '    if False:\n        return False', "guard",
+     'a process read that raises refuses the remove'),
+    ("worktree-remove: an unreadable session record no longer allows the remove with a note",
+     '    if live is None:\n        return None',
+     '    if False:\n        return None', "guard",
+     'a record under an absent parent, is noted as unconfirmed'),
     ("worktree-remove: any session record counts as live, recycled pid included",
      '    diff = actual - started\n    if diff > SESSION_LIVE_TOLERANCE_MS:\n'
      '        return None\n    return diff >= -SESSION_LIVE_TOLERANCE_MS',
@@ -1629,6 +1639,19 @@ MUTATIONS = [
      '        if live is None:\n            saw_unreadable = True',
      '        if not session_is_live(record):\n            continue',
      "guard", "liveness: worktree_live_session answers None on an unreadable record under target"),
+    # Every OSError is read as a removed folder, so a permission error on a record's cwd reads as gone. The
+    # permission-denied control (tests/guard/s33355-misc.py) must die: its cwd is unreadable, not absent.
+    ("liveness: _folder_is_gone reads every OSError as a removed folder",
+     "    except (FileNotFoundError, NotADirectoryError):\n",
+     "    except OSError:\n",
+     "guard", "liveness: worktree_live_session answers None for permission denied on a record's cwd, "
+     "with or without the opt-in"),
+    # A missing parent folder reads unknown, never gone (git_reads._folder_is_gone). Without that rule a record whose
+    # cwd and parent are both absent reads as a gone folder, so a forced remove of a clean tree is allowed unnoted.
+    ("liveness: _folder_is_gone reads a missing parent as a removed folder",
+     '        return parent != path and os.path.isdir(parent)',
+     '        return parent != path', "guard",
+     "log: a forced remove, a record under an absent parent, is noted as unconfirmed"),
     ("liveness: the windows arm reads access-denied (error 5) as CONFIRMED dead",
      '        if error == 87:  # ERROR_INVALID_PARAMETER: no such process\n            return None',
      '        if error in (87, 5):\n            return None',
@@ -2854,15 +2877,23 @@ MUTATIONS = [
      'NPM_DRY_RUN_WRITERS = set()',
      "guard", 'linked-nm: refuse npm rebuild --dry-run (Bash) in a linked folder'),
     # ---- the Stop check's long-agent rule (hooks/stall_watch.py, decision stall-watch). An agent that has run
-    # AGENT_LONG seconds is due one check-in; these two cross the age test and the check-in time test.
+    # AGENT_LONG seconds is due one check-in; these four cross the age test, the check-in fire time and its ahead bound.
     ("stall: the long-agent age test admits the limit one step late, so an agent exactly AGENT_LONG old is not yet due",
      "now - began >= long_age and not checked_in(job, began + long_age, sent)",
      "now - began > long_age and not checked_in(job, began + long_age, sent)", "stall",
      "A11f."),
     ("stall: a check-in made before the crossing counts, so a check-in older than the crossing clears the block",
-     "return any(when is not None and when >= crossed and pat.search(text) for when, text in sent)",
-     "return any(when is not None and when <= crossed and pat.search(text) for when, text in sent)", "stall",
+     "if ahead <= AGENT_CHECKIN_AHEAD and fire >= crossed:",
+     "if ahead <= AGENT_CHECKIN_AHEAD and fire <= crossed:", "stall",
      "A13b."),
+    ("stall: a check-in's fire time ignores its delay, so a check-in made before the crossing that fires after it does not count",
+     "fire = when + ahead * 60",
+     "fire = when", "stall",
+     "A13c."),
+    ("stall: the ahead bound is dropped, so a check-in set far ahead of the Stop clears the block",
+     "ahead <= AGENT_CHECKIN_AHEAD and fire >= crossed",
+     "fire >= crossed", "stall",
+     "A13f."),
     # ---- the always-silent stub. A hook whose main() exits 0 with no output passes every
     # "nothing printed" case on its own. Each suite pairs that silence with a known-bad input in
     # the same case (`known-bad pair`), and these mutants are the stub itself.

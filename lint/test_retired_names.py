@@ -10,8 +10,11 @@ Each is distinctive, so a whole-word match in a tracked file is the old name com
 file, GLOSSARY.md, whose "Not" cells list them, and the generated docs/records.md are the exceptions. A HISTORY
 file may keep its name only on a line whose comment holds the opt-out marker. A retired word in plain
 prose ("the test will pass") is a reviewer's call, not this test's. The widened glossary check will replace this list.
+RepoRetiredNamesTests scans each tracked text file for the names in RETIRED_PATTERN, so a retired name cannot return
+in any file. RepoGlossaryTests checks the real GLOSSARY.md. The ready check runs both, from this file.
 """
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -20,6 +23,7 @@ import tokenize
 import unittest
 
 import _test_temp  # test-temp-standard: one run folder per run (the one home, lint/_test_temp.py)
+import check_glossary  # the check module: the real GLOSSARY.md cases read its rows() and words()
 from check_glossary import OPT_OUT  # the one home of the opt-out marker, a line that holds it is skipped
 
 RUN_FOLDER = _test_temp.run_folder()
@@ -187,6 +191,203 @@ class LineScope(unittest.TestCase):
         repo = make_repo({other: 'old = "Lane kind: blind"  # glossary-ok: quoted to be refused\n'})
         self.assertTrue(other in tracked(repo), "the fixture does not track %s" % other)
         self.assertEqual(hits(repo, self.OLD), [other])
+
+
+def plural_forms(word):
+    """The word with a plural `s`, `es` or `ies` taken off, so gaps, tries and claims reach gap, try and claim."""
+    out = {word, word[:-1] if word.endswith("s") else word}
+    if word.endswith("es"):
+        out.add(word[:-2])
+    if word.endswith("ies"):
+        out.add(word[:-3] + "y")
+    return out
+
+
+class RepoGlossaryTests(unittest.TestCase):
+    def test_repo_glossary_homes_resolve(self):
+        """The real GLOSSARY.md: every home resolves. A path list keeps git out of it."""
+        r = subprocess.run([sys.executable, check_glossary.__file__, "README.md"], cwd=ROOT,
+                           capture_output=True, encoding="utf-8")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
+    def test_real_not_names_use_this_sense_only_and_keep_gap_try_claim_plain(self):
+        """The real GLOSSARY.md, read through the check's own rows(): each tag is (this sense), and gap,
+        try and claim are everyday words, so no "not" name may be one of them."""
+        with open(os.path.join(ROOT, "GLOSSARY.md"), encoding="utf-8") as f:
+            table = check_glossary.rows(f.read())
+        self.assertTrue(table, "GLOSSARY.md has no rows under ## Terms")
+        problems = []
+        for term, _homes, names in table:
+            for name in names:
+                if "(" in name and not re.fullmatch(r"[^()]+ \(this sense\)", name):
+                    problems.append("row '%s': not name '%s' has a tag other than (this sense)" % (term, name))
+                for word in check_glossary.words(name.split(" (")[0]):
+                    if plural_forms(word) & {"gap", "try", "claim"}:
+                        problems.append("row '%s': not name '%s' holds '%s'; gap, try and claim are plain words"
+                                        % (term, name, word))
+        self.assertEqual(problems, [], "\n".join(problems))
+
+
+# retired-names: pattern block begins
+# o13 lane B retired these names (GLOSSARY.md rows agent, mutation test, red run, command). Claude
+# Code's own names stay: the hook events, `subagent_type`, the CLAUDE_CODE_* settings keys and the
+# `subagents/` transcript folder. Two old names stay readable until their end day, each in one file:
+# the `--subagent` flag of local_time.py and the `_subagentCapUntil` field of config_watch.py.
+RETIRED_PATTERN = (r"(?i)sub-?agent|harness[-_ ]scope|HARNESS_SCOPE|mutation harness|AUTHOR_HARNESS"
+                   r"|ask-steps-run-alone|\b(?:ask|count|harmless|background)_steps?\b|\b(?:ask|harmless|chained) steps?\b"
+                   r"|roles-one-role-per-worker|output-never-echo-worker-report|worker_transcript"
+                   r"|WORKER_FOLDED_KEYS|(?i:red[- ]proof)")
+PLATFORM = (r"SubagentStop|SubagentStart|subagent_type|(?:\\u0043|C)LAUDE_CODE_\w+"
+            r"|[\"'/`]subagents(?=[\"'/`])|subagents/|SUBAGENT_MODEL")
+STAYS = {  # path: the one old name it may still hold, and why
+    "hooks/local_time.py": "--subagent",            # read until OLD_FLAG_ENDS
+    "hooks/config_watch.py": "_subagentCapUntil",   # read until OLD_NAME_ENDS
+    "hooks/test_local_time.py": "--subagent",       # pins the old flag until then
+    "hooks/test_config_watch.py": "_subagentCapUntil",
+    "testing/skip-locally-fail-in-ci.test.mjs": "Red proof",  # header shared with copies in other repos
+    "lint/test_find_copies.py": "Red proof",        # the fixture copy of that header
+    "mods/plain-diff/docs/mockup.html": "red proof",  # sample diff text
+    # the writer-label alternation of OTHER_WRITER_ROW_RE: the harness writes "Subagent report:". Only this fragment
+    # stays, so a bare "subagent" elsewhere in the file still fails.
+    "lint/report_guard.py": "agent|subagent|",
+}
+# retired-names: pattern block ends
+# The scan skips the paths in SKIP: an exact file, or a folder (its name ends in /) and every path under it.
+SKIP = ("skills/impeccable/", "GLOSSARY.md")  # GLOSSARY.md names the retired words in its "Not" cells, on purpose
+BLOCK_BEGIN = "# retired-names: pattern block begins"  # the scan reads this file as data between the two markers
+BLOCK_END = "# retired-names: pattern block ends"
+
+
+def skipped(rel):
+    """True for a path the whole-tree scan skips: an exact SKIP file, or a path under a SKIP folder."""
+    return any(rel == entry or (entry.endswith("/") and rel.startswith(entry)) for entry in SKIP)
+
+
+def scanned_lines(rel, lines):
+    """(number, text) for each line the scan reads in a tracked file. In this file the lines from BLOCK_BEGIN to
+    BLOCK_END are data, and are left out. Each marker must stand alone once, begin before end; otherwise None, a hit,
+    so an unpaired marker cannot exempt the rest of the file."""
+    if rel != SELF:
+        return list(enumerate(lines, 1))
+    begin = [n for n, line in enumerate(lines, 1) if line.strip() == BLOCK_BEGIN]
+    end = [n for n, line in enumerate(lines, 1) if line.strip() == BLOCK_END]
+    if len(begin) != 1 or len(end) != 1 or end[0] < begin[0]:
+        return None
+    return [(n, line) for n, line in enumerate(lines, 1) if not begin[0] <= n <= end[0]]
+
+
+def retired_hits(repo):
+    """The hits of the whole-tree scan of repo, one text line each: a path, or a numbered line, that holds a retired
+    name. None when git cannot list repo."""
+    listed = subprocess.run(["git", "-C", repo, "ls-files"], capture_output=True, encoding="utf-8")
+    if listed.returncode != 0:
+        return None
+    retired, platform = re.compile(RETIRED_PATTERN), re.compile(PLATFORM)
+    found = []
+    for rel in listed.stdout.splitlines():
+        if skipped(rel):
+            continue
+        if retired.search(rel):
+            found.append("%s: the path" % rel)
+        try:
+            with open(os.path.join(repo, rel), encoding="utf-8") as f:
+                text = f.read()
+        except (OSError, UnicodeDecodeError):
+            continue
+        text = platform.sub("", text)
+        if rel in STAYS:
+            text = text.replace(STAYS[rel], "")
+        lines = scanned_lines(rel, text.splitlines())
+        if lines is None:
+            found.append("%s: the pattern block markers are not one begin, then one end" % rel)
+            continue
+        for number, line in lines:
+            hit = retired.search(line)
+            if hit:
+                found.append("%s:%d: %s" % (rel, number, hit.group(0)))
+    return found
+
+
+class RepoRetiredNamesTests(unittest.TestCase):
+    def test_no_retired_name_in_tracked_files(self):
+        """Every tracked path and text file, less the SKIP paths and this file's pattern block: no name o13 lane B
+        retired, outside the platform's own."""
+        found = retired_hits(ROOT)
+        self.assertIsNotNone(found, "git ls-files could not list %s" % ROOT)
+        self.assertEqual(found, [], "\n".join(found[:40]))
+
+
+PLANTED = "HARNESS_" "SCOPE"  # a retired name, split so this file's own source holds none in matchable form
+
+
+class ScanScope(unittest.TestCase):
+    """retired_hits reads this file outside its pattern block, and every other tracked file less SKIP. Each case
+    plants a name in a scratch repo, so the scan's reach is shown, not assumed."""
+
+    def this_file(self):
+        with open(os.path.join(ROOT, SELF), encoding="utf-8") as f:
+            return f.read()
+
+    def test_unplanted_copy_of_this_file_is_clean(self):
+        repo = make_repo({SELF: self.this_file()})
+        self.assertIn(SELF, tracked(repo), "the fixture does not track %s" % SELF)
+        self.assertEqual(retired_hits(repo), [])
+
+    def test_name_planted_outside_the_pattern_block_is_named(self):
+        text = self.this_file()
+        repo = make_repo({SELF: text + '\nNOTE = "%s"\n' % PLANTED})
+        self.assertIn(SELF, tracked(repo), "the fixture does not track %s" % SELF)
+        self.assertEqual(retired_hits(repo), ["%s:%d: %s" % (SELF, text.count("\n") + 2, PLANTED)])
+
+    def test_name_planted_inside_the_pattern_block_is_not_a_hit(self):
+        text = self.this_file()
+        planted = text.replace(BLOCK_BEGIN + "\n", BLOCK_BEGIN + '\nNOTE = "%s"\n' % PLANTED, 1)
+        self.assertNotEqual(planted, text, "the fixture did not plant the name")
+        repo = make_repo({SELF: planted})
+        self.assertIn(SELF, tracked(repo), "the fixture does not track %s" % SELF)
+        self.assertEqual(retired_hits(repo), [])
+
+    def test_unpaired_block_marker_is_a_hit(self):
+        kept = [line for line in self.this_file().splitlines() if line.strip() != BLOCK_END]
+        repo = make_repo({SELF: "\n".join(kept) + "\n"})
+        self.assertEqual(retired_hits(repo),
+                         ["%s: the pattern block markers are not one begin, then one end" % SELF])
+
+    def test_bak_sibling_of_this_file_is_scanned(self):
+        repo = make_repo({SELF + ".bak": 'NOTE = "%s"\n' % PLANTED})
+        self.assertIn(SELF + ".bak", tracked(repo), "the fixture does not track %s.bak" % SELF)
+        self.assertEqual(retired_hits(repo), ["%s.bak:1: %s" % (SELF, PLANTED)])
+
+    def test_skip_entries_match_exact_paths_and_folders_only(self):
+        planted = 'NOTE = "%s"\n' % PLANTED
+        repo = make_repo({"GLOSSARY.md": planted, "GLOSSARY.md.bak": planted,
+                          "skills/impeccable/a.md": planted, "skills/impeccable-old/a.md": planted})
+        self.assertIn("GLOSSARY.md.bak", tracked(repo), "the fixture does not track GLOSSARY.md.bak")
+        self.assertEqual(retired_hits(repo), ["GLOSSARY.md.bak:1: %s" % PLANTED,
+                                              "skills/impeccable-old/a.md:1: %s" % PLANTED])
+
+    def test_marker_pair_in_another_file_is_still_a_hit(self):
+        """The markers exempt lines of this file only. A pair around a retired name in README.md is a hit."""
+        repo = make_repo({"README.md": "%s\nNOTE = \"%s\"\n%s\n" % (BLOCK_BEGIN, PLANTED, BLOCK_END)})
+        self.assertIn("README.md", tracked(repo), "the fixture does not track README.md")
+        self.assertEqual(retired_hits(repo), ["README.md:2: %s" % PLANTED])
+
+    def test_pattern_block_holds_only_pattern_assignments(self):
+        """The real file's pattern block assigns only the names the scan reads, so a pair wrapped round other code (a
+        def, an import, a test) cannot exempt that code."""
+        import ast  # local, so this edit stays inside the class
+        lines = self.this_file().splitlines()
+        begin = [n for n, line in enumerate(lines) if line.strip() == BLOCK_BEGIN]
+        end = [n for n, line in enumerate(lines) if line.strip() == BLOCK_END]
+        self.assertEqual((len(begin), len(end)), (1, 1), "the real file needs one pattern block: one begin, one end")
+        reads = {name for name in retired_hits.__code__.co_names if name.isupper()}
+        strays = []
+        for node in ast.parse("\n".join(lines[begin[0] + 1:end[0]])).body:
+            names = [t.id for t in node.targets if isinstance(t, ast.Name)] if isinstance(node, ast.Assign) else []
+            if not names or not all(name in reads for name in names):
+                strays.append(begin[0] + 1 + node.lineno)
+        self.assertEqual(strays, [], "the pattern block holds code that is not a pattern assignment, at line(s) %s"
+                         % strays)
 
 
 def tearDownModule():

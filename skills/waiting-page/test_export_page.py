@@ -2035,13 +2035,22 @@ class Rebuild(Base):
 
     def test_a_crash_in_rebuild_exits_3_with_one_unknown_line(self):
         waiting = self.exported({"items": {"item-001": item(1)}}, page=False)
-        # 100,000 levels: json.load raises RecursionError inside rebuild, and no Stop handler takes it, so it is a crash.
-        write_text(os.path.join(waiting, "items", "deep.json"), "[" * 100000 + "]" * 100000)
-        r = self.rebuild(waiting, os.path.join(self.tmp.name, "batches"))
+        # json.load raises RecursionError inside rebuild, and no Stop handler takes it, so it is a crash. The raise is
+        # injected: CPython 3.15 parses a 100,000-level doc, and the batch writer then sizes it at O(depth^2) bytes, so no
+        # nesting depth makes this crash on every interpreter.
+        printed = io.StringIO()
+        with mock.patch.object(export_page.json, "load", side_effect=RecursionError("maximum recursion depth exceeded")), \
+                contextlib.redirect_stdout(printed):
+            try:
+                code = export_page.main(["--rebuild", waiting, "--batches", os.path.join(self.tmp.name, "batches")])
+            except Exception as err:  # main() turns a crash into exit 3; an escape is a failed assert, not an error
+                self.fail("main() let %s escape instead of exiting 3: %s" % (type(err).__name__, err))
+        r = subprocess.CompletedProcess(["--rebuild"], code, printed.getvalue(), "")
         self.assertEqual(r.returncode, 3, "a crash must exit 3, not %d. Output:\n%s" % (r.returncode, shown(r)))
         lines = verdict_lines(r)
         self.assertEqual(len(lines), 1, "a crash must print one unknown line. Output:\n" + shown(r))
         self.assertTrue(lines[0].startswith("unknown"), shown(r))
+        self.assertIn("(RecursionError)", lines[0], "scope: the crash is not the RecursionError from json.load. Output:\n" + shown(r))
 
     def test_an_empty_waiting_dir_is_unknown(self):
         waiting = self.out()
