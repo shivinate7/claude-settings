@@ -2970,6 +2970,32 @@ def parse_config(root, cfg, ref, where, path, cite, fill=True):
         say(f"merge: {path} on {where} leaves out {', '.join(filled)}. Using the defaults for those.")
     return cfg
 
+def head_config_refusal(root, head, base, path=DEFAULT_CONFIG):
+    """-> the one refusal line for a PR head whose `path` this running tool's parse_config refuses, else None. Only a PR whose diff against origin/`base` touches `path` is
+    judged, so a head that inherits a stamp from an older main is left alone. A deleted file, an unreadable diff or file read as None: the base's stamp decides then
+    (the same reading head_none_stamp takes). The check protects only a run of the older tool (the launcher's `stable`); a run from the PR's own tree passes by construction.
+    Cost: one `git diff --name-only`, and for a touched file one `git show` and one parse_config (the workflow-cap read at the head, git only)."""
+    c, names = git(root, "diff", "--name-only", f"origin/{base}...{head}")
+    if c or path not in names.split("\n"):
+        return None
+    c, text = git(root, "show", f"{head}:{path}")
+    if c:
+        return None
+    where = f"{path} on the head {head[:9]}"
+    try:
+        cfg = json.loads(text)
+        if not isinstance(cfg, dict) or not isinstance(cfg.get("merge", {}), dict):
+            raise ValueError("not an object")
+    except ValueError as e:
+        return f"{where} is not valid JSON ({e}). Every merge in the repo reads this file from the default branch, so fix it before the PR goes on."
+    try:
+        with contextlib.redirect_stdout(io.StringIO()):  # parse_config says its defaults and floors; only its refusal is read here
+            parse_config(root, cfg, head, f"the head {head[:9]}", path, "", fill=False)
+    except Stop as e:
+        return (f"{e} The merge tool at stable does not know this value or key yet, so every merge in the repo would be refused once this lands. "
+                f"Land the tool change first, wait until stable holds it, then change {path} in a second PR.")
+    return None
+
 def refuse_bad_pr(info):
     if info["state"] != "OPEN":
         raise Stop(f"the pull request is {info['state']}")
@@ -4169,6 +4195,9 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_t
         if target.isdigit():
             cross_fails, reports, stop = cross_measure(root, head, int(target), info["body"], host, with_prs, base, fetched, why is None, is_integration_pr(info))
             fails += cross_fails
+            refused = head_config_refusal(root, head, base)
+            if refused:
+                fails.append(refused)
             # one check-runs read: the draft's Windows and macOS runs, which this Linux lint never runs. A batch integration PR has no draft run of its own
             # (a lane's run is the proof), so it reads none. A base with merge.requiredChecks "none" or "first-proof", or a setup head whose own stamp says "none", reads no draft run,
             # and the local lint steps below are the whole proof (decision private-repos-no-ci).
@@ -5683,6 +5712,9 @@ def draft_step(root, cfg, n, host, info, merge_main=False):
     red = head_check_red(host.head_state(n, info["head"]))  # a head that will not merge never goes ready; before any push
     if red:
         raise Stop(f"the head of #{n} has a red check, so it stays a draft and nothing was pushed {GREEN_CITE}: {red}.")
+    refused = head_config_refusal(root, info["head"], base)
+    if refused:
+        raise Stop(f"{refused} #{n} stays a draft and nothing was pushed.")
     checks = cfg.get("merge", {}).get("readyChecks")
     if not checks:
         say(READY_NO_CHECKS_LINE)
