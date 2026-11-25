@@ -4049,8 +4049,89 @@ def case_widens_reasons_bound_the_settings_repo_never_widens():
               "'unless' and 'other than'" % name, bool(holds) and not missing, cause)
 
 
+# ------------------------------------------------------------------ the named rulings of a Based on (ruling) line
+#
+# named_rulings(text, ids) -> list. `ids` are the candidate ruling ids (`decisions/<slug>`, `ruled:<id>`). The result holds
+# each id in `ids`, in the order of `ids` and once, that a `Based on (ruling):` line of `text` names, by its full id or by
+# its slug (the part after the last "/"). A name inside a longer word or path is no name. A Based on line of another kind,
+# and a Problem line, name nothing. When the function is not built, each case reads the sentinel, so it fails by its name.
+NAMED_MISSING = ("MISSING", "hooks/question_form.py has no named_rulings(text, ids) yet")
+RULING_IDS = ["decisions/github-apps-keep-access", "decisions/ci-job-caps"]
+NAMED_RULED_ID = "ruled:own-goal-dont-wait-on-me"
+APPS_RULING_LINE = "Based on (ruling): decisions/github-apps-keep-access (2026-10-28) says revisit only if the apps get bloated."
+CAPS_RULING_LINE = "Based on (ruling): decisions/ci-job-caps (2026-10-27) says the caps are a stopgap."
+
+
+def named_of(text, ids):
+    """named_rulings(text, ids) when the build has it, else the sentinel, so the case fails by its name."""
+    fn = getattr(question_form, "named_rulings", None) if question_form is not None else None
+    return fn(text, ids) if fn is not None else NAMED_MISSING
+
+
+def case_named_rulings_full_id():
+    got = named_of(APPS_RULING_LINE, RULING_IDS)
+    check("named rulings: a Based on (ruling) line that names a full id returns that id",
+          got == ["decisions/github-apps-keep-access"], got)
+
+
+def case_named_rulings_bare_slug():
+    line = "Based on (ruling): github-apps-keep-access says revisit only if the apps get bloated."
+    got = named_of(line, RULING_IDS)
+    check("named rulings: a Based on (ruling) line that names only the slug returns the id it names",
+          got == ["decisions/github-apps-keep-access"], got)
+
+
+def case_named_rulings_ruled_store_id():
+    line = "Based on (ruling): ruled:own-goal-dont-wait-on-me, 2026-11-24 10:36 CST: the owner ruled it."
+    got = named_of(line, [NAMED_RULED_ID, "decisions/ci-job-caps"])
+    check("named rulings: a ruled: id named by a Based on (ruling) line returns that id",
+          got == [NAMED_RULED_ID], got)
+
+
+def case_named_rulings_several_lines_name_two_ids():
+    text = "\n".join((APPS_RULING_LINE, CAPS_RULING_LINE, "Based on (read): hooks/guard.py:120 holds the merge check."))
+    got = named_of(text, RULING_IDS)
+    check("named rulings: two Based on (ruling) lines name two ids, returned in the order of the candidates",
+          got == RULING_IDS, got)
+
+
+def case_named_rulings_code_line_yields_none():
+    text = "Based on (code): decisions/github-apps-keep-access is the file that holds the check."
+    got = named_of(text, RULING_IDS)
+    check("named rulings: a Based on (code) line that names an id yields none", got == [], got)
+
+
+def case_named_rulings_problem_line_yields_none():
+    text = ("Problem (risk): decisions/github-apps-keep-access leaves the apps' access open, so it needs your word.\n"
+            "Based on (read): hooks/guard.py:120 holds the merge check.")
+    got = named_of(text, RULING_IDS)
+    check("named rulings: an id named in the Problem line, and in no Based on (ruling) line, yields none",
+          got == [], got)
+
+
+def case_named_rulings_longer_word_is_no_name():
+    line = "Based on (ruling): github-apps-keep-access-old says revisit only if the apps get bloated."
+    got = named_of(line, RULING_IDS)
+    check("named rulings: a slug inside a longer word is no name", got == [], got)
+
+
+def case_named_rulings_empty_text_names_nothing():
+    got = named_of("", RULING_IDS)
+    check("named rulings: text with no Based on (ruling) line names nothing", got == [], got)
+
+
+def case_based_on_ruling_kind_still_reads():
+    # Control, green on origin/main: the Based on line parser still reads (ruling) as a kind, so the new reader has its line.
+    kinds = [m.group(1).strip().lower() for m in question_form.BASED_LINE.finditer(APPS_RULING_LINE)]
+    check("named rulings control: BASED_LINE still reads a (ruling) line as kind ruling", kinds == ["ruling"], kinds)
+
+
 def main():
-    for case in (case_recommend_base_passes, case_recommend_missing_or_unknown_is_refused,
+    for case in (case_named_rulings_full_id, case_named_rulings_bare_slug, case_named_rulings_ruled_store_id,
+                 case_named_rulings_several_lines_name_two_ids, case_named_rulings_code_line_yields_none,
+                 case_named_rulings_problem_line_yields_none, case_named_rulings_longer_word_is_no_name,
+                 case_named_rulings_empty_text_names_nothing, case_based_on_ruling_kind_still_reads,
+                 case_recommend_base_passes, case_recommend_missing_or_unknown_is_refused,
                  case_legacy_pick_is_the_recommendation, case_why_is_required, case_waiting_on_line_is_required,
                  case_update_judges_only_the_fields_it_carries, case_str_replace_keeps_the_waiting_line,
                  case_kindless_update_with_a_goal_line_needs_the_waiting_line,
