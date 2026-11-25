@@ -4319,10 +4319,13 @@ def ref(name):
     return ""
 def feat_head(): return ref("refs/heads/" + S.get("head_ref", "feat"))  # the pull request's head branch: feat, or the case's head_ref (a batch integration PR's batch-x, whose claim commit moves it)
 RUN_FIELDS = ("databaseId", "name", "workflowName", "workflowDatabaseId", "status", "conclusion", "headSha", "headBranch", "event", "createdAt", "url")
-def next_runs():
+def next_runs(sha=None):
     """The next answer to a workflow-run read: runs_seq, one entry a read, the last one again. An entry is (name, status, conclusion[, databaseId[, workflowDatabaseId]]).
+    sha_runs: {sha: entries}, the same entries on every read of that sha, as sha_checks gives check rows. A sha in it takes no step of runs_seq,
+    so a case can keep one head's run pending while the sequence answers the other reads in order.
     Without an id a run gets 9000 plus its place; without a workflow id, one derived from its name, so runs of one name share one workflow."""
-    seq = S.get("runs_seq") or [[]]; cur = seq.pop(0) if len(seq) > 1 else seq[0]; save()
+    own = (S.get("sha_runs") or {}).get(sha)
+    seq = S.get("runs_seq") or [[]]; cur = own if own is not None else (seq.pop(0) if len(seq) > 1 else seq[0]); save()
     return [(r[0], r[1], r[2], r[3] if len(r) > 3 else 9000 + i, r[4] if len(r) > 4 else sum(map(ord, r[0]))) for i, r in enumerate(cur)]
 def run_list_json(runs, sha, argv):
     """`gh run list --json F,...` as gh prints it: only the fields asked for. A field the fake does not know is gh's refusal. Every run's createdAt is one hour before FAKE_NOW (S runs_created sets it), the same for each run."""
@@ -4377,7 +4380,7 @@ if a[:1] != ["api"]:
         commit = a[a.index("--commit") + 1] if "--commit" in a else ""
         if commit and commit in {r[1] for r in S.get("open_prs", [])} and commit != feat_head():  # another open pull request's head, read by the batch brake: its own runs, and the head's script is not used
             print(json.dumps([{"name": n, "status": st, "conclusion": c} for n, st, c in S.get("other_runs", {}).get(commit, [])])); sys.exit(0)
-        print(run_list_json(next_runs(), commit or feat_head(), a))
+        print(run_list_json(next_runs(commit or feat_head()), commit or feat_head(), a))
         sys.exit(0)
     if a[:2] == ["run", "watch"]:
         sys.exit(0)
@@ -4587,7 +4590,7 @@ try:
                 raise Refused(S["runs_fail"])
             runs = [{"id": rid, "name": n, "status": st, "conclusion": c or None, "head_sha": params["head_sha"], "head_branch": "feat",
                      "workflow_id": wf, "event": "pull_request", "html_url": "https://github.com/o/r/actions/runs/%d" % rid}
-                    for n, st, c, rid, wf in next_runs()]
+                    for n, st, c, rid, wf in next_runs(params["head_sha"])]
             finish(one({"total_count": len(runs), "workflow_runs": runs}, jq), 0, include)
         runs = S.get("base_runs", [])
         finish(one({"total_count": len(runs), "workflow_runs": runs}, jq), 0, include)
@@ -6119,10 +6122,11 @@ class GhHalf(Env):
 
     def test_a_pending_run_of_the_workflow_that_defines_the_required_job_refuses_at_once(self):
         # The folder defines the required job `checks`, so its pending run makes the head pending: refused at once, the later complete run is never read.
+        # The head's own run is pending too (sha_runs): a green own run of the head would prove it, which this case does not test.
         push_base(self, {".github/workflows/checks.yml": workflow_text("checks", "checks")})
         before = self.head()
         self.proven_parent()  # the head is a clean merge of main: its proof is read on the parent the fake gh must know
-        self.set(runs_seq=[[("checks", "in_progress", "")], [("checks", "completed", "success")]])
+        self.set(runs_seq=[[("checks", "in_progress", "")], [("checks", "completed", "success")]], sha_runs={before: [("checks", "in_progress", "")]})
         rc, out = self.go()
         self.assertEqual(rc, 1, out)
         self.assertIn("a check is pending: workflow checks", out)
@@ -6133,10 +6137,12 @@ class GhHalf(Env):
 
     def assert_pending_run_refused_at_once(self, runs_name, required=("checks",)):
         """A pending run that no workflow file shows to be outside the required names makes the head pending: refused at once, with no pause,
-        and nothing claimed or pushed. The required names pass, so only the run holds the head."""
+        and nothing claimed or pushed. The required names pass, so only the run holds the head. The head's own run is pending too (sha_runs), so the
+        head has no green run of its own to prove it."""
         before = self.head()
         self.proven_parent()  # the head is a clean merge of main (the tool's base merge): its proof is read on the parent
-        self.set(checks_seq=[[(n, "pass", "") for n in required]], runs_seq=[[(runs_name, "in_progress", "")], [(runs_name, "completed", "success")]])
+        self.set(checks_seq=[[(n, "pass", "") for n in required]], runs_seq=[[(runs_name, "in_progress", "")], [(runs_name, "completed", "success")]],
+                 sha_runs={before: [(runs_name, "in_progress", "")]})
         rc, out = self.go(required=required)
         self.assertEqual(self.paused, [], f"the pending run {runs_name!r} waited before it refused")
         self.assertEqual(rc, 1, out)
