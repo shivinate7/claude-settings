@@ -1511,15 +1511,18 @@ def load_module(name="stall_watch_under_test"):
     return mod
 
 
-def stop_in_process(transcript_path, spies=None):
+def stop_in_process(transcript_path, spies=None, patch=None):
     """Run the Stop check in this process at NOW, with the default quiet and long ages and no output base: every
     STALL_WATCH_ variable the caller set is cleared for the run, as run_stop clears them from the subprocess. Return
     (rc, stdout, the paths os.stat was called with, the paths open was called with). The wrappers count
     every path the check stats or opens, so a case counts the calls that name one agent.
 
     spies, when given, is a list that collects each process start, network call and write the check makes.
-    Each such call raises, so none runs. A case reads the list after the run."""
+    Each such call raises, so none runs. A case reads the list after the run.
+    patch, when given, is {function name: stand-in}: each named function of the module is replaced for this run only."""
     mod = load_module("stall_watch_in_process")
+    for name, stand_in in (patch or {}).items():
+        setattr(mod, name, stand_in)
     stats, opens = [], []
     real_stat, real_os_open, real_open, real_io_open = os.stat, os.open, builtins.open, io.open
     write_flags = os.O_WRONLY | os.O_RDWR | os.O_APPEND | os.O_CREAT | os.O_TRUNC
@@ -1864,10 +1867,14 @@ def finished_notice(aid):
     return notice(aid, "completed", summary='Agent "review the diff" completed')
 
 
-def agent_checkin(ago, aid, is_error=False):
+def agent_checkin(ago, aid, is_error=False, delay=None):
     """A send_later check-in that names agent aid, made ago seconds before NOW, with its result: an error when
-    is_error, else a good result. Both records are stamped, so the check-in's time is known."""
-    rec = tool_call(SEND_LATER, {"message": "check agent %s" % aid})
+    is_error, else a good result. Both records are stamped, so the check-in's time is known. delay, when given, is
+    the check-in's delay_minutes: how many minutes ahead it is set."""
+    inp = {"message": "check agent %s" % aid}
+    if delay is not None:
+        inp["delay_minutes"] = delay
+    rec = tool_call(SEND_LATER, inp)
     call_id = rec["message"]["content"][0]["id"]
     text = "send_later failed: no session" if is_error else "scheduled"
     return stamped([rec, tool_result(call_id, text, is_error=is_error, tool_use_result=text)], ago)
@@ -2340,6 +2347,69 @@ def A17j_agent_never_resumed_with_a_waiting_notice_stays_waiting_and_its_block_s
     msg = system_message(out, problems)
     problems += expect(aid not in msg, f"waiting agent {aid} has a quiet row: {msg[:200]!r}")
     problems += ["control: " + p for p in listed_once(msg, ctl_id, by_line=True)]
+    return problems
+
+
+def unread_row(msg, aid):
+    """True when one row of msg names agent aid and says it is unread."""
+    return any(aid in line and "unread" in line for line in msg.splitlines())
+
+
+@case
+def A18a_agent_the_check_cannot_read_gets_one_unread_row():
+    """A18a. a quiet background agent the check cannot read, in two ways: its launch record has no parseable time, so
+    its age is unknown; or a read inside its job loop raises. Each run prints one row that names its id and says it is
+    unread, and the Stop exits 0. Control: the same quiet agent, read with no failure, is listed as quiet"""
+    aid = agent_id(320)
+    folder = new_dir()
+    launch, spec = background_agent(folder, aid, agent_step("u1"), 400)
+    rc, out, err = run_stop(transcript(launch, agents=[spec], folder=folder))
+    problems = expect(rc == 0, f"no launch time: exit {rc}, want 0: {err.strip()[:200]}")
+    problems += expect(unread_row(system_message(out, problems), aid),
+                       f"agent {aid} with no parseable launch time has no row that says it is unread: {out[:200]!r}")
+    folder = new_dir()
+    launch, spec = background_agent(folder, aid, agent_step("u2"), 400)
+    path = transcript(stamped(launch, 900), agents=[spec], folder=folder)
+
+    def failing_read(*args, **kwargs):  # a stand-in for a read inside the job loop that raises
+        raise ValueError("a read in the job loop failed")
+    rc, out, _, _ = stop_in_process(path, patch={"open_call": failing_read})
+    problems += expect(rc == 0, f"a raised read: exit {rc}, want 0")
+    problems += expect(unread_row(system_message(out, problems), aid),
+                       f"agent {aid} whose read raised in the job loop has no row that says it is unread: {out[:200]!r}")
+    rc, out, _, _ = stop_in_process(path)
+    problems += ["control: " + p for p in listed_once(system_message(out, problems), aid, by_line=True)]
+    return problems
+
+
+@case
+def A18b_checkin_set_hours_ahead_does_not_clear_the_block():
+    """A18b. a background agent launched 31 min before the Stop, still writing, with a send_later check-in that names
+    it, made 30 s before the Stop, whose delay_minutes is 180: the remedy allows at most 30 minutes ahead, so the
+    check-in does not count and the Stop still blocks and names the agent"""
+    aid = agent_id(321)
+    folder = new_dir()
+    launch, spec = background_agent(folder, aid, agent_step("k1"), 10)
+    rc, out, err = run_stop(transcript(stamped(launch, 1860) + agent_checkin(30, aid, delay=180),
+                                       agents=[spec], folder=folder))
+    problems = expect(rc == 0, f"exit {rc}, want 0: {err.strip()[:200]}")
+    problems += expect(aid in block_text(out),
+                       f"a check-in set 180 minutes ahead cleared the block of agent {aid}, though the remedy allows "
+                       f"30 minutes ahead at most: {out[:200]!r}")
+    return problems
+
+
+@case
+def A18c_checkin_set_29_minutes_ahead_clears_the_block():
+    """A18c. the agent of A18b with a send_later check-in that names it, made 30 s before the Stop, whose delay_minutes
+    is 29: within the 30-minute remedy, so it counts and the Stop prints no block"""
+    aid = agent_id(322)
+    folder = new_dir()
+    launch, spec = background_agent(folder, aid, agent_step("k2"), 10)
+    rc, out, err = run_stop(transcript(stamped(launch, 1860) + agent_checkin(30, aid, delay=29),
+                                       agents=[spec], folder=folder))
+    problems = expect(rc == 0, f"exit {rc}, want 0: {err.strip()[:200]}")
+    problems += expect('"decision"' not in out, f"a check-in set 29 minutes ahead left a block: {out[:200]!r}")
     return problems
 
 
