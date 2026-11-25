@@ -765,11 +765,37 @@ class MovedLineTests(Fixture):
 
     Each case writes the base files, then the change: `source` (hooks/x.py by default) is rewritten to `keep`
     (None deletes it) and the pieces are added. The change first proves its own state: each piece is a new file,
-    not a rename, and each line of `source` that the change takes out is deleted. Only then does the check run."""
+    not a rename, and each line of `source` that the change takes out is deleted. Only then does the check run.
+
+    A reflow is a move too. The change replaces one deleted line with added lines that carry the same words, a case
+    arm split one alternative per line, or an import tuple split one name per line. A token is a run of characters
+    between whitespace, bars, commas, parentheses or backslashes. Each added line whose
+    every token is a token of a line the same file and hunk deletes is a move. A token that no such deleted line
+    holds is new, and that line stays flagged: a reflow must not let a new avoided word hide in it. The builder's
+    rule lives in lint/diff_moves.py, which holds this docstring's definition of a token."""
 
     KEEP = "def keep_it():\n    pass\n"
     MOVED = "def bundle_old():\n    pass\n"
     ANCHOR = "# see rule:bundle-check\n"
+    ARM = "    bundle|keep|tree)\n"
+    IMPORT = "from tools import (bundle_old, keep_it)\n"
+
+    def edit(self, base, after, source):
+        """Commit `base`, then write `after` over it: `source` is an edit, and each base line it takes out is deleted."""
+        for rel, text in base.items():
+            self.put(rel, text)
+        self.base_repo()
+        for rel, text in after.items():
+            self.put(rel, text)
+        self.commit()
+        status = self.git("diff", "-M", "--name-status", "origin/main")
+        self.assertIn("M\t%s\n" % source, status, "fixture state: %s is not an edited file\n%s" % (source, status))
+        patch = self.git("diff", "-U0", "-M", "origin/main")
+        kept = after[source].splitlines()
+        for row in base[source].splitlines():
+            if row.strip() and row not in kept:
+                self.assertIn("\n-" + row + "\n", patch, "fixture state: the base line is not deleted: " + row)
+        return self.run_check()
 
     def setUp(self):
         super().setUp()
@@ -829,6 +855,40 @@ class MovedLineTests(Fixture):
                                {"tests/guard/x.py": self.MOVED}, keep=self.KEEP, source="docs/records.md")
         self.assertEqual(code, 1, "a name deleted from a file the check skips excused its copy in code\n" + out)
         self.assertIn("tests/guard/x.py:1", out, "the copy in code was not flagged\n" + out)
+
+    def test_reflowed_case_arm_is_a_move_and_clean(self):
+        code, out = self.edit({"hooks/x.sh": self.ARM}, {"hooks/x.sh": "    bundle|\\\n    keep|\\\n    tree)\n"},
+                              "hooks/x.sh")
+        self.assertEqual(code, 0, "a case arm reflowed one alternative per line counted as added: each word was on the deleted line\n" + out)
+
+    def test_reflow_with_a_new_avoided_word_still_fails(self):
+        code, out = self.edit({"hooks/x.sh": self.ARM}, {"hooks/x.sh": "    bundle|\\\n    keep|\\\n    bundle_fresh|tree)\n"},
+                              "hooks/x.sh")
+        self.assertEqual(code, 1, "a reflow hid a new avoided word whose token no deleted line holds\n" + out)
+        self.assertIn("hooks/x.sh:3", out, "the line with the new word was not flagged\n" + out)
+
+    def test_case_arm_moved_verbatim_into_a_new_file_is_clean(self):
+        code, out = self.split({"hooks/x.sh": self.ARM + "echo kept\n"}, {"tests/guard/x.sh": self.ARM},
+                               keep="echo kept\n", source="hooks/x.sh")
+        self.assertEqual(code, 0, "a case arm moved verbatim into a new file counted as added\n" + out)
+
+    def test_reflowed_import_tuple_is_a_move_and_clean(self):
+        code, out = self.edit({"hooks/x.py": self.IMPORT}, {"hooks/x.py": "from tools import (\n    bundle_old,\n    keep_it,\n)\n"},
+                              "hooks/x.py")
+        self.assertEqual(code, 0, "an import tuple reflowed one name per line counted as added: each name was on the deleted line\n" + out)
+
+    def test_reflow_token_deleted_in_another_file_excuses_nothing(self):
+        code, out = self.split({"hooks/x.sh": self.ARM + "echo kept\n"}, {"hooks/y.sh": "    bundle|\\\n    keep|\\\n    tree)\n"},
+                               keep="echo kept\n", source="hooks/x.sh")
+        self.assertEqual(code, 1, "a deleted line in another file excused a reflowed line that holds a new word\n" + out)
+        self.assertIn("hooks/y.sh:1", out, "the reflowed line in the other file was not flagged\n" + out)
+
+    def test_reflow_token_deleted_in_another_hunk_excuses_nothing(self):
+        base = "    bundle|tree)\nkeep_line\n    other|x)\n"
+        after = "keep_line\n    bundle|\\\n    x)\n"
+        code, out = self.edit({"hooks/x.sh": base}, {"hooks/x.sh": after}, "hooks/x.sh")
+        self.assertEqual(code, 1, "a token deleted in another hunk of the same file excused a new word in this hunk\n" + out)
+        self.assertIn("hooks/x.sh:2", out, "the new word in the second hunk was not flagged\n" + out)
 
 
 class UncommittedTests(Fixture):
