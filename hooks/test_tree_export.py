@@ -187,5 +187,42 @@ class TreeExportLinkTargetCases(unittest.TestCase):
             self.assertEqual(handle.read(), SPEC, "the directory's contents are not at the refused link's path")
 
 
+MANIFEST_NAME = ".tree-export-paths"  # pinned here; hooks/tree_export.py MANIFEST must hold the same name
+MANIFEST_FILES = {  # a space, a non-ASCII name, a nested folder, next to the default symlink
+    "spec/openapi.yaml": SPEC,
+    "docs/with space.md": "a\n",
+    "docs/café.md": "b\n",
+    "lint/deep/nested/mod.py": "c = 1\n",
+}
+
+
+def tracked_paths(repo, sha):
+    """The paths git lists at SHA, read raw (-z) so no name is quoted, sorted."""
+    env = {key: value for key, value in os.environ.items() if key not in SCRUBBED}
+    done = subprocess.run(["git", "-C", repo, "ls-tree", "-r", "-z", "--name-only", sha], capture_output=True, env=env)
+    if done.returncode != 0:
+        raise RuntimeError("git ls-tree failed: %s" % done.stderr.decode(errors="replace").strip())
+    return sorted(path.decode("utf-8") for path in done.stdout.split(b"\0") if path)
+
+
+class TreeExportManifestCases(unittest.TestCase):
+    """The export writes a manifest at its root: one archived path per line, the same set git lists at the commit."""
+
+    def test_the_export_writes_a_manifest_of_the_paths_git_lists_at_the_sha(self):
+        repo, sha = make_fixture(os.path.join(ROOT, "names"), files=MANIFEST_FILES)
+        want = tracked_paths(repo, sha)
+        dest = os.path.join(ROOT, "names-export")
+        os.makedirs(dest)
+        error = tree_export.export_tree(repo, sha, dest)
+        self.assertIsNone(error, "the export of the manifest fixture failed: %s" % error)
+        name = getattr(tree_export, "MANIFEST", None)
+        self.assertEqual(name, MANIFEST_NAME, "hooks/tree_export.py names no MANIFEST of %s, it is %r" % (MANIFEST_NAME, name))
+        path = os.path.join(dest, MANIFEST_NAME)
+        self.assertTrue(os.path.isfile(path), "the export wrote no manifest at %s" % MANIFEST_NAME)
+        with open(path, encoding="utf-8", newline="") as handle:
+            got = sorted(line for line in handle.read().split("\n") if line)
+        self.assertEqual(got, want, "the manifest lists %s, git lists %s at the sha" % (got, want))
+
+
 if __name__ == "__main__":
     unittest.main()
