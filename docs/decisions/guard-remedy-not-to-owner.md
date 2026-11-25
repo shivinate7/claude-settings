@@ -149,7 +149,7 @@ Text: `past_ruling_text` in `hooks/question_form.py`, wrapped by `RELAY_RULE_REA
 - The refusal never tells the session to take a pick or to drop the question.
 - A question passes when its `Based on (ruling): <id>` line names the ruling the refusal cites, by id or slug. Code reads that line (`question_form.named_rulings`) on both paths: the Stop check (`lint/report_guard.py`) and the check before a question box or page write (`hooks/call_judge.py`). The model judges first; the code allow then overrides its refusal. A mention of the id anywhere else in the text does not pass.
 - The remedy line reads `Based on (ruling): <id> (<time>), may be stale: <why>`.
-- The Stop-path refusal appends one `guard.log` line, rule `past-ruling`. Cost: one line per refusal, no file, no process. Reader: the guard cull (`lint/guard_log_report.py`).
+- The Stop-path refusal appends one `guard.log` line, rule `past-ruling`. Cost: at most one line per refusal, no new file, no process. Reader: the guard cull (the `guard_log_report` script in `lint/`).
 - Control: a question with no `Based on (ruling)` line that names the ruling is still refused once.
 - Owner, 10:36 and 10:42 CST 2026-11-24: a hook that cites a past ruling must not stop a question that updates that ruling; it carries a "may be stale" note; "forbids is too strong a word".
 - Incident, 22:31 CST 2026-11-24: a session dropped five owner questions after a refusal that gave only a ruling id.
