@@ -112,7 +112,7 @@
         "kind": "guard",
         "ref": "roles-third-round-steps-up"
       },
-      "test": "hooks/test_guard.py::floor step-up: builder Round 3 of 3 on sonnet is denied"
+      "test": "hooks/test_guard.py::floor step-up: reviewer Round 3 of 3 on haiku is denied"
     },
     "roles-resume-by-name": {
       "mechanism": {
@@ -560,7 +560,7 @@
     "reports-batch-pace-numbers": {
       "mechanism": {
         "kind": "unmechanized",
-        "reason": "The numbers come from live git and GitHub reads at report time; no guard or check reads them."
+        "reason": "Partly read, never checked: the numbers come from git, GitHub, the guard.log and the session transcript at report time, and no guard or check reads the report. lint/guard_log_report.py prints number four (--between START END --rule load-brake), and lint/pace_numbers.py prints numbers two and three (agents run, most at once, minutes with no agent running) from the transcript; each prints `unknown: <reason>` when it cannot read."
       }
     },
     "reports-blockquote-no-fence": {

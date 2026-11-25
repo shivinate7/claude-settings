@@ -63,6 +63,7 @@ import cost_probe  # noqa: E402  the shared cost counters (testing/cost_probe.py
 MODULE_PATH = os.environ.get("LOCAL_TIME_UNDER_TEST") or os.path.join(HERE, "local_time.py")
 sys.path.append(os.path.join(os.path.dirname(HERE), "lint"))
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (the one home, lint/_test_temp.py)
+from case_runner_test import run_cases  # noqa: E402  the one case runner (hooks/case_runner_test.py)
 ROOT = _test_temp.run_folder()
 EMPTY_TZPATH = os.path.join(ROOT, "empty_tzpath")
 os.makedirs(EMPTY_TZPATH, exist_ok=True)
@@ -3242,135 +3243,228 @@ class CostTests(unittest.TestCase):
                         "a granted plain override writes its grant file; got %r" % (run["files"],))
 
 
+def case_raising_case_does_not_stop_the_run():
+    """A case that raises does not stop the run: the case after it still runs, and main returns 1 with a summary."""
+    g = globals()
+    names = [n for n, v in g.items() if n.startswith("case_") and callable(v)]
+    saved = {n: g[n] for n in names}
+    saved_failed, saved_root = g["FAILED"], g["ROOT"]
+    saved_run_class = cost_probe.run_class
+    marker, out, raised, rc = [], io.StringIO(), "", None
+
+    def quiet():
+        return None
+
+    def raiser():
+        """the stub that raises"""
+        raise RuntimeError("stub case raised on purpose")
+
+    def record():
+        marker.append(True)
+
+    stubs = dict.fromkeys(names, quiet)
+    stubs["case_pointer_constant"] = raiser  # the second case in main's sequence
+    stubs["case_real_clock"] = record        # the third
+    g.update(stubs)
+    g["FAILED"] = []
+    g["ROOT"] = os.path.join(saved_root, "stub_run")
+    os.makedirs(g["ROOT"], exist_ok=True)
+    cost_probe.run_class = lambda case_class: True
+    try:
+        with contextlib.redirect_stdout(out):
+            rc = g["main"]()
+    except Exception as e:
+        raised = "%s: %s" % (type(e).__name__, e)
+    finally:
+        g.update(saved)
+        g["FAILED"], g["ROOT"] = saved_failed, saved_root
+        cost_probe.run_class = saved_run_class
+    check("a raising case does not stop the run: the case after it still runs", bool(marker),
+          "the third case did not run; main raised %s" % (raised or "nothing"))
+    check("a run with a raising case returns 1 and prints the summary",
+          rc == 1 and "1 failed" in out.getvalue(),
+          "main returned %r; main raised %s" % (rc, raised or "nothing"))
+    check("the FAIL line names the case that raised",
+          "FAIL the stub that raises" in out.getvalue().splitlines(),
+          "no such FAIL line; main raised %s" % (raised or "nothing"))
+
+
+def case_system_exit_in_a_case_is_a_failed_case():
+    """A case that raises SystemExit fails by name, and the cases after it still run (run_cases)."""
+    # The stub list runs in a child, so an exit that escapes run_cases ends the child, never this suite.
+    stub = r'''
+import sys
+sys.path.insert(0, %r)
+import case_runner_test as cr
+def first():
+    return None
+def exits():
+    """the stub that exits"""
+    raise SystemExit(0)
+def marked():
+    print("MARKER the case after the exit ran")
+sys.exit(cr.run_cases([first, exits, marked]))
+''' % HERE
+    proc = subprocess.run([sys.executable, "-c", stub], capture_output=True, text=True, timeout=120)
+    lines = proc.stdout.splitlines()
+    seen = "child exited %r; output %r" % (proc.returncode, proc.stdout[-300:])
+    check("a case that raises SystemExit: the case after it still runs",
+          "MARKER the case after the exit ran" in lines, seen)
+    check("a case that raises SystemExit: it is a FAIL line that names it",
+          "FAIL the stub that exits" in lines, seen)
+    check("a case that raises SystemExit: the run returns 1 and prints the summary",
+          proc.returncode == 1 and " 1 failed," in proc.stdout, seen)
+
+
+def case_cli_agent_old_flag():
+    """--subagent, the old flag: read until local_time.OLD_FLAG_ENDS"""
+    case_cli_agent("--subagent")
+
+
+def case_cost_tests():
+    """CostTests"""
+    if cost_probe.run_class(CostTests):
+        return None
+    return ["the CostTests class has a failing case (its report is above)"]
+
+
+def suite_cases():
+    """The cases main() runs, in order. Built on each call, so a stub in a case's globals is seen."""
+    return [
+        case_table_in_process,
+        case_pointer_constant,
+        case_real_clock,
+        case_no_tz_database,
+        case_machine_zone_is_not_used,
+        case_cli_hook_shape,
+        case_cli_agent,
+        case_cli_agent_old_flag,
+        case_cli_no_tz_database,
+        case_cwd_gone_prints_one_remedy_line,
+        case_cwd_present_prints_no_remedy_line,
+        case_cwd_stat_denied_prints_nothing,
+        case_cwd_check_leaves_exit_and_other_output_unchanged,
+        case_cwd_absent_from_payload_prints_nothing,
+        case_cwd_gone_guard_unimportable_prints_one_sentence,
+        case_cwd_regular_file_prints_gone_line,
+        case_cwd_gone_newline_path_prints_one_escaped_line,
+        case_cwd_gone_non_ascii_path_ascii_stdout_keeps_later_lines,
+        case_cwd_gone_ascii_path_ascii_stdout_prints_override_line,
+        case_override_grants,
+        case_override_context_line,
+        case_override_off,
+        case_override_off_with_a_full_stop_is_a_reason,
+        case_opus_context_line,
+        case_override_takes_words,
+        case_override_reason_goes_through_the_log_writer,
+        case_override_reason_with_a_lone_surrogate,
+        case_override_not_the_first_word,
+        case_override_line_in_prose,
+        case_override_prose_mention_grants_nothing,
+        case_override_line_in_prose_by_source,
+        case_override_line_in_prose_after_a_notice,
+        case_override_line_in_a_seed_brief_grants_nothing,
+        case_ruling_cites_carry_their_time,
+        case_override_corrupt_file_replaced,
+        case_override_session_id_stays_inside,
+        case_override_fail_open,
+        case_override_capture_failure_keeps_the_grant,
+        case_opus_ask_judge_approved_lifts_every_role,
+        case_opus_ask_judge_refusal_grants_nothing,
+        case_opus_ask_keyword_forms_never_ask_the_judge,
+        case_opus_ask_machine_text_and_pasted_text_never_ask_the_judge,
+        case_opus_ask_asks_the_judge_only_for_the_word,
+        case_opus_ask_failure_fails_closed,
+        case_opus_ask_builders_only_lifts_builders,
+        case_opus_ask_length_and_role_from_the_words,
+        case_opus_ask_two_roles_grant_both,
+        case_opus_ask_addressee_is_not_a_role,
+        case_opus_ask_negated_role_grants_nothing,
+        case_opus_ask_two_lengths_grant_nothing,
+        case_opus_ask_spelled_lengths,
+        case_opus_ask_first_word_opus_is_plain_unless_keyword,
+        case_opus_ask_reminder_and_unclosed_paste_never_reach_the_judge,
+        case_opus_ask_logs_the_grant_text,
+        case_opus_ask_full_size_prompt,
+        case_opus_ask_remote_env_is_scoped_to_its_block,
+        case_opus_ask_machine_blocks_never_ask_the_judge,
+        case_opus_ask_plain_wake_word_still_reaches_the_judge,
+        case_opus_ask_seed_prompt_in_a_remote_session_never_asks_the_judge,
+        case_opus_ask_remote_session_grants_after_an_owner_turn,
+        case_opus_ask_first_prompt_grants_outside_a_remote_session,
+        case_opus_ask_decimal_and_compound_lengths_grant_nothing,
+        case_opus_ask_minute_length_grants_ninety_minutes,
+        case_opus_ask_no_problem_grants_builder,
+        case_opus_ask_effort_records_are_not_the_owner_turn,
+        case_opus_ask_scheduled_reminder_is_not_the_owner_turn,
+        case_opus_ask_peer_and_task_notification_origins_are_not_the_owner_turn,
+        case_opus_ask_owner_turn_after_effort_records_still_grants,
+        case_opus_ask_seed_record_equal_to_prompt_is_not_an_owner_turn,
+        case_opus_ask_system_record_is_never_an_owner_turn,
+        case_opus_ask_local_timed_check_in_is_not_an_owner_turn,
+        case_opus_ask_prompt_record_after_an_owner_turn_still_grants,
+        case_opus_ask_check_in_then_a_later_owner_turn_still_grants,
+        case_opus_ask_earlier_owner_turn_equal_to_prompt_still_grants,
+        case_opus_ask_source_refused_values_never_grant,
+        case_opus_ask_source_unknown_value_grants_nothing,
+        case_opus_ask_source_user_grants,
+        case_opus_ask_source_absent_falls_back_to_the_transcript,
+        case_opus_ask_loop_wakeup_check_in_without_its_record_never_grants,
+        case_opus_ask_source_keyword_forms_are_untouched,
+        case_opus_scope_context_names_builders_grants_builder,
+        case_opus_scope_reads_the_plain_prompts_oldest_first,
+        case_opus_scope_reads_only_the_transcript_tail,
+        case_opus_scope_without_an_earlier_prompt_grants_every_role,
+        case_opus_scope_not_read_when_the_ask_names_a_role_or_length_is_unclear,
+        case_opus_scope_not_read_when_the_judge_says_no,
+        case_opus_scope_judge_is_given_the_ask_text_only,
+        case_opus_scope_plain_prompt_naming_reviewers_is_read,
+        case_opus_scope_excluded_records_never_reach_the_read,
+        case_opus_scope_pasted_block_in_a_prior_prompt_never_reaches_the_read,
+        case_opus_scope_the_asks_own_record_is_not_context,
+        case_opus_scope_odd_answer_or_error_grants_every_role,
+        case_opus_scope_drops_an_unknown_role_and_keeps_the_rest,
+        case_opus_scope_two_roles_from_the_read_grant_both_sorted,
+        case_opus_list_role_lifts_its_roles_and_refuses_the_rest,
+        case_opus_keyword_files_keep_their_bytes,
+        case_opus_scope_read_sees_every_role_before_it_runs,
+        case_opus_scope_a_kill_during_the_read_leaves_every_role,
+        case_opus_scope_valid_answer_ends_narrowed,
+        case_opus_ask_negation_after_a_role_grants_nothing,
+        case_opus_ask_far_negation_still_grants,
+        case_opus_scope_override_filter_ignores_case,
+        case_opus_scope_model_roles_narrow_case_insensitively,
+        case_opus_scope_returns_the_models_raw_role_strings,
+        case_opus_ask_exclusion_words_grant_nothing,
+        case_opus_ask_plain_lists_still_grant_both,
+        case_opus_scope_cloud_seed_record_is_not_context,
+        case_opus_scope_seed_record_names_reviewer_outside_a_cloud_session,
+        case_override_ask_judge_yes_grants,
+        case_override_ask_judge_not_yes_keeps_the_main_result,
+        case_override_ask_not_asked_grants_nothing,
+        case_override_ask_off_word_leaves_the_override_standing,
+        case_override_ask_cloud_seed_never_asks,
+        case_override_ask_cloud_grants_after_an_owner_turn,
+        case_override_ask_source_checks_before_the_judge,
+        case_override_ask_opus_word_never_asks_the_override_judge,
+        case_override_ask_quoted_refusal_and_notices_never_ask,
+        case_override_ask_pasted_block_is_cut_before_the_judge,
+        case_override_ask_scanner_edges,
+        case_override_ask_grant_defers_a_length,
+        case_override_ask_bare_number_reads_the_raw_first_word,
+        case_override_ask_judge_import_failure_keeps_main_result,
+        case_override_ask_plain_one_act_logs_its_words_once,
+        case_override_ask_off_in_the_reason_grants_once,
+        case_override_ask_judge_kill_keeps_the_inbox_capture,
+        case_raising_case_does_not_stop_the_run,
+        case_system_exit_in_a_case_is_a_failed_case,
+        case_cost_tests,
+    ]
+
+
 def main():
     try:
-        case_table_in_process()
-        case_pointer_constant()
-        case_real_clock()
-        case_no_tz_database()
-        case_machine_zone_is_not_used()
-        case_cli_hook_shape()
-        case_cli_agent()
-        case_cli_agent("--subagent")  # the old flag, read until local_time.OLD_FLAG_ENDS
-        case_cli_no_tz_database()
-        case_cwd_gone_prints_one_remedy_line()
-        case_cwd_present_prints_no_remedy_line()
-        case_cwd_stat_denied_prints_nothing()
-        case_cwd_check_leaves_exit_and_other_output_unchanged()
-        case_cwd_absent_from_payload_prints_nothing()
-        case_cwd_gone_guard_unimportable_prints_one_sentence()
-        case_cwd_regular_file_prints_gone_line()
-        case_cwd_gone_newline_path_prints_one_escaped_line()
-        case_cwd_gone_non_ascii_path_ascii_stdout_keeps_later_lines()
-        case_cwd_gone_ascii_path_ascii_stdout_prints_override_line()
-        case_override_grants()
-        case_override_context_line()
-        case_override_off()
-        case_override_off_with_a_full_stop_is_a_reason()
-        case_opus_context_line()
-        case_override_takes_words()
-        case_override_reason_goes_through_the_log_writer()
-        case_override_reason_with_a_lone_surrogate()
-        case_override_not_the_first_word()
-        case_override_line_in_prose()
-        case_override_prose_mention_grants_nothing()
-        case_override_line_in_prose_by_source()
-        case_override_line_in_prose_after_a_notice()
-        case_override_line_in_a_seed_brief_grants_nothing()
-        case_ruling_cites_carry_their_time()
-        case_override_corrupt_file_replaced()
-        case_override_session_id_stays_inside()
-        case_override_fail_open()
-        case_override_capture_failure_keeps_the_grant()
-        case_opus_ask_judge_approved_lifts_every_role()
-        case_opus_ask_judge_refusal_grants_nothing()
-        case_opus_ask_keyword_forms_never_ask_the_judge()
-        case_opus_ask_machine_text_and_pasted_text_never_ask_the_judge()
-        case_opus_ask_asks_the_judge_only_for_the_word()
-        case_opus_ask_failure_fails_closed()
-        case_opus_ask_builders_only_lifts_builders()
-        case_opus_ask_length_and_role_from_the_words()
-        case_opus_ask_two_roles_grant_both()
-        case_opus_ask_addressee_is_not_a_role()
-        case_opus_ask_negated_role_grants_nothing()
-        case_opus_ask_two_lengths_grant_nothing()
-        case_opus_ask_spelled_lengths()
-        case_opus_ask_first_word_opus_is_plain_unless_keyword()
-        case_opus_ask_reminder_and_unclosed_paste_never_reach_the_judge()
-        case_opus_ask_logs_the_grant_text()
-        case_opus_ask_full_size_prompt()
-        case_opus_ask_remote_env_is_scoped_to_its_block()
-        case_opus_ask_machine_blocks_never_ask_the_judge()
-        case_opus_ask_plain_wake_word_still_reaches_the_judge()
-        case_opus_ask_seed_prompt_in_a_remote_session_never_asks_the_judge()
-        case_opus_ask_remote_session_grants_after_an_owner_turn()
-        case_opus_ask_first_prompt_grants_outside_a_remote_session()
-        case_opus_ask_decimal_and_compound_lengths_grant_nothing()
-        case_opus_ask_minute_length_grants_ninety_minutes()
-        case_opus_ask_no_problem_grants_builder()
-        case_opus_ask_effort_records_are_not_the_owner_turn()
-        case_opus_ask_scheduled_reminder_is_not_the_owner_turn()
-        case_opus_ask_peer_and_task_notification_origins_are_not_the_owner_turn()
-        case_opus_ask_owner_turn_after_effort_records_still_grants()
-        case_opus_ask_seed_record_equal_to_prompt_is_not_an_owner_turn()
-        case_opus_ask_system_record_is_never_an_owner_turn()
-        case_opus_ask_local_timed_check_in_is_not_an_owner_turn()
-        case_opus_ask_prompt_record_after_an_owner_turn_still_grants()
-        case_opus_ask_check_in_then_a_later_owner_turn_still_grants()
-        case_opus_ask_earlier_owner_turn_equal_to_prompt_still_grants()
-        case_opus_ask_source_refused_values_never_grant()
-        case_opus_ask_source_unknown_value_grants_nothing()
-        case_opus_ask_source_user_grants()
-        case_opus_ask_source_absent_falls_back_to_the_transcript()
-        case_opus_ask_loop_wakeup_check_in_without_its_record_never_grants()
-        case_opus_ask_source_keyword_forms_are_untouched()
-        case_opus_scope_context_names_builders_grants_builder()
-        case_opus_scope_reads_the_plain_prompts_oldest_first()
-        case_opus_scope_reads_only_the_transcript_tail()
-        case_opus_scope_without_an_earlier_prompt_grants_every_role()
-        case_opus_scope_not_read_when_the_ask_names_a_role_or_length_is_unclear()
-        case_opus_scope_not_read_when_the_judge_says_no()
-        case_opus_scope_judge_is_given_the_ask_text_only()
-        case_opus_scope_plain_prompt_naming_reviewers_is_read()
-        case_opus_scope_excluded_records_never_reach_the_read()
-        case_opus_scope_pasted_block_in_a_prior_prompt_never_reaches_the_read()
-        case_opus_scope_the_asks_own_record_is_not_context()
-        case_opus_scope_odd_answer_or_error_grants_every_role()
-        case_opus_scope_drops_an_unknown_role_and_keeps_the_rest()
-        case_opus_scope_two_roles_from_the_read_grant_both_sorted()
-        case_opus_list_role_lifts_its_roles_and_refuses_the_rest()
-        case_opus_keyword_files_keep_their_bytes()
-        case_opus_scope_read_sees_every_role_before_it_runs()
-        case_opus_scope_a_kill_during_the_read_leaves_every_role()
-        case_opus_scope_valid_answer_ends_narrowed()
-        case_opus_ask_negation_after_a_role_grants_nothing()
-        case_opus_ask_far_negation_still_grants()
-        case_opus_scope_override_filter_ignores_case()
-        case_opus_scope_model_roles_narrow_case_insensitively()
-        case_opus_scope_returns_the_models_raw_role_strings()
-        case_opus_ask_exclusion_words_grant_nothing()
-        case_opus_ask_plain_lists_still_grant_both()
-        case_opus_scope_cloud_seed_record_is_not_context()
-        case_opus_scope_seed_record_names_reviewer_outside_a_cloud_session()
-        case_override_ask_judge_yes_grants()
-        case_override_ask_judge_not_yes_keeps_the_main_result()
-        case_override_ask_not_asked_grants_nothing()
-        case_override_ask_off_word_leaves_the_override_standing()
-        case_override_ask_cloud_seed_never_asks()
-        case_override_ask_cloud_grants_after_an_owner_turn()
-        case_override_ask_source_checks_before_the_judge()
-        case_override_ask_opus_word_never_asks_the_override_judge()
-        case_override_ask_quoted_refusal_and_notices_never_ask()
-        case_override_ask_pasted_block_is_cut_before_the_judge()
-        case_override_ask_scanner_edges()
-        case_override_ask_grant_defers_a_length()
-        case_override_ask_bare_number_reads_the_raw_first_word()
-        case_override_ask_judge_import_failure_keeps_main_result()
-        case_override_ask_plain_one_act_logs_its_words_once()
-        case_override_ask_off_in_the_reason_grants_once()
-        case_override_ask_judge_kill_keeps_the_inbox_capture()
-        if not cost_probe.run_class(CostTests):
-            FAILED.append("CostTests")
+        run_cases(suite_cases(), failures=FAILED, echo_pass=False)
     finally:
         shutil.rmtree(ROOT, ignore_errors=True)
     if FAILED:
