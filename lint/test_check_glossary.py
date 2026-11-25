@@ -232,8 +232,9 @@ class GlossaryTests(Fixture):
 
 class CodeNameTests(Fixture):
     """The widened check: identifiers, rule anchors, record slugs and hook messages on added lines."""
+    # "sub" "agent" is split: the whole-tree retired-names scan reads this file, and must not read the name here.
     EXTRA = ("| refuse | What a guard does. | `rule:one-rule` | `deny (this sense)`, `block (this sense)` |\n"
-             "| agent | Anything the Agent tool starts. | `rule:one-rule` | `subagent` |\n"
+             "| agent | Anything the Agent tool starts. | `rule:one-rule` | `sub" "agent` |\n"
              "| safety hole | A guard that lets an act through. | `rule:one-rule` | `hole` |\n"
              "| helper | A worker that runs one task. | `rule:one-rule` | `worker (this sense)` |\n"
              "| record | One entry in a records folder. | `rule:one-rule` | `entry (this sense)` |\n")
@@ -282,7 +283,7 @@ class CodeNameTests(Fixture):
     def test_platform_names_pass_and_compounds_fail(self):
         self.green("hooks/x.py", 'subagent_type = "subagent_type"\nSubagentStop = 1\n')
         self.green("hooks/y.py", 'import os\nos.environ["CLAUDE_CODE_SUBAGENT_MODEL"] = "x"\n')
-        self.red("hooks/z.py", "subagent_count = 1\n", "hooks/z.py:1")
+        self.red("hooks/z.py", "sub" "agent_count = 1\n", "hooks/z.py:1")
 
     def test_this_sense_word_is_left_out_of_code_names(self):
         self.green("hooks/x.py", 'deny = 1\nblock_it = 2\nMSG = "The guard will deny it."\n')
