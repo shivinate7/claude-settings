@@ -33,7 +33,7 @@ import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
 sys.path.insert(0, os.path.join(HERE, "..", "testing"))
 import tracked_tree  # noqa: E402  copies the script under test into a scratch tree; rm_tree removes the run folder
-from workflow_steps import job_block, job_workflow, run_body, step_blocks, step_key  # noqa: E402  the one home of the step parser
+from workflow_steps import job_block, job_workflow, run_body, step_blocks, step_env, step_key  # noqa: E402  the one home of the step parser
 import test_windows_split as split  # noqa: E402  the one home of the checks.yml reader and the `if:` evaluator (eval_with)
 SCRIPT = os.environ.get("CI_SCOPE") or os.path.join(HERE, "..", ".github", "scripts", "ci-scope.sh")
 JOB_FLAGS = ["checks_windows", "checks_windows_merge", "checks_windows_rest", "checks_macos", "shell_macos", "pointer_windows"]
@@ -1998,6 +1998,14 @@ class SkippedDaily(unittest.TestCase):
         for job in ("shell-macos", "checks-macos-b"):
             with self.subTest(job=job):
                 self.assertIn(job, started, f"{job} does not start on a plain daily, so the skipped-daily case proves nothing about it")
+
+    # Named failure: the scope step is not handed the nightly-skip output, so ci-scope.sh never learns of a skipped daily and turns
+    # the suites on. One assert on the step's env.
+    def test_the_scope_step_is_handed_the_nightly_skip_output(self):
+        text = self.workflow()
+        got = [step_env(st).get("NIGHTLY_SKIP") for st in step_blocks(job_block(text, "scope")) if step_key(st, "id") == "scope"]
+        self.assertEqual(got, ["${{ needs.nightly-skip.outputs.skip }}"],
+                         f"the scope step's env does not carry NIGHTLY_SKIP from the nightly-skip output, so ci-scope.sh reads no skip: {got}")
 
     # Named failure: a job runs a test step on a skipped daily, so the suites the green daily proved run again. One subtest per job.
     def test_no_job_runs_a_test_step_on_a_skipped_daily(self):
