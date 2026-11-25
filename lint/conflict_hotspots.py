@@ -1,12 +1,25 @@
 #!/usr/bin/env python3
 """Ranks the files that merges conflict on. On demand only. Stdlib and git 2.38 or newer.
 
-    python3 lint/conflict_hotspots.py --since DATE [--base main] [--top 20] [--repo .]
+    python3 lint/conflict_hotspots.py --since DATE [--base main] [--top 20] [--repo .] [--exposure] [--into-branches]
 
 Finds each merge commit of two parents since DATE (committer date) that touches --base: the merge is on the base's
 history, or one parent is. That covers a merge of main into a branch and a PR merge into main. Replays each with
 `git merge-tree --write-tree --name-only <parent1> <parent2>` and counts, per file, the merges that conflict on it.
 The replay is what git finds today, not what the author saw: a resolution by hand, rerere or a merge option can differ.
+
+Two opt-in flags. Without them the output is unchanged.
+
+    --exposure        each file row reads `<conflicts>/<exposure> <path>`. Exposure is the replayed merges where both
+                      sides changed the file: it differs from the merge base on each parent (renames off, so a rename
+                      changes both its old and new path). It tells a file that conflicts often from one that is merely
+                      busy. A file no merge conflicts on gets no row. A conflict git names on a path that only one side
+                      changed (a rename/delete) reads `1/0`. A merge with no merge base adds no exposure. With several
+                      merge bases, git merge-base picks one.
+    --into-branches   the filter runs before every count: only a merge of the base INTO a branch counts, a merge off the
+                      base's first-parent line with exactly one parent on it. A PR merge into the base, a merge of two
+                      branches, a merge whose parents reach the base only through a PR merge, and a merge with no base
+                      parent are dropped and appear in no line, `merges not replayed` included.
 
 Output (summary lines start with a letter, file rows with a digit):
 
@@ -22,7 +35,10 @@ Not seen: a squash or rebase merge leaves no merge commit, so it is absent from 
 under the name git prints for the conflict.
 
 Cost, per run: one start each of git --version, rev-parse (the date, the object folder), rev-list of the base,
-log of all refs, and one git merge-tree per replay. No process stays running. It writes nothing into the repo and
+log of all refs, and one git merge-tree per replay. No process stays running. Added by --exposure: three git starts
+per replayed merge (one merge-base, two diffs), so a run of N merges starts about 3N more git processes and its wall
+time grows by about that share. Added by --into-branches: one rev-list --first-parent of the base. The cost line counts
+merge-trees only. It writes nothing into the repo and
 creates no ref: git writes the replay's new objects to a fresh folder under TMPDIR, which is removed before exit,
 also on Ctrl-C. Exit 0 for a report (zero merges included), 2 for a git older than 2.38, 1 for any other failure.
 """
@@ -79,20 +95,24 @@ def check_version():
                       % (MIN_GIT + (p.stdout.strip() or "none",)))
 
 
-def merges_since(repo, since, base):
-    """([(parent1, parent2)] of each two-parent merge on the base since the date, octopus count, off-base count)."""
+def merges_since(repo, since, base, into_branches=False):
+    """([(parent1, parent2)] of each two-parent merge on the base since the date, octopus count, off-base count).
+    With into_branches, a merge that is not a merge of the base into a branch is dropped first and counted nowhere."""
     cutoff = read_git(repo, ["rev-parse", "--since=" + since]).strip()
     m = re.fullmatch(r"--max-age=(\d+)", cutoff)
     if not m:
         raise Failure("cannot read the date %r" % since)
     cutoff = int(m.group(1))
     on_base = set(read_git(repo, ["rev-list", base, "--"]).split())
+    trunk = set(read_git(repo, ["rev-list", "--first-parent", base, "--"]).split()) if into_branches else set()
     found, octopus, off_base = [], 0, 0
     for line in read_git(repo, ["log", "--all", "--merges", "--format=%H %ct %P"]).splitlines():
         fields = line.split()
         if len(fields) < 4 or int(fields[1]) < cutoff:
             continue
         commit, parents = fields[0], fields[2:]
+        if into_branches and (commit in trunk or sum(p in trunk for p in parents) != 1):
+            continue
         if len(parents) != 2:
             octopus += 1
         elif commit in on_base or parents[0] in on_base or parents[1] in on_base:
@@ -119,17 +139,33 @@ def replay(repo, parents, env):
     return "conflict", paths
 
 
-def report(repo, since, base, top):
+def both_sides(repo, parents):
+    """The paths that differ from the merge base on each parent, or None when the parents share no merge base."""
+    rc, out, _ = run_git(repo, ["merge-base"] + list(parents))
+    if rc:
+        return None
+    mb = out.decode("utf-8", "replace").strip()
+    sides = []
+    for parent in parents:
+        names = read_git(repo, ["diff", "--name-only", "--no-renames", "-z", mb, parent])
+        sides.append({n for n in names.split("\0") if n})
+    return sides[0] & sides[1]
+
+
+def report(repo, since, base, top, exposure=False, into_branches=False):
     started = time.monotonic()
     check_version()
-    found, octopus, off_base = merges_since(repo, since, base)
+    found, octopus, off_base = merges_since(repo, since, base, into_branches)
     objects = os.path.abspath(read_git(repo, ["rev-parse", "--path-format=absolute", "--git-path", "objects"]).strip())
-    counts, conflicted, unknown, starts = {}, 0, 0, 0
+    counts, exposed, conflicted, unknown, starts = {}, {}, 0, 0, 0
     scratch = tempfile.mkdtemp(prefix="conflict-hotspots-")
     try:
         env = git_env(scratch, objects)
         for parents in found:
             starts += 1
+            if exposure:
+                for path in both_sides(repo, parents) or ():
+                    exposed[path] = exposed.get(path, 0) + 1
             verdict, paths = replay(repo, parents, env)
             if verdict == "conflict":
                 conflicted += 1
@@ -145,7 +181,7 @@ def report(repo, since, base, top):
              "conflict rate: %.1f%%" % rate,
              "merges not replayed: %d (octopus %d, off base %d)" % (octopus + off_base, octopus, off_base)]
     for path, count in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))[:top]:
-        lines.append("%d %s" % (count, path))
+        lines.append("%d/%d %s" % (count, exposed.get(path, 0), path) if exposure else "%d %s" % (count, path))
     lines.append("cost: merge-trees %d, wall %.1f s" % (starts, time.monotonic() - started))
     return lines
 
@@ -156,11 +192,15 @@ def main(argv):
     ap.add_argument("--base", default="main", help="the ref whose history a merge must touch (default main)")
     ap.add_argument("--top", type=int, default=20, help="file rows to print (default 20)")
     ap.add_argument("--repo", default=".", help="the repo to read (default the current folder)")
+    ap.add_argument("--exposure", action="store_true",
+                    help="rows read conflicts/exposure; adds three git starts per replayed merge")
+    ap.add_argument("--into-branches", action="store_true",
+                    help="count only merges of the base into a branch; adds one rev-list --first-parent")
     args = ap.parse_args(argv)
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
     try:
-        lines = report(args.repo, args.since, args.base, args.top)
+        lines = report(args.repo, args.since, args.base, args.top, args.exposure, args.into_branches)
     except Failure as e:
         print(e)
         return e.code
