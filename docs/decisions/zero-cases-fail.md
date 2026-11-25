@@ -11,7 +11,7 @@ A suite run directly must exit 1 when it runs no case. A suite whose cases all s
 
 ## The mistake
 
-A suite can lose every case and still exit 0 when run directly. The causes are a filter that matches no case, a renamed case list, or a missing `unittest.main()` call.
+A suite that loses every case (a filter that matches none, a renamed case list, a missing `unittest.main()` call) or drops its runner's result still exits 0, so its checks read as proven.
 
 - Commit adfab4906a, on `origin/tests-no-real-config`, 2026-11-25 00:03 CST. `lint/test_test_temp.py` and `lint/test_tests_set_config.py` had no `unittest.main()` block. `python3 lint/<file>`, the form `checks.yml` runs, exited 0 with zero cases. The commit adds the block.
 - The all-suites audit of 2026-11-24 found the gap across the suites (brief; no tracked record of that audit).
@@ -24,10 +24,13 @@ CI stays green while a suite tests nothing. CI runs most steps without `bin/verd
 
 - `no_cases_exit(cases, runner)` in `hooks/case_runner_test.py`. It returns 1 and prints the line when `cases` is empty. A runner calls it first in `main()`.
 - The 11 hand runners call it: `hooks/test_agent_brief.py`, `test_config_watch.py`, `test_config_watch_fast_exit.py`, `test_feedback_inbox.py`, `test_guard_load_os.py`, `test_page_link_check.py`, `test_reply_judge.py`, `test_rm_prompt_answer.py`, `test_shared_names.py`, `test_waiting_export.py`, `test_wrappers.py`.
-- The four mods collectors fail on `results.length === 0`: `mods/token-weather`, `mods/session-board`, `mods/decision-watch`, `mods/plain-diff`.
-- `lint/check_suites_have_main.py`, the checker. It reads each `test_*.py` as a syntax tree. A file with a TestCase is clean when a top-level `if __name__ == "__main__":` block reaches `unittest.main` (or a `main` imported from unittest), `run_class` or `TextTestRunner(...).run(...)`, directly or through a module-level function that block calls. A runner in an `if False:` or `if 0:` body does not count (its `else` does), nor does one outside that block or in an uncalled function. `ALLOWED` is empty.
+- The four mods collectors fail when their results array is empty (`length === 0`): `mods/token-weather`, `mods/session-board`, `mods/decision-watch`, `mods/plain-diff`.
+- `lint/check_suites_have_main.py`, the checker. It reads each `test_*.py` as a syntax tree. A file with a TestCase is clean when a top-level `if __name__ == "__main__":` block reaches `unittest.main` (or a `main` imported from unittest), `run_class` or `TextTestRunner(...).run(...)`. Its reach walk follows a module-level function that the block calls or names. A runner in an `if False:` or `if 0:` body does not count (its `else` does), nor does one outside that block or in an uncalled function. A `run_cases(...)` call that is a bare statement on the `__main__` path is a problem: its dropped count exits 0 on a failure. `ALLOWED` is empty.
 - `make_variant` (`lint/test_zero_case_runs.py` `make_variant`) writes the copy of a mods file. Its rewriter (`lint/test_zero_case_runs.py` `REWRITER`) runs under node with TypeScript's scanner, so it changes code and never text.
-- Tests: `hooks/test_case_runner.py` (3 cases); `lint/test_zero_case_runs.py` (the 11 runners with their case lists emptied; the 4 collectors with every awaited `test(` statement disabled; 7 cases for the copy's code-only edits); `lint/test_suites_have_main.py` (fixture cases `test_suite_without_main_is_a_problem`, `test_suite_with_main_is_clean`, `test_script_without_a_suite_is_clean`, `test_mention_in_string_or_comment_is_clean`, `test_main_only_under_if_false_is_a_problem`, `test_main_in_uncalled_function_is_a_problem`, `test_main_in_function_called_from_guard_is_clean`, `test_text_runner_result_sets_exit_code_is_clean`; repo run `test_repo_has_no_suite_without_main`).
+- `run_class` (`testing/cost_probe.py`) fails a class with no test methods: it prints one line and returns False.
+- `hooks/test_local_time.py` `main` exits by the runner's result when no case failed, so a run with no cases exits 1.
+- `checks.yml` job `checks` runs four steps: 'Case runner suite', 'Zero-case runs suite', 'Suites have main suite' and 'Suites have main check' (~:352-368).
+- Tests: `hooks/test_case_runner.py` (the `CASES` list); `lint/test_zero_case_runs.py` (classes `HandRunnersWithNoCases`, `TokenWeatherCollectorWithNoTests`, `ModsCollectorsWithNoTests` with awaited `test(` calls disabled, `VariantRewriteCases`, `FilterMatchingNoCase`); `lint/test_suites_have_main.py` (classes `FixtureCases`, `RunClassCases`, `RepoRun`).
 
 ## Cost
 
@@ -37,14 +40,16 @@ CI stays green while a suite tests nothing. CI runs most steps without `bin/verd
 
 ## Limits
 
-- No `checks.yml` step runs the checker, `hooks/test_case_runner.py`, `lint/test_suites_have_main.py` or `lint/test_zero_case_runs.py`. CiCoverage (`lint/test_windows_split.py`) flags the three test files for it. On a draft PR, `lane-touched-tests.yml` runs a touched `test_*.py` on Windows. The checker is not a `test_*.py`, so no workflow runs it.
-- The exit-1-on-zero check covers the 11 hand runners, the four mods collectors, and the callers of `run_cases`. As of this commit, 49 `hooks/test_*.py` files lack a `no_cases_exit` call (`grep -L`); 5 of those call `run_cases`.
+- The checker judges per file, not per TestCase class: a file with two classes where `run_class` covers one passes.
+- A name reference counts as reached: `print(run)` passes, though `run` never runs.
+- Not recognised, so false alarms: `ut.main()` after `import unittest as ut`, and a runner held in a name or a module-level list (`runner = unittest.TextTestRunner()`, then `runner.run(...)`). Only `TextTestRunner(...).run(...)` counts. `ALLOWED` clears a file with a reason.
+- The checker reads the syntax tree, not the flow. Only a top-level `__main__` block counts: a `__main__` block nested in an `if` or `try` is not read, so its runner is flagged. A base whose name ends in `TestCase` counts. A TestCase that comes from an imported base with another name is not seen.
+- A suite that loses some but not all cases is not caught. A count compare is a later lane.
+- The exit-1 check covers the 11 hand runners, the four mods collectors, and the callers of `run_cases` from `hooks/case_runner_test.py`. Of the 49 `hooks/test_*.py` files with no `no_cases_exit` call (`grep -L`, this commit), those callers are guarded by `run_cases`; the rest are not checked.
 - `RUNNERS` in `lint/test_zero_case_runs.py` is a hand list. A hand runner not in it is not checked there. The file's own comment names `hooks/test_guard.py` and `lint/check_guardset_lists.py` as left out.
 - The copy rewrites only code. It changes an import or export whose specifier starts `./` or `../`, a dynamic `import()` of one, `import.meta.url`, and an awaited `test(...)` statement. It does not change `require(...)`, a specifier without `./` or `../`, or a `test(` call that is not an awaited statement. A run with such a call still exits 1 when its own test fails, so the mods case would pass without a zero-test run.
-- The mods and rewriter cases need `tsc` and `node` on PATH, or they skip. The `CI` variable makes them run anyway, so a missing `tsc` fails there. `npm ci --ignore-scripts --prefix actions/code-check/tools` puts `tsc` on PATH (CI does this).
-- `lint/check_suites_have_main.py` flags a file whose `__main__` block runs a `TextTestRunner` held in a name (`runner = unittest.TextTestRunner()`, then `runner.run(...)`). That is a false alarm: only the direct form `TextTestRunner(...).run(...)` counts. `ALLOWED` clears it with a reason.
-- The checker reads the syntax tree, not the flow. Only a top-level `__main__` block counts: a `__main__` block nested in an `if` or `try` is not read, so its runner is flagged. A base whose name ends in `TestCase` counts. A TestCase that comes from an imported base with another name is not seen.
-- Not this question: `bin/verdict` fails a zero-test run it reads (PR 3705). That record answers when verdict reads an exit-0 run as a failure. Its record, `decisions/verdict-reads-runner-markers.md`, was culled in commit 46eaf546d5.
+- `lint/test_zero_case_runs.py` needs `tsc` and `node` on PATH for 11 of its 13 cases, or they skip. The `CI` variable makes them run anyway, so a missing `tsc` fails there. `npm ci --ignore-scripts --prefix actions/code-check/tools` puts `tsc` on PATH (CI does this).
+- Not this question: `bin/verdict` fails a zero-test run it reads (PR 3705).
 
 Basis: commit adfab4906a (incident); the all-suites audit of 2026-11-24 (brief).
 Kind: process
