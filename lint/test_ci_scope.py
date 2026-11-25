@@ -72,16 +72,6 @@ MUTATE_GUARD = os.path.join(HERE, "..", "hooks", "mutate_guard.py")
 
 GUARD_READS = "GUARD_READ_FILES"
 GUARD_FOLDERS = "GUARD_READ_FOLDERS"
-# The file each GUARD_READ_FOLDERS folder is checked by: one the guard suite reads, so the copy of its folder reaches a suite that
-# loads it. lint/rule_audit.py: mutate_guard.py imports it at run time (rule_audit._section_dir). janitor/sweep.py: lay_out_guard_reads
-# says the simulator refusal imports it. skills/waiting-page/splice.py: tests/guard/s25539-page-stale.py reads it.
-# testing/tracked_tree.py: mutate_guard.py lays out the guard copies through it.
-GUARD_FOLDER_FILE = {
-    "lint": "lint/rule_audit.py",
-    "janitor": "janitor/sweep.py",
-    "skills": "skills/waiting-page/splice.py",
-    "testing": "testing/tracked_tree.py",
-}
 # The list methods that change a list, and the dunder names that do the same when called by name. A call to any other method
 # (.index, .count) reads the list and changes nothing.
 GUARD_MUTATORS = frozenset(("append", "extend", "insert", "remove", "pop", "clear", "sort", "reverse",
@@ -425,21 +415,6 @@ class Scope(FlagAsserts, unittest.TestCase):
         for p in paths:
             with self.subTest(path=p):
                 self.assertFlags(run([p], existing=[p]), want_true=["guard"])
-
-    # Every folder GUARD_READ_FOLDERS (hooks/mutate_guard.py) names is copied whole into each guard copy, so an edit to a file under
-    # one changes what the guard suite reads. The folders come from the constant; each folder's file is GUARD_FOLDER_FILE's, a file
-    # the guard suite reads, edited in place (`existing`). Named failure: an edit under a folder sets no `guard`, so the suite that
-    # reads the folder skips the change.
-    def test_an_edit_under_each_guard_read_folder_turns_on_the_guard_suite(self):
-        folders = guard_read_folders()
-        self.assertEqual(sorted(folders), sorted(GUARD_FOLDER_FILE), "GUARD_READ_FOLDERS and GUARD_FOLDER_FILE name other folders")
-        for folder in folders:
-            p = GUARD_FOLDER_FILE[folder]
-            with self.subTest(folder=folder, path=p):
-                self.assertTrue(p.startswith(folder + "/") and os.path.isfile(os.path.join(HERE, "..", p)),
-                                f"GUARD_FOLDER_FILE names {p} for {folder}/, which is not an existing file under it")
-                got = run([p], existing=[p])
-                self.assertEqual(got["guard"], "true", f"{folder}/: an edit to {p} sets guard {got['guard']}")
 
     # actions/ci-alarm/events.json and clear_rule.py: the Windows merge slice (checks-windows-merge, flag checks_windows_merge) runs
     # merge/test_merge.py on windows-latest. That suite reads events.json (test_base_events_are_the_keys_of_the_events_file) and runs

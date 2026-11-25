@@ -5,11 +5,13 @@ A diff that touches no guard input runs no Windows guard shard, so the list must
 GuardInputsList proves: (a) every path in TRACED_READS matches a glob, and each one is a tracked repo file; (b) every string
 constant in hooks/test_guard.py and tests/guard/*.py that equals a tracked repo file, or an os.path.join of constants that
 does, matches a glob; (c) every module that hooks/guard.py or hooks/test_guard.py imports, at any depth, matches a glob; (d) every
-glob names at least one tracked file.
+glob names at least one tracked file. GuardReadsTurnGuardOn proves that each file the guard suite reads under a GUARD_READ_FOLDERS
+folder sets the `guard` flag on its own edit, and that a lint/ file the suite does not read leaves it off.
 
 Cost of this test: one `git ls-files` process per run (a walk of the tree where .git is absent, as in a git archive copy), one
 read of the list, and an ast parse of hooks/test_guard.py, tests/guard/*.py and the import closure of the two guard entry points.
-No clock, no sleep, no other process.
+GuardReadsTurnGuardOn runs the scope script once per file it covers (25 today) and once for its control. Each run builds a scratch
+git repo (about a dozen git commands), then runs the script under bash, which makes its own git reads. No clock, no sleep.
 
 Run with:  python3 lint/test_guard_inputs.py -v
 """
@@ -26,7 +28,8 @@ sys.path.insert(0, HERE)
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
 sys.path.insert(0, os.path.join(HERE, "..", "testing"))
 import tracked_tree  # noqa: E402  rm_tree removes the run folder
-from test_ci_scope import imported_names  # noqa: E402  the one home of the import walk (lint/test_ci_scope.py)
+import test_ci_scope  # noqa: E402  the scope run (run) and its run folder: setUpModule and tearDownModule below call its pair
+from test_ci_scope import BASH, guard_read_folders, imported_names  # noqa: E402  one home each: scope skip, folder list, import walk
 
 RUN_DIR = None
 
@@ -34,9 +37,11 @@ RUN_DIR = None
 def setUpModule():
     global RUN_DIR
     RUN_DIR = _test_temp.run_folder()
+    test_ci_scope.setUpModule()
 
 
 def tearDownModule():
+    test_ci_scope.tearDownModule()
     tracked_tree.rm_tree(RUN_DIR)
 
 
@@ -519,6 +524,40 @@ class GuardInputsList(unittest.TestCase):
         tracked = tracked_files()
         dead = [g for g in globs if not any(fnmatch.fnmatchcase(p, g) for p in tracked)]
         self.assertEqual(dead, [], f"globs in {GUARD_INPUTS_REL} that match no tracked file: {dead}")
+
+
+# GUARD_READ_FOLDERS (hooks/mutate_guard.py) names the folders that each guard copy carries whole. A file under one of them is read by
+# the guard suite only when the suite opens it: the import closure of its entry points, plus TRACED_READS. That set is the claim. A rule
+# that turns `guard` on for every file under a folder would start the guard suite on files it never opens, so the claim is per file.
+def guard_read_paths():
+    """-> the repo files the guard suite truly reads that sit under a GUARD_READ_FOLDERS folder, sorted. The folders come from the
+    constant (guard_read_folders); the reads come from the import walk and TRACED_READS, the one homes of each."""
+    folders = tuple(folder + "/" for folder in guard_read_folders())
+    return sorted(p for p in import_closure(IMPORT_ROOTS) | set(TRACED_READS) if p.startswith(folders))
+
+
+class GuardReadsTurnGuardOn(unittest.TestCase):
+    # Each file in guard_read_paths() sets `guard` on its own edit, so the change is in a file the guard suite reads. The file is changed
+    # in place (`existing`): a new file under a landed dir sets `guard` through the landed-dirs rule and would pass for the wrong reason.
+    # One sub-case per file, so the failure names each. Named failure: an edit to a file the guard suite reads skips the guard suite.
+    @unittest.skipUnless(BASH, "bash not on PATH")
+    def test_an_edit_to_each_guard_read_file_under_a_guard_folder_turns_on_guard(self):
+        paths = guard_read_paths()
+        self.assertTrue(paths, "no file the guard suite reads sits under a GUARD_READ_FOLDERS folder")
+        for p in paths:
+            with self.subTest(path=p):
+                got = test_ci_scope.run([p], existing=[p])
+                self.assertEqual(got["guard"], "true", f"an edit to {p}, which the guard suite reads, sets guard {got['guard']}")
+
+    # The control: a lint/ file the guard suite does not read leaves `guard` off. Without it, a rule that turned `guard` on for every
+    # file under lint/ would pass the case above. Named failure: the control sets `guard`, so the scope turns on a folder whole.
+    @unittest.skipUnless(BASH, "bash not on PATH")
+    def test_an_edit_to_a_lint_file_the_guard_suite_does_not_read_leaves_guard_off(self):
+        p = "lint/test_check_agent_models.py"
+        self.assertTrue(os.path.isfile(os.path.join(ROOT, *p.split("/"))), f"the control {p} is not a file")
+        self.assertNotIn(p, guard_read_paths(), f"the guard suite reads the control {p}, so it is no control")
+        got = test_ci_scope.run([p], existing=[p])
+        self.assertEqual(got["guard"], "false", f"an edit to {p}, which the guard suite does not read, sets guard {got['guard']}")
 
 
 if __name__ == "__main__":
