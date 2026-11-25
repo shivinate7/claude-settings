@@ -387,7 +387,7 @@ def item_mark(verdict):
         return None
     if isinstance(item, str) and ITEM_MARK_STRING.fullmatch(item.strip()):
         item = int(item.strip())
-    elif isinstance(item, float) and item.is_integer():
+    elif isinstance(item, float) and item % 1 == 0:
         item = int(item)
     return item if isinstance(item, int) and 1 <= item <= 8 else None
 
