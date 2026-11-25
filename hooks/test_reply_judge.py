@@ -825,42 +825,44 @@ def guard_rules(config):
     return [line.split("\t")[3] for line in guard_lines(config) if len(line.split("\t")) == 6]
 
 
-def case_f1_note_holds_the_older_reason_and_no_new_entry_text():
-    config = sample_config("f1-note")
+def case_note_holds_older_reason_and_no_new_entry_text():
+    config = sample_config("note-two-fields")
     answer = two_field_answer(False, BLOCK_REASON, [new_entry(NEW_FINDING_RULE, NEW_ENTRY_TEXT)])
     run = run_hook(MARK, answer=answer, config=config, session=SESSION_ALPHA)  # Stop 1: the full prompt
     note = note_of(run)
-    check("F1: exit 0", run.code == 0, run.code)
-    check("F1: the note holds the older reason", isinstance(note, str) and OLDER_ID in note, run.out)
-    check("F1: the note holds no word of the new entry",
+    check("note, two-field answer: exit 0", run.code == 0, run.code)
+    check("note, two-field answer: the note holds the older reason", isinstance(note, str) and OLDER_ID in note, run.out)
+    check("note, two-field answer: the note holds no word of the new entry",
           isinstance(note, str) and NEW_ENTRY_TEXT not in note and NEW_FINDING_RULE not in note, run.out)
     rules = guard_rules(config)
-    check("F1: one guard.log line carries the new rule id", rules.count(NEW_FINDING_RULE) == 1, rules)
-    check("F1: the older finding keeps its own guard.log line", rules.count(OLDER_ID) == 1, rules)
+    check("note, two-field answer: one guard.log line carries the new rule id", rules.count(NEW_FINDING_RULE) == 1, rules)
+    check("note, two-field answer: the older finding keeps its own guard.log line", rules.count(OLDER_ID) == 1, rules)
 
 
-def case_f2_full_prompt_both_fields_arrive():
-    config = sample_config("f2-both")
+def case_full_prompt_answer_carries_note_and_new_entry():
+    config = sample_config("full-prompt-both-fields")
     answer = two_field_answer(False, BLOCK_REASON, [new_entry(NEW_FINDING_RULE, NEW_ENTRY_TEXT)])
     run = run_hook(MARK, answer=answer, config=config, session=SESSION_ALPHA)  # Stop 1: the full prompt
     note = note_of(run)
-    check("F2: the note holds the older reason", isinstance(note, str) and OLDER_ID in note, run.out)
+    check("full prompt, two-field answer: the note holds the older reason",
+          isinstance(note, str) and OLDER_ID in note, run.out)
     rules = guard_rules(config)
-    check("F2: the new entry arrives as its own guard.log line", rules.count(NEW_FINDING_RULE) == 1, rules)
+    check("full prompt, two-field answer: the new entry arrives as its own guard.log line",
+          rules.count(NEW_FINDING_RULE) == 1, rules)
 
 
-def case_f2_prompts_ask_for_two_fields():
-    config = sample_config("f2-prompt")
+def case_both_prompts_ask_for_the_two_fields():
+    config = sample_config("prompts-two-fields")
     full = run_hook(MARK, answer=OK_ANSWER, config=config, session=SESSION_ALPHA)  # Stop 1: the full prompt
     only = run_hook(MARK, answer=OK_ANSWER, config=config, session=SESSION_ALPHA)  # Stop 2: the new rules only
     for label, run in (("full prompt", full), ("new-only prompt", only)):
         head = prompt_head(run.prompt())
         for phrase in FIELD_PHRASES:
-            check("F2 prompt: the %s asks for the two fields, phrase %r" % (label, phrase), phrase in head, head[:200])
+            check("prompt, two fields: the %s asks for the two fields, phrase %r" % (label, phrase), phrase in head, head[:200])
 
 
 def case_two_new_entries_and_no_older_reason_log_two_lines_and_print_nothing():
-    config = sample_config("f3-two")
+    config = sample_config("two-entries")
     answer = two_field_answer(True, None, [new_entry(NEW_FINDING_RULE, "FIND-A-3f1c"),
                                            new_entry(NEW_WAIT_RULE, "WAIT-B-8d2e")])
     run = run_hook(MARK, answer=answer, config=config, session=SESSION_ALPHA)  # Stop 1
@@ -882,7 +884,7 @@ def case_malformed_new_field_prints_nothing_and_logs_nothing_for_it():
                                                                              {"reason": BAD_ENTRY}])),
     )
     for label, answer in shapes:
-        config = sample_config("f4-" + label.replace(" ", "-"))
+        config = sample_config("malformed-" + label.replace(" ", "-"))
         run = run_hook(MARK, answer=answer, config=config, session=SESSION_ALPHA)  # Stop 1
         note = note_of(run)
         check("malformed, %s: exit 0" % label, run.code == 0, run.code)
@@ -891,18 +893,42 @@ def case_malformed_new_field_prints_nothing_and_logs_nothing_for_it():
               BAD_ENTRY not in run.out and BAD_ENTRY not in run.err, run.out)
         check("malformed, %s: the bad field logs no line, so only the older finding's line" % label,
               guard_rules(config) == [OLDER_ID], guard_rules(config))
-    config = sample_config("f4-ok-reply")
+    config = sample_config("malformed-ok-reply")
     run = run_hook(MARK, answer=two_field_answer(True, None, [new_entry("not-a-rule-anchor", BAD_ENTRY)]),
                    config=config, session=SESSION_ALPHA)  # Stop 1: an ok reply with a bad entry
     check("malformed, ok reply: exit 0 and nothing printed", run.code == 0 and run.out.strip() == "", run.out)
     check("malformed, ok reply: no guard.log line for the bad entry", guard_rules(config) == [], guard_rules(config))
 
 
+# --------------------------------------------------------------------------- every-reply: the new-rules-only answer
+# A Stop that does not sample the older rules sends the new-rules-only prompt. The hook's docstring says its `ok` and
+# `reason` are not read, so an answer that carries only `new_rules` must still log each valid entry.
+
+def case_new_rules_only_answer_without_ok_still_logs_its_line():
+    config = sample_config("no-ok-new-rules")
+    run_hook(MARK, answer=OK_ANSWER, config=config, session=SESSION_ALPHA)  # Stop 1: the full prompt, sampled
+    answer = json.dumps({"new_rules": [new_entry(NEW_WAIT_RULE, "the wait names no event; name what it waits for.")]})
+    run = run_hook(MARK, answer=answer, config=config, session=SESSION_ALPHA)  # Stop 2: the new rules only
+    check("new-only answer, no ok: Stop 2 makes the new-rules-only call", new_rules_only(run), run.calls)
+    check("new-only answer, no ok: its new_rules line is logged", guard_rules(config) == [NEW_WAIT_RULE], guard_rules(config))
+
+
+def case_new_rules_only_answer_with_ok_still_logs_its_line():
+    # Control: the same entry with `ok` true logs its line, as it does on the head.
+    config = sample_config("with-ok-new-rules")
+    run_hook(MARK, answer=OK_ANSWER, config=config, session=SESSION_ALPHA)  # Stop 1: the full prompt, sampled
+    answer = json.dumps({"ok": True, "new_rules": [new_entry(NEW_WAIT_RULE, "the wait names no event; name what it waits for.")]})
+    run = run_hook(MARK, answer=answer, config=config, session=SESSION_ALPHA)  # Stop 2: the new rules only
+    check("new-only answer, with ok: Stop 2 makes the new-rules-only call", new_rules_only(run), run.calls)
+    check("new-only answer, with ok: its new_rules line is logged", guard_rules(config) == [NEW_WAIT_RULE], guard_rules(config))
+
+
 # --------------------------------------------------------------------------- every-reply: the note's reason
 # A finding on the older prompt prints its note unless its reason names a newer rule: the suppress branch in
 # hooks/reply_judge.py, `if not any(r in reason for r in NEW_RULES)`. So a reason that names an older id and a
 # newer id prints nothing, and its verdict still gets its guard.log line. The green control is a reason that
-# names only newer ids: it prints nothing either. A reason that names only older ids prints its note (case F1).
+# names only newer ids: it prints nothing either. A reason that names only older ids prints its note
+# (case_older_rule_finding_still_prints_its_note).
 
 MIXED_REASON = ("output-never-paste-passing-output: paste the verdict, not the run's output; "
                 "also parallelism-keep-going: name the event the wait ends on.")
@@ -925,6 +951,14 @@ def case_reason_naming_only_newer_ids_prints_no_note():
     check("note, newer-only reason: exit 0", run.code == 0, run.code)
     check("note, newer-only reason: nothing printed, because the reason names only newer rules",
           run.out.strip() == "", run.out)
+
+
+def case_newer_only_reason_on_the_older_prompt_is_logged_under_its_newer_id():
+    # A newer rule's line is keyed under that rule's id, so the per-rule reader command finds it.
+    config = sample_config("newer-only-reason-key")
+    run_hook(MARK, answer=two_field_answer(False, NEWER_ONLY_REASON, []), config=config, session=SESSION_ALPHA)  # Stop 1: sampled
+    check("newer-only reason, older prompt: the one guard.log line is keyed under the newer rule id",
+          guard_rules(config) == [NEW_WAIT_RULE], guard_rules(config))
 
 
 def case_new_rule_ids_are_the_claude_md_anchors():
@@ -2858,13 +2892,16 @@ CASES = (
     case_failed_new_rules_call_prints_nothing_and_exits_zero,
     case_new_rules_are_judged_rules_and_counted,
     case_new_rules_prompt_names_the_exemptions,
-    case_f1_note_holds_the_older_reason_and_no_new_entry_text,
-    case_f2_full_prompt_both_fields_arrive,
-    case_f2_prompts_ask_for_two_fields,
+    case_note_holds_older_reason_and_no_new_entry_text,
+    case_full_prompt_answer_carries_note_and_new_entry,
+    case_both_prompts_ask_for_the_two_fields,
     case_two_new_entries_and_no_older_reason_log_two_lines_and_print_nothing,
     case_malformed_new_field_prints_nothing_and_logs_nothing_for_it,
+    case_new_rules_only_answer_without_ok_still_logs_its_line,
+    case_new_rules_only_answer_with_ok_still_logs_its_line,
     case_reason_naming_an_older_and_a_newer_id_is_logged_and_prints_no_note,
     case_reason_naming_only_newer_ids_prints_no_note,
+    case_newer_only_reason_on_the_older_prompt_is_logged_under_its_newer_id,
     case_new_rule_ids_are_the_claude_md_anchors,
     case_ignored_stop_imports_no_guard_family_module,
     case_sampling_skipped_stop_imports_no_guard_family_module,
