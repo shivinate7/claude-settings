@@ -5380,15 +5380,59 @@ def ready_job_groups(checks):
         groups.setdefault(m.group(1) if m else "checks", []).append((entry, m.group(2) if m else entry))
     return groups
 
+def base_read_phrases(wt, base, failing, body=None):
+    """-> {declared name: the base phrase of its failing row} for `failing`, a list of (declared name, job, bare step name) of ready checks that FAILed in the tree `wt`.
+    The one home of the base read: each check runs once, alone (`--step`), through ci_job_run in one detached worktree of the merge base of HEAD in `wt` and origin/`base`
+    (add_worktree), which is dropped on every path. The tip of the base is not read: a checkout behind it would blame the change for what the base gained since. The worktree has the repo's history, so a check that reads git sees what it sees on the base. It never touches `wt`: no checkout, no index write.
+    The phrase is `passes on <sha9>: this change broke it`, `also fails on <sha9>` (the sha9 of the merge base), or `base not read: <reason>`, the last for a base that is absent, a base
+    with no merge base (`git merge-base` empty or non-zero: no copy is made), a copy that cannot be made, and a run that is unknown (a crash, a timeout, no line for the check). It never guesses: only a PASS or a FAIL line of the check itself names the base. The phrase lifts nothing; the caller keeps the row a fail.
+    ci-job's rerun cache serves a passing base (the same merge base commit in another tree hits); a fail is not saved, so it runs again.
+    Cost: a base with no failing check costs nothing. Otherwise one `git rev-parse`, one `git merge-base`, one worktree add and remove, and one ci-job run per failing check."""
+    if not failing:
+        return {}
+    c, sha = git(wt, "rev-parse", "--verify", "-q", f"origin/{base}^{{commit}}")
+    if c or not sha:
+        return {declared: f"base not read: origin/{base} is absent" for declared, _, _ in failing}
+    c, sha = git(wt, "merge-base", "HEAD", f"origin/{base}")
+    if c or not sha:
+        return {declared: f"base not read: HEAD and origin/{base} share no merge base" for declared, _, _ in failing}
+    tmp = copy = None
+    phrases = {}
+    try:
+        try:
+            tmp, copy = add_worktree(wt, sha)
+        except (Stop, OSError, subprocess.SubprocessError) as e:
+            return {declared: f"base not read: no copy of {sha[:9]} ({' '.join(str(e).split())[:120]})" for declared, _, _ in failing}
+        for declared, job, bare in failing:
+            raw = []
+            try:
+                state = ci_job_run(copy, job, "--pinned", "--step", bare, "--base", f"origin/{base}", raw=raw, pr_body=body)[0]
+                verdict, _, detail = step_verdicts(raw, [bare], state)[0]
+            except (Stop, OSError, subprocess.SubprocessError) as e:
+                verdict, detail = "unknown", str(e)
+            if verdict == "pass":
+                phrases[declared] = f"passes on {sha[:9]}: this change broke it"
+            elif verdict == "fail":
+                phrases[declared] = f"also fails on {sha[:9]}"
+            else:
+                phrases[declared] = f"base not read: {' '.join(detail.split())[:120] or 'ci-job gave no verdict'}"
+    finally:
+        if tmp:
+            try:
+                drop_worktree(wt, tmp, copy)
+            except (OSError, subprocess.SubprocessError):
+                shutil.rmtree(tmp, ignore_errors=True)
+    return phrases
+
 def pre_ready_rows(wt, n, base, checks, pre, body=None):
     """The pre-ready run: one ci-job run per job of `merge.readyChecks` `checks` in the tree `wt` (ready_job_groups), then, when `pre` is (root, host, info), the debt-close lint
     and the open-PR clash of the PR's head info["head"] (the lint reads it through `wt`'s git), each once. Prints one verdict line per check, `pass NAME`, `skip NAME: why` (a listed action step this tool cannot run, step_skip; counted only when another listed step passes), `fail NAME: why` or `unknown NAME: why`, all before any
-    refusal; NAME is the declared entry.
+    refusal; NAME is the declared entry. A `fail` line also names its base read, `fail NAME (passes on <sha9>: this change broke it): why`, `(also fails on <sha9>)` or `(base not read: <reason>)` (base_read_phrases); the row stays a fail whatever it says.
     -> (rows, (state, lines, log)): rows of (verdict, name, detail), and the jobs' ci_job_run answers combined: state fail over unknown over pass, lines and log joined.
     Each job's steps are read from that job's own lines, so a step name two jobs hold reads only its own job.
     Each job's run gets the PR body (info["body"], else `body`, which a run with no `pre` passes) as PR_BODY, which the records-and-rules step (actions/claude-md-cites, a ready check by name) reads; with no body it reads unknown when it finds a gap.
     Cost of the six cheap checks (Hook catalog check, Retired names, Silent undo check, Ruling kind check, the Skill model rows and Project-ops roles fixture suites), measured through bin/ci-job on one machine, one run each: 1.4 s, 3.9 s, 2.4 s, 0.3 s, 7.1 s and 14.9 s, 30.0 s in all, no run past 20 s (the Glossary fixture suite, 112.4 s, is left out of the list). The Code check step (actions/code-check/code_check.py, ruff, mypy, ShellCheck and the comment check) is listed too: 13.6 s with the pinned tools cached, 0.2 s on a cached rerun (one local run, 14:33 CST Nov 24 2026); a first run on a machine with no cached tools is unmeasured. It joins the checks job's one ci-job run as one more step; it needs pipx, and with pipx absent it reads unknown. A machine with pipx but no cached tools and no network reads fail, not unknown: code_check.py names only a missing pipx or npx as "could not start". They join the checks job's one ci-job run, so they add no ci-job start; each step is one bin/verdict start and one shell, as every named step is. The silent-undo and ruling-kind steps read the base and head sha ci-job sets, the catalog step reads GITHUB_BASE_REF. No gh call and no GitHub read (merge/test_lane_lint.py test_six_cheap_checks_share_one_ci_job_start_and_read_no_github).
-    Cost: one ci-job run per job (a ready check that names a local action adds no run of its own: its three probe steps are three bin/verdict starts and shells inside that run, a git diff, and one live GitHub read per Facts claim, which reads unknown when it fails), one debt-close lint (a scratch worktree and one Retire test run per closed debt), one cross_measure; no file but ci-job's log and the temporary worktrees."""
+    Cost: one ci-job run per job (a ready check that names a local action adds no run of its own: its three probe steps are three bin/verdict starts and shells inside that run, a git diff, and one live GitHub read per Facts claim, which reads unknown when it fails), one debt-close lint (a scratch worktree and one Retire test run per closed debt), one cross_measure; for failing checks only, one worktree of the base and one more ci-job run per failing check (base_read_phrases), none for a pass; no file but ci-job's log and the temporary worktrees."""
     rows, states, lines, log, held = [], [], [], [], []  # held: each job's ci-job state and rows before a skip is read
     for job, group in ready_job_groups(checks).items():
         raw = []
@@ -5408,10 +5452,12 @@ def pre_ready_rows(wt, n, base, checks, pre, body=None):
     if any(v == "skip" for v, _, _ in rows) and not any(v == "pass" for v, _, _ in rows):  # every listed step is unrunnable: nothing ran, so nothing passed
         states, rows = [s_ for s_, _ in held], [r for _, job_rows in held for r in job_rows]
     state = "fail" if "fail" in states else "unknown" if "unknown" in states else "pass"
+    where = {declared: (job, bare) for job, group in ready_job_groups(checks).items() for declared, bare in group}
+    based = base_read_phrases(wt, base, [(name, *where[name]) for v, name, _ in rows if v == "fail" and name in where], pre[2].get("body") if pre else body)  # a failing row names its base; the row stays fail
     if pre:
         root, host, info, *act = pre  # a fourth item False is the read-only run (fast_checks): an idle red clash is read, never drafted
         rows += [debt_verdict(wt, base, host, info), clash_verdict(root, n, base, host, info, draft_idle=act[0] if act else True)]
-    say(*[f"{v} {name}" + (f": {d}" if d else "") for v, name, d in rows])
+    say(*[f"{v} {name}" + (f" ({based[name]})" if v == "fail" and name in based else "") + (f": {d}" if d else "") for v, name, d in rows])
     return rows, (state, lines, log)
 
 def run_ready_checks(wt, n, base, checks, remedy="Fix it on the branch, push, and run --confirm again.", pre=None):
