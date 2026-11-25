@@ -4,7 +4,7 @@
 
 The owner's words are quoted below.
 The rule sentences here are the consultant's wording of them.
-The owner approved the rule "for the most part" (11:15 CST, Nov 25, 2026).
+The owner approved doing this in claude-settings "for the most part" (his words, 11:15 CST, Nov 25, 2026).
 A list, table or registry that many lanes add to holds one entry per line.
 Where order cannot matter, the lines are sorted.
 A list may hold one file per entry instead.
@@ -63,7 +63,7 @@ None is built.
 ## Not built
 
 - The list check is not built yet, and it will live on its own in-flight branch (named under In flight, slug held back).
-- The compliance-check skill section waits (owner, 17:20 CST Nov 24, 2026, process-only word: skills are revamped later), and by `skill-edits-follow-work` the real change lands now without it.
+- The compliance-check skill section comes later, and by decision `skill-edits-follow-work` (owner, 22:21 CST Nov 24, 2026: "other skill edits come later"; "nothing in wanting to change the skills should hold up the real work") the check lands now without it.
 - The whole-read note, a note only, inside hooks/reread_check.py --pre-read.
 - The big splits: merge/merge.py by concern, merge/test_lane_lint.py, and .github/workflows/checks.yml.
 
