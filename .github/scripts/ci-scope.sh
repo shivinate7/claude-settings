@@ -199,7 +199,10 @@ if [ -n "$files" ]; then
     # a folder rule would start the guard suite on files it never opens. The GUARD_READ_FILES entries set `guard` in their own arms above.
     # The list cannot drift silently: lint/test_guard_inputs.py (guard_read_paths) computes it and fails on a file missing here.
     case "$f" in
-      agents/builder.md|agents/claude-code-guide.md|agents/design-reviewer.md|agents/designer.md|agents/explore.md|agents/plan.md|agents/record-writer.md|agents/refuter.md|agents/reviewer.md|agents/test-author.md|bin/sim-test|docs/decisions/agent-model-cap.md|merge/install_from_main.sh|janitor/sweep.py|janitor/temp_sweep.py|lint/_guard_sections.py|lint/check_record_slugs.py|lint/check_red_run.py|lint/check_skill_model_rows.py|lint/hook_catalog.py|lint/rule_audit.py|lint/ruled_store.py|lint/stale_cites.py|skills/impeccable/SKILL.md|testing/shallow_clone.py) on="$on guard checks_guard " ;;
+      # The guard suite reads the real agents folder (hooks/guard.py role_agent_keys): a top-level agents file turns the guard on, so a new one needs no edit here. The empty nested arm comes first because bash's `*` matches `/`.
+      agents/*/*.md) ;;
+      agents/*.md) on="$on guard checks_guard " ;;
+      bin/sim-test|docs/decisions/agent-model-cap.md|merge/install_from_main.sh|janitor/sweep.py|janitor/temp_sweep.py|lint/_guard_sections.py|lint/check_record_slugs.py|lint/check_red_run.py|lint/check_skill_model_rows.py|lint/hook_catalog.py|lint/rule_audit.py|lint/ruled_store.py|lint/stale_cites.py|skills/impeccable/SKILL.md|testing/shallow_clone.py) on="$on guard checks_guard " ;;
     esac
   done <<< "$files"
   # SCOPE_FILES (the header) skips the guard-inputs pass below, which reads every changed path of the range, and keeps the landed-dir read.
