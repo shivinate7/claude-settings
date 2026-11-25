@@ -2376,8 +2376,9 @@ SNAPSHOT_DIFFS = [
                              "lint_red_run", "sweep"]),
     (["merge/merge.py"], {}, ["checks_guard", "checks_macos", "checks_windows", "checks_windows_merge", "code", "guard",
                               "lint_comment_narration", "lint_red_run"]),
-    (["agents/builder.md"], {"existing": ["agents/builder.md"]}, ["doc_agents", "doc_any"]),
-    (["docs/decisions/agent-model-cap.md"], {"existing": ["docs/decisions/agent-model-cap.md"]},
+    # agents/*.md and a decision record the guard suite does not read (agents/builder.md and agent-model-cap.md are read by it).
+    (["agents/x.md"], {"existing": ["agents/x.md"]}, ["doc_agents", "doc_any"]),
+    (["docs/decisions/session-tiers.md"], {"existing": ["docs/decisions/session-tiers.md"]},
      ["doc_any", "doc_decisions", "lint_ruling_kind"]),
     # guard, checks_guard: the guard suite reads this file (decision guard-reads-turn-guard-on). A prose edit sets no code, and the fixture
     # shards need code and guard, so this file sets checks_guard itself.
