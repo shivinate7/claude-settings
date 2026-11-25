@@ -1,5 +1,5 @@
 # section 39500
-# The opt-in row (commit a1a1a7e0): a run that names no family prints one SKIP row for each opt-in family, and the row
+# The opt-in row: a run that names no family prints one SKIP row for each opt-in family, and the row
 # gives the command that runs the family. Each check runs this runner in a child on a copy of the section files, with
 # GUARD_SHARD set past the end of any selection, so the child prints its rows and runs no case or check. The checks sit
 # in their own section, with no fixtureless reference, so the red run can copy this file onto an older commit.
