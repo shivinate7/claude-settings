@@ -493,6 +493,10 @@ jobs:
         if: ${{ !cancelled() && (needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_any == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_check_cost_pins.py
 
+      - name: Tool pin fixture suite
+        if: ${{ !cancelled() && needs.scope.outputs.records_only_skip != 'true' }}
+        run: python3 lint/test_check_tool_pins.py
+
       - name: Red-run trailer fixture suite
         if: ${{ !cancelled() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_check_red_run.py
