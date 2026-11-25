@@ -314,9 +314,11 @@ def audit_reason(handoff):
 # The spawn tools. guard.SPAWN_TOOLS names the same two; this file cannot import the guard, which imports it.
 SPAWN_NAMES = ("Agent", "Task")
 # A heading is MISSING, STALE or DONE in any case, then an optional count or title, then a colon with items after it, or
-# nothing: `MISSING`, `Missing items:`, `MISSING (2):`, `missing: `#12` open`.
-_HEADING = re.compile(r"^[\s#*_>`-]*(MISSING|STALE|DONE)\b(?:\s*\(\d+\)|\s+[A-Za-z][A-Za-z ]{0,30}?)?[\s*_`]*"
-                      r"(?::[\s*_]*(?P<inline>.*)|[\s:*_`]*)$", re.IGNORECASE)
+# the end of the line. A count or title in brackets may end the line: `MISSING`, `MISSING (2 items)`. A title after a
+# space needs the colon: `Missing items:`. A prose line such as `Done reading the transcript` is no heading.
+_HEADING = re.compile(r"^[\s#*_>`-]*(MISSING|STALE|DONE)\b(?:"
+                      r"(?:\s*\([^)\n]{0,30}\)|\s+[A-Za-z][A-Za-z ]{0,30}?)?[\s*_`]*:[\s*_]*(?P<inline>.*)"
+                      r"|(?:\s*\([^)\n]{0,30}\))?[\s:*_`]*)$", re.IGNORECASE)
 _TICKS = re.compile(r"`([^`\n]+)`")
 
 
@@ -403,8 +405,9 @@ def rewrite_check(payload):
     tokens the audit's MISSING list names, and the jobs and agents that still run (stall_watch.scan_jobs). A token the
     audit's DONE or STALE list names may go. An audit reply the transcript cannot give leaves the baseline and the
     live jobs, and no token may go. It stays quiet while the audit agent itself runs. A state file with no usable
-    baseline passes and clears the flag, with one line on stderr. A pass clears the flag. A block stamps the flag with the handoff's hash, and a Stop with stop_hook_active true on
-    that same text passes: one block per chain. Reads no PR state.
+    baseline passes and clears the flag, with one line on stderr. A pass clears the flag. A block stamps the flag with
+    the handoff's hash, and a Stop with stop_hook_active true on that same text passes. So it blocks once per distinct
+    handoff text, with no cap while the text changes. Reads no PR state.
     Never raises."""
     try:
         sid = payload["session_id"]
