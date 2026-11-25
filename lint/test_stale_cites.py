@@ -3223,6 +3223,29 @@ class CitedExcerptTests(unittest.TestCase):
         self.assertEqual(shown.split("\n")[:2], ["63: def deep():", "64:     return 1"],
                          "read PATH NAME gives %r, not the rows from deep's def" % shown.split("\n")[:2])
 
+    # A bare word after an article is prose, not a name: `read the guard in PATH` gives the file top, even when the file binds `guard`.
+    # FILL_ROWS puts the bound name past row 40, so a start at that name would show a line number past 40.
+    def test_a_bare_word_after_the_gives_the_file_top_not_a_name(self):
+        text = self.FILL_ROWS + "\nguard = None\n"  # `guard` is bound at line 62
+        shown = self.stale.cited_excerpt("read the guard in hooks/config_watch.py", text)
+        self.assertEqual(shown.split("\n")[0], "1: x0 = 0",
+                         "a bare word after `the` is taken as a name: the excerpt starts at %r, not the file top"
+                         % shown.split("\n")[0])
+
+    def test_a_bare_word_after_a_gives_the_file_top_not_a_name(self):
+        text = self.FILL_ROWS + "\ndef main():\n    return 1\n"  # `main` is defined at line 62
+        shown = self.stale.cited_excerpt("read a main in hooks/agent_brief.py", text)
+        self.assertEqual(shown.split("\n")[0], "1: x0 = 0",
+                         "a bare word after `a` is taken as a name: the excerpt starts at %r, not the file top"
+                         % shown.split("\n")[0])
+
+    def test_a_backticked_name_before_its_path_starts_at_its_def(self):
+        # Control, green now and after. The judge passes `paren_cites` output, which drops the backticks, and the name leads its path.
+        [cite] = self.stale.paren_cites("- the rule holds (read `deep` in lint/widget.py)")
+        shown = self.stale.cited_excerpt(cite, self.DEEP)
+        self.assertEqual(shown.split("\n")[0], "63: def deep():",
+                         "a backticked name before its path starts at %r, not at its def" % shown.split("\n")[0])
+
 
 CONFIG = "hooks/config.py"  # the Python file the value cites name
 LIMIT_BASE = "LIMIT = 4\n\n\ndef keep():\n    return 1\n"
