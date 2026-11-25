@@ -5620,7 +5620,7 @@ class GhHalf(Env):
         self.assertIn("reverted on feat", out)
         self.assertEqual(rc, 1, out)
         self.assertEqual(self.calls().count(MERGE_CALL), 1)  # a refusal is not retried
-        self.assertNotIn(merge.NET_PAUSE, self.paused)  # no network-retry pause
+        self.assertEqual(self.paused, [merge.NET_PAUSE], "the refusal reply was not read once more after one NET_PAUSE, or another wait was taken\n" + out)  # one re-read of main: the one pause before it
         self.assertTrue(self.reverted())
         self.assertFalse(self.lock_ref())
 
