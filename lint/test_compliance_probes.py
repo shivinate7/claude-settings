@@ -7,6 +7,7 @@ Each group goes red on the gap it guards, and stays quiet on a repo that is fine
 folder, a vendored screenshot script, a generated token file, a cited cap and an owner-named cap.
 PROBES_UNDER_TEST names the script under test (default: the one beside this file).
 """
+import ast
 import contextlib
 import http.server
 import importlib.util
@@ -4521,6 +4522,136 @@ class FactsLive(unittest.TestCase):
     def test_an_incomplete_body_from_github_is_unknown_not_a_traceback(self):
         repo, _ = self.record("ref stable absent")
         self.assert_unknown(repo, {REF_STABLE_PATH: (200, b"", "short")})
+
+
+# The brief's standing lines (decision agents-get-standing-rules): each line of hooks/agent_brief.py carries a record slug, and
+# probe_aligned reads each line as a unit that cites its slug. The cases build on the real brief file, so no fixture pins the
+# field's shape: the entries come from the helper brief_entries(), read in a child Python, and their source is read with ast.
+AGENT_BRIEF_REL = "hooks/agent_brief.py"
+AGENT_BRIEF = os.path.join(os.path.dirname(HERE), *AGENT_BRIEF_REL.split("/"))
+BRIEF_HELPER = "brief_entries"  # the one reader of the (slug, text) pairs, in hooks/agent_brief.py
+BRIEF_HEADING = "Standing rules for this agent:"
+BRIEF_PROGRAM = (
+    "import json, sys\n"
+    "sys.path.insert(0, sys.argv[1])\n"
+    "import agent_brief\n"
+    "helper = getattr(agent_brief, sys.argv[2], None)\n"
+    "print(json.dumps(None if not callable(helper) else [list(pair) for pair in helper()]))\n"
+)
+# A .py file with no entries: its comments and strings name a slug, hold a comment opener and a lone quote. It adds no unit.
+NOTES_PY = '''"""Notes: the slug `hold-unsafe-after-round-3` in a docstring, over two lines.
+It's a lone quote in text, and a comment opener in a string: "# not a comment".
+"""
+# A comment that names `hold-unsafe-after-round-3` with a lone quote: it's here.
+TEXT = "a string that holds # and a ' quote"
+'''
+
+
+def brief_pairs(test):
+    """(slug, text) pairs from the helper. A failed assert names the cause when the hook does not load or the helper is
+    missing, so no case reads a crash."""
+    done = subprocess.run([sys.executable, "-c", BRIEF_PROGRAM, os.path.dirname(AGENT_BRIEF), BRIEF_HELPER],
+                          capture_output=True, text=True)
+    test.assertEqual(done.returncode, 0, "hooks/agent_brief.py does not load or its helper raises: %s" % done.stderr[-200:])
+    pairs = json.loads(done.stdout)
+    test.assertIsNotNone(pairs, "hooks/agent_brief.py has no %s() helper: its standing lines carry no record slug" % BRIEF_HELPER)
+    return [tuple(pair) for pair in pairs]
+
+
+def brief_source():
+    with open(AGENT_BRIEF, encoding="utf-8") as handle:
+        return handle.read()
+
+
+def str_constants(source):
+    """Each str constant of `source`, as an ast node. The parser reads the source, so a comment opener or a quote inside a
+    string is text, never a comment."""
+    return [node for node in ast.walk(ast.parse(source)) if isinstance(node, ast.Constant) and isinstance(node.value, str)]
+
+
+def with_entry_edit(source, node, addition):
+    """`source` with `addition` put before the closing quote of the str constant `node`, which ends on its last line. The
+    constant's value changes, and the line that holds its closing quote is the one the diff touches."""
+    lines = source.split("\n")
+    row, col = node.end_lineno - 1, node.end_col_offset - 1
+    if lines[row][col] not in "'\"":
+        raise AssertionError("the constant ending at line %d does not end in a quote" % node.end_lineno)
+    lines[row] = lines[row][:col] + addition + lines[row][col:]
+    return "\n".join(lines)
+
+
+def record_path(slug):
+    return "docs/decisions/%s.md" % slug
+
+
+class AlignedBriefEntries(AlignedSteps, unittest.TestCase):
+    """Each standing line of the brief cites its record slug. A record change that no line of its entry follows is refused,
+    and the refusal names the file and the slug. The refusal clears on a touched entry, or on the body line that names the
+    record."""
+
+    def entry(self, multi=False):
+        """(slug, text, node, source) of the first entry with a slug that spans one line of the brief file, or several
+        lines when `multi` is set. The heading and the placeholder entry are not used."""
+        source = brief_source()
+        for slug, text in brief_pairs(self):
+            if not slug or text == BRIEF_HEADING or "{scope}" in text:
+                continue
+            nodes = [n for n in str_constants(source) if n.value == text and (n.lineno < n.end_lineno) == multi]
+            if len(nodes) == 1:
+                return slug, text, nodes[0], source
+        self.fail("no brief entry with a record slug %s in hooks/agent_brief.py" % ("spans lines" if multi else "sits on one line"))
+
+    def brief_base(self, source, slug):
+        """A child on origin/main: the brief file as `source`, and the record `slug` as it stands."""
+        return {AGENT_BRIEF_REL: source, record_path(slug): aligned_record(ALIGNED_LINE38)}
+
+    def record_change(self, slug):
+        """The PR's change to the record `slug`: its line 38 moves, and no line of the brief file does."""
+        return {record_path(slug): aligned_record(ALIGNED_LINE38_NEW)}
+
+    def test_a_record_change_with_its_entry_untouched_is_refused(self):
+        slug, _, _, source = self.entry()
+        repo = self.pr(self.brief_base(source, slug), self.record_change(slug))
+        code, out, err = self.probe_pr(repo)
+        self.assertEqual(code, 1, "the record changed, no line of its entry did, and the probe does not refuse: %s%s" % (out, err))
+        self.assertTrue(any(AGENT_BRIEF_REL in line and slug in line for line in out.splitlines()),
+                        "no refusal line names %s and the slug %s: %s" % (AGENT_BRIEF_REL, slug, out))
+
+    def test_a_record_change_with_its_entry_touched_passes(self):  # green control of the refusal above
+        slug, _, node, source = self.entry()
+        changes = self.record_change(slug)
+        changes[AGENT_BRIEF_REL] = with_entry_edit(source, node, " Also checked.")
+        repo = self.pr(self.brief_base(source, slug), changes)
+        self.assert_clear(repo)
+
+    def test_a_record_change_with_its_confirming_body_line_passes(self):  # green control of the refusal above
+        slug, _, _, source = self.entry()
+        repo = self.pr(self.brief_base(source, slug), self.record_change(slug))
+        self.assert_clear(repo, body="Summary of the change.\nRules checked: %s %s no change\nTests: run." % (slug, ALIGNED_DASH))
+
+    def test_touching_the_last_line_of_a_multi_line_entry_clears_it(self):
+        slug, _, node, source = self.entry(multi=True)
+        changes = self.record_change(slug)
+        changes[AGENT_BRIEF_REL] = with_entry_edit(source, node, " Also checked.")
+        repo = self.pr(self.brief_base(source, slug), changes)
+        self.assert_clear(repo)
+
+    def test_an_entry_text_holding_a_comment_opener_and_a_lone_quote_is_still_read(self):
+        slug, _, node, source = self.entry()
+        opening = source.split("\n")[node.lineno - 1][node.col_offset]
+        other = "'" if opening == '"' else '"'
+        edited = with_entry_edit(source, node, " # it%ss a lone quote" % other)
+        repo = self.pr(self.brief_base(edited, slug), self.record_change(slug))
+        code, out, err = self.probe_pr(repo)
+        self.assertEqual(code, 1, "the entry's text holds a comment opener and a quote, and the record change is not refused: %s%s" % (out, err))
+        self.assertTrue(any(AGENT_BRIEF_REL in line and slug in line for line in out.splitlines()),
+                        "no refusal line names %s and the slug %s: %s" % (AGENT_BRIEF_REL, slug, out))
+
+    def test_a_py_file_with_no_entries_adds_nothing(self):  # green control: no entry, so no unit and no refusal
+        base = {"hooks/brief_notes.py": NOTES_PY, ALIGNED_RECORD: aligned_record(ALIGNED_LINE38)}
+        changes = {ALIGNED_RECORD: aligned_record(ALIGNED_LINE38_NEW), "hooks/brief_notes.py": NOTES_PY + "EXTRA = 1\n"}
+        repo = self.pr(base, changes)
+        self.assert_clear(repo)
 
 
 def tearDownModule():
