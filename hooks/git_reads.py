@@ -800,7 +800,22 @@ def _under_by_identity(cwd_resolved: str, target_identity):
     return None if unresolved else False
 
 
-def worktree_live_session(target: str):
+def _folder_is_gone(path: str) -> bool:
+    """True only when PATH is confirmed absent: `os.stat` says PATH is not there (FileNotFoundError,
+    NotADirectoryError) while its PARENT exists and is a folder. A missing parent reads as unknown, never
+    "gone": `os.stat` reports it the same way whether the folders were removed or a drive or mount is gone.
+    Every other error (permission, a symlink loop, an I/O or stale-handle fault) is unknown too."""
+    try:
+        os.stat(path)
+    except (FileNotFoundError, NotADirectoryError):
+        parent = os.path.dirname(path)
+        return parent != path and os.path.isdir(parent)
+    except Exception:
+        return False
+    return False
+
+
+def worktree_live_session(target: str, absent_is_out: bool = False):
     """True when a live session's cwd sits at or under TARGET. False when every session under
     TARGET is confirmed not live, or none has a cwd under TARGET at all. None when the session
     directory itself could not be read. None also when some session's cwd sits under TARGET,
@@ -811,7 +826,12 @@ def worktree_live_session(target: str):
 
     A record with an unreadable liveness read is never dropped by `continue` as though it were
     confirmed dead. Doing so would fold "could not tell" back into "not live," the exact defect
-    this read exists to avoid."""
+    this read exists to avoid.
+
+    ABSENT_IS_OUT (off by default) reads a record whose cwd folder is confirmed gone (`_folder_is_gone`)
+    as not under TARGET, so a session that outlived its folder no longer keeps every tree. Only a caller
+    that also keeps a dirty, locked or unmerged tree may set it: the answer feeds a removal that cannot be
+    undone, and a moved folder reads the same way as a removed one. An unreadable TARGET stays None."""
     records = session_records()
     if records is None:
         return None
@@ -838,6 +858,8 @@ def worktree_live_session(target: str):
             # The string spellings differ. Before concluding "not under," check whether they
             # are two spellings of the one physical location (see `_path_identity`).
             under = _under_by_identity(cwd_resolved, target_identity)
+            if under is None and absent_is_out and target_identity is not None and _folder_is_gone(cwd_resolved):
+                under = False
         if under is None:
             saw_unreadable = True
             continue

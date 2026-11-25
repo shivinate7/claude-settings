@@ -1,0 +1,1 @@
+- unread-row-repeats-every-stop: `hooks/stall_watch.py`, `read_job` in `stop()`: the row `background agent, launch time unread` (:1336) has no once-gate, though its comment says "once" (:1335). It is appended at each Stop while the agent is open, its transcript is found and it is not quiet-listed. No previous-Stop test guards it. Decision: stall-watch. Seen: 2026-11-25 x1
