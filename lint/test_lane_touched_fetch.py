@@ -252,7 +252,7 @@ def named_run_step(text, name):
     return next((s for s in step_blocks(job_block(text, "run")) if step_key(s, "name") == name), None)
 
 
-def gate_problem(what, raw, want):
+def if_value_problem(what, raw, want):
     """None when the `if:` value `raw` is `${{ want }}` whole, else the one cause for `what`. `want` is squashed. The compare
     is case-insensitive, as GitHub compares strings in an expression; a negation is still a different value."""
     expr = re.fullmatch(r"\$\{\{(.*)\}\}", drop_comment(raw or "").strip())
@@ -265,13 +265,13 @@ def gate_problem(what, raw, want):
 
 def if_problem(step, want):
     """None when the step's whole `if:` is `${{ want }}`, else the one cause. `want` is squashed."""
-    return gate_problem("the step %r" % step_key(step, "name"), step_key(step, "if"), want)
+    return if_value_problem("the step %r" % step_key(step, "name"), step_key(step, "if"), want)
 
 
 def run_job_if_problem(text):
     """None when the run job's whole `if:` is RUN_JOB_IF, else the one cause."""
     m = re.search(r"^    if:(.*)$", job_block(text, "run") or "", re.M)
-    return gate_problem("the run job", m.group(1) if m else None, RUN_JOB_IF)
+    return if_value_problem("the run job", m.group(1) if m else None, RUN_JOB_IF)
 
 
 def body_lines(body):
