@@ -1,1 +1,1 @@
-- cancelled-run-reads-replaced: `jobs_of` in `actions/ci-alarm/clear_rule.py` returns `[]` for every cancelled run, so a hand-cancelled run with a newer run above it reads as replaced.
+- cancelled-run-reads-replaced: `jobs_of` in `actions/ci-alarm/clear_rule.py` returns `[]` for every cancelled run, so a hand-cancelled run with a newer run above it reads as replaced. Seen: 2026-11-25 x1
