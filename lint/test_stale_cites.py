@@ -3239,6 +3239,24 @@ class CitedExcerptTests(unittest.TestCase):
                          "a bare word after `a` is taken as a name: the excerpt starts at %r, not the file top"
                          % shown.split("\n")[0])
 
+    # Names bound past row 40 for the article and determiner cases: `guard` at line 62, `main` at 63, `checks` at 65. A start at any of
+    # them shows a line number past 40, so a bare word taken as a name cannot pass as the file top.
+    PAST_40 = FILL_ROWS + "\nguard = None\ndef main():\n    return 1\ndef checks():\n    return 2\n"
+
+    def test_an_article_governs_a_chain_of_names_before_a_path(self):
+        # `the` leads `guard and main`. The article makes the whole chain prose, so `main` does not lead the path.
+        shown = self.stale.cited_excerpt("read the guard and main in hooks/config_watch.py", self.PAST_40)
+        self.assertEqual(shown.split("\n")[0], "1: x0 = 0",
+                         "an article before a chain of names does not make the chain prose: the excerpt starts at %r, not the file top"
+                         % shown.split("\n")[0])
+
+    def test_a_capital_article_governs_a_name_before_a_path(self):
+        # `The` is an article: the article check ignores case, so `guard` is prose and the file top shows.
+        shown = self.stale.cited_excerpt("read The guard in hooks/config_watch.py", self.PAST_40)
+        self.assertEqual(shown.split("\n")[0], "1: x0 = 0",
+                         "a capital article `The` does not make `guard` prose: the excerpt starts at %r, not the file top"
+                         % shown.split("\n")[0])
+
     def test_a_backticked_name_before_its_path_starts_at_its_def(self):
         # Control, green now and after. The judge passes `paren_cites` output, which drops the backticks, and the name leads its path.
         [cite] = self.stale.paren_cites("- the rule holds (read `deep` in lint/widget.py)")
