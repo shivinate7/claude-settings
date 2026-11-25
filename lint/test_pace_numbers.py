@@ -17,9 +17,14 @@ Form under test: `python3 lint/pace_numbers.py --transcript FILE --between START
 - A window time with no UTC offset exits 2 with an argument error that names the window time, and prints
   no number.
 - Output: `agents run: N, most at once: M`, with ` (P still running)` appended when P > 0, then
-  `minutes with no agent running: K`. N counts distinct agents. K is the floor of idle seconds / 60.
-- An unreadable file, an empty file, or a window with no record in it prints one `unknown: <reason>`
-  line and exits 0.
+  `minutes with no agent running: K`, with a coverage note appended to the second line when the window reaches
+  past the covered span (below). N counts distinct agents. K is the floor of idle seconds / 60.
+- The covered span runs from the earliest to the latest timestamped record. A window minute outside it is not
+  idle. The second line then ends with ` (transcript covers from <ISO> on; <N> min before it not counted)` when
+  the window starts before the span, or ` (transcript covers until <ISO>; <N> min after it not counted)` when it
+  ends after it. <ISO> is the span's edge in the window's offset, such as 2026-11-25T04:00:00-06:00.
+- A window with no minute in common with the covered span, touching it at one instant included, prints one
+  `unknown: <reason>` line and exits 0. So does an unreadable file, or an empty one.
 
 Each case runs the reader as a subprocess and compares its stdout. No case imports the reader, so a
 missing reader fails on an assert, not on an import.
@@ -73,12 +78,26 @@ def shell_id(n):
     return "b%08x" % n
 
 
-def expected_lines(agents, most, idle, still=0):
-    """The reader's two lines. The wording lives here only, so a wording change is one edit."""
+def expected_lines(agents, most, idle, still=0, note=None):
+    """The reader's two lines. The wording lives here only, so a wording change is one edit. note is the coverage
+    note the idle line ends with when the window reaches past the covered span."""
     first = "agents run: %d, most at once: %d" % (agents, most)
     if still:
         first += " (%d still running)" % still
-    return [first, "minutes with no agent running: %d" % idle]
+    second = "minutes with no agent running: %d" % idle
+    if note:
+        second += " (%s)" % note
+    return [first, second]
+
+
+def before_note(hm, minutes):
+    """The coverage note for a window that starts `minutes` before the covered span, which starts at `hm` UTC."""
+    return "transcript covers from %s on; %d min before it not counted" % (window_arg(hm), minutes)
+
+
+def after_note(hm, minutes):
+    """The coverage note for a window that ends `minutes` after the covered span, which ends at `hm` UTC."""
+    return "transcript covers until %s; %d min after it not counted" % (window_arg(hm), minutes)
 
 
 def flat(*items):
@@ -192,6 +211,14 @@ def write_transcript(folder, records, runs_to=None):
     return path
 
 
+def covered_span(path):
+    """The earliest and latest timestamped record of a fixture, read back from disk. A case checks its scope with
+    this before it asks the reader about a window."""
+    moments = [rec["timestamp"] for rec in _transcript.read_transcript(path)
+               if isinstance(rec.get("timestamp"), str)]
+    return min(moments), max(moments)
+
+
 def run_reader(transcript, start_hm, end_hm):
     return run_reader_bounds(transcript, window_arg(start_hm), window_arg(end_hm))
 
@@ -212,10 +239,10 @@ class PaceNumbersTests(unittest.TestCase):
     def tearDown(self):
         shutil.rmtree(self.folder, ignore_errors=True)
 
-    def expect(self, path, start, end, want):
+    def expect(self, path, start, end, want, cause="reader lines differ from the form"):
         proc = run_reader(path, start, end)
         self.assertEqual(proc.returncode, 0, "exit code is not 0: " + proc.stderr.strip())
-        self.assertEqual(proc.stdout.splitlines(), want, "reader lines differ from the form")
+        self.assertEqual(proc.stdout.splitlines(), want, cause)
 
     def expect_unknown(self, path, start, end):
         proc = run_reader(path, start, end)
@@ -326,6 +353,62 @@ class PaceNumbersTests(unittest.TestCase):
     def test_window_with_records_but_no_agent_prints_zero_agents_and_the_whole_window_idle(self):
         path = write_transcript(self.folder, [plain(at("10:00")), plain(at("10:50"))], runs_to="11:00")
         self.expect(path, "10:00", "11:00", expected_lines(agents=0, most=0, idle=60))
+
+    def test_window_starting_before_the_first_record_counts_only_from_the_first_record(self):
+        # The blob has no timestamp and comes first, so the first timestamped record is the spawn at 10:00.
+        path = write_transcript(self.folder, flat(
+            blob("synthetic resumed copy with no timestamp, written before the first record"),
+            spawn(at("10:00"), "t1"), launched(at("10:00"), "t1", agent_id(1)),
+            end("10:10", "10:11", agent_id(1), "t1"),
+        ), runs_to="10:30")
+        self.assertEqual(covered_span(path), (at("10:00"), at("10:30")), "the fixture's covered span")
+        self.expect(path, "09:30", "10:30",
+                    expected_lines(agents=1, most=1, idle=20, note=before_note("10:00", 30)),
+                    cause="a window part before the first timestamped record is counted as idle")
+
+    def test_window_ending_after_the_last_record_counts_only_up_to_it(self):
+        path = write_transcript(self.folder, flat(
+            spawn(at("10:00"), "t1"), launched(at("10:00"), "t1", agent_id(1)),
+            end("10:10", "10:11", agent_id(1), "t1"),
+            plain(at("10:20")),
+        ))
+        self.assertEqual(covered_span(path), (at("10:00"), at("10:20")), "the fixture's covered span")
+        self.expect(path, "10:00", "11:00",
+                    expected_lines(agents=1, most=1, idle=10, note=after_note("10:20", 40)),
+                    cause="a window part after the last timestamped record is counted as idle")
+
+    def test_window_inside_the_covered_span_prints_the_plain_line(self):
+        path = write_transcript(self.folder, flat(
+            spawn(at("10:00"), "t1"), launched(at("10:00"), "t1", agent_id(1)),
+            end("10:10", "10:11", agent_id(1), "t1"),
+        ), runs_to="10:30")
+        self.assertEqual(covered_span(path), (at("10:00"), at("10:30")), "the fixture's covered span")
+        self.expect(path, "10:05", "10:25", expected_lines(agents=1, most=1, idle=15))
+
+    def test_window_touching_the_covered_span_prints_one_unknown_line(self):
+        # A window that meets the span at one instant has no minute in the span, so it lies wholly outside it.
+        path = write_transcript(self.folder, flat(
+            spawn(at("10:00"), "t1"), launched(at("10:00"), "t1", agent_id(1)),
+            end("10:10", "10:11", agent_id(1), "t1"),
+        ), runs_to="10:30")
+        self.assertEqual(covered_span(path), (at("10:00"), at("10:30")), "the fixture's covered span")
+        problems = []
+        for side, begin_hm, finish_hm in (("before", "09:00", "10:00"), ("after", "10:30", "11:00")):
+            proc = run_reader(path, begin_hm, finish_hm)
+            lines = proc.stdout.splitlines()
+            if proc.returncode != 0 or len(lines) != 1 or not lines[0].startswith("unknown: "):
+                problems.append("%s window: exit %d, lines %r" % (side, proc.returncode, lines))
+        self.assertEqual(problems, [],
+                         "a window that meets the covered span at one instant prints numbers, not one "
+                         "'unknown: <reason>' line")
+
+    def test_window_clear_of_the_covered_span_prints_one_unknown_line(self):
+        path = write_transcript(self.folder, flat(
+            spawn(at("10:00"), "t1"), launched(at("10:00"), "t1", agent_id(1)),
+            end("10:10", "10:11", agent_id(1), "t1"),
+        ), runs_to="10:30")
+        self.expect_unknown(path, "09:00", "09:30")
+        self.expect_unknown(path, "10:45", "11:00")
 
     def test_failed_notice_ends_a_span(self):
         path = write_transcript(self.folder, flat(
