@@ -69,6 +69,13 @@ DOUBLED_LABEL = "sweep doubled: anchor in two places"
 WIDENED_LABEL = "sweep widened: anchor spans both lines, present once"
 SWAP_A_LABEL = "sweep swap A: fixture-only row"
 SWAP_B_LABEL = "sweep swap B: fixture-only row"
+UNKNOWN_TARGET = "nosuch"  # a sweep row's target that SOURCES does not hold
+UNKNOWN_LABEL = "sweep unknown target: names no source"
+CLEAN_THREE_LABEL = "sweep clean three: def line present once"
+MALFORMED_SWEEP_LABEL = "sweep malformed: two fields"
+UNLABELLED_INDEX = 1  # the 0-based index of the empty row in its sweep table
+MALFORMED_GUARD_LABEL = "guard malformed: two fields"
+GUARD_TABLE_FILE = "hooks/mutate_guard.py"  # the file a guard finding names: the table the row sits in
 
 
 def sweep_row(label, old, target="sweep"):
@@ -110,6 +117,7 @@ class CensusFindings(unittest.TestCase):
             "guard": (self.guard, None, None, None),
             "audit": (self.guard, None, None, None),
             "watch": (self.watch, None, None, None),
+            "plain": (self.guard, None, None, None),  # a non-guard-family target: a guard row named here reads this file alone
         }
         # The guard table is empty and the sweep table holds no row unless a case sets one, so no case reads the real tables.
         self.sweep_file = self.put("janitor/sweep.py", SWEEP_TEXT)
@@ -119,11 +127,19 @@ class CensusFindings(unittest.TestCase):
             patcher.start()
             self.addCleanup(patcher.stop)
 
-    def run_main(self, sweep_rows):
-        """The census's main() with `sweep_rows` as the sweep table and no guard rows -> (exit code, stdout)."""
+    def run_main(self, sweep_rows, guard_rows=()):
+        """The census's main() with `sweep_rows` as the sweep table and `guard_rows` as the guard table -> (exit code, stdout).
+        Guard rows are judged against this case's own targets, so no row reads the real hooks/ tree. A census that raises fails
+        the case by assert, naming the exception, so a crash is never the red."""
         out = io.StringIO()
-        with mock.patch.object(mutate_sweep, "MUTATIONS", sweep_rows), contextlib.redirect_stdout(out):
-            code = census.main()
+        with mock.patch.object(mutate_sweep, "MUTATIONS", sweep_rows), \
+                mock.patch.object(census.mutate_guard, "MUTATIONS", list(guard_rows)), \
+                mock.patch.object(census.mutate_guard, "TARGETS", self.targets), \
+                contextlib.redirect_stdout(out):
+            try:
+                code = census.main()
+            except Exception as error:
+                self.fail("census raised %s (%s) instead of printing its FAIL lines" % (type(error).__name__, error))
         return code, out.getvalue()
 
     def lines_naming(self, out, label):
@@ -285,6 +301,54 @@ class CensusFindings(unittest.TestCase):
         code, out = self.run_main(rows)
         self.assertEqual([line for line in out.splitlines() if line.startswith("FAIL")], [], out)
         self.assertEqual(code, 0, out)
+
+    def test_an_unknown_sweep_target_fails_with_the_unknown_target_line(self):
+        code, out = self.run_main([sweep_row(CLEAN_LABEL, CLEAN_OLD), sweep_row(UNKNOWN_LABEL, CLEAN_OLD, UNKNOWN_TARGET)])
+        self.assertEqual(self.lines_naming(out, CLEAN_LABEL), [], "a clean sweep row is reported: %s" % out)
+        want = "FAIL unknown mutation target 'nosuch' in %s: %s" % (TABLE_FILE, UNKNOWN_LABEL)
+        self.assertEqual(self.lines_naming(out, UNKNOWN_LABEL), [want], out)
+        self.assertEqual(code, 1, out)
+
+    def test_the_pass_line_counts_the_guard_rows_and_the_sweep_rows(self):
+        guard_rows = [mutant("guard clean: anchor present once", "return x > 1", "plain"),
+                      mutant("guard clean two: anchor present once", 'url = "http://x // y"', "plain")]
+        sweep_rows = [sweep_row(CLEAN_LABEL, CLEAN_OLD), sweep_row(WIDENED_LABEL, WIDENED_OLD),
+                      sweep_row(CLEAN_THREE_LABEL, "def unlock(stale):")]
+        code, out = self.run_main(sweep_rows, guard_rows)
+        self.assertEqual([line for line in out.splitlines() if line.startswith("FAIL")], [], out)
+        self.assertEqual(code, 0, out)
+        self.assertIn("PASS mutant anchor census: 5 mutants", out.splitlines(), out)
+
+    def test_a_malformed_sweep_row_fails_naming_its_label_and_the_table_with_no_traceback(self):
+        code, out = self.run_main([sweep_row(CLEAN_LABEL, CLEAN_OLD), (MALFORMED_SWEEP_LABEL, "sweep")])
+        self.assertEqual(self.lines_naming(out, CLEAN_LABEL), [], "a clean sweep row is reported: %s" % out)
+        lines = self.lines_naming(out, MALFORMED_SWEEP_LABEL)
+        self.assertEqual(len(lines), 1, "want one FAIL line for the malformed sweep row, got:\n%s" % out)
+        self.assertTrue(lines[0].startswith("FAIL "), lines[0])
+        self.assertIn(TABLE_FILE, lines[0], lines[0])
+        self.assertNotIn("Traceback", out, out)
+        self.assertEqual(code, 1, out)
+
+    def test_a_sweep_row_with_no_label_fails_naming_its_row_index(self):
+        code, out = self.run_main([sweep_row(CLEAN_LABEL, CLEAN_OLD), ()])
+        self.assertEqual(self.lines_naming(out, CLEAN_LABEL), [], "a clean sweep row is reported: %s" % out)
+        fails = [line for line in out.splitlines() if line.startswith("FAIL")]
+        self.assertEqual(len(fails), 1, "want one FAIL line for the unlabelled sweep row, got:\n%s" % out)
+        self.assertIn("row %d" % UNLABELLED_INDEX, fails[0], fails[0])
+        self.assertIn(TABLE_FILE, fails[0], fails[0])
+        self.assertNotIn("Traceback", out, out)
+        self.assertEqual(code, 1, out)
+
+    def test_a_malformed_guard_row_fails_naming_its_label_and_the_table_with_no_traceback(self):
+        guard_rows = [mutant("guard clean: anchor present once", "return x > 1", "plain"), (MALFORMED_GUARD_LABEL, "return x > 1")]
+        code, out = self.run_main([], guard_rows)
+        self.assertEqual(self.lines_naming(out, "guard clean"), [], "a clean guard row is reported: %s" % out)
+        lines = self.lines_naming(out, MALFORMED_GUARD_LABEL)
+        self.assertEqual(len(lines), 1, "want one FAIL line for the malformed guard row, got:\n%s" % out)
+        self.assertTrue(lines[0].startswith("FAIL "), lines[0])
+        self.assertIn(GUARD_TABLE_FILE, lines[0], lines[0])
+        self.assertNotIn("Traceback", out, out)
+        self.assertEqual(code, 1, out)
 
 
 if __name__ == "__main__":
