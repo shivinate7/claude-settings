@@ -8,8 +8,11 @@ finds newer calls, modules and syntax. An ast pass finds a union type `int | Non
 Both read the source with the host's `ast`, so the host Python must be 3.9 or newer.
 
 vermin keeps one table of names per file, so a name bound to an int in one function makes a same-spelled name in
-another function read as an int. The check drops a vermin line `'int.X' member` unless a read of `.X` has an int
-receiver: an int literal, `int`, `int(...)`, or a name bound to an int in its own scope or one around it.
+another function read as an int. The check drops a vermin line `'int.X' member` unless a read of `.X` has a
+receiver that may be an int: an int literal, `int`, `int(...)`, any expression that is not a plain name and not a
+known non-int (`(x & 0xFF)`, `(x + 1)`, `(-5)`, a walrus, a call, an attribute), or a name bound to an int in its
+own scope or one around it (an int assignment, an `int` annotation, an int default, a loop target over
+`range(...)`). A default value is read in the scope around its function.
 
 A product file is a .py file under hooks/ or lint/ that is not a test: a path `is_test_rel` (hooks/guard.py, the
 one home of what a test path is) calls a test, or a name `_test*.py`. A `# novermin` line comment excuses its
@@ -45,9 +48,12 @@ never clean.
 Limits: vermin's tables miss `subprocess.run(process_group=)` and `datetime.fromisoformat` with a "Z" suffix, both
 3.11 behaviour, so neither is caught. A symlinked folder under hooks/ or lint/ is not followed. An assignment value
 or isinstance argument that joins non-builtin names (`Alias = Foo | Bar`) is not caught, since it reads the same
-as a bit-flag OR. The int-member rule keeps a line when any int receiver reads the member, and finds an int by an
-int literal or `int(...)` assignment or an `int` annotation only, so a name that gets its int another way
-(`x = y`, a loop target) is dropped.
+as a bit-flag OR. The int-member rule keeps a line when any read of the member may be on an int. It keeps the
+line for any receiver that is not a plain name, bar the known non-ints (a non-int literal, a container, a true
+division, a product or sum with a float literal), so `obj.count.bit_count()` or a call keeps a line that a
+shadowing name alone would have dropped. A name that gets its int another way (`x = y`, `x = len(s)`, a tuple
+unpack, a `with` target) is dropped. A float expression the check cannot tell from an int, such as `((a / 2) + b)`,
+keeps the line.
 """
 import ast
 import io
@@ -276,9 +282,28 @@ def is_int_annotation(node):
     return isinstance(node, ast.Name) and node.id == "int"
 
 
+def is_range_call(node):
+    return isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "range"
+
+
+def is_not_int_expression(node):
+    """True for a receiver that cannot be an int: a non-int literal, a container or f-string, or an arithmetic
+    expression that is a float (a true division, or an operand that is a float literal). Anything else that is not a
+    plain name may be an int, as `(x & 0xFF)`, `(x + 1)`, `(-5)` and a walrus are."""
+    if isinstance(node, ast.Constant):
+        return not isinstance(node.value, int)
+    if isinstance(node, ast.BinOp):
+        return isinstance(node.op, ast.Div) or any(
+            isinstance(side, ast.Constant) and isinstance(side.value, float) for side in (node.left, node.right))
+    return isinstance(node, (ast.JoinedStr, ast.List, ast.Tuple, ast.Dict, ast.Set, ast.ListComp, ast.SetComp,
+                             ast.DictComp, ast.GeneratorExp))
+
+
 class IntMembers(ast.NodeVisitor):
-    """Finds each read of `.attr` on a value that is an int. A receiver counts when it is an int literal, `int`,
-    `int(...)`, or a name bound to an int in its own function or module, or one around it. A class body is a scope
+    """Finds each read of `.attr` on a value that may be an int. A receiver counts when it is an int literal, `int`,
+    `int(...)`, an expression that is not a plain name and not known to be a non-int (see is_not_int_expression), or
+    a name bound to an int in its own function or module, or one around it. A name is bound to an int by an int
+    assignment, an `int` annotation, an int default, or a loop target over `range(...)`. A class body is a scope
     only for its own statements, as in Python. vermin keeps one table of names per file, so it cannot tell this
     from a same-spelled name bound to an int in another function (vermin 1.9.2, source_visitor name_res)."""
 
@@ -298,11 +323,17 @@ class IntMembers(ast.NodeVisitor):
             self.scopes[-1].add(target.id)
 
     def function(self, node):
+        # Decorators, defaults and annotations run in the enclosing scope, before the body's scope opens.
+        args = node.args
+        for outer in (node.decorator_list, args.defaults, [d for d in args.kw_defaults if d is not None]):
+            for child in outer:
+                self.visit(child)
         self.scopes.append(set())
         self.kinds.append("function")
-        args = node.args
-        for arg in args.posonlyargs + args.args + args.kwonlyargs:
-            if is_int_annotation(arg.annotation):
+        positional = args.posonlyargs + args.args
+        defaults = [None] * (len(positional) - len(args.defaults)) + list(args.defaults)
+        for arg, default in list(zip(positional, defaults)) + list(zip(args.kwonlyargs, args.kw_defaults)):
+            if is_int_annotation(arg.annotation) or (default is not None and is_int_value(default)):
                 self.bind(ast.Name(id=arg.arg))
         for child in node.body:
             self.visit(child)
@@ -312,6 +343,9 @@ class IntMembers(ast.NodeVisitor):
     visit_FunctionDef = visit_AsyncFunctionDef = function
 
     def visit_ClassDef(self, node):
+        for outer in (node.decorator_list, node.bases, [k.value for k in node.keywords]):
+            for child in outer:
+                self.visit(child)
         self.scopes.append(set())
         self.kinds.append("class")
         for child in node.body:
@@ -330,6 +364,18 @@ class IntMembers(ast.NodeVisitor):
             self.bind(node.target)
         self.generic_visit(node)
 
+    def visit_For(self, node):
+        if is_range_call(node.iter):
+            self.bind(node.target)
+        self.generic_visit(node)
+
+    visit_AsyncFor = visit_For
+
+    def visit_comprehension(self, node):
+        if is_range_call(node.iter):
+            self.bind(node.target)  # bound in the enclosing scope: it can only keep a line, never drop one
+        self.generic_visit(node)
+
     def visit_Attribute(self, node):
         if node.attr == self.attr:
             self.reads.append((node.value, self.visible()))
@@ -337,9 +383,12 @@ class IntMembers(ast.NodeVisitor):
 
     def has_int_read(self):
         for receiver, scopes in self.reads:
-            if is_int_value(receiver) or (isinstance(receiver, ast.Name) and receiver.id == "int"):
+            if is_int_value(receiver):
                 return True
-            if isinstance(receiver, ast.Name) and any(receiver.id in names for names in scopes):
+            if isinstance(receiver, ast.Name):
+                if receiver.id == "int" or any(receiver.id in names for names in scopes):
+                    return True
+            elif not is_not_int_expression(receiver):
                 return True
         return False
 
