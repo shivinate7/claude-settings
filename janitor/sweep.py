@@ -651,12 +651,23 @@ def prime_pushed(root: str, entries):
         cache.update({h: h not in unpushed for h in heads if h not in cache})
 
 
-def fully_pushed(path: str):
+def _local_ref_tips(path: str):
+    """The commit SHAs of every local branch and of refs/stash in PATH, or None when git could not tell.
+    One `for-each-ref`; a detached HEAD is not a ref and `fully_pushed` reads it apart."""
+    answer = git_reads._git(path, "for-each-ref", "--format=%(objectname)", "refs/heads", "refs/stash")
+    if answer is None or answer.returncode != 0:
+        return None
+    return answer.stdout.split()
+
+
+def fully_pushed(path: str, every_ref: bool = False):
     """True when every commit on HEAD is reachable from a head the remote lists now (a detached
     HEAD counts too), False when one is not, None when git could not tell: ls-remote failed
     or rev-list failed. A live SHA missing locally is dropped, not unreadable. Every reap needs it, not only a
     stale agent lock: a lane always commits, and a detached HEAD has no branch to tombstone.
-    HEAD is read now; `prime_pushed` may already have settled that commit this run."""
+    HEAD is read now; `prime_pushed` may already have settled that commit this run.
+    EVERY_REF adds each local branch and refs/stash to HEAD, in the same ls-remote and rev-list: a nested clone
+    in a trash folder holds work on a side branch or in a stash, which a HEAD read does not see."""
     live = _live_remote_heads(path)
     if live is None:
         return None
@@ -664,15 +675,21 @@ def fully_pushed(path: str):
     if head is None or head.returncode != 0 or not head.stdout.strip():
         return None
     head = head.stdout.strip()
+    heads = [head]
+    if every_ref:
+        tips = _local_ref_tips(path)
+        if tips is None:
+            return None
+        heads += tips
     cache = _pushed_cache(path)
-    if cache is not None and head in cache:
+    if cache is not None and not every_ref and head in cache:
         return cache[head]
-    unpushed = _unpushed_among(path, [head], live)
+    unpushed = _unpushed_among(path, heads, live)
     if unpushed is None:
         return None
     if cache is not None:
-        cache[head] = head not in unpushed
-    return head not in unpushed
+        cache.update({h: h not in unpushed for h in heads})
+    return not unpushed
 
 
 STRICT_IDLE_SECONDS = 60 * 60  # a tree needs 1 hour of git quiet
@@ -3165,14 +3182,15 @@ def _own_trash_lines(parent: str, base: str, original: str, lines):
 
 
 def _nested_repo_holds_work(repo: str):
-    """True when the repo at REPO has an uncommitted path or a HEAD commit no remote head holds, False when it
-    is clean and every commit is on its remote (a clone: build output), None when git cannot say."""
+    """True when the repo at REPO has an uncommitted path or a commit no remote head holds, on HEAD, any local
+    branch or refs/stash, False when it is clean and every commit is on its remote (a clone: build output), None
+    when git cannot say."""
     lines = git_reads.porcelain(repo)
     if lines is None:
         return None
     if lines:
         return True
-    pushed = fully_pushed(repo)
+    pushed = fully_pushed(repo, every_ref=True)
     return None if pushed is None else not pushed
 
 
