@@ -1,0 +1,1 @@
+- push-skip-reason-line: lint/test_push_skip.py:1396 passes a reason line to assert_base, which checks only the base value and prints the reason on failure, so the reason line pins nothing (PR 3853, merged; checked on main). Seen: 2026-11-24 x1

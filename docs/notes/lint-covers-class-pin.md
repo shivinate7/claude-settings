@@ -1,0 +1,1 @@
+- lint-covers-class-pin: reviewer's F6 (PR 3860, open): the class-body checks_step in test_ci_job_takes_its_flags_from_the_scope_script_the_repo_holds (lint/test_ci_job.py) pins a case; unverified. Seen: 2026-11-24 x1

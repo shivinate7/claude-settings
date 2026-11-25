@@ -1,0 +1,1 @@
+- records-index-dates-dropped: docs/decisions/records-index-at-merge.md lost dates and a quote in its rewrite; the substance was kept (PR 3856, merged; reviewer's report, unverified). Seen: 2026-11-24 x1
