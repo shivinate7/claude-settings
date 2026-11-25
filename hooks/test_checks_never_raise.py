@@ -9,6 +9,8 @@ Run from the repository root:
 
     python3 hooks/test_checks_never_raise.py
 
+`--exit-cases` runs only the exit cases of main(), with the fuzz stubbed, in a few seconds.
+
 Standard library only. The checks are read from the dispatch in hooks/guard.py: each call that
 `judge_shell` and `judge` make, and each hook-module function that those callees call through an
 attribute (`question_form.page_item_hit`, for one). A call that resolves to no hook function fails
@@ -970,6 +972,53 @@ def quoted_data_property():
     print("quoted-data: %d seeded draws and %d scope checks, %d failing rows" % (QUOTED_COUNT, 2 * len(QUOTED_REFUSE), failing))
     return failing
 
+EXIT_STUBS = ("self_test", "sweep_proof", "run_checks", "quoted_data_property", "fixture_proof", "annotation_proof")
+# (case, the self-test passes, the sweep passes, sweep reached, fuzz runs, exit code): the exit of main(), one row each
+EXIT_CASES = (
+    ("a failed self-test stops the run", False, True, False, False, 1),
+    ("a failed sweep is counted and the fuzz still runs", True, False, True, True, 1),
+    ("a clean self-test and sweep run the fuzz and exit 0", True, True, True, True, 0),
+)
+
+
+def exit_proof():
+    """True when each EXIT_CASES row holds, with the self-test, the sweep and the fuzz stubbed, so no fuzz runs.
+
+    The fixture and annotation proofs read the run folder, which main() removes when it ends, so they are stubbed too:
+    the exit code then depends on the self-test and the sweep alone. A miss prints one FAIL line that names its cause.
+    """
+    failing = []
+    saved = {name: globals()[name] for name in EXIT_STUBS}
+    try:
+        for case, self_ok, sweep_ok, want_sweep, want_fuzz, want_rc in EXIT_CASES:
+            seen = {"sweep": 0, "fuzz": 0}
+
+            def sweep_stub():
+                seen["sweep"] += 1
+                return sweep_ok
+
+            def fuzz_stub(*args, **kwargs):
+                seen["fuzz"] += 1
+                return []
+
+            globals().update(self_test=lambda: self_ok, sweep_proof=sweep_stub, run_checks=fuzz_stub,
+                             quoted_data_property=lambda: 0, fixture_proof=lambda: [], annotation_proof=lambda: [])
+            with contextlib.redirect_stdout(io.StringIO()):
+                rc = main()
+            if (seen["sweep"] > 0) != want_sweep:
+                failing.append("%s: the sweep proof %s" % (case, "did not run" if want_sweep else "ran after a failed self-test"))
+            if (seen["fuzz"] > 0) != want_fuzz:
+                failing.append("%s: the fuzz %s" % (case, "did not run" if want_fuzz else "ran after a failed self-test"))
+            if rc != want_rc:
+                failing.append("%s: exit code %d, want %d" % (case, rc, want_rc))
+    finally:
+        globals().update(saved)
+    for problem in failing:
+        print("FAIL exit: %s" % problem)
+    print("exit cases: %s (%d cases, the fuzz stubbed)" % ("FAILED" if failing else "ok", len(EXIT_CASES)))
+    return not failing
+
+
 def main():
     started = time.monotonic()
     try:
@@ -1034,4 +1083,8 @@ def main():
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    if "--exit-cases" in sys.argv[1:]:
+        sys.exit(0 if exit_proof() else 1)
+    code = main()   # the exit cases run after main(): main() removes the run folder that the real fixture proofs read
+    exit_ok = exit_proof()
+    sys.exit(code if exit_ok else 1)
