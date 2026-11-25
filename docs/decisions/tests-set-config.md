@@ -35,7 +35,7 @@ Limits:
 - `os.putenv` counts as a set, but it leaves `os.environ` unchanged. A `pop` then a `putenv` is clean, yet `os.environ.get` still returns None.
 - A set made by a function imported from another module. The file stays flagged, though the set runs at import.
 - A bare `isolated_config(...)` call that nothing enters does not count. The file stays flagged.
-- The check is not in CI or in `merge.readyChecks` yet. `merge/test_merge.py` must set the variable first. The case `test_repo_names_the_incident_file` in `lint/test_tests_set_config.py` expects that file as a finding, so the case fails once the file is fixed. Re-point it then.
+- CI runs the check and both suites in job `checks`, after the stand-in signature suite, on a code change. `merge/test_merge.py` now sets the variable at import (line 68), so the repo run is clean. The case `test_repo_names_the_incident_file` in `lint/test_tests_set_config.py` still expects that file as a finding and fails; re-point it.
 
 Kind: process
 Home: lint/check_tests_set_config.py
