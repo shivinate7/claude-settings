@@ -1,0 +1,356 @@
+#!/usr/bin/env python3
+"""lease: the one home of a named lease held in git. Take it, give it back, or lift it.
+
+Usage:
+  lease take NAME [--holder ID] [--roster TEXT] [--repo-dir D] [--remote R]
+  lease give back NAME [--holder ID] [--repo-dir D] [--remote R]   (`give NAME` does the same; `give back` alone is a usage error)
+  lease lift NAME [--repo-dir D] [--remote R]
+  lease show NAME [--repo-dir D] [--remote R]
+
+A lease is the ref refs/heads/lease/NAME on the remote. Its record is a commit with an empty tree whose message lines are
+`lease NAME`, `holder:`, `repo:`, `taken:` and `roster:`. A lease has no expiry: it ends when the holder gives it back or
+the owner lifts it. A released record carries the line `expires: 0`. A give back and a lift push such a record and never
+delete the ref: the cloud git proxy refuses a ref delete and every push outside refs/heads. A ref the owner deleted by hand
+reads as free.
+
+take    one force-with-lease push that names the sha it expects (empty when the ref is absent), so one of two takes at once
+        loses. The holder taking again is `own` and pushes nothing. Another holder's live lease is `held`.
+give back  the holder's release. `not-holder` for anyone else, `free` when no live lease is there.
+lift    the owner's release. It reads only the ref's sha, never the commit message, so a corrupt record can still be lifted.
+show    prints the state and the holder.
+
+Holder: --holder, else holder_id() of the caller's environment (`session_X` for the cloud id `cse_X`, else
+CLAUDE_CODE_SESSION_ID). A caller with no id cannot take or give back.
+Exit codes: 0 done (take: taken or own; give: given or free; lift: lifted or free; show), 1 refused (held, not-holder),
+2 UNKNOWN (a read or push that failed or ran past its time) or a bad argument. A read that fails is UNKNOWN, never free.
+Cost: holds() and read() start git for `ls-remote`, one `fetch` of the ref (once more when that fetch fails) and one `log` on a sha not
+seen before in this process; a sha seen before costs the `ls-remote` alone. A commit never changes, so the sha-to-record cache is safe. The
+ref's own sha is never cached. The fetch stores the tip in the repo's own ref refs/lease-read/NAME and writes no remote-tracking ref, and the
+`log` reads the record from that ref, so a record is always the tip the fetch got, never an older sha the `ls-remote` saw. A push (take, give back or lift) starts git six times: `remote get-url`,
+`for-each-ref` (before), `mktree`, `commit-tree`, `push` and `for-each-ref` (after), plus one `update-ref -d` per new tracking ref; a take also starts `config` once. The push
+goes to the remote's URL, and a second remote of the same URL rides on the push command (`-c`, never written to config). A push by URL writes no
+remote-tracking ref. A push by remote name (the fallback, when the push URL cannot be read) makes git write one: the clean-up deletes a new ref
+(by its full name and its new value), and a ref that was there before is left as git moved it, to the pushed record. Newer git is reported,
+unverified, to pair a bare push URL with the one configured remote of that URL; the second remote makes that pairing not unique. A snapshot that
+fails skips the clean-up. No timer, no process left running, no other file written.
+"""
+import argparse
+import os
+import re
+import subprocess
+import sys
+import time
+from collections import namedtuple
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
+import override  # noqa: E402  the one home of the cloud session id (hooks/override.py, remote_session_id)
+
+READ_BUDGET_S = 10  # all the git calls of one read, together: a read past it is UNKNOWN, so a guard never hangs on a dead remote
+PUSH_TIMEOUT_S = 30
+REF_PREFIX = "refs/heads/lease/"
+LOCAL_ENV = "CLAUDE_CODE_SESSION_ID"
+READ_REF_PREFIX = "refs/lease-read/"
+NO_TRACK_REMOTE = "remote.lease-no-track"  # the -c key prefix of the second remote a push carries (see _push_record)
+FETCH_TRIES = 2  # a read's fetch and its one retry
+HOLDER_MAX = 200
+GIT_ENV = {"GIT_TERMINAL_PROMPT": "0"}  # a credential prompt would hang until the time runs out
+GIT_IDENT = ["-c", "user.name=lease", "-c", "user.email=lease@localhost"]
+
+Record = namedtuple("Record", "sha fields released")
+Taken = namedtuple("Taken", "status holder output")  # status: taken, own or held
+Given = namedtuple("Given", "status output")  # status: given, not-holder or free
+
+
+class Unknown(Exception):
+    """A read or push that failed, ran past its time, or returned what this module cannot read. It refuses; it never reads as free."""
+
+
+_records = {}  # (repo, sha) -> the record's message: a commit never changes
+
+
+def ref_of(name):
+    return REF_PREFIX + name
+
+
+def holder_id(env, payload_session_id=None):
+    """The caller's holder id: `session_X` for a cloud id `cse_X`, else the local session id, else the hook payload's. None when none is set.
+    A cloud value that is set but not of the form cse_X gives no id: it never falls through to the local or payload id."""
+    if env.get(override.LANE_ENV):
+        return override.session_id_in(env)
+    return env.get(LOCAL_ENV) or payload_session_id or None
+
+
+def _git(repo, args, timeout, input=None):
+    """One git child, through the no-window wrapper, with a time limit. -> (code, stdout, stderr). A start that fails or runs past `timeout` is Unknown."""
+    if timeout <= 0:
+        raise Unknown("the time for reading the lease ran out")
+    try:
+        done = _nowindow.run(["git", *args], cwd=repo, input=input, capture_output=True, text=True, encoding="utf-8",
+                             errors="replace", timeout=timeout, env=dict(os.environ, **GIT_ENV))
+    except subprocess.TimeoutExpired:
+        raise Unknown("git %s ran past %.0fs" % (args[0], timeout)) from None
+    except OSError as err:
+        raise Unknown("git did not start: %s" % err) from None
+    return done.returncode, done.stdout.strip(), done.stderr.strip()
+
+
+def _tip(repo, remote, name, deadline):
+    """The ref's sha on the remote, or '' when the ref is absent. A failed read is Unknown."""
+    ref = ref_of(name)
+    code, out, err = _git(repo, ["ls-remote", remote, ref], deadline - time.monotonic())
+    if code:
+        raise Unknown("cannot read %s on %s: %s" % (ref, remote, err or out))
+    for line in out.splitlines():
+        sha, _, found = line.partition("\t")
+        if found == ref:  # ls-remote matches a pattern by its tail: only this exact ref counts
+            return sha
+    return ""
+
+
+def _parse(sha, message):
+    fields = {}
+    for line in message.splitlines()[1:]:
+        m = re.fullmatch(r"([a-z]+): (.*)", line)
+        if m:
+            fields.setdefault(m.group(1), m.group(2))
+    return Record(sha, fields, fields.get("expires") == "0")
+
+
+def read(repo, remote, name, budget_s=READ_BUDGET_S):
+    """The lease's Record(sha, fields, released), or None when the ref is absent. Raises Unknown when the read fails or runs past budget_s."""
+    deadline = time.monotonic() + budget_s
+    sha = _tip(repo, remote, name, deadline)
+    if not sha:
+        return None
+    key = (os.path.realpath(repo), sha)
+    if key not in _records:
+        ref = ref_of(name)
+        local = READ_REF_PREFIX + name
+        for _ in range(FETCH_TRIES):  # one lost ref-lock race must not read as Unknown: fetch once more, within the read's budget
+            code, out, err = _git(repo, ["fetch", "-q", "--no-write-fetch-head", "--refmap=", remote, "+%s:%s" % (ref, local)],
+                                  deadline - time.monotonic())
+            if not code:
+                break
+        if code:
+            raise Unknown("cannot fetch %s from %s: %s" % (ref, remote, err or out))
+        code, out, err = _git(repo, ["log", "-1", "--format=%H%n%B", local], deadline - time.monotonic())
+        if code:
+            raise Unknown("cannot read the fetched lease %s: %s" % (ref, err or out))
+        fetched, _, message = out.partition("\n")
+        if fetched != sha:  # the ref moved between the ls-remote and the fetch: the record is the one the fetch got
+            sha = fetched
+            key = (key[0], sha)
+        _records[key] = message
+    return _parse(sha, _records[key])
+
+
+def holds(repo, remote, name, holder, budget_s=READ_BUDGET_S):
+    """True only when the lease is live and its holder line is `holder`. Raises Unknown on a failed read."""
+    record = read(repo, remote, name, budget_s)
+    return bool(holder) and record is not None and not record.released and record.fields.get("holder") == holder
+
+
+def _line(text):
+    """One capped line: untrusted text cannot add a `holder:` or `expires:` line."""
+    return " ".join(str(text).split())[:HOLDER_MAX]
+
+
+def _push_record(repo, remote, name, expected, message):
+    """Make a record commit with `message` and push it, naming `expected` as the sha the ref must still hold (empty: the ref must be absent).
+    -> (code, push output, sha of the record commit). The output of the push is kept for the caller."""
+    ref = ref_of(name)
+    deadline = time.monotonic() + PUSH_TIMEOUT_S
+    code, url, _ = _git(repo, ["remote", "get-url", "--push", remote], PUSH_TIMEOUT_S)
+    target = url if code == 0 and url else remote
+    # Newer git is reported, unverified, to pair a bare push URL with the one configured remote of that URL and update its tracking ref. A second
+    # remote of the same URL, on this command's -c only, makes that pairing not unique; older git never pairs a URL, so it is inert there. The
+    # target is the URL, or the caller's own string when it is no remote name (`--remote <url>`, or a get-url that failed): the same second remote.
+    shadow = ["-c", "%s.url=%s" % (NO_TRACK_REMOTE, target)]
+    before = _tracking_refs(repo, name)
+    code, tree, err = _git(repo, ["mktree"], PUSH_TIMEOUT_S, input="")
+    if code:
+        raise Unknown("cannot make the lease tree: " + err)
+    code, sha, err = _git(repo, [*GIT_IDENT, "commit-tree", tree, "-m", message], deadline - time.monotonic())
+    if code:
+        raise Unknown("cannot make the lease commit: " + err)
+    code, out, err = _git(repo, [*shadow, "push", "-q", "--force-with-lease=%s:%s" % (ref, expected), target, "%s:%s" % (sha, ref)],
+                          deadline - time.monotonic())
+    _drop_new_tracking_refs(repo, name, before)
+    return code, (out + "\n" + err).strip(), sha
+
+
+def _tracking_refs(repo, name):
+    """{full ref name: sha} of every remote-tracking ref for the lease branch in `repo`, or None when the read failed (a failed read skips the clean-up)."""
+    try:
+        code, out, _ = _git(repo, ["for-each-ref", "--format=%(refname) %(objectname)", "refs/remotes/*/lease/" + name], PUSH_TIMEOUT_S)
+    except Unknown:
+        return None
+    if code:
+        return None
+    found = {}
+    for line in out.splitlines():
+        ref, _, sha = line.partition(" ")
+        if ref.startswith("refs/remotes/") and ref.endswith("/lease/" + name):
+            found[ref] = sha
+    return found
+
+
+def _drop_new_tracking_refs(repo, name, before):
+    """The backstop: delete each remote-tracking ref for the lease that the push wrote and `before` (the snapshot taken ahead of it) did not hold.
+    A ref that was there before is left alone. Each delete names the ref in full and the sha it now holds, so nothing else can go. Never raises: the push's result stands."""
+    if before is None:
+        return
+    after = _tracking_refs(repo, name)
+    for ref, sha in (after or {}).items():
+        if ref not in before:
+            try:
+                _git(repo, ["update-ref", "-d", ref, sha], PUSH_TIMEOUT_S)
+            except Unknown:
+                pass
+
+
+def _released_message(name, how):
+    return "lease %s\nexpires: 0\nreleased: %s\nby: %s" % (name, int(time.time()), how)
+
+
+def _without_credential(url):
+    """The URL without the user and password in front of its host: a lease record is shared, so it never carries a credential."""
+    return re.sub(r"^([A-Za-z][A-Za-z0-9+.-]*://)[^/]*@", r"\1", url)
+
+
+def _taken_message(repo, remote, name, holder, roster):
+    code, url, _ = _git(repo, ["config", "--get", "remote.%s.url" % remote], PUSH_TIMEOUT_S)
+    lines = ["lease " + name, "holder: " + _line(holder), "repo: " + _line(_without_credential(url if code == 0 and url else remote)),
+             "taken: " + time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())]
+    if roster:
+        lines.append("roster: " + _line(roster))
+    return "\n".join(lines)
+
+
+def take(repo, remote, name, holder, roster=None):
+    """Take the lease. -> Taken(status, holder, output): `taken`, `own` (the holder took it before; nothing pushed) or `held` (another holder's live lease).
+    The push names the sha it read, so of two takes at once one loses and reads held. Raises Unknown."""
+    if not holder:
+        raise Unknown("no holder id: the caller has no session id")
+    message = _taken_message(repo, remote, name, holder, roster)
+    for _ in range(3):
+        record = read(repo, remote, name)
+        if record is not None and not record.released:
+            who = record.fields.get("holder", "unknown")
+            return Taken("own" if who == holder else "held", who, "")
+        code, out, _ = _push_record(repo, remote, name, record.sha if record else "", message)
+        if not code:
+            return Taken("taken", holder, out)
+        now = read(repo, remote, name)  # a moved ref is another take; an unmoved ref is a push the remote refused
+        if (now.sha if now else "") == (record.sha if record else ""):
+            raise Unknown("the remote refused the push that takes lease %s: %s" % (name, out))
+    raise Unknown("lease %s kept changing while it was taken" % name)
+
+
+def give_result(repo, remote, name, holder):
+    """The holder gives the lease back. -> Given(status, output): `given`, `not-holder` or `free` (no live lease); the output is the push's.
+    A push that reports failure after its release landed still reads `given`. Raises Unknown."""
+    record = read(repo, remote, name)
+    if record is None or record.released:
+        return Given("free", "")
+    if not holder or record.fields.get("holder") != holder:
+        return Given("not-holder", "")
+    code, out, sent = _push_record(repo, remote, name, record.sha, _released_message(name, "give"))
+    if not code:
+        return Given("given", out)
+    now = read(repo, remote, name)
+    if now is not None and now.sha == sent:
+        return Given("given", out)  # the release landed and only its reply was lost
+    if now is None or now.sha != record.sha:
+        return Given("not-holder", out)  # the lease changed under this give back: it is no longer this holder's to give
+    raise Unknown("the remote refused the push that gives back lease %s: %s" % (name, out))
+
+
+def give(repo, remote, name, holder):
+    """give_result's status alone: `given`, `not-holder` or `free`. Raises Unknown."""
+    return give_result(repo, remote, name, holder).status
+
+
+def lift(repo, remote, name):
+    """The owner lifts the lease whoever holds it, even a record whose message is junk. -> `lifted` or `free` (no ref). Raises Unknown.
+    It reads only the ref's sha."""
+    for _ in range(3):
+        sha = _tip(repo, remote, name, time.monotonic() + READ_BUDGET_S)
+        if not sha:
+            return "free"
+        code, out, _ = _push_record(repo, remote, name, sha, _released_message(name, "lift"))
+        if not code:
+            return "lifted"
+        if _tip(repo, remote, name, time.monotonic() + READ_BUDGET_S) == sha:
+            raise Unknown("the remote refused the push that lifts lease %s: %s" % (name, out))
+    raise Unknown("lease %s kept changing while it was lifted" % name)
+
+
+def _show(record, name):
+    if record is None:
+        return "lease %s is free" % name
+    if record.released:
+        return "lease %s is free (given back or lifted)" % name
+    f = record.fields
+    return "lease %s is held by %s (taken %s, repo %s%s)" % (name, f.get("holder", "unknown"), f.get("taken", "?"), f.get("repo", "?"),
+                                                            ", roster " + f["roster"] if "roster" in f else "")
+
+
+class OneLineParser(argparse.ArgumentParser):
+    """A bad argument prints one usage line on stderr and exits 2."""
+
+    def error(self, message):
+        print("usage: lease take NAME [--holder ID] [--roster TEXT] | give back NAME [--holder ID] | lift NAME | show NAME [--repo-dir D] [--remote R]; "
+              + message.replace("\n", " "), file=sys.stderr)
+        sys.exit(2)
+
+
+def main(argv=None):
+    p = OneLineParser(prog="lease", description="The one lease: take, give back or lift a named lease held in git.")
+    p.add_argument("words", nargs="+", metavar="VERB [back] NAME")
+    p.add_argument("--holder")
+    p.add_argument("--roster")
+    p.add_argument("--repo-dir", default=os.getcwd())
+    p.add_argument("--remote", default="origin")
+    args = p.parse_args(argv)
+    words = args.words
+    if words[:2] == ["give", "back"]:
+        words = ["give", *words[2:]]  # `give back NAME` is `give NAME`; `give back` alone has no NAME
+    if len(words) != 2 or words[0] not in ("take", "give", "lift", "show"):
+        p.error("say take NAME, give back NAME, lift NAME or show NAME")
+    args.verb, args.name = words
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", args.name):
+        p.error("NAME is letters, digits, dot, dash and underscore only")
+    holder = args.holder or holder_id(os.environ)
+    try:
+        if args.verb == "show":
+            print(_show(read(args.repo_dir, args.remote, args.name), args.name))
+            return 0
+        if args.verb == "lift":
+            print("lease %s: %s" % (args.name, lift(args.repo_dir, args.remote, args.name)))
+            return 0
+        if not holder:
+            print("lease: UNKNOWN: no holder id; pass --holder, or run in a session that has CLAUDE_CODE_SESSION_ID", file=sys.stderr)
+            return 2
+        if args.verb == "give":
+            got = give_result(args.repo_dir, args.remote, args.name, holder)
+            if got.output:
+                print(got.output, file=sys.stderr)
+            print("lease %s: %s" % (args.name, got.status))
+            return 1 if got.status == "not-holder" else 0
+        got = take(args.repo_dir, args.remote, args.name, holder, args.roster)
+        if got.output:
+            print(got.output, file=sys.stderr)
+        if got.status == "held":
+            print("lease %s is held by %s; ask the owner to lift it (lease lift %s)" % (args.name, got.holder, args.name), file=sys.stderr)
+            return 1
+        print("lease %s: %s by %s" % (args.name, got.status, got.holder))
+        return 0
+    except Unknown as err:
+        print("lease: UNKNOWN: %s" % err, file=sys.stderr)
+        return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main())
