@@ -55,9 +55,16 @@ def record(suite, group, case, s, fixture_s, outcome):
 
 
 def _flush():
-    left = [_case_of(frame["test"]) for frame in _LEFT + _OPEN]  # a frame that never stopped is named here too
-    if left:
-        sys.stderr.write("case_times: left open and dropped, no row kept: %s\n" % ", ".join(left))
+    _write_rows()
+    try:  # after the rows, so a name that cannot be built never costs them
+        left = [_frame_name(frame["test"]) for frame in _LEFT + _OPEN]  # a frame that never stopped is named here too
+        if left:
+            sys.stderr.write("case_times: left open and dropped, no row kept: %s\n" % ", ".join(left))
+    except Exception as error:
+        sys.stderr.write("case_times: could not name the open frames: %s\n" % error)
+
+
+def _write_rows():
     if not _ROWS:
         return
     path = _LATCH["path"]
@@ -109,6 +116,13 @@ def _case_of(test):
     if method is None:
         return test.id()
     return "%s.%s" % (type(test).__qualname__, method)
+
+
+def _frame_name(test):
+    """The name a leaked frame's stderr line gives. A test object with no id() is named by its class."""
+    if getattr(test, "_testMethodName", None) is None and not hasattr(test, "id"):
+        return type(test).__qualname__
+    return _case_of(test)
 
 
 def _tally(result):
