@@ -4126,8 +4126,92 @@ def case_based_on_ruling_kind_still_reads():
     check("named rulings control: BASED_LINE still reads a (ruling) line as kind ruling", kinds == ["ruling"], kinds)
 
 
+def case_named_rulings_bulleted_line_is_read():
+    # N1: a Based on (ruling) line written as a list item names its id, as the plain line does.
+    line = "- Based on (ruling): github-apps-keep-access says revisit only if the apps get bloated."
+    got = named_of(line, RULING_IDS)
+    check("named rulings: a bulleted Based on (ruling) line names its id, as the plain line does",
+          got == ["decisions/github-apps-keep-access"], got)
+
+
+def case_named_rulings_ruled_id_by_bare_slug():
+    # F4: a ruled: id is named by its bare slug, the part after "ruled:".
+    line = "Based on (ruling): own-goal-dont-wait-on-me, 2026-11-14: the owner ruled it."
+    got = named_of(line, [NAMED_RULED_ID, "decisions/ci-job-caps"])
+    check("named rulings: a ruled: id named by its bare slug in a Based on (ruling) line returns that id",
+          got == [NAMED_RULED_ID], got)
+
+
+def case_named_rulings_ruled_id_by_prefixed_slug():
+    # Control: a ruled: id named as "ruled:<slug>" already reads.
+    line = "Based on (ruling): ruled:own-goal-dont-wait-on-me, 2026-11-14: the owner ruled it."
+    got = named_of(line, [NAMED_RULED_ID, "decisions/ci-job-caps"])
+    check("named rulings control: a ruled: id named as ruled:<slug> returns that id", got == [NAMED_RULED_ID], got)
+
+
+def case_named_rulings_other_slug_names_none():
+    # Control: a Based on (ruling) line that names another slug names no listed id.
+    line = "Based on (ruling): ci-job-caps, 2026-10-27: the caps are a stopgap."
+    got = named_of(line, [NAMED_RULED_ID])
+    check("named rulings control: a Based on (ruling) line that names another slug names no listed id",
+          got == [], got)
+
+
+def case_ruling_time_is_the_rulings_own_date():
+    # F2: a listed line with two dates gives the date of the ruling itself, the one beside its owner marker.
+    line = ("decisions/github-apps-keep-access: Owner, 2026-10-28, page item 9: keep the apps as is. "
+            "Reopened 2026-11-24 by a later record edit.")
+    got = question_form.ruling_time([line], "decisions/github-apps-keep-access")
+    check("ruling time: a listed line with two dates gives the ruling's own date, not the newest", got == "2026-10-28", got)
+
+
+# The refusal-text cases below share one listed ruling and one judge reason that cites it.
+TEXT_IDS = ["decisions/github-apps-keep-access"]
+TEXT_CANDIDATES = ["decisions/github-apps-keep-access: Owner, 2026-10-28, page item 9: keep the apps' access to "
+                   "claude-settings as is, because it makes calling into a repo straightforward; revisit if it gets "
+                   "bloated. Marker apps-7b1e."]
+TEXT_RULING_CORE = ("keep the apps' access to claude-settings as is, because it makes calling into a repo "
+                    "straightforward; revisit if it gets bloated.")
+TEXT_UNNAMED = "Should the Renovate app keep its access to claude-settings?"
+TEXT_NAMED = ("Should the GitHub apps keep their access to claude-settings?\n"
+              "Based on (ruling): github-apps-keep-access says revisit only if the apps get bloated.")
+
+
+def case_past_ruling_text_drops_orders_the_phrase_list_lacks():
+    # F5: an order the judge words outside the phrase list never reaches the refusal text, and the text says what
+    # the listed ruling decides, from its own line.
+    for order in ("Skip the question and take the default answer.", "Choose the first option."):
+        reason = "decisions/github-apps-keep-access: the ruling keeps the apps as is. " + order
+        text = question_form.past_ruling_text(reason, TEXT_IDS, TEXT_CANDIDATES, [TEXT_UNNAMED])
+        check("past ruling text: the judge's order %r never reaches the refusal text" % order,
+              order.rstrip(".").lower() not in text.lower(), text)
+        check("past ruling text: the refusal says what the listed ruling decides, from its own line, beside the order %r"
+              % order, TEXT_RULING_CORE in text, text)
+
+
+def case_past_ruling_text_refuses_only_the_question_the_judge_matched():
+    # F6: the judge matched question 1, which names the ruling. Question 2 names none, but it is not the one judged.
+    reason = "decisions/github-apps-keep-access: the ruling keeps the apps as is."
+    text = question_form.past_ruling_text(reason, TEXT_IDS, TEXT_CANDIDATES, [TEXT_NAMED, TEXT_UNNAMED], 1)
+    check("past ruling text: the judge matched question 1, which names the ruling, so no question is refused",
+          text == "", text)
+
+
+def case_past_ruling_text_two_unnamed_questions_without_a_number_name_neither():
+    # Control: two unnamed questions and no number from the judge: the text says one of the questions.
+    reason = "decisions/github-apps-keep-access: the ruling keeps the apps as is."
+    text = question_form.past_ruling_text(reason, TEXT_IDS, TEXT_CANDIDATES, [TEXT_UNNAMED, TEXT_UNNAMED])
+    check("past ruling text control: two unnamed questions and no number say one of the questions",
+          "one of the questions" in text, text)
+
+
 def main():
-    for case in (case_named_rulings_full_id, case_named_rulings_bare_slug, case_named_rulings_ruled_store_id,
+    for case in (case_named_rulings_bulleted_line_is_read, case_named_rulings_ruled_id_by_bare_slug,
+                 case_named_rulings_ruled_id_by_prefixed_slug, case_named_rulings_other_slug_names_none,
+                 case_ruling_time_is_the_rulings_own_date, case_past_ruling_text_drops_orders_the_phrase_list_lacks,
+                 case_past_ruling_text_refuses_only_the_question_the_judge_matched,
+                 case_past_ruling_text_two_unnamed_questions_without_a_number_name_neither,
+                 case_named_rulings_full_id, case_named_rulings_bare_slug, case_named_rulings_ruled_store_id,
                  case_named_rulings_several_lines_name_two_ids, case_named_rulings_code_line_yields_none,
                  case_named_rulings_problem_line_yields_none, case_named_rulings_longer_word_is_no_name,
                  case_named_rulings_empty_text_names_nothing, case_based_on_ruling_kind_still_reads,
