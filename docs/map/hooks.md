@@ -1,6 +1,6 @@
 # Hooks
 
-The hooks under `hooks/`. The pilot map covers four files here. What each hook does is in `docs/catalog.md`.
+The hooks under `hooks/`. The pilot map covers five files here. What each hook does is in `docs/catalog.md`.
 
 ## Code files
 
@@ -13,3 +13,6 @@ The hooks under `hooks/`. The pilot map covers four files here. What each hook d
 - `hooks/guard.py` — The guard that runs before each matched tool call, and it loads its rule modules first. A load that meets a half-installed set waits and tries again.
   - The load keeps trying for 5.0 seconds, and then it fails closed. — `_LOAD_WAIT_SECONDS = 5.0`
   - The load waits 0.25 seconds between two tries. — `_LOAD_STEP_SECONDS = 0.25`
+- `hooks/lease.py` — Takes, gives back, lifts and shows a named lease held in git, one ref per lease on the remote. A read that fails or runs past its time is unknown, and it refuses, never free.
+  - The read waits at most 10 seconds for all its git calls together. — `READ_BUDGET_S = 10`
+  - A push waits at most 30 seconds. — `PUSH_TIMEOUT_S = 30`
