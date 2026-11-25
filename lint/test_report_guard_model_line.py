@@ -193,7 +193,8 @@ class ModelListHomeTests(unittest.TestCase):
                              "lint/check_agent_models.py MODEL_NAME does not match fable")
 
     def test_fable_ranks_above_sonnet_beside_opus(self):
-        # Sonnet is the ceiling for an agent's own role, so a model above it ranks above it. Fable sits beside opus.
+        # Sonnet is the ceiling for an agent's own role, so a model above it ranks above it. Fable is the rank directly
+        # above opus: ROLE_MODEL_RANK is MODEL_FAMILIES, haiku, sonnet, opus, fable.
         import guard
         rank = tuple(guard.ROLE_MODEL_RANK)
         self.assertIn("fable", rank, "hooks/guard.py ROLE_MODEL_RANK does not hold fable: %r" % (rank,))
