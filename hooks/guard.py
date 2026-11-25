@@ -5214,8 +5214,9 @@ def role_name(table, subagent_type) -> str:
     return next((name for name in table if role_key(name) == role_key(role)), role)
 
 
-# A Workflow spawn whose brief the scan could not read carries BRIEF_UNREAD; its refusal adds BRIEF_LITERAL_REMEDY.
-# The remedy stays lowercase mid-sentence, so both refusals carry the same words.
+# A Workflow spawn whose brief the scan could not read carries BRIEF_UNREAD. The role-model refusal (role_model_one) and the
+# Opus-ceiling refusal for a role other than builder add BRIEF_LITERAL_REMEDY: no builder marker grants Opus, so a readable
+# brief would not lift a builder's Opus refusal. The remedy stays lowercase mid-sentence, so both refusals carry the same words.
 BRIEF_UNREAD = "brief_unread"
 WORKFLOW_NO_MODEL = "workflow_no_model"   # set on a spawn_inputs yield for a Workflow call with a literal agentType and no model key
 BRIEF_LITERAL_REMEDY = "write the brief as a literal string so the marker is readable"
@@ -5228,7 +5229,7 @@ def spawn_inputs(tool: str, tool_input):
     (decision agent-model-cap). A call with a literal agentType, no `model` key and no spread yields too, with
     WORKFLOW_NO_MODEL set and an empty model: role_model_one refuses it when the role has a row and the Workflow default (ROLE_WORKFLOW_MODEL_ENV) is unset or not that row's model. A brief the scan cannot read (a variable, or a prompt key beside a spread) carries no
     marker and grants nothing, so the spawn is judged with an empty brief and BRIEF_UNREAD set, and its refusal names
-    BRIEF_LITERAL_REMEDY, so the author can make the marker readable. A
+    BRIEF_LITERAL_REMEDY (but not a builder's Opus refusal), so the author can make the marker readable. A
     call whose model or agentType the scan cannot read is skipped, and so is one with no model and no literal
     agentType, or with a spread that may hold the model: a static read never guesses a role or a model. A shorthand or a spread with no literal agentType may set the role, so it is unread;
     a literal agentType beside a spread is read. step_up_hit still skips an unread brief, as a marker it cannot read
@@ -8611,7 +8612,7 @@ def judge(payload) -> None:
         refuse(tool, "deny", "agent-model-cap",
                OPUS_SPAWN_REASON
                + (" The scan could not read this brief, so it read no marker: " + BRIEF_LITERAL_REMEDY + "."
-                  if opus_unread and opus_role != "builder" else ""),
+                  if opus_unread and role_key(opus_role) != "builder" else ""),
                opus_model,
                spawn_role=opus_role or "general-purpose")
 
