@@ -71,6 +71,10 @@ MUTATE_GUARD = os.path.join(HERE, "..", "hooks", "mutate_guard.py")
 
 
 GUARD_READS = "GUARD_READ_FILES"
+# The list methods that change a list, and the dunder names that do the same when called by name. A call to any other method
+# (.index, .count) reads the list and changes nothing.
+GUARD_MUTATORS = frozenset(("append", "extend", "insert", "remove", "pop", "clear", "sort", "reverse",
+                            "__setitem__", "__delitem__", "__iadd__"))
 
 
 def _is_guard_name(node):
@@ -94,7 +98,8 @@ def _guard_reads_change(stmt):
             return "rebound"
         if isinstance(node, ast.Subscript) and not isinstance(node.ctx, ast.Load) and _is_guard_name(node.value):
             return "changed by an item store"
-        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and _is_guard_name(node.func.value):
+        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and _is_guard_name(node.func.value)
+                and node.func.attr in GUARD_MUTATORS):
             return "mutated by .%s()" % node.func.attr
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and node.name == GUARD_READS:
             return "rebound by a def or class"
