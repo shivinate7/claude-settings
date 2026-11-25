@@ -1777,7 +1777,7 @@ def case_marker_does_not_skip_the_check():
 # the ruling decides, and the remedy line. It never says "settles" and never carries an order to the session. The Stop
 # path pins the same text in lint/test_report_guard.py. Every answer here is the stub's: no model runs.
 APPS_ID, APPS_DATE = "decisions/" + APPS_SLUG, "2026-10-28"
-APPS_DECIDES = "keep the apps' access to claude-settings as is, because calling into a repo is straightforward"
+APPS_DECIDES = "the ruling keeps the apps' access to claude-settings as is, because calling into a repo is straightforward"
 APPS_REASON = "decisions/%s: %s." % (APPS_SLUG, APPS_DECIDES)
 APPS_SETTLES_REASON = "decisions/%s settles this: %s." % (APPS_SLUG, APPS_DECIDES)
 APPS_ORDER_REASON = "decisions/%s: %s. Take a pick and drop this question." % (APPS_SLUG, APPS_DECIDES)
@@ -1840,7 +1840,7 @@ def case_past_ruling_refusal_drops_the_judge_order_and_keeps_the_sentence():
 
 
 def case_past_ruling_undated_ruling_says_time_unknown():
-    r = judge_refusal_run("decisions/%s: keep the apps' access as is." % UNDATED_SLUG, repo=UNDATED_REPO)
+    r = judge_refusal_run("decisions/%s: the ruling keeps the apps' access as is." % UNDATED_SLUG, repo=UNDATED_REPO)
     check("past ruling time: a ruling line with no date gives the time as time unknown", "time unknown" in r.reason(),
           detail(r))
 
