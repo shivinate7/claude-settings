@@ -550,21 +550,26 @@ class PaceNumbersTests(unittest.TestCase):
                     cause="one stop in three carriers does not end its span once, at its first copy")
 
     def test_compaction_summary_quote_does_not_end_a_resumed_span(self):
-        earlier = notice(agent_id(1), "n1", summary="synthetic first stop")
+        # The send at 10:03 resumes the span, and no real stop follows it, so the span is still running at 10:10.
+        # The summary quotes a stop of the same agent whose text no real carrier has. A reader that counts the
+        # quote closes the span at 10:04: no span still running, and 7 min idle instead of 1.
+        quoted = notice(agent_id(1), "q1", summary="synthetic quoted stop")
         path = write_transcript(self.folder, flat(
             spawn(at("10:00"), "t1"), launched(at("10:00"), "t1", agent_id(1)),
             end("10:02", "10:02:30", agent_id(1), "n1", summary="synthetic first stop"),
             send(at("10:03"), agent_id(1), "s1"),
-            compaction_summary(at("10:04"), "synthetic summary of earlier turns:\n" + earlier),
-            end("10:08", "10:08:30", agent_id(1), "n2", summary="synthetic second stop"),
+            compaction_summary(at("10:04"), "synthetic summary of earlier turns:\n" + quoted),
         ), runs_to="10:10")
-        # Scope first: the summary is the only compaction record, and it quotes a stop.
+        # Scope first: the summary is the only compaction record, it quotes a stop, and no other record carries that stop.
         summaries = [rec for rec in _transcript.read_transcript(path) if rec.get("isCompactSummary") is True]
         self.assertEqual(len(summaries), 1, "the fixture holds one compaction summary record")
         self.assertIn("<task-notification>", summaries[0]["message"]["content"], "the summary quotes a stop")
+        carriers = [rec for rec in _transcript.read_transcript(path)
+                    if "<tool-use-id>q1</tool-use-id>" in json.dumps(rec)]
+        self.assertEqual(len(carriers), 1, "only the summary carries the quoted stop")
         self.assertEqual(covered_span(path), (at("10:00"), at("10:10")), "the fixture's covered span")
-        self.expect(path, "10:00", "10:10", expected_lines(agents=1, most=1, idle=3),
-                    cause="a compaction summary that quotes an earlier stop ends the resumed span")
+        self.expect(path, "10:00", "10:10", expected_lines(agents=1, most=1, idle=1, still=1),
+                    cause="a compaction summary that quotes a stop ends the resumed span")
 
     def test_invalid_utf8_at_the_end_prints_one_unknown_line(self):
         path = write_transcript(self.folder, flat(
