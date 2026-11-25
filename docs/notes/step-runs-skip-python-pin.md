@@ -1,0 +1,1 @@
+- step-runs-skip-python-pin: The pin applies only under `--lint` (bin/ci-job :1659). A `--step` run, such as merge's ready checks, runs a pinned job's steps on python3 with no line. Decision: lanes-run-no-full-ci-job (lanes run no full CI job). Seen: 2026-11-24 x1
