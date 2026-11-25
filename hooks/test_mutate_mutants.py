@@ -179,5 +179,40 @@ class FolderAddsNothingElse(unittest.TestCase):
         self.assertEqual(labels_from(proc), labels_of(literal_table()))
 
 
+def repo_copy(name):
+    """A copy of this checkout without its git history, under the run folder, made a git repo of its own (no commit) so the
+    harness lists its files by git. The copy is what the harness runs in: the real checkout is never written."""
+    root = os.path.join(RUN, name)
+    shutil.copytree(REPO, root, ignore=shutil.ignore_patterns(".git", "__pycache__", "node_modules"))
+    subprocess.run(["git", "init", "-q", root], check=True, capture_output=True, timeout=300)
+    return root
+
+
+class MutateOnlySelectsAFolderRow(unittest.TestCase):
+    """The single-mutant run (MUTATE_ONLY=<label>) selects a row from the folder. A probe copies the first table row under a
+    new label, so the run kills it the way it kills that row. The run must end green and name the probe in its verdicts."""
+
+    def test_the_single_mutant_run_selects_a_folder_row(self):
+        root = repo_copy("only")
+        label, old, new, target, required = literal_table()[0]
+        probe = "probe: MUTATE_ONLY selects a folder row"
+        folder = os.path.join(root, "hooks", "mutants")
+        os.makedirs(folder)
+        with open(os.path.join(folder, "aa-probe.py"), "w", encoding="utf-8") as handle:
+            handle.write(rows_text_of([(probe, old, new, target, required)]))
+        env = dict(os.environ, MUTATE_ONLY=probe)
+        proc = subprocess.run([sys.executable, os.path.join("hooks", "mutate_guard.py")], cwd=root, env=env,
+                              capture_output=True, text=True, timeout=1800)
+        output = proc.stdout + proc.stderr
+        self.assertNotIn("ERROR no mutation named", output, "the single-mutant run does not see the folder row")
+        self.assertEqual(proc.returncode, 0, output[-2000:])
+        self.assertIn(probe, proc.stdout, "the run did not print a verdict for the folder row")
+
+
+def rows_text_of(rows):
+    """A folder file that exposes the given (label, old, new, target, required) rows in ROWS."""
+    return "ROWS = [\n" + "".join("    %r,\n" % (row,) for row in rows) + "]\n"
+
+
 if __name__ == "__main__":
     unittest.main()
