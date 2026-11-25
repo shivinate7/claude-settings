@@ -2,24 +2,27 @@
 """The one reader of the child list: the repos that registered with claude-settings (docs/children.txt).
 
     python3 lint/children.py [--file PATH] list [--active]
-    python3 lint/children.py [--file PATH] add owner/name id since
+    python3 lint/children.py [--file PATH] add owner/name since
     python3 lint/children.py [--file PATH] scan
 
-The file holds one line per child, sorted by name: `owner/name <GitHub repo id> <since YYYY-MM-DD>`. `#`
-lines and blank lines are allowed. The id is the key. A rename changes the name, never the id, and an
-archived or renamed repo stays in the file, so the list never fails on a repo's state.
+The file holds one line per child, sorted by name: `owner/name <since YYYY-MM-DD>`. `#` lines and blank lines
+are allowed. The name is the key. The file is public, so it holds no GitHub repo id. A renamed repo is unknown to
+the reader until its line is fixed by pull request.
 
 list           prints each name in file order. It reads no network.
-list --active  asks GitHub for each child by id. It leaves out an archived child and prints a renamed
-               child's current name. A child GitHub cannot answer for prints `unknown: owner/name` on stderr,
-               and the exit code is 3; the readable children are still listed.
-add            writes one line at its sorted place and keeps every other line. It refuses a duplicate name
-               or id, a malformed argument, and claude-settings itself (exit 2).
+list --active  asks GitHub for each child by name. It leaves out an archived child. A child GitHub cannot answer
+               for, a renamed one included, prints `unknown: owner/name` on stderr, and the exit code is 3; the
+               readable children are still listed.
+add            writes one line at its sorted place and keeps every other line. It refuses a duplicate name, an
+               extra or missing argument, a malformed argument, and claude-settings itself in any letter case
+               (exit 2).
 scan           prints each repo of the token's owner that carries .github/stamp.json and is not in the file
-               (matched by id; never claude-settings). It writes nothing.
+               (matched by name; never claude-settings). It writes nothing.
 
 Every subcommand refuses a malformed line with its number (exit 2). The real fetch runs `gh api`, so the token
-stays in gh and is never an argument or output. A read that failed is unknown, never clear or absent.
+stays in gh and is never an argument or output. A read that failed is unknown, never clear or absent. A stamp
+read is "no file" only when its HTTP status is 404; the status is read from the end of gh's error line, never
+searched for in text that may hold it elsewhere, such as a repo name.
 Cost: one read of the file; list --active adds one GitHub read per child; scan adds one listing page per 100
 repos and one stamp read per unlisted repo. No file is written except by add.
 """
@@ -34,8 +37,9 @@ import sys
 HERE = os.path.dirname(os.path.realpath(__file__))
 DEFAULT_FILE = os.path.join(os.path.dirname(HERE), "docs", "children.txt")
 SELF = "shivinate7/claude-settings"
-NAME = re.compile(r"[^\s/]+/[^\s/]+")
-LINE = re.compile(r"([^\s/]+/[^\s/]+) (\d+) (\d{4}-\d{2}-\d{2})")
+NAME = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")
+LINE = re.compile(r"(\S+) (\d{4}-\d{2}-\d{2})")
+HTTP_STATUS = re.compile(r"\(HTTP (\d{3})\)\s*$")
 PAGE = 100
 
 
@@ -50,13 +54,11 @@ def check_since(since):
         raise Refused("since is not a date YYYY-MM-DD: %s" % since)
 
 
-def check_entry(name, ident, since):
+def check_entry(name, since):
     if not NAME.fullmatch(name):
         raise Refused("name is not owner/name: %s" % name)
-    if not re.fullmatch(r"\d+", ident):
-        raise Refused("id is not digits: %s" % ident)
     check_since(since)
-    if name == SELF:
+    if name.casefold() == SELF.casefold():
         raise Refused("%s is not a child" % SELF)
 
 
@@ -69,7 +71,7 @@ def read_lines(path):
 
 
 def parse(path, lines):
-    """[(name, id, since)] for each entry line. A malformed line raises Refused naming its number."""
+    """[(name, since)] for each entry line. A malformed line raises Refused naming its number."""
     rows = []
     for number, line in enumerate(lines, 1):
         if not line.strip() or line.startswith("#"):
@@ -77,7 +79,7 @@ def parse(path, lines):
         found = LINE.fullmatch(line)
         try:
             if not found:
-                raise Refused("not `owner/name id YYYY-MM-DD`")
+                raise Refused("not `owner/name YYYY-MM-DD`")
             check_entry(*found.groups())
         except Refused as e:
             raise Refused("%s line %d: %s" % (path, number, e))
@@ -93,45 +95,56 @@ class OneLineParser(argparse.ArgumentParser):
 
 
 def gh_fetch(path):
-    """The parsed JSON of one GitHub REST read. gh holds the token; it is never in an argument or output."""
+    """The parsed JSON of one GitHub REST read. gh holds the token; it is never in an argument or output.
+    A failed read raises with gh's last error line at the end: it carries `(HTTP <status>)` for an HTTP failure."""
     env = {k: v for k, v in os.environ.items() if k not in ("AI_AGENT", "CLAUDECODE")}
     try:
         done = subprocess.run(["gh", "api", path], capture_output=True, text=True, env=env, timeout=60)
     except (OSError, subprocess.TimeoutExpired) as e:
-        raise RuntimeError("gh api failed: %s" % type(e).__name__)
+        raise RuntimeError("gh api %s: %s" % (path, type(e).__name__))
     if done.returncode != 0:
-        raise RuntimeError("gh api %s: %s" % (path, done.stderr.strip()[:200]))
+        said = done.stderr.strip().splitlines()
+        raise RuntimeError("gh api %s: %s" % (path, said[-1] if said else "no error line"))
     return json.loads(done.stdout)
+
+
+def http_status(error):
+    """The HTTP status a failed read ended with, or None. Read from the end of the message only: the path before
+    it holds a repo name, and a name may hold digits such as 404."""
+    found = HTTP_STATUS.search(str(error))
+    return int(found.group(1)) if found else None
 
 
 def cmd_list(rows, fetch, active):
     if not active:
-        for name, _, _ in rows:
+        for name, _ in rows:
             print(name)
         return 0
     unknown = 0
-    for name, ident, _ in rows:
+    for name, _ in rows:
         try:
-            found = fetch("repositories/%s" % ident)
-            if str(found["id"]) != ident:
-                raise RuntimeError("GitHub answered with another id")
-            archived, current = bool(found.get("archived")), found["full_name"]
+            found = fetch("repos/%s" % name)
+            # GitHub redirects a renamed repo's old name to the new one; a different name is a rename, not an answer.
+            if found["full_name"].casefold() != name.casefold():
+                raise RuntimeError("GitHub answered for another name")
+            archived = found["archived"]
         except Exception:
             print("unknown: %s" % name, file=sys.stderr)
             unknown += 1
             continue
         if not archived:
-            print(current)
+            print(name)
     return 3 if unknown else 0
 
 
-def cmd_add(path, lines, rows, name, ident, since):
-    check_entry(name, ident, since)
-    if any(r[0] == name for r in rows):
+def cmd_add(path, lines, rows, fields):
+    if len(fields) != 2:
+        raise Refused("add takes owner/name and since, got %d: %s" % (len(fields), " ".join(fields)))
+    name, since = fields
+    check_entry(name, since)
+    if any(r[0].casefold() == name.casefold() for r in rows):
         raise Refused("%s is already in the list" % name)
-    if any(r[1] == ident for r in rows):
-        raise Refused("id %s is already in the list under %s" % (ident, next(r[0] for r in rows if r[1] == ident)))
-    new = "%s %s %s" % (name, ident, since)
+    new = "%s %s" % (name, since)
     at = len(lines)
     for number, line in enumerate(lines):
         found = LINE.fullmatch(line)
@@ -157,7 +170,7 @@ def owner_repos(fetch):
 
 
 def cmd_scan(rows, fetch):
-    known = {r[1] for r in rows}
+    known = {r[0].casefold() for r in rows} | {SELF.casefold()}
     unknown = 0
     try:
         repos = owner_repos(fetch)
@@ -166,12 +179,12 @@ def cmd_scan(rows, fetch):
         return 3
     for repo in repos:
         name = repo["full_name"]
-        if str(repo["id"]) in known or name == SELF:
+        if name.casefold() in known:
             continue
         try:
-            fetch("repositories/%s/contents/.github/stamp.json" % repo["id"])
+            fetch("repos/%s/contents/.github/stamp.json" % name)
         except Exception as e:
-            if "404" not in str(e):
+            if http_status(e) != 404:
                 print("unknown: %s" % name, file=sys.stderr)
                 unknown += 1
             continue
@@ -185,9 +198,7 @@ def main(argv=None, fetch=None):
     parser.add_argument("--file", default=DEFAULT_FILE)
     sub = parser.add_subparsers(dest="cmd", required=True, parser_class=OneLineParser)
     sub.add_parser("list").add_argument("--active", action="store_true")
-    add = sub.add_parser("add")
-    for field in ("name", "id", "since"):
-        add.add_argument(field)
+    sub.add_parser("add").add_argument("fields", nargs="*", metavar="owner/name since")
     sub.add_parser("scan")
     try:
         args = parser.parse_args(argv)
@@ -199,7 +210,7 @@ def main(argv=None, fetch=None):
         if args.cmd == "list":
             return cmd_list(rows, fetch, args.active)
         if args.cmd == "add":
-            return cmd_add(args.file, lines, rows, args.name, args.id, args.since)
+            return cmd_add(args.file, lines, rows, args.fields)
         return cmd_scan(rows, fetch)
     except Refused as e:
         print(str(e), file=sys.stderr)
