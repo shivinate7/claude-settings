@@ -10,8 +10,8 @@ class Skip(Exception):
 
 
 def run_cases(cases, failures=None, echo_pass=True):
-    """Run each case function. A case returns a list of problems, empty for a pass. Return 1 when
-    any case failed, else 0.
+    """Run each case function. A case returns a list of problems, empty for a pass. A case that raises
+    or calls sys.exit is a failed case. Return 1 when any case failed, else 0.
 
     failures: an optional list that a suite's checks append to when they fail. A case that adds
     to it fails with those entries as its problems, even when it returns nothing. A case that
@@ -27,6 +27,8 @@ def run_cases(cases, failures=None, echo_pass=True):
             skipped += 1
             print(f"SKIP {name}: {s}")
             continue
+        except SystemExit as e:  # a case that exits is a failed case, named; the run goes on (KeyboardInterrupt still stops it)
+            problems = ["the case called sys.exit(%r)" % (e.code,)]
         except Exception as e:  # a missing module or a crash is a failed case, not a stop
             problems = [str(e)]
         grew = failures is not None and len(failures) > before
