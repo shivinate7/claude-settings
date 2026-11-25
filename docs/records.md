@@ -385,7 +385,6 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | Slug | Gist | Link |
 |---|---|---|
 | `agent-reports-with-live-watcher` | No check stops an agent that sends its final report while a Monitor or background task it started is still running. | [`docs/debts/agent-reports-with-live-watcher.md`](../docs/debts/agent-reports-with-live-watcher.md) |
-| `agent-resume-reads-closed` | A TaskStop or a terminal notice closes an agent id for the whole transcript, so the Stop check drops every later launch under that id. | [`docs/debts/agent-resume-reads-closed.md`](../docs/debts/agent-resume-reads-closed.md) |
 | `agent-session-tools` | On 2026-11-07 an agent called session tools by mistake. | [`docs/debts/agent-session-tools.md`](../docs/debts/agent-session-tools.md) |
 | `aligned-skips-agents-skills` | Round 1 review found `agents/reviewer.md` lines 75-77 copy text of `hold-unsafe-after-round-3` and cite it. | [`docs/debts/aligned-skips-agents-skills.md`](../docs/debts/aligned-skips-agents-skills.md) |
 | `answered-brief-paths` | The answered-claim check judges only the text fields of SendMessage, the remote send, and create_session. | [`docs/debts/answered-brief-paths.md`](../docs/debts/answered-brief-paths.md) |
@@ -406,6 +405,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `cant-claim-design-talk` | A reply that talks about design, in a turn with no tool call, blocks as a cannot-claim with no try. | [`docs/debts/cant-claim-design-talk.md`](../docs/debts/cant-claim-design-talk.md) |
 | `cant-claim-reachable-passes` | "I can't check whether the host is reachable." and "I can't verify whether the token works." pass with no try, because a `whether` clause reads as a fact. | [`docs/debts/cant-claim-reachable-passes.md`](../docs/debts/cant-claim-reachable-passes.md) |
 | `carry-source-words` | `SOURCE_RE` accepts only the words git, page and digest as the source of a Recovered item. | [`docs/debts/carry-source-words.md`](../docs/debts/carry-source-words.md) |
+| `checkin-before-crossing-ignored` | `checked_in` counts a check-in only when it was made at or after the agent's crossing of 30 minutes (`when >= crossed`). | [`docs/debts/checkin-before-crossing-ignored.md`](../docs/debts/checkin-before-crossing-ignored.md) |
 | `ci-hygiene-snippet-no-push-base` | The push snippet in `skills/ci-hygiene/snippets.md` (section 20) runs the push-skip action but never reads its `base=` output or passes it to the scope step. | [`docs/debts/ci-hygiene-snippet-no-push-base.md`](../docs/debts/ci-hygiene-snippet-no-push-base.md) |
 | `ci-job-pass-cache-ignores-index` | The pass cache key in the CI job runner `bin/ci-job` is `tree_key`, a `git add -A` on a temp copy of the index. | [`docs/debts/ci-job-pass-cache-ignores-index.md`](../docs/debts/ci-job-pass-cache-ignores-index.md) |
 | `ci-job-writes-pip-cache` | A full run of `lint/test_ci_job.py` rewrites an entry in `~/.cache/pip/http-v2`. | [`docs/debts/ci-job-writes-pip-cache.md`](../docs/debts/ci-job-writes-pip-cache.md) |
