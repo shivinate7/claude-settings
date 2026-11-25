@@ -386,8 +386,9 @@ def breaking_run(judged, newest_red, events=None):
 
 
 def replaced_in_span(judged, newest_red, events, jobs, key):
-    """-> the superseded runs (`superseded_run`) in the span of the breaking merge walked from `newest_red`: the runs of its file and group below it, down to the green parent, newest first.
+    """-> the superseded runs (`superseded_run`) in the span of the breaking merge walked from `newest_red`: the runs of its file and group between the breaking run and the green parent, newest first.
     `judged` is the runs of main newest first, so `newest_red` is a newer run of the group for each of them. A replaced run proved nothing, so its commit may be the one that broke the base.
+    The walk is breaking_run's: each failed run restarts the list, so the failed run it ends on is the breaking run, and a replaced run above it is outside the span.
     Call it only once `breaking_run` found a first red run: the walk then ends at a green run. `jobs(run)` and `key(run)` are superseded_run's."""
     mine = (newest_red["path"], events[newest_red["event"]])
     found = []
@@ -396,13 +397,15 @@ def replaced_in_span(judged, newest_red, events, jobs, key):
             continue
         if r["status"] != "completed" or r["conclusion"] == "success":
             break
-        if superseded_run(r, judged, jobs, key):
+        if r["conclusion"] not in ("skipped", "neutral", "cancelled"):
+            found = []
+        elif superseded_run(r, judged, jobs, key):
             found.append(r)
     return found
 
 
 Red = collections.namedtuple("Red", "run lines names")  # a red run: the run, its red jobs' lines (empty when it ended red with no red job), their names (empty then too)
-Judgment = collections.namedtuple("Judgment", "verdict red cancelled unknown judged order blamed base_head replaced")
+Judgment = collections.namedtuple("Judgment", "verdict red cancelled unknown judged order blamed base_head replaced", defaults=({},))
 
 
 class ReadFailed(Exception):

@@ -1944,7 +1944,7 @@ class Host:
         A cancelled run with no red job that nothing clears keeps its line, in the unknown detail and beside a red verdict. It is named with `gh run rerun <id>` only when its
         `head_sha` is the head_sha of the newest run on the page read (any status, any event in BASE_EVENTS, from the unfiltered list): runs on the base start at its head, and a re-run tests the run's own commit. Never named for a run with a red job or a re-run in flight.
         A red verdict's detail also holds breaking_line's segment for each red run judged (one per file and group), the head group's first: the first red run with a green parent, as a re-run to try (a first red) or as the breaking merge (red again on its re-run).
-        A red verdict also leaves `self.base_facts` for revert_proven, as data the prose cannot carry: `blamed` (the full head shas of the breaking merges), `red` (red runs judged),
+        A red verdict also leaves `self.base_facts` for revert_proven, as data the prose cannot carry: `blamed` (the full head shas of the breaking merges, each with the heads of the replaced runs between it and its green parent), `red` (red runs judged),
         `others` (red entries without a run, cancelled runs and re-runs in flight beside the red), `head` (the head sha of the newest run read) and `red_heads` (the head sha of each red run judged), `red_ids` (the id of each red run judged) and `red_jobs` (per red run, the names of its red jobs; empty for a run that ended red with no red job). Every other verdict leaves it None."""
         self.base_facts = None  # a red verdict sets it below; any other verdict, and any stop, leaves it None
         if waits_on_no_check(self.required):  # a repo with "none" runs no CI, so the base's runs are not read, whatever they hold (decision private-repos-no-ci); "first-proof" reads no run of the base either
@@ -4885,7 +4885,7 @@ def revert_proven(root, host, base, beside_ok=False):
     """True when a red base is lifted by a revert already merged with its tree proven (ruling own-823-b-revert-merge-lifts-red, decision no-merge-onto-red-main).
     Merges resume when the revert merges, with its run still going (ruling own-745-b-resume-at-revert), and stay resumed while unrelated commits land above it.
     Read from the facts base_state left on the host (`base_facts`), never from its prose. All must hold:
-    - exactly one red run, no cancelled run, no re-run in flight and no other red read beside it, and exactly one breaking merge B, named by its full sha;
+    - exactly one red run, no cancelled run, no re-run in flight and no other red read beside it, and exactly one blamed sha B (the breaking merge, with no replaced run in its span), named by its full sha;
     - origin/<base> is the head the runs were read at, and B is its ancestor;
     - of every commit from B up to the head (any parent, so a revert under a catch-up merge counts; at most REVERT_WALK_MAX), exactly one, R, says `This reverts commit <B>`;
     - no commit there names R, or the commit that landed R, as reverted (a re-land);
