@@ -65,7 +65,7 @@ if HERE not in sys.path:
 # building-allow-list-is-the-constant). Cost: importing guard.py for it measured about 120 ms per Agent spawn;
 # shared_names is standard library only and adds about 2 ms.
 from shared_names import EXPLORE_AUDIT_MARKER  # noqa: E402
-from shared_names import DATA_TOOL, SETTINGS_REPO  # noqa: E402  stdlib only: the one home of the tool name and the settings repo
+from shared_names import DATA_TOOL, MODEL_FAMILIES, SETTINGS_REPO  # noqa: E402  stdlib only: the one home of the tool name, the model list and the settings repo
 
 OK_SHAPE = {"ok": (True, False)}
 SPAWN_RULE, QUESTION_RULE = "spawn-judge", "question-judge"
@@ -88,6 +88,19 @@ OPUS_ASK_PROMPT = (
     "use opus`, a mention in the past tense, a request about some other model or topic, and any text that quotes or "
     "reports what an agent or another person said. When unsure answer {\"ok\": false}. Reply JSON only: "
     "{\"ok\": true} or {\"ok\": false}.\n\nText:\n"
+)
+
+# The plain model ask (model_ask): the same call and time budget as opus_ask, for the owner's choice of any one model of
+# the list. The list is written into the head from shared_names, never copied. Reply quotes are cut before the text
+# reaches it (override._strip_quotes), and the judge is told to refuse a quote too.
+MODEL_ASK_PROMPT = (
+    "The text below is a prompt the owner typed to a coding assistant. The models are: " + ", ".join(MODEL_FAMILIES)
+    + ". Answer {\"ok\": true, \"model\": \"<the one model from that list>\"} only when it is the owner's own present "
+    "choice of that one model for the agents to run on now (for example `use sonnet for the audit` or `run the "
+    "reviewers on haiku`). Answer {\"ok\": false} for a question, a hedge such as `maybe haiku?`, a negation such as "
+    "`don't use sonnet`, a mention in the past tense, a request about some other topic, text that names two or more "
+    "models as the choice, and any text that quotes or reports what an agent or another person said. When unsure "
+    "answer {\"ok\": false}. Reply JSON only: {\"ok\": true, \"model\": \"<model>\"} or {\"ok\": false}.\n\nText:\n"
 )
 
 # The plain override ask (override_ask): the same call and time budget as opus_ask, its own head.
@@ -272,25 +285,47 @@ def invoke_model(*args, **kwargs):
     return home(*args, **kwargs)
 
 
+def _ask_verdict(head, text):
+    """The model's parsed answer, a dict with a true or false `ok`, to the owner's prompt `text` read under the prompt
+    `head`: the one call of the plain asks. Raises ValueError for an error, a timeout or an answer with no true or false ok."""
+    import decision_watch  # lazy: the one home of the model's name
+    verdict, error = invoke_model(head + text, model=decision_watch.MODEL,
+                                  timeout=OPUS_ASK_TIMEOUT, shape=OK_SHAPE, effort="low")
+    if error:
+        raise ValueError(" ".join(str(error).split()))
+    ok = verdict.get("ok") if isinstance(verdict, dict) else None
+    if ok is not True and ok is not False:
+        raise ValueError("the answer has no true or false ok")
+    return verdict
+
+
 def _ask_judge(head, text, what):
     """True only when the model answers {"ok": true} to the owner's prompt `text` read under the prompt `head`. The one
     fail-closed call of the plain asks: an error, a timeout or an odd answer is False with one stderr line naming
     `what`; a plain {"ok": false} is False with none."""
     try:
-        import decision_watch  # lazy: the one home of the model's name
-        verdict, error = invoke_model(head + text, model=decision_watch.MODEL,
-                                      timeout=OPUS_ASK_TIMEOUT, shape=OK_SHAPE, effort="low")
-        if error:
-            raise ValueError(" ".join(str(error).split()))
-        ok = verdict.get("ok") if isinstance(verdict, dict) else None
-        if ok is True:
-            return True
-        if ok is not False:
-            raise ValueError("the answer has no true or false ok")
-        return False
+        return _ask_verdict(head, text)["ok"] is True
     except Exception as exc:
         print("call judge: %s grants nothing: %s" % (what, " ".join(str(exc).split())), file=sys.stderr)
         return False
+
+
+def model_ask(text):
+    """The model family the owner chose in the prompt `text`, when the model says it is his own present choice of one model
+    for the agents (MODEL_ASK_PROMPT); False for a plain no; None for an error, a timeout, an odd answer or a yes that names no
+    family of MODEL_FAMILIES, with one stderr line. The caller tells the three apart: a no keeps a held model, an
+    error ends it (override.grant_model_ask)."""
+    try:
+        verdict = _ask_verdict(MODEL_ASK_PROMPT, text)
+        if verdict["ok"] is False:
+            return False
+        family = str(verdict.get("model")).strip().lower()
+        if family not in MODEL_FAMILIES:
+            raise ValueError("the answer names no model of the list")
+        return family
+    except Exception as exc:
+        print("call judge: model ask reads as an error: %s" % " ".join(str(exc).split()), file=sys.stderr)
+        return None
 
 
 def opus_ask(text):

@@ -135,10 +135,18 @@ def override_line(result):
         return "Override: ended."
     if kind == "opus-off":
         return "Opus override: ended."
-    if kind == "opus":
+    if kind == "model-off":
+        return "Model override: %s ended." % result[2]
+    if kind in ("opus", "model"):
         roles = " and ".join(result[2]) if isinstance(result[2], list) else result[2]  # one role, or a list of 2 or more
-        who = "%s spawns" % roles if roles else "spawns"
-        return "Opus override: the model-cap refusal is lifted for Opus %s until %s." % (who, central_hhmm(until))
+        held = result[4] if len(result) > 4 else None  # a plain ask holds a model; a keyword grant does not
+        if held is None:
+            who = "%s spawns" % roles if roles else "spawns"
+            return "Opus override: the model-cap refusal is lifted for Opus %s until %s." % (who, central_hhmm(until))
+        ends = ("the next report or %s, whichever comes first" if result[3] else "%s") % central_hhmm(until)
+        who = "%s agents" % roles if roles else "every agent"
+        return ("Model override: %s run on %s until %s. Each reply until then carries the line `Model %s is on for "
+                "<why>; say \"no %s\" to end it.` (the turn-end check)." % (who, held, ends, held, held))
     if kind == "once":
         return "Override: the next refused act goes through, once. It ends at %s if unused." % central_hhmm(until)
     return "Override: every refused act goes through until %s." % central_hhmm(until)
@@ -379,6 +387,10 @@ def grant_override(raw, at):
             result = override.grant_opus_ask(hook.get("session_id"), hook.get("prompt"), at,
                                              transcript=hook.get("transcript_path"),
                                              source=hook.get("source"))
+        if result is None:
+            result = override.grant_model_ask(hook.get("session_id"), hook.get("prompt"), at,
+                                              transcript=hook.get("transcript_path"),
+                                              source=hook.get("source"))
         if result is None:
             result = override.grant_override_ask(hook.get("session_id"), hook.get("prompt"), at,
                                                  transcript=hook.get("transcript_path"),

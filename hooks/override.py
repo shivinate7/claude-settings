@@ -93,11 +93,12 @@ import sys
 import uuid
 from datetime import datetime, timedelta, timezone
 
-try:  # stdlib only: the one home of the machine-text tags and the config dir
-    from shared_names import MACHINE_TAGS, NOTICE_FRAMES, config_dir
+try:  # stdlib only: the one home of the machine-text tags, the model list and the config dir
+    from shared_names import MACHINE_TAGS, MODEL_FAMILIES, NOTICE_FRAMES, config_dir
     NOTICE_TAGS = MACHINE_TAGS + NOTICE_FRAMES
 except ImportError:  # a missing or stale helper: the keyword grants still run, the plain ask grants nothing
     NOTICE_TAGS = ()
+    MODEL_FAMILIES = ()
 
     def config_dir():  # a copy by need: an override file must stay readable while the helper lands late
         return os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(os.path.expanduser("~"), ".claude")
@@ -116,6 +117,12 @@ OPUS_LENGTH = re.compile(r"(\d+)([mh])", re.I)  # an Opus override needs its uni
 # The plain ask (grant_opus_ask): the whole word, the blocks that are not the owner's words, a word that may name a
 # role, and a length (bounded by non-word characters, so `12 mhz` is none).
 OPUS_WORD = re.compile(r"\bopus\b", re.I)
+_FAMILIES = "|".join(MODEL_FAMILIES) or "(?!)"  # an empty list (a stale helper) matches nothing
+MODEL_WORD = re.compile(r"(?<![A-Za-z])(%s)(?![A-Za-z])" % _FAMILIES, re.I)  # also inside claude-sonnet-5-5
+# His end words for a held model, as the whole prompt: `no sonnet`, `sonnet off`. `opus off` also has its keyword form.
+END_WORD = re.compile(r"(?:no\s+(%s)|(%s)\s+off)\s*[.!]?" % (_FAMILIES, _FAMILIES), re.I)
+# A reply Claude wrote that he pasted back: the marker comment of a numbered reply and each line that starts with `>`.
+REPLY_QUOTES = re.compile(r"<!--\s*reply\b[^>]*-->|^[ \t]*>.*$", re.I | re.M)
 PASTED = r"<pasted_content\b[^>]*>.*?</pasted_content>|<pasted_content\b.*"  # an unclosed block runs to the end
 # One block per tag name in NOTICE_TAGS, so the lists stay the one home; an unclosed block, or a bracket line, runs
 # to the end.
@@ -153,6 +160,7 @@ COMMAND_RECORDS = ("<local-command-caveat>", "<command-name>", "<command-message
 SEED_READ_MAX = 1 << 20  # bytes of the transcript the seed check reads, from the top
 KEYWORD_REST = re.compile(r"\s*off(?![\w-])", re.I)
 DEFAULT_ASK_LENGTH = ("2", "h")
+HOLD_END_REPORT = "report"  # a hold's `end` value: it ends at the session's next report
 SCOPE_CONTEXT_PROMPTS, SCOPE_CONTEXT_CHARS = 10, 2000  # the newest earlier prompts the scope read sees, and the cut of each
 OPUS_RULE = "agent-model-cap"  # the one rule an Opus override lifts, and only its spawn refusal
 # The roles an Opus spawn can ask for: the agents/ roles and the built-in ones, less Plan, which runs Opus by standing
@@ -162,6 +170,13 @@ OPUS_ROLES = ("builder", "reviewer", "test-author", "record-writer", "claude-cod
               "general-purpose", "claude")
 # The roles a plain ask or its scope read can name: OPUS_ROLES less `claude`, which in prose addresses the assistant.
 ASK_ROLES = tuple(role for role in OPUS_ROLES if role != "claude")
+# The roles a model ask can name: ASK_ROLES and Explore, which has no Opus form of its own (an Explore on Opus is the
+# audit marker's business). A word names a role by its own name, its plural, or `explorer(s)`.
+MODEL_ROLES = ASK_ROLES + ("Explore",)
+MODEL_ROLE_WORDS = {word: role for role in MODEL_ROLES for word in (role.lower(), role.lower() + "s")}
+MODEL_ROLE_WORDS.update({"explorer": "Explore", "explorers": "Explore"})
+FLOOR_RULE, ROLE_RULE = "agent-model-floor", "agent-role-model"
+HOLD_ONLY_RULES = (FLOOR_RULE, ROLE_RULE)  # the rules a held model lifts besides OPUS_RULE (and only for its own model)
 LOG_REASON_MAX = 300
 ID_CHAR = r"[\w.-]"  # the characters of a session id, for a reader that finds one inside other text
 SESSION_ID = re.compile(ID_CHAR + "{1,128}")  # the id names a file: no separator, no leading dot
@@ -250,12 +265,7 @@ def _grant_opus(session_id, rest, at):
     if path is None or not words or (rest[:1] and not rest[:1].isspace()):
         return None
     if [w.lower() for w in words] == ["off"]:
-        try:
-            os.remove(path)
-        except FileNotFoundError:
-            return None
-        _log(session_id, "opus-off", "")
-        return "opus-off", None
+        return _end_hold(session_id, path, "opus")  # a held sonnet is no Opus hold: `opus off` leaves it
     role = opus_role(words[0]) if len(words) == 2 else None
     length = OPUS_LENGTH.fullmatch(words[-1])
     if not length or len(words) > 2 or (len(words) == 2 and role is None):
@@ -263,27 +273,57 @@ def _grant_opus(session_id, rest, at):
     return _write_opus(session_id, path, at, length.groups(), role)
 
 
-def _write_opus(session_id, path, at, length, role, said=None, log=True):
-    """Write the Opus override file for `length` = (number, unit) from `at` and log it: the one home of the file's
-    shape, for the keyword grant and the plain ask. `role` is None, one role, or a sorted list of 2 or more roles.
-    `said` is the owner's words, for the log; `log` False writes the file and no log line. Returns ("opus", until,
-    role)."""
+def _write_opus(session_id, path, at, length, role, said=None, log=True, model=None, end=None):
+    """Write the Opus pass file for `length` = (number, unit) from `at` and log it: the one home of the file's
+    shape, for the keyword grant and the plain asks. `role` is None, one role, or a sorted list of 2 or more roles.
+    `said` is the owner's words, for the log; `log` False writes the file and no log line. A keyword grant passes no
+    `model`: its file is the three keys it always had, and the guard reads it as Opus. A plain ask passes the model it
+    holds (a judged yes), and the file also keeps `at`, `said` and, for an ask with no length of its own, `end`
+    "report": the hold then ends at the session's next report, or at `until`, whichever comes first. Returns ("opus",
+    until, role) for a keyword grant; for a plain ask ("opus" or "model", until, role, end, model)."""
     number, unit = length
     until = _length_end(at, number, unit)
     stamp = until.astimezone(timezone.utc).isoformat()
-    _write(path, {"kind": "opus", "until": stamp, "role": role})
+    body = {"kind": "opus", "until": stamp, "role": role}
+    if model is not None:
+        body.update(model=model, at=at.astimezone(timezone.utc).isoformat(), said=" ".join((said or "").split()))
+        if end:
+            body["end"] = end
+    _write(path, body)
+    result = ("opus", until, role) if model is None else ("opus" if model == "opus" else "model", until, role, end, model)
     if not log:
-        return "opus", until, role
+        return result
     detail = "%s until %s" % (", ".join(role) if isinstance(role, list) else role or "every role", stamp)
+    if model not in (None, "opus"):
+        detail = "model %s, %s" % (model, detail)
+    if end:
+        detail += " (or the next report)"
     if said:
         detail += ": " + said[:LOG_REASON_MAX].encode("utf-8", "replace").decode("utf-8")
     _log(session_id, "opus-grant", detail)
-    return "opus", until, role
+    return result
 
 
 def _strip_blocks(prompt):
     """The prompt with each pasted or machine-tag block replaced by a marker: that text is not the owner's words."""
     return BLOCKS.sub("[pasted text]", prompt)
+
+
+def _strip_quotes(text):
+    """`text` less the reply quotes (REPLY_QUOTES): what he pasted back from Claude's own report is not his words."""
+    return REPLY_QUOTES.sub(" ", text)
+
+
+def _names_models(text):
+    """The set of model families (MODEL_FAMILIES) the whole words of `text` name, lower case."""
+    return {m.group(1).lower() for m in MODEL_WORD.finditer(text)}
+
+
+def _family(model):
+    """The family a model name holds (`claude-sonnet-5-5` is `sonnet`), the highest when it holds more than one, else
+    None. The one reader of a model name here; hooks/guard.py role_model_rank ranks the same names."""
+    value = str(model or "").lower()
+    return next((word for word in reversed(MODEL_FAMILIES) if word in value), None)
 
 
 def _keyword_rest(rest):
@@ -312,11 +352,16 @@ def _near_negation(names, at, negations):
     return bool(negations & {w.lower() for w in near})
 
 
-def _ask_scope(text):
+def model_role(word):
+    """The role a word names, singular or plural, from MODEL_ROLES (MODEL_ROLE_WORDS), else None."""
+    return MODEL_ROLE_WORDS.get(word.lower())
+
+
+def _ask_scope(text, resolve=opus_role, allowed=ASK_ROLES):
     """(length, roles) a plain ask names, or None when the words are unclear: two lengths, a decimal or compound
     length, a role with a negation within NEGATION_SPAN words before or after it, or two role words joined by
     anything but a plain list (PLAIN_LIST). `roles` is the sorted list of the roles it names, empty when it names
-    none."""
+    none. A role word is `resolve`d and must be in `allowed`: the Opus ask reads OPUS_ROLES, the model ask MODEL_ROLES."""
     lengths = _ask_lengths(text)
     if lengths is None:
         return None
@@ -324,8 +369,8 @@ def _ask_scope(text):
     words = [m.group() for m in matches]
     roles, last_end = set(), None
     for at, word in enumerate(words):
-        role = opus_role(word)
-        if role not in ASK_ROLES:
+        role = resolve(word)
+        if role not in allowed:
             continue
         if _near_negation(words, at, NEGATIONS):
             return None
@@ -377,11 +422,15 @@ def _tail_prompts(transcript):
     return found
 
 
-def _owner_text(rec):
+def _owner_text(rec, typed=True):
     """The words of a record that is an owner's typed turn, else None: the one test for the seed check and the scope
-    context. Not an isMeta record, a promptSource "system" record, a record whose origin kind is not human, a command
-    record (`/effort`) or a fired scheduled task's block."""
-    if not isinstance(rec, dict) or rec.get("isMeta") or rec.get("promptSource") == "system":
+    context. Not an isMeta record, a compaction summary, a promptSource "system" record, a record whose origin kind is
+    not human, a command record (`/effort`) or a fired scheduled task's block. With `typed`, a record whose
+    `turnOrigin` is neither absent nor "human" is not his either: a session's seed brief (host_synthetic, sdk) is the
+    session that started it speaking. The seed check passes typed False so it still finds that first turn."""
+    if not isinstance(rec, dict) or rec.get("isMeta") or rec.get("isCompactSummary") or rec.get("promptSource") == "system":
+        return None
+    if typed and rec.get("turnOrigin") not in (None, "human"):
         return None
     origin = rec.get("origin")
     if isinstance(origin, dict) and origin.get("kind", "human") != "human":
@@ -399,8 +448,19 @@ def latest_owner_text(transcript):
     owner turn, so the latest turn is found however far back it sits. Cost, on demand: one open and one chunk read (at
     most 1 MiB) when the turn is in the last MiB, one more chunk per MiB of reply after it, and the whole file once when
     it holds no owner turn."""
+    for rec in _records_backward(transcript):
+        text = _owner_text(rec)
+        if text is not None:
+            return text
+    return None
+
+
+def _records_backward(transcript):
+    """Each JSON record of the transcript at path `transcript`, last first, read in SEED_READ_MAX chunks from the end
+    and only as far as the caller goes: the one backward reader (the owner's last turn, the report after a hold). A
+    missing or unreadable file, or no path, yields nothing."""
     if not isinstance(transcript, str):  # no transcript_path in the payload; an int would open a descriptor
-        return None
+        return
     try:
         with open(transcript, "rb") as handle:
             end, carry = handle.seek(0, os.SEEK_END), b""
@@ -412,15 +472,12 @@ def latest_owner_text(transcript):
                 carry, body = (lines[0], lines[1:]) if start else (b"", lines)
                 for line in reversed(body):
                     try:
-                        text = _owner_text(json.loads(line))
+                        yield json.loads(line)
                     except ValueError:
                         continue
-                    if text is not None:
-                        return text
                 end = start
     except OSError:
-        return None
-    return None
+        return
 
 
 def _own_record(found, prompt):
@@ -448,7 +505,7 @@ def _seed_record(transcript, found, prompt):
                     rec = json.loads(line)
                 except ValueError:
                     continue
-                if at != own and _owner_text(rec) is not None:
+                if at != own and _owner_text(rec, typed=False) is not None:
                     return at
     except OSError:
         pass
@@ -489,19 +546,22 @@ def _scoped_roles(scope_judge, text, context):
     return sorted({w.strip().lower() for w in named if isinstance(w, str)} & set(ASK_ROLES))
 
 
-def _owner_ask(prompt, source, transcript, wanted):
+def _owner_ask(prompt, source, transcript, wanted, strip_quotes=False):
     """The gates of the plain asks (grant_opus_ask, grant_override_ask), the one home. Returns (text, found, seed) for a
     prompt that may go to a judge, else None. `text` is the prompt less its pasted and notice blocks. `found` is the
     tail read (_tail_prompts). `seed` is a cloud session's seed record offset, else None. `wanted(text)` is the route's
     own test of the words, run before the transcript is read. None for: a non-string, a `source` outside
     OPUS_ASK_SOURCES, a missing NOTICE_TAGS, a prompt that starts with a notice, a fired-task block, words the route
     does not want, a prompt whose own record is last in the transcript with promptSource "system", and in a cloud
-    session (env LANE_ENV set) a prompt with no earlier owner turn (the seed prompt)."""
+    session (env LANE_ENV set) a prompt with no earlier owner turn (the seed prompt). With `strip_quotes`, the reply
+    quotes (_strip_quotes) are cut from `text` too, before `wanted` reads it and before any judge sees it."""
     if not isinstance(prompt, str) or source not in OPUS_ASK_SOURCES:
         return None
     if not NOTICE_TAGS or prompt.lstrip().startswith(NOTICE_TAGS) or FIRED_TASK.search(prompt):
         return None  # a stored task, a notice or no tag list: not typed words
     text = _strip_blocks(prompt)
+    if strip_quotes:
+        text = _strip_quotes(text)
     if not wanted(text):
         return None
     found = _tail_prompts(transcript)
@@ -535,7 +595,7 @@ def grant_opus_ask(session_id, prompt, at, judge=None, transcript=None, source=N
     first = OPUS_PROMPT.match(prompt)
     if PROMPT.match(prompt) or (first and _keyword_rest(first.group(1))):
         return None
-    gated = _owner_ask(prompt, source, transcript, lambda text: OPUS_WORD.search(text) is not None)
+    gated = _owner_ask(prompt, source, transcript, _opus_wanted, strip_quotes=True)
     if gated is None:
         return None
     text, found, seed = gated
@@ -548,19 +608,99 @@ def grant_opus_ask(session_id, prompt, at, judge=None, transcript=None, source=N
         return None
     length, roles = scope
     said = " ".join(text.split())
+    end = None if _ask_lengths(text) else HOLD_END_REPORT  # a length he states is his; with none, the report ends it
     context = [] if roles else _context_prompts(found, prompt, seed)
     if context:
         # No scope means every role, so that file goes down first: the prompt hook's timeout can kill the process in the
         # scope read, and a kill must leave the every-role file. A valid answer then narrows it.
-        _write_opus(session_id, path, at, length, None, said, log=False)
+        _write_opus(session_id, path, at, length, None, said, log=False, model="opus", end=end)
         if scope_judge is None:
             from call_judge import opus_scope as scope_judge
         try:
             roles = _scoped_roles(scope_judge, text, context)
         except BaseException:  # an interrupt or an exit during the read: log the every-role grant that stands
-            _write_opus(session_id, path, at, length, None, said)
+            _write_opus(session_id, path, at, length, None, said, model="opus", end=end)
             raise
-    return _write_opus(session_id, path, at, length, _file_role(roles), said)
+    return _write_opus(session_id, path, at, length, _file_role(roles), said, model="opus", end=end)
+
+
+def _opus_wanted(text):
+    """True when the plain Opus ask may go to its judge on its words alone: the whole word `opus` and no other model
+    word. A prompt that names another model goes to the model ask (grant_model_ask), so a prompt reaches one judge."""
+    return OPUS_WORD.search(text) is not None and _names_models(text) <= {"opus"}
+
+
+def _model_wanted(text):
+    """True when the model ask may go to its judge on its words alone: a whole model word other than opus (opus alone is the
+    Opus ask's), and no whole word `override` outside code spans (the override ask judges that prompt)."""
+    return bool(_names_models(text) - {"opus"}) and OVERRIDE_WORD.search(_outside_code(text)) is None
+
+
+def _end_hold(session_id, path, family=None, why=""):
+    """End the session's held model: delete its pass file when it holds `family` (any model when None, and a file that
+    cannot be read). Returns ("opus-off", None) for an Opus hold, ("model-off", None, family) for another, else None when
+    there was nothing to end or it holds another model. One `opus-off` line to guard.log."""
+    hold = _read_hold(path)
+    if hold is None or (isinstance(hold, dict) and family not in (None, hold["model"])):
+        return None
+    held = hold["model"] if isinstance(hold, dict) else family or "opus"
+    try:
+        os.remove(path)
+    except FileNotFoundError:
+        return None
+    _log(session_id, "opus-off", ("%s: %s" % (held, why)) if why else held)
+    return ("opus-off", None) if held == "opus" else ("model-off", None, held)
+
+
+def _grant_end_word(session_id, prompt):
+    """His end word as the whole prompt, after pasted blocks and reply quotes are cut: `no sonnet` or `sonnet off`. It ends
+    the session's held model when it is that one (_end_hold). Never a model call. Returns what _end_hold returns, else None."""
+    path = _path(session_id, "opus")
+    said = END_WORD.fullmatch(_strip_quotes(_strip_blocks(prompt)).strip()) if path and isinstance(prompt, str) else None
+    return _end_hold(session_id, path, (said.group(1) or said.group(2)).lower()) if said else None
+
+
+def grant_model_ask(session_id, prompt, at, judge=None, transcript=None, source=None):
+    """The owner's plain model ask (`use sonnet for the audit`, `run it on haiku`): the model he chose, held in the session's
+    pass file, when a model says the prompt is his own present choice of one model (decision agent-model-cap, the owner's
+    model name). `judge` is call_judge.model_ask unless a caller passes another: it returns the model family, False for a
+    plain no, None for an error, a timeout or an odd answer. Returns ("model" or "opus", until, role, end, model) for a hold
+    written, ("model-off", None, model) when an error ended a held model, else None.
+    The words: a whole model word other than opus, outside pasted blocks, notices and reply quotes, from an owner prompt
+    that passes the gates of _owner_ask, with no whole word `override` outside code spans. A prompt that names only opus is
+    the Opus ask's; one prompt reaches one judge. The roles named, the length and the end are the Opus ask's reading
+    (_ask_scope; MODEL_ROLES for a model other than opus): a length he states is the hold's `until`; with none it ends at
+    the next report or after DEFAULT_ASK_LENGTH.
+    A held model ends only on a judge yes for another model (the file is replaced), a judge error (the file is deleted:
+    his words could not be read, so no model he named earlier stays on), or his end words (_grant_end_word). A judge no
+    keeps it. A judge that answers a model the words do not name is an odd answer, so an error.
+    Cost: for a prompt that names no model other than opus, nothing: the word test runs before any file read. For one
+    that does, one tail read, one judge call (call_judge.model_ask, a Haiku call of at most OPUS_ASK_TIMEOUT s) and one
+    file write or delete. No scope read."""
+    path = _path(session_id, "opus")
+    if path is None or not isinstance(prompt, str):
+        return None
+    gated = _owner_ask(prompt, source, transcript, _model_wanted, strip_quotes=True)
+    if gated is None:
+        return None
+    text = gated[0]
+    try:
+        if judge is None:
+            from call_judge import model_ask as judge
+        family = judge(text)
+    except Exception as exc:
+        print("override: model ask clears the held model: %s" % " ".join(str(exc).split()), file=sys.stderr)
+        family = None
+    if family is False:
+        return None
+    if family not in _names_models(text):  # an error, an odd answer, or a model the words do not name
+        return _end_hold(session_id, path, why="the judge could not read the owner's words")
+    scope = _ask_scope(text) if family == "opus" else _ask_scope(text, model_role, MODEL_ROLES)
+    if scope is None:
+        return None
+    length, roles = scope
+    end = None if _ask_lengths(text) else HOLD_END_REPORT
+    return _write_opus(session_id, path, at, length, _file_role(roles), text, model=family, end=end)
 
 
 # One prose line that is the whole keyword form (an override line inside a prose message counts):
@@ -589,6 +729,9 @@ def grant(session_id, prompt, at, defer=True, transcript=None, source=None):
     seed brief, which its coordinator wrote. Only the line route reads the transcript."""
     got = _grant_first_word(session_id, prompt, at, defer)
     if got is None:
+        got = _grant_end_word(session_id, prompt)
+        if got is not None:
+            return got
         line = _keyword_line(prompt)
         if line is not None and line != (prompt.strip() if isinstance(prompt, str) else None):
             try:
@@ -751,27 +894,130 @@ def _log(session_id, decision, detail, rule=OPUS_RULE):
     guard_core.record("UserPromptSubmit", decision, rule, detail)
 
 
-def _take_opus(session_id, spawn_role, at):
-    """OPUS_LIFTED when the session's Opus override covers a spawn of spawn_role now, OPUS_UNREAD when the
-    file exists but cannot be read, else None."""
-    path = _path(session_id, "opus")
-    if path is None:
+def _parse_when(text):
+    """An ISO-8601 time (a trailing Z is UTC, a time with no offset is read as UTC) as an aware datetime, else None."""
+    if not isinstance(text, str):
         return None
+    try:
+        when = datetime.fromisoformat(text.strip().replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return when if when.tzinfo is not None else when.replace(tzinfo=timezone.utc)
+
+
+def _lower_roles(role):
+    """The file's `role` (None, one role, a list) with each role lower case, the form a spawn's role is compared in."""
+    return [r.lower() for r in role] if isinstance(role, list) else role.lower() if isinstance(role, str) else None
+
+
+def _read_hold(path):
+    """The session's pass file at `path` as a dict {model, until, role, end, at, said}, None when it is absent, OPUS_UNREAD
+    when it cannot be read or has the wrong shape. `model` is the family it holds, Opus when the file has none (a keyword
+    grant writes none). `role` is None, one role or a list, lower case; the roles of an Opus file must be OPUS_ROLES,
+    those of another model's file any names (MODEL_ROLES: Explore too). `end` is None or HOLD_END_REPORT; `at` is None
+    when the file has none or none that reads."""
     try:
         with open(path, "rb") as handle:
             data = json.loads(handle.read().decode("utf-8"))
         until, role = datetime.fromisoformat(data["until"]), data["role"]
+        model = data.get("model", "opus")
         roles = role if isinstance(role, list) else [role]  # null, one role, or a list of roles
         if (data["kind"] != "opus" or until.tzinfo is None or (isinstance(role, list) and not role)
-                or any(r is not None and (not isinstance(r, str) or opus_role(r) != r) for r in roles)):
+                or (model != "opus" and model not in MODEL_FAMILIES) or data.get("end") not in (None, HOLD_END_REPORT)
+                or any(r is not None and (not isinstance(r, str) or (model == "opus" and opus_role(r) != r))
+                       for r in roles)):
             return OPUS_UNREAD
     except FileNotFoundError:
         return None
     except (OSError, ValueError, KeyError, TypeError, AttributeError):
         return OPUS_UNREAD
+    said = data.get("said")
+    return {"model": model, "until": until, "role": _lower_roles(role), "end": data.get("end"),
+            "at": _parse_when(data.get("at")), "said": said if isinstance(said, str) else ""}
+
+
+REPORT_BLOCK = re.compile(r"^\s*>", re.M)  # a report is a block of `>` lines, so a reply with none is no report
+
+
+def _assistant_text(rec):
+    """The text blocks of an assistant record joined by newlines, else ""."""
+    content = (rec.get("message") or {}).get("content") if isinstance(rec.get("message"), dict) else None
+    if isinstance(content, list):
+        return "\n".join(b["text"] for b in content if isinstance(b, dict) and isinstance(b.get("text"), str))
+    return content if isinstance(content, str) else ""
+
+
+def _report_shape_ok():
+    """lint/report_guard.py report_shape_ok, the one test of a report's shape. Imported on demand: only a hold that ends at
+    the report, with a reply after it that holds a block of `>` lines, needs it."""
+    from guard_core import lint_dir
+    lint = lint_dir()
+    if lint not in sys.path:
+        sys.path.insert(0, lint)
+    import report_guard
+    return report_guard.report_shape_ok
+
+
+def _report_since(at, transcript, records=None, report_ok=None):
+    """True when an assistant reply stamped after `at` is a report (`report_ok`, report_guard.report_shape_ok by default). The
+    reads go backward from the end of the transcript at path `transcript` (_records_backward), or through the parsed
+    `records` the caller already holds, and stop at the first record stamped at or before `at`, so the cost is the
+    replies since the hold. An agent's own record (isSidechain) is no report of the session. A read that cannot run, or
+    a shape test that cannot load, finds no report: the hold stays until `until`."""
+    for rec in reversed(records) if records is not None else _records_backward(transcript):
+        if not isinstance(rec, dict):
+            continue
+        stamp = _parse_when(rec.get("timestamp"))
+        if stamp is not None and stamp <= at:
+            return False
+        if rec.get("type") != "assistant" or rec.get("isSidechain"):
+            continue
+        text = _assistant_text(rec)
+        if not REPORT_BLOCK.search(text):
+            continue
+        try:
+            report_ok = report_ok or _report_shape_ok()
+            if report_ok(text):
+                return True
+        except Exception:
+            return False
+    return False
+
+
+def model_override(session_id, transcript=None, records=None, report_ok=None, at=None):
+    """The session's live model hold as a dict (_read_hold), else None: the one reader the guard and the turn-end model line
+    share, so the two cannot disagree. Live means the pass file reads, `at` (now by default) is before its `until`, and a
+    hold with `end` "report" has no report after it (_report_since, from the transcript at path `transcript` or the parsed
+    `records`). A file with no `at` cannot tell, so only `until` ends it. Cost, on demand: one open of the pass file; for a
+    hold that ends at the report, the replies since it. It writes nothing."""
+    path = _path(session_id, "opus")
+    hold = _read_hold(path) if path else None
+    if not isinstance(hold, dict) or (now() if at is None else at) >= hold["until"]:
+        return None
+    if hold["end"] == HOLD_END_REPORT and hold["at"] is not None and _report_since(hold["at"], transcript, records, report_ok):
+        return None
+    return hold
+
+
+def _take_opus(session_id, spawn_role, at, transcript=None, model=None):
+    """OPUS_LIFTED when the session's pass file covers a spawn of spawn_role on `model` now, OPUS_UNREAD when the file
+    exists but cannot be read, else None. A held model lifts only a spawn on that model (`model` None is an Opus spawn,
+    the Opus ceiling's own call): a held sonnet lifts no Opus ceiling. A hold that ends at the report is not read as live
+    after a report in the transcript at path `transcript`."""
+    path = _path(session_id, "opus")
+    if path is None:
+        return None
+    hold = _read_hold(path)
+    if not isinstance(hold, dict):
+        return hold
+    until, role = hold["until"], hold["role"]
     if isinstance(role, list) and str(spawn_role).lower() in role:
         role = str(spawn_role).lower()  # a list that names the spawn's role covers it as that one role
     if at >= until or (role is not None and role != str(spawn_role).lower()):
+        return None
+    if hold["model"] != ("opus" if model is None else _family(model)):
+        return None
+    if hold["end"] == HOLD_END_REPORT and hold["at"] is not None and _report_since(hold["at"], transcript):
         return None
     return OPUS_LIFTED
 
@@ -858,13 +1104,18 @@ def step_read():
     return _step_read
 
 
-def take(session_id, agent_id, at, rule=None, spawn_role=None, cwd=None):
+def take(session_id, agent_id, at, rule=None, spawn_role=None, cwd=None, transcript=None, model=None):
     """LIFTED when the override lifts this refusal (a one-act override is spent), UNREAD when its file
     exists but cannot be read, else None. Of calls racing for one one-act override, only the one that
     creates its claim marker wins. For the Opus spawn refusal (rule OPUS_RULE with a spawn_role) the Opus
     override is read first, then the step grant (STEP_LIFTED or STEP_UNREAD), so a lift either one covers
-    spends no one-act override. `cwd` is the call's directory, where the step grant is read."""
-    opus = _take_opus(session_id, spawn_role, at) if rule == OPUS_RULE and spawn_role is not None else None
+    spends no one-act override. `cwd` is the call's directory, where the step grant is read.
+    The session's pass file also lifts the model floor and the role row (HOLD_ONLY_RULES), and only for a spawn on the
+    model it holds and a role it covers: `model` is the spawn's model, `transcript` the session's, where a hold that
+    ends at the report is read."""
+    opus = _take_opus(session_id, spawn_role, at, transcript, model) if rule == OPUS_RULE and spawn_role is not None else None
+    if rule in HOLD_ONLY_RULES:
+        opus = _take_opus(session_id, spawn_role, at, transcript, model or "")
     if opus == OPUS_LIFTED:
         return opus
     step = None
