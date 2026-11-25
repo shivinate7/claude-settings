@@ -1705,6 +1705,65 @@ class StaleCwdRecordTests(unittest.TestCase):
         self.assertTrue(delete, "trash_verdict kept a build folder for untracked output in nested folders: %s" % reason)
         self.assertEqual(reason, "leftover trash")
 
+    @unittest.skipIf(os.name == "nt", "a symlink needs a privilege on Windows")
+    def test_trash_folder_with_a_link_to_an_outside_repo_is_deleted_beside_such_a_record(self):
+        """Case 2h for the trash sweep. A link inside the renamed folder points at a repo outside it. The nested-repo walk
+        follows no link, so the outside `.git` is not work in this folder, and the leftover folder is deleted."""
+        self.assert_record_stands_nowhere()
+        wt = self.new_worktree("trash-link-outside")
+        trash = self.trash_from_build(wt)
+        outside = os.path.join(self.base, "outside-repo")
+        make_repo(outside, {"x.txt": "outside\n"})
+        link = os.path.join(trash, "ext")
+        os.symlink(outside, link)
+        self.assertTrue(os.path.islink(link), "scope: the link must be a symlink")
+        self.assertTrue(os.path.isdir(os.path.join(outside, ".git")), "scope: the outside repo must hold a .git folder")
+        with mock.patch.object(sweep, "processes_in", return_value=([], [])):
+            delete, reason = sweep.trash_verdict(trash)
+        self.assertTrue(delete, "trash_verdict kept a trash folder for a link to a repo outside it: %s" % reason)
+        self.assertEqual(reason, "leftover trash")
+
+    @unittest.skipIf(os.name == "nt" or (hasattr(os, "geteuid") and os.geteuid() == 0),
+                     "a folder with mode 0 still lists for root, and Windows has no mode 0")
+    def test_trash_folder_is_kept_unreadable_when_a_folder_under_it_cannot_be_read(self):
+        """Case 2i for the trash sweep. A folder under the renamed folder cannot be listed, so the nested-repo walk cannot
+        rule out a `.git` inside it. The folder is kept as unreadable, whatever the record says."""
+        self.assert_record_stands_nowhere()
+        wt = self.new_worktree("trash-unreadable-sub")
+        trash = self.empty_trash(wt)
+        locked = os.path.join(trash, "locked")
+        os.makedirs(locked)
+        os.chmod(locked, 0)
+        self.addCleanup(os.chmod, locked, 0o755)
+        with self.assertRaises(PermissionError):
+            os.listdir(locked)
+        with mock.patch.object(sweep, "processes_in", return_value=([], [])):
+            delete, reason = sweep.trash_verdict(trash)
+        self.assertFalse(delete, "trash_verdict deleted a trash folder with a folder under it it could not read")
+        self.assertEqual(reason, "unreadable-subject", "a trash folder with an unreadable folder under it was kept, but not as unreadable: %s" % reason)
+
+    def test_trash_folder_is_kept_for_a_quoted_path_it_cannot_place_beside_such_a_record(self):
+        """Case 2j for the trash sweep. A tracked file whose name holds a non-ASCII letter is moved under the trash name. Git
+        quotes the path of its deletion at the original name, so the status line starts with a double quote and cannot be
+        placed by its plain path. A line the sweep cannot place counts as this folder's, so the folder is kept as dirty."""
+        self.assert_record_stands_nowhere()
+        wt = self.new_worktree("trash-quoted")
+        build = os.path.join(wt, "native", "build")
+        name = "café.txt"
+        write(os.path.join(build, name), "tracked\n")
+        self.assertEqual(run_vcs(wt, "add", "-f", os.path.join("native", "build", name)).returncode, 0,
+                         "scope: the build file must be tracked")
+        self.assertEqual(run_vcs(wt, *IDENT, "commit", "-q", "-m", "track a quoted build file").returncode, 0,
+                         "scope: the build file must be committed")
+        trash = sweep.trash_name(build)
+        os.rename(build, trash)
+        self.assertTrue(any(line[3:].startswith('"') for line in sweep.git_reads.porcelain(wt)),
+                        "scope: git must list the moved file's deletion with a quoted path")
+        with mock.patch.object(sweep, "processes_in", return_value=([], [])):
+            delete, reason = sweep.trash_verdict(trash)
+        self.assertFalse(delete, "trash_verdict deleted a trash folder whose moved file git lists with a quoted path")
+        self.assertEqual(reason, "dirty", "a trash folder whose moved file git quoted was kept, but not as dirty: %s" % reason)
+
     def test_trash_folder_is_kept_for_a_process_inside_beside_such_a_record(self):
         """Case 3. An empty trash folder reads clean, so the process is the only cause, and the keep names its pid."""
         self.assert_record_stands_nowhere()

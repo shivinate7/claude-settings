@@ -1003,6 +1003,35 @@ MUTATIONS = [
      '    if live is None or inside is None:\n        return False, "unreadable-subject"\n    if dirty:',
      'test_trash_folder_is_kept_unreadable_when_the_dirty_read_returns_none'),
 
+    # The trash sweep's nested-repo walk (has_nested_git) and the status-line placement (_own_trash_lines).
+    ('build dirs trash nested git: has_nested_git never finds a .git, so a nested repo reads clean',
+     'sweep',
+     '            return True\n    return None if unreadable else False',
+     '            pass\n    return None if unreadable else False',
+     'test_trash_folder_is_kept_for_a_nested_repo_with_uncommitted_work_beside_such_a_record'),
+    ('build dirs trash nested git: the walk follows a symlink out of the folder',
+     'sweep',
+     'os.walk(path, followlinks=False, onerror=unreadable.append)',
+     'os.walk(path, followlinks=True, onerror=unreadable.append)',
+     'test_trash_folder_with_a_link_to_an_outside_repo_is_deleted_beside_such_a_record',
+     "posix"),
+    ('build dirs trash nested git: an unreadable folder in the walk reads as clean',
+     'sweep',
+     '    return None if unreadable else False',
+     '    return False',
+     'test_trash_folder_is_kept_unreadable_when_a_folder_under_it_cannot_be_read',
+     "posix"),
+    ('build dirs trash lines: a deletion at the original name that a sibling holds counts for this folder',
+     'sweep',
+     '        if not any(os.path.lexists(os.path.join(parent, n, rel)) for n in siblings):\n            mine.append(line)',
+     '        if True:\n            mine.append(line)',
+     'test_a_trash_folder_is_judged_on_its_own_lines_beside_a_sibling_from_the_same_name'),
+    ('build dirs trash lines: a line that cannot be placed is skipped instead of kept',
+     'sweep',
+     '        text = line[3:]\n',
+     '        text = line[3:]\n        if text.startswith(\'"\') or " -> " in text:\n            continue\n',
+     'test_trash_folder_is_kept_for_a_quoted_path_it_cannot_place_beside_such_a_record'),
+
     ('build dirs: the hook deletes in its own process before it returns',
      'agent_end_reap',
      '            os.rename(folder, new)\n',
@@ -1043,8 +1072,10 @@ MUTATIONS = [
     # only_on="posix": the sleep fixture is POSIX only.
     ("husks: a process inside no longer keeps the husk",
      "sweep",
-     '    if inside:\n        return {"path": path, "action": "keep", "reason": "process-inside',
-     '    if False:\n        return {"path": path, "action": "keep", "reason": "process-inside',
+     '    if inside:\n        return {"path": path, "action": "keep", "reason": process_inside_reason(inside)}\n'
+     '    return {"path": path, "action": "husk"',
+     '    if False:\n        return {"path": path, "action": "keep", "reason": process_inside_reason(inside)}\n'
+     '    return {"path": path, "action": "husk"',
      "test_a_process_inside_keeps_the_husk",
      "posix"),
 
@@ -1052,11 +1083,11 @@ MUTATIONS = [
     ("pre-check: a process sitting inside the worktree no longer keeps it",
      "sweep",
      '    if inside:\n'
-     '        return {"path": path, "action": "keep",\n'
-     '                "reason": "process-inside: pid %s" % ", ".join(str(p) for p in sorted(inside))}',
+     '        return {"path": path, "action": "keep", "reason": process_inside_reason(inside)}\n'
+     '    if host_lock:\n',
      '    if False:\n'
-     '        return {"path": path, "action": "keep",\n'
-     '                "reason": "process-inside: pid %s" % ", ".join(str(p) for p in sorted(inside))}',
+     '        return {"path": path, "action": "keep", "reason": process_inside_reason(inside)}\n'
+     '    if host_lock:\n',
      "test_a_process_inside_the_worktree_keeps_it_and_names_the_pid"),
 
     # ---- the stale agent lock (a dead or reused pid frees a clean, fully pushed worktree) ----
