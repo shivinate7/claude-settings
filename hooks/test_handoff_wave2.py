@@ -1812,7 +1812,8 @@ def remedy_commands(text):
 def case_f1_printed_helper_command_passes_while_owed():
     """Red on the old code: with the audit owed, the audit helper command that the compaction-audit refusal prints is
     allowed by the guard. The old guard refuses that command as compaction-audit, so the printed remedy cannot run.
-    A remedy that names no helper command has nothing to run, so the case then checks nothing."""
+    The refusal must print at least one such command: a remedy with none fails here, so the case never passes by
+    checking nothing."""
     c = Case("f1-cmd")
     try:
         post, rd = compact(c, SID)
@@ -1821,7 +1822,11 @@ def case_f1_printed_helper_command_passes_while_owed():
         refusal = guard_call(c, SID, "Bash", BASH)
         if not step("after the read, a Bash call is refused by compaction-audit", refused_by(refusal, AUDIT_RULE)):
             return
-        for cmd in remedy_commands(refusal[1]):
+        commands = remedy_commands(refusal[1])
+        if not step("the refusal prints an audit helper command in backticks",
+                    "" if commands else "no backticked span in the refusal runs %s" % HELPER_NAME):
+            return
+        for cmd in commands:
             if not step("with the audit owed, the guard allows the helper command the refusal prints",
                         allowed_why(guard_call(c, SID, "Bash", {"command": cmd}))):
                 return
