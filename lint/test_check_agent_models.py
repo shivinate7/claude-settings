@@ -1114,7 +1114,7 @@ class McpTools(unittest.TestCase):
         self.assertEqual(code, 1, "a tools: allow-list that names an MCP tool passes the check: %r" % out)
         self.assertTrue(names(out, "reviewer.md"), "no line names reviewer.md: %r" % out)
 
-    def test_full_size_deny_list_ending_in_the_mcp_glob_passes(self):
+    def test_full_size_refuse_list_ending_in_the_mcp_glob_passes(self):
         refuse = ", ".join(["Edit", "Write", "NotebookEdit", "Bash", "Read", "Glob", "Grep", "WebFetch", "WebSearch",
                             "Task", "TodoWrite", MCP_GLOB])
         self.assertEqual(role_verdict("builder", "disallowedTools: %s" % refuse), (0, ""),
