@@ -1,0 +1,1 @@
+- test-c7-reds-reported: test_c7 in lint/test_check_debt_retire.py (line 737 on main) and OctopusCommonBase in lint/test_check_silent_undo.py were red locally and on main when reported at 04:41 CST Nov 24 (reviewer's report, not rerun here). Seen: 2026-11-24 x1

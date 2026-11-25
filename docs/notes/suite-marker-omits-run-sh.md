@@ -1,0 +1,1 @@
+- suite-marker-omits-run-sh: actions/stamp/test_action.sh:15's subject marker names only stamp.mjs, yet the suite also tests run.sh; a change to run.sh alone prints a not-run line and the suite does not run in lane lint. Seen: 2026-11-24 x1

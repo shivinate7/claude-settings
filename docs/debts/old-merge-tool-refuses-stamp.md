@@ -1,6 +1,6 @@
 # An older merge tool refuses the stamp
 
-**What.** A merge tool older than this change refuses main's `stamp.json`, which has the unknown field `keepBranches`. The tool stops with a clear message. The merge does not run.
+**What.** A merge tool older than this change refuses main's `stamp.json`, which has the unknown fields `keepBranches` and `lintSuites`. The tool stops with a clear message. The merge does not run.
 
 **Where.** `.github/stamp.json` on main. The merge tool copy on each machine.
 

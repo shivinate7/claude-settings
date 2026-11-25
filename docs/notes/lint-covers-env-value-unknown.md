@@ -1,0 +1,1 @@
+- lint-covers-env-value-unknown: reviewer's F7 (PR 3860, open): a three-word env value reads unknown in commands (bin/ci-job on the PR 3860 branch; reviewer's line 377); unverified. Seen: 2026-11-24 x1

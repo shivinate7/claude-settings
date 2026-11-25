@@ -1,0 +1,1 @@
+- ci-job-foreign-job-two-lines: `bin/ci-job <a job on another runner> --lint` may print both a not-run line and the new unknown line for one step; not probed; lane lint only calls `checks`. Seen: 2026-11-24 x1

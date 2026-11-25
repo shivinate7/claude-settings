@@ -1,0 +1,1 @@
+- fail-says-two-merge-bases: base_read_phrases (merge/merge.py on the PR 3862 branch; reviewer's line 5505) runs git merge-base without --all, which prints one merge base, so a criss-cross history with two bases is misread (PR 3862, open; reviewer's F3, git behavior not run here). Seen: 2026-11-24 x1

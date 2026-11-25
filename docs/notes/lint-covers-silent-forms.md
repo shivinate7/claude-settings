@@ -1,0 +1,1 @@
+- lint-covers-silent-forms: reviewer's F8 (PR 3860, open): subshell, timeout and pushd command forms are silent in shell_commands (bin/ci-job on the PR 3860 branch; reviewer's line 1218); unverified. Seen: 2026-11-24 x1

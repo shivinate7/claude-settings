@@ -1,0 +1,1 @@
+- listed-real-markers-unpinned: no test pins the real marker lines on actions/stamp/test_stamp.mjs and test_action.sh (only a synthetic suite does), and the unparseable-config case in lint/test_ci_job.py asserts no exit code. Seen: 2026-11-24 x1
