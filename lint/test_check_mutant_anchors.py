@@ -367,8 +367,8 @@ def probe_rows(label, old):
 
 class FolderRowsAreCensused(unittest.TestCase):
     """The census reads the list the harness runs, folder rows included. Each case runs the real census script in a copy of
-    the tree, under the run folder, with one probe file in hooks/mutants/. The copy holds hooks/ and testing/ flat, without
-    test files, as the census reads them."""
+    the tree, under the run folder, with one probe file in hooks/mutants/. The copy holds hooks/, janitor/ and testing/ flat,
+    without test files, as the census reads them. The census imports janitor/mutate_sweep.py, so the copy needs janitor/."""
 
     def tree(self, name):
         root = os.path.join(RUN_FOLDER, name)
@@ -376,7 +376,7 @@ class FolderRowsAreCensused(unittest.TestCase):
         shutil.copyfile(os.path.join(os.path.dirname(HERE), "lint", "check_mutant_anchors.py"),
                         os.path.join(root, "lint", "check_mutant_anchors.py"))
         repo = os.path.dirname(HERE)
-        for folder in ("hooks", "testing"):
+        for folder in ("hooks", "janitor", "testing"):
             dest = os.path.join(root, folder)
             os.makedirs(dest)
             for entry in os.listdir(os.path.join(repo, folder)):
