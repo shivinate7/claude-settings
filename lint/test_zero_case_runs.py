@@ -100,6 +100,19 @@ def absolute_import(match, base):
     return match.group(1) + match.group(2) + pathlib.Path(target).as_uri() + match.group(2)
 
 
+def make_variant(original, out):
+    """Write to out the copy of one mods test file with every `await test(` call disabled. Returns how
+    many calls it disabled. The copy's relative imports and import.meta.url name the original file."""
+    with open(original, encoding="utf-8") as f:
+        source = f.read()
+    base = os.path.dirname(original)
+    copied = STATIC_IMPORT.sub(lambda m: absolute_import(m, base), source)
+    copied = copied.replace("import.meta.url", '"%s"' % pathlib.Path(original).as_uri())
+    with open(out, "w", encoding="utf-8") as f:
+        f.write(copied.replace(DISABLE_FROM, "if (false) " + DISABLE_FROM))
+    return source.count(DISABLE_FROM)
+
+
 def zero_test_exit(case, path):
     """Run one mods test file with every `await test(` call disabled, and check that the run fails.
 
@@ -110,17 +123,10 @@ def zero_test_exit(case, path):
     node = shutil.which("node")
     if node is None:
         case.skipTest("node is not on PATH: the %s zero-test case skips here" % os.path.basename(path))
-    with open(os.path.join(REPO, path), encoding="utf-8") as f:
-        source = f.read()
-    case.assertGreater(source.count(DISABLE_FROM), 0,
-                       "%s has no `await test(` call to disable, so no zero-test run can be made" % path)
-    original = os.path.join(REPO, path)
-    base = os.path.dirname(original)
-    copied = STATIC_IMPORT.sub(lambda m: absolute_import(m, base), source)
-    copied = copied.replace("import.meta.url", '"%s"' % pathlib.Path(original).as_uri())
     variant = os.path.join(RUN, "zero_" + os.path.basename(path))
-    with open(variant, "w", encoding="utf-8") as f:
-        f.write(copied.replace(DISABLE_FROM, "if (false) " + DISABLE_FROM))
+    disabled = make_variant(os.path.join(REPO, path), variant)
+    case.assertGreater(disabled, 0,
+                       "%s has no `await test(` call to disable, so no zero-test run can be made" % path)
     proc = subprocess.run([node, variant], cwd=RUN, capture_output=True, text=True, timeout=TIMEOUT)
     last = (proc.stdout + proc.stderr).strip().splitlines()[-1:] or ["<no output>"]
     case.assertRegex(proc.stdout, SUMMARY,
