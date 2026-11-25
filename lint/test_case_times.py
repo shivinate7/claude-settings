@@ -338,6 +338,111 @@ class Timed(unittest.TestCase):
 '''
 
 
+# A case that starts a frame on a result of its own and never stops it, so the frame is still open when the run ends.
+LEAK = '''import unittest
+
+
+class Leak(unittest.TestCase):
+    def test_a_leaves_frame_open(self):
+        unittest.TestResult().startTest(self)
+
+    def test_b_plain(self):
+        self.assertTrue(True)
+
+    def test_c_plain(self):
+        self.assertTrue(True)
+'''
+
+# Makes TestCase._callSetUp absent from the class, as a Python that renamed it would: class access raises, and each
+# instance still runs its setUp, so the suite runs the same. The finder makes the absence after unittest.case loads,
+# which is before the arm reads the attribute.
+ABSENT_RUNNER = '''import importlib.machinery
+import os
+import sys
+
+site = sys.modules.get("sitecustomize")
+print("SITE_FILE", os.path.realpath(site.__file__) if site is not None and getattr(site, "__file__", None) else "none")
+
+
+class Absent(object):
+    def __init__(self, function):
+        self.function = function
+
+    def __get__(self, obj, owner=None):
+        if obj is None:
+            raise AttributeError("type object 'TestCase' has no attribute '_callSetUp'")
+        return self.function.__get__(obj, owner)
+
+
+class Finder(object):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname != "unittest.case":
+            return None
+        spec = importlib.machinery.PathFinder.find_spec(fullname, path)
+        if spec is None or spec.loader is None:
+            return None
+        load = spec.loader.exec_module
+
+        def exec_module(module):
+            load(module)
+            module.TestCase._callSetUp = Absent(module.TestCase._callSetUp)
+
+        spec.loader.exec_module = exec_module
+        return spec
+
+
+sys.meta_path.insert(0, Finder())
+import unittest  # noqa: E402
+
+suite = unittest.defaultTestLoader.loadTestsFromName("fixture_plain")
+result = unittest.TextTestRunner(stream=open(os.devnull, "w"), verbosity=0).run(suite)
+print("RESULT ran=%d failures=%d errors=%d skipped=%d"
+      % (result.testsRun, len(result.failures), len(result.errors), len(result.skipped)))
+'''
+
+# An async case: its asyncSetUp seconds are fixture time, apart from the case's own seconds.
+ASYNC = '''import time
+import unittest
+
+
+class Async(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        time.sleep(0.5)
+
+    async def test_case(self):
+        time.sleep(0.25)
+'''
+
+# A setUp that raises. Its traceback text must be the same armed and unarmed.
+SETUP_ERROR = '''import unittest
+
+
+class SetupError(unittest.TestCase):
+    def setUp(self):
+        raise RuntimeError("setup broke")
+
+    def test_case(self):
+        self.assertTrue(True)
+'''
+
+# Prints the traceback text of each error between markers, so the armed and unarmed texts can be compared.
+TRACEBACK_RUNNER = '''import os
+import sys
+
+site = sys.modules.get("sitecustomize")
+print("SITE_FILE", os.path.realpath(site.__file__) if site is not None and getattr(site, "__file__", None) else "none")
+import unittest  # noqa: E402
+
+suite = unittest.defaultTestLoader.loadTestsFromName("fixture_setup_error")
+result = unittest.TestResult()
+suite.run(result)
+for test, text in result.errors:
+    print("TRACEBACK-BEGIN")
+    print(text, end="")
+    print("TRACEBACK-END")
+'''
+
+
 def setUpModule():
     global RUN
     RUN = _test_temp.run_folder()
@@ -396,6 +501,15 @@ def site_file(result):
         if line.startswith("SITE_FILE "):
             return line[len("SITE_FILE "):]
     return None
+
+
+def traceback_text(result):
+    """The text between a traceback runner's markers, or None when it printed none."""
+    begin = result.stdout.find("TRACEBACK-BEGIN\n")
+    end = result.stdout.find("TRACEBACK-END\n")
+    if begin < 0 or end < begin:
+        return None
+    return result.stdout[begin + len("TRACEBACK-BEGIN\n"):end]
 
 
 def scope_ok(test, result):
@@ -782,6 +896,96 @@ class RowFails(unittest.TestCase):
         cases = sorted(row.get("case") for row in rows if (row.get("case") or "").startswith("Broken."))
         self.assertEqual(cases, ["Broken.test_b_plain", "Broken.test_c_plain"],
                          "the rows after the one that could not be kept are wrong: %s" % cases)
+
+
+class OpenFrame(unittest.TestCase):
+    def test_open_frame_at_flush_keeps_later_rows_and_names_it(self):
+        folder = case_folder(self)
+        write(folder, "fixture_leak.py", LEAK)
+        unarmed = run_module(folder, "fixture_leak", armed=False, report=True)
+        self.assertEqual(result_line(unarmed), "RESULT ran=3 failures=0 errors=0 skipped=0",
+                         "the unarmed control run did not pass its three cases: %r" % unarmed.stderr[-300:])
+        armed = run_module(folder, "fixture_leak", report=True)
+        scope_ok(self, armed)
+        self.assertEqual(result_line(armed), result_line(unarmed),
+                         "the armed run's outcome differs from the unarmed run's")
+        rows = rows_of(folder) or []
+        for case in ("Leak.test_b_plain", "Leak.test_c_plain"):
+            got = [row for row in rows if row.get("case") == case]
+            self.assertEqual(len(got), 1, "%s has %d rows, want one: the frame an earlier case left open dropped it"
+                             % (case, len(got)))
+            self.assertEqual(got[0].get("outcome"), "pass",
+                             "%s outcome is %r, want 'pass'" % (case, got[0].get("outcome")))
+        notes = [line for line in armed.stderr.splitlines() if line.startswith("case_times:")]
+        self.assertEqual(len(notes), 1, "the open frame at flush wrote %d case_times stderr lines, want one: %s"
+                         % (len(notes), notes))
+        self.assertIn("Leak.test_a_leaves_frame_open", notes[0],
+                      "the stderr line does not name the open frame: %r" % notes[0])
+
+
+class ArmWithoutCallSetUp(unittest.TestCase):
+    def test_missing_call_setup_still_starts_and_runs(self):
+        folder = case_folder(self)
+        write(folder, "fixture_plain.py", PLAIN)
+        write(folder, "absent_runner.py", ABSENT_RUNNER)
+        unarmed = run_py(folder, ["absent_runner.py"], armed=False)
+        self.assertEqual(result_line(unarmed), "RESULT ran=1 failures=0 errors=0 skipped=0",
+                         "the unarmed control run did not pass its one case with TestCase._callSetUp absent: %r"
+                         % unarmed.stderr[-300:])
+        armed = run_py(folder, ["absent_runner.py"])
+        scope_ok(self, armed)
+        self.assertEqual(armed.returncode, 0,
+                         "the armed run exited %d, want 0: with TestCase._callSetUp absent the arm broke the Python "
+                         "start; stderr tail: %s" % (armed.returncode, armed.stderr[-300:]))
+        self.assertEqual(result_line(armed), result_line(unarmed),
+                         "the armed run's outcome differs from the unarmed run's")
+        notes = [line for line in armed.stderr.splitlines() if line.startswith("case_times:")]
+        self.assertEqual(len(notes), 1, "the absent TestCase._callSetUp wrote %d case_times stderr lines, want one: %s"
+                         % (len(notes), notes))
+
+
+class AsyncFixture(unittest.TestCase):
+    def test_async_setup_seconds_land_in_fixture_s(self):
+        folder = case_folder(self)
+        write(folder, "fixture_async.py", ASYNC)
+        unarmed = run_module(folder, "fixture_async", armed=False, report=True)
+        self.assertEqual(result_line(unarmed), "RESULT ran=1 failures=0 errors=0 skipped=0",
+                         "the unarmed control run did not pass its one case: %r" % unarmed.stderr[-300:])
+        armed = run_module(folder, "fixture_async", report=True)
+        scope_ok(self, armed)
+        self.assertEqual(result_line(armed), result_line(unarmed),
+                         "the armed run's outcome differs from the unarmed run's")
+        rows = rows_of(folder)
+        self.assertIsNotNone(rows, "the armed run wrote no case-times file")
+        timed = [row for row in rows if row.get("case") == "Async.test_case"]
+        self.assertEqual(len(timed), 1, "Async.test_case has %d rows, want one" % len(timed))
+        self.assertEqual(timed[0].get("fixture_s"), 0.5,
+                         "Async.test_case fixture_s is %r, want 0.5: its asyncSetUp seconds belong in fixture_s"
+                         % timed[0].get("fixture_s"))
+        self.assertEqual(timed[0].get("s"), 0.25, "Async.test_case s is %r, want its own 0.25"
+                         % timed[0].get("s"))
+
+
+class SetupTraceback(unittest.TestCase):
+    def test_setup_error_traceback_matches_unarmed(self):
+        folder = case_folder(self)
+        write(folder, "fixture_setup_error.py", SETUP_ERROR)
+        write(folder, "traceback_runner.py", TRACEBACK_RUNNER)
+        unarmed = run_py(folder, ["traceback_runner.py"], armed=False)
+        unarmed_text = traceback_text(unarmed)
+        self.assertIsNotNone(unarmed_text, "the unarmed run printed no setUp error traceback; stdout tail: %r"
+                             % unarmed.stdout[-300:])
+        self.assertIn("in setUp", unarmed_text, "the unarmed control traceback has no setUp frame: %r" % unarmed_text)
+        armed = run_py(folder, ["traceback_runner.py"])
+        scope_ok(self, armed)
+        armed_text = traceback_text(armed)
+        self.assertIsNotNone(armed_text, "the armed run printed no setUp error traceback; stdout tail: %r"
+                             % armed.stdout[-300:])
+        frames = [line.strip() for line in armed_text.splitlines() if line.lstrip().startswith("File ")]
+        unarmed_frames = [line.strip() for line in unarmed_text.splitlines() if line.lstrip().startswith("File ")]
+        self.assertEqual(armed_text, unarmed_text,
+                         "the armed setUp traceback differs from the unarmed one: armed frames %s, unarmed frames %s"
+                         % (frames, unarmed_frames))
 
 
 if __name__ == "__main__":
