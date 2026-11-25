@@ -1878,7 +1878,7 @@ class StaleCwdRecordTests(unittest.TestCase):
                          % reason)
 
     def test_trash_folder_is_kept_as_dirty_for_a_clone_with_two_local_branches_both_pushed_beside_such_a_record(self):
-        """Nested-clone control, now a keep. The clone holds two local branches, main and `second`, and each one's commit
+        """Nested-clone control. The clone holds two local branches, main and `second`, and each one's commit
         is on its remote. No commit is unpushed and no stash exists, yet the nested `.git` keeps the folder as dirty."""
         self.assert_record_stands_nowhere()
         wt = self.new_worktree("trash-two-pushed-branches")
@@ -1963,8 +1963,8 @@ class StaleCwdRecordTests(unittest.TestCase):
 
     def test_trash_folder_is_kept_as_dirty_for_a_bare_repo_directory_inside_it_beside_such_a_record(self):
         """Nested-repo pin, a bare repo with no `.git` entry. `checkouts/dep.git` holds HEAD, objects and refs, and commits
-        the parent repo cannot see, so the folder is kept as dirty. This case is red on the head and on 3816836c86: each
-        walk finds only a `.git` entry, so a bare repo reads clean."""
+        the parent repo cannot see, so the folder is kept as dirty. A nested-repo walk that finds only a `.git` entry reads
+        a bare repo as clean, so this pin needs the walk to recognise a bare repo too."""
         self.assert_record_stands_nowhere()
         wt = self.new_worktree("trash-bare-dir")
         trash = self.trash_from_build(wt)
