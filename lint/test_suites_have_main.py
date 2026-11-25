@@ -48,6 +48,35 @@ MENTIONS_ONLY = (
     'NOTE = "class Cases(unittest.TestCase):\\n    pass"\n'
     "print(NOTE)\n"
 )
+MAIN_UNDER_IF_FALSE = SUITE_WITHOUT_MAIN + (
+    "\n"
+    "\n"
+    "if False:\n"
+    "    unittest.main()\n"
+)
+MAIN_IN_UNCALLED_FUNCTION = SUITE_WITHOUT_MAIN + (
+    "\n"
+    "\n"
+    "def main():\n"
+    "    unittest.main()\n"
+)
+MAIN_IN_FUNCTION_CALLED_FROM_GUARD = SUITE_WITHOUT_MAIN + (
+    "\n"
+    "\n"
+    "def main():\n"
+    "    unittest.main()\n"
+    "\n"
+    "\n"
+    'if __name__ == "__main__":\n'
+    "    main()\n"
+)
+RUNNER_RESULT_SETS_EXIT_CODE = "import sys\n" + SUITE_WITHOUT_MAIN + (
+    "\n"
+    "\n"
+    'if __name__ == "__main__":\n'
+    "    result = unittest.TextTestRunner().run(unittest.defaultTestLoader.loadTestsFromTestCase(Cases))\n"
+    "    sys.exit(0 if result.wasSuccessful() else 1)\n"
+)
 
 
 def checker():
@@ -93,6 +122,24 @@ class FixtureCases(unittest.TestCase):
     def test_mention_in_string_or_comment_is_clean(self):
         found = checker().problems(fixture("mentions", MENTIONS_ONLY))
         self.assertEqual(found, [], "a TestCase named only in a string or comment is reported: %r" % found)
+
+    def test_main_only_under_if_false_is_a_problem(self):
+        found = checker().problems(fixture("main_under_if_false", MAIN_UNDER_IF_FALSE))
+        self.assertEqual(len(found), 1, "a unittest.main() that never runs under if False: counts as a call: %r" % found)
+        self.assertTrue(found[0].endswith("test_one.py: " + SUFFIX), "problem text is %r" % found[0])
+
+    def test_main_in_uncalled_function_is_a_problem(self):
+        found = checker().problems(fixture("main_in_uncalled_function", MAIN_IN_UNCALLED_FUNCTION))
+        self.assertEqual(len(found), 1, "a unittest.main() inside a function nothing calls counts as a call: %r" % found)
+        self.assertTrue(found[0].endswith("test_one.py: " + SUFFIX), "problem text is %r" % found[0])
+
+    def test_main_in_function_called_from_guard_is_clean(self):
+        found = checker().problems(fixture("main_in_called_function", MAIN_IN_FUNCTION_CALLED_FROM_GUARD))
+        self.assertEqual(found, [], "a unittest.main() in a function the __main__ block calls is reported: %r" % found)
+
+    def test_text_runner_result_sets_exit_code_is_clean(self):
+        found = checker().problems(fixture("text_runner_exit_code", RUNNER_RESULT_SETS_EXIT_CODE))
+        self.assertEqual(found, [], "a TextTestRunner run under the __main__ block is reported: %r" % found)
 
 
 class RepoRun(unittest.TestCase):
