@@ -2,12 +2,13 @@
 
 ## The ruling
 
-Owner, 2026-10-12: a SubagentStart hook injects the standing rules, so a brief need not retype them. `hooks/agent_brief.py` prints `additionalContext` with the lines below. The standing line bans three things only. It holds no reset ban (owner, 14:12 CST 2026-11-23: "yes drop the line then"), so the brief agrees with decision `agent-worktree-discard-is-noted`, where an agent may undo commits inside its own agent-owned worktree. Lane pick, not the owner's: only the reset verb left the line.
+Owner, 2026-10-12: a SubagentStart hook injects the standing rules, so a brief need not retype them. `hooks/agent_brief.py` prints `additionalContext` with the lines below. Two standing lines carry the git bans, for every agent type. The first bans the stash verb everywhere. The second bans, outside the agent's own worktree, the discarding resets, a checkout of a path, and the restore verb. Inside its own worktree an agent may run those. The stash stack is shared by every worktree, and the other acts lose work only in a shared tree; the owner's October rulings allow them inside an agent's own worktree (decision `agent-worktree-discard-is-noted`). Owner, 14:12 CST 2026-11-23: "yes drop the line then".
 
 The hook prints these lines, in this order. A line marked every type goes to every agent type. A line marked writing types only goes to every type outside the read-only set: reviewer, Explore, Plan, claude-code-guide, design-reviewer and refuter. An unknown type writes. Type names match ignoring case.
 
 - (every type) Standing rules for this agent:
-- (every type) Never run git stash, git checkout <path>, or git restore.
+- (every type) Never run git stash.
+- (every type) Outside your own worktree, never run git reset with one of the flags --hard/--merge/--keep, git checkout of a path, or git restore.
 - (writing types only) Push only with: git push origin HEAD:<branch>.
 - (every type) Make no gh call unless your brief names it.
 - (every type) The scope line. Each type below has its own line. A type with no line of its own gets the general line.
@@ -29,7 +30,7 @@ The hook prints these lines, in this order. A line marked every type goes to eve
 - (every type, when .github/stamp.json sets cite.form) Cite a record in this repo's form, one form per record kind, joined by commas. Any other wrapper around a slug stays dead text.
 
 - The type is the text after the last `:`, so `my-plugin:reviewer` counts as `reviewer`. The builder scope line says `A mutant goes to a test-author.` Owner ruling, 2026-11-08 17:19 CST (waiting-page item 447 a): mutants are test content.
-- Readers (the six read-only types above) get the five every-type lines, plus the note and cite lines when they apply. They never commit or push, so they get no push, trailer, record-path, diff or server line. Writers and the general case get all ten fixed lines, plus the note and cite lines when they apply.
+- Readers (the six read-only types above) get the six every-type lines, plus the note and cite lines when they apply. They never commit or push, so they get no push, trailer, record-path, diff or server line. Writers and the general case get all eleven fixed lines, plus the note and cite lines when they apply.
 - The hook is advisory. On an internal error it prints no context, writes one `agent_brief:` line to stderr, and exits 0.
 
 Why: a brief that forgot one line let an agent stash, or push in the wrong form. `additionalContext` on SubagentStart lands in the agent's context before its first prompt.
