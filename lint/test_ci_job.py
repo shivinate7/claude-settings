@@ -4759,9 +4759,15 @@ class ScopeLint(Job):
                 f.write(text)
 
     def commit_base(self, script):
-        """main holds the probe, the two lists the script reads, and the scope script the repo holds (its text)."""
-        self.write({self.PROBE: self.PROBE_SRC, "landed-dirs.txt": "landed-probe-dir\n",
-                    ".github/guard-inputs.txt": "no-such-path/*\n", self.SCOPE: script})
+        """main holds the probe, the two lists the script reads, the guard set's manifest (the list the script's guard arm reads;
+        without it every flag is on), and the scope script the repo holds (its text)."""
+        files = {self.PROBE: self.PROBE_SRC, "landed-dirs.txt": "landed-probe-dir\n",
+                 ".github/guard-inputs.txt": "no-such-path/*\n", self.SCOPE: script}
+        guard_set = os.path.join(HERE, "..", "hooks", "guard-set.txt")
+        if os.path.isfile(guard_set):
+            with open(guard_set, encoding="utf-8", newline="") as f:
+                files["hooks/guard-set.txt"] = f.read()
+        self.write(files)
         self.git("add", "-A")
         self.git("commit", "-qm", "base")
 
