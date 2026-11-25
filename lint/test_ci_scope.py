@@ -18,12 +18,14 @@ Output names pinned (the `scope` job re-exports them as job outputs):
 Run with:  python3 lint/test_ci_scope.py -v
 """
 import ast
+import json
 import os
 import re
 import shutil
 import subprocess
 import tempfile
 import unittest
+from collections import Counter
 from unittest import mock
 
 import sys
@@ -33,6 +35,7 @@ import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
 sys.path.insert(0, os.path.join(HERE, "..", "testing"))
 import tracked_tree  # noqa: E402  copies the script under test into a scratch tree; rm_tree removes the run folder
+import bash_case  # noqa: E402  the one home of the case reader (testing/bash_case.py)
 from workflow_steps import job_block, job_workflow, run_body, step_blocks, step_key  # noqa: E402  the one home of the step parser
 import test_windows_split as split  # noqa: E402  the one home of the checks.yml reader and the `if:` evaluator (eval_with)
 SCRIPT = os.environ.get("CI_SCOPE") or os.path.join(HERE, "..", ".github", "scripts", "ci-scope.sh")
@@ -2740,6 +2743,54 @@ class PushDiffFromProvenBase(FlagAsserts, unittest.TestCase):
     def test_a_pull_request_diff_is_unchanged_by_a_proven_base(self):
         self.assertFlags(run(self.DOCS, event="pull_request", proven=True), want_false=ALL)
         self.assertFlags(run(self.CODE, event="pull_request", proven=True), want_true=["checks_windows_merge", "code"])
+
+
+PINS = os.path.join(HERE, "testdata", "ci_scope_arm_pins.json")
+# The file the delta runs add on the green head. The fixture was frozen with this name.
+PIN_GREEN = "pin-green-head.txt"
+
+
+class PinnedArmVerdicts(unittest.TestCase):
+    """The verdict of each alternative in the case arms of .github/scripts/ci-scope.sh, frozen in
+    lint/testdata/ci_scope_arm_pins.json at the base commit. Regenerate the fixture only for a change of verdict,
+    never for a reformat. A reformat that drops an alternative fails the presence test. One that moves a path to
+    another arm fails the verdict test. The delta-arm alternatives run with GREEN_HEAD set, the rest on a plain
+    pull request. Every run reads the fixture's guard-inputs text and landed-dirs list, so a later edit to either
+    list does not move a pinned verdict."""
+
+    @classmethod
+    def setUpClass(cls):
+        with open(PINS, encoding="utf-8") as f:
+            cls.doc = json.load(f)
+
+    def test_fixture_pins_enough_path_alternatives_to_mean_something(self):
+        paths = [pin for pin in self.doc["pins"] if pin["path"]]
+        self.assertGreaterEqual(len(paths), 240, "the fixture pins fewer path alternatives than the script holds")
+
+    def test_every_pinned_alternative_is_still_in_the_script(self):
+        with open(SCRIPT, encoding="utf-8") as f:
+            arms = bash_case.case_arms(f.read())
+        have = Counter(text for arm in arms for text, _ in arm["alts"])
+        want = Counter(pin["alt"] for pin in self.doc["pins"])
+        gone = ["%s (x%d)" % (alt, want[alt] - have[alt]) for alt in sorted(want) if have[alt] < want[alt]]
+        self.assertEqual(gone, [], "pinned alternatives the script no longer holds, by text")
+
+    def test_each_pinned_path_turns_the_flags_it_turned_at_the_base(self):
+        seen = {}
+        for pin in self.doc["pins"]:
+            if not pin["path"]:
+                continue
+            key = (pin["run"], pin["path"])
+            if key not in seen:
+                if pin["run"] == "delta":
+                    got = run([pin["path"]], green=[PIN_GREEN], guard_inputs=self.doc["guard_inputs"],
+                              landed=self.doc["landed"])
+                else:
+                    got = run([pin["path"]], existing=[pin["path"]], guard_inputs=self.doc["guard_inputs"],
+                              landed=self.doc["landed"])
+                seen[key] = sorted(name for name, value in got.items() if value == "true")
+            with self.subTest(alt=pin["alt"], path=pin["path"], run=pin["run"]):
+                self.assertEqual(seen[key], pin["flags"])
 
 
 if __name__ == "__main__":
