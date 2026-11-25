@@ -3018,12 +3018,15 @@ RUN_FOLDER = re.compile(r"(?:ci-job-lint-(\d+)-|ci-job-pin-(\d+)-[0-9a-f]{7}-|mu
 
 def _descends_from(sweep, pid, owner):
     """True when OWNER is PID's parent or an ancestor, None when a parent cannot be read on the way up, else False. A holder is its folder's
-    owner's child (red-run's test command, a lint's subprocess), so this is how an unreadable pid is tied to one folder."""
+    owner's child (red-run's test command, a lint's subprocess), so this is how an unreadable pid is tied to one folder. A chain that
+    revisits a pid is a parent loop with no ancestor outside it, so no owner sits above: False."""
+    seen = set()
     for _ in range(sweep.MAX_CLIMB):
         if pid == owner:
             return True
-        if pid <= 1:
+        if pid <= 1 or pid in seen:
             return False
+        seen.add(pid)
         pid = sweep._parent_pid(pid)
         if pid is None:
             return None
