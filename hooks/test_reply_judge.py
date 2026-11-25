@@ -2205,11 +2205,11 @@ def case_glossary_check_passes_on_reply_judge():
 
 
 # --------------------------------------------------------------------------- cost rank
-# measure-before-priority: a reply that ranks a cost (the biggest cost, the most expensive lane, most of the
+# style-measure-before-priority: a reply that ranks a cost (the biggest cost, the most expensive lane, most of the
 # spend) is judged off-sample, as a search total is. Code finds the ranking words (COST_RANK in reply_judge.py);
-# the model decides whether the ranking names its measure. COST_RULE is the test's pick, taken from the branch
-# slug. No ruling names the rule id yet, so the owner may rename it.
-COST_RULE = "measure-before-priority"
+# the model decides whether the ranking names its measure. COST_RULE is the rule's anchor id, the one
+# output-styles/shiv-stylisms.md carries and JUDGED_RULES names.
+COST_RULE = "style-measure-before-priority"
 COST_REPLY = "Done: the biggest cost is wakes, from the run."
 COST_FINDING = {"ok": False, "reason": COST_RULE + ": a cost ranking names no measure; give the figure with its unit "
                 "and a date, run id or sample count."}
@@ -2379,7 +2379,7 @@ def case_cost_rank_prompt_flags_no_measure_only_when_work_is_steered():
 def case_cost_rank_style_flags_no_measure_only_when_work_is_steered():
     with open(STYLE_FILE, encoding="utf-8") as f:
         bullet = rule_text_before(f.read(), STYLE_COST_ANCHOR).lower()
-    check("no measure cost rank style: the output style holds the measure-before-priority bullet (control)",
+    check("no measure cost rank style: the output style holds the style-measure-before-priority bullet (control)",
           bullet.strip() != "", "the anchor %s is absent" % STYLE_COST_ANCHOR)
     sentences = [s for s in bullet.split(".") if s.strip()]
     check("no measure cost rank style: one sentence flags a ranking with no measure only when the same reply "
