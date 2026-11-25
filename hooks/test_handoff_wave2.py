@@ -2718,13 +2718,15 @@ def case_flagged_call_opens_the_handoff():
 # The rewrite check (decision precompact-handoff). The audit spawn sets <sid>.rewrite. The next Stop judges the
 # handoff against: the #N and fb- ids the handoff held at PreCompact (state.json keeps them), the audit's MISSING
 # ids, and the job ids that stall_watch.scan_jobs shows live. The audit's DONE and STALE ids may go, and so may a
-# baseline job that is no longer live. The audit's reply is read from the transcript: a heading line MISSING,
-# STALE or DONE, then one item per line, each with one backticked token.
+# baseline job that is no longer live. The audit's reply is read from the transcript: a heading line whose first
+# word is MISSING, STALE or DONE (any case, with count or colon text after it), then one item per line, each with
+# one backticked token. A token on the heading line itself counts too.
 
 BASE_PR_DONE = "#3840"       # merged; the audit lists it DONE, so the rewrite may drop it
 BASE_PR_OPEN = "#3873"       # open; the audit lists no item for it, so the rewrite keeps it
 BASE_FB_STALE = "fb-1312-1"  # the audit lists it STALE, so the rewrite may drop it
 BASE_FB_OPEN = "fb-1313-2"   # standing; the audit lists no item for it, so the rewrite keeps it
+BASE_FB_CLOSED = "fb-1314-3"  # answered; the audit lists it DONE (F3), so the rewrite may drop it
 JOB_DEAD = "bk9dead01"       # launched before PreCompact, finished before the Stop: may be dropped
 JOB_NEW = "bk9new03"         # launched after PreCompact, still running at the Stop: required
 PR_MISSING = "#3900"         # the audit lists it MISSING: required
@@ -2784,9 +2786,10 @@ def pre_compact_at(c, sid):
                                    "transcript_path": SESSION_TRANSCRIPT, "cwd": c.proj})
 
 
-def stop_at(c, sid, probe_log=None):
-    """The Stop run, with the session's transcript path. With probe_log, the run logs its opens of that transcript."""
-    body = {"session_id": sid, "hook_event_name": "Stop", "stop_hook_active": False,
+def stop_at(c, sid, probe_log=None, active=False):
+    """The Stop run, with the session's transcript path. `active` is stop_hook_active: true on a Stop that follows an
+    earlier Stop block. With probe_log, the run logs its opens of that transcript."""
+    body = {"session_id": sid, "hook_event_name": "Stop", "stop_hook_active": active,
             "cwd": c.proj, "transcript_path": SESSION_TRANSCRIPT}
     if probe_log is None:
         return c.run(READ_CHECK, "--stop", body)
@@ -2824,22 +2827,25 @@ def state_json(c, sid):
         return f.read()
 
 
-def rewrite_flow(c, sid, tokens, mode="sync", probe_log=None):
-    """One compaction, one audit and one rewrite. The handoff holds BASELINE at PreCompact. The audit's result is
-    `mode`: sync (AUDIT_REPLY as its tool result), async (the audit still runs: its launch result only), or null
-    (a result the transcript cannot read). Then the handoff becomes handoff_with(tokens), and Stop runs. Returns
-    the runs and the rewrite flag: pre, post, read, spawn (the guard's decision), flag, stop."""
-    put(c.handoff(sid), handoff_with(BASELINE))
+def rewrite_flow(c, sid, tokens, mode="sync", probe_log=None, reply=None, baseline=BASELINE, chained=False):
+    """One compaction, one audit and one rewrite. The handoff holds `baseline` at PreCompact. The audit's result is
+    `mode`: sync (`reply`, or AUDIT_REPLY when none is given, as its tool result), async (the audit still runs: its
+    launch result only), or null (a result the transcript cannot read). Then the handoff becomes handoff_with(tokens),
+    and Stop runs. With `chained`, a Stop before the spawn blocks for the audit, and the Stop after the rewrite runs
+    with stop_hook_active true, as a Stop does after an earlier block. Returns the runs and the rewrite flag: pre,
+    post, read, first (the Stop before the spawn; None unless chained), spawn (the guard's decision), flag, stop."""
+    put(c.handoff(sid), handoff_with(baseline))
     before = [rec("user", [{"type": "text", "text": "hello"}])] + launch_shell(JOB_DEAD, "tu-dead")
     write_transcript_at(c, before)
     pre = pre_compact_at(c, sid)
     post = c.post_compact(sid)
     rd = c.read(sid, c.handoff(sid))
+    first = stop_at(c, sid) if chained else None
     spawn = guard_call(c, sid, "Agent", AUDIT_SPAWN)
     flag = os.path.isfile(c.state("%s.rewrite" % sid))
     after = [spawn_call("tu-audit", AUDIT_SPAWN)]
     if mode == "sync":
-        after.append(spawn_result("tu-audit", AUDIT_REPLY))
+        after.append(spawn_result("tu-audit", AUDIT_REPLY if reply is None else reply))
     elif mode == "null":
         after.append(spawn_result("tu-audit", None))
     else:
@@ -2848,8 +2854,8 @@ def rewrite_flow(c, sid, tokens, mode="sync", probe_log=None):
     after += [finish(JOB_DEAD)] + launch_shell(JOB_NEW, "tu-new")
     write_transcript_at(c, before + after)
     put(c.handoff(sid), handoff_with(tokens))
-    stop = stop_at(c, sid, probe_log)
-    return {"pre": pre, "post": post, "read": rd, "spawn": spawn, "flag": flag, "stop": stop}
+    stop = stop_at(c, sid, probe_log, active=chained)
+    return {"pre": pre, "post": post, "read": rd, "first": first, "spawn": spawn, "flag": flag, "stop": stop}
 
 
 def flow_why(flow):
@@ -2873,6 +2879,15 @@ def rewrite_block_why(stop, token):
 
 def rewrite_passes_why(stop):
     return "" if passes(stop) else "Stop blocked: %r" % tail(stop.stdout)
+
+
+def audit_block_why(stop):
+    """'' when Stop blocks and the reason is the audit's remedy. Else the one cause."""
+    obj = json_or_none(stop.stdout)
+    if stop.returncode != 0 or not (isinstance(obj, dict) and obj.get("decision") == "block"):
+        return "Stop did not block: rc=%r out=%r" % (stop.returncode, tail(stop.stdout))
+    reason = str(obj.get("reason", ""))
+    return "" if "audit" in reason else "the block is not the audit block: %r" % tail(reason, 160)
 
 
 def without(tokens, *drop):
@@ -3137,6 +3152,112 @@ def case_rewrite_check_cost():
         c2.cleanup()
 
 
+def case_f1_heading_spellings_start_the_list():
+    """F1: a MISSING heading that is not exactly `MISSING` still starts its list: `MISSING items:`, `MISSING (2):`,
+    `Missing`, `missing`, and a token on the heading line itself. Each spelling: a rewrite that drops the audit's
+    MISSING PR is refused at Stop, naming it and a remedy. Red on the exact-match heading parser, which starts no list
+    for these lines, so the PR is never required."""
+    row = "- `%s` open PR with no line in the handoff" % PR_MISSING
+    rest = ["STALE", "- `%s` no longer standing" % BASE_FB_STALE, "DONE", "- `%s` merged" % BASE_PR_DONE]
+    spellings = (
+        ("items", "MISSING items:", [row]),
+        ("count", "MISSING (2):", [row]),
+        ("title", "Missing", [row]),
+        ("lower", "missing", [row]),
+        ("inline", "MISSING: `%s` open PR with no line in the handoff" % PR_MISSING, []),
+    )
+    for short, heading, body in spellings:
+        c = Case("f1-" + short)
+        try:
+            reply = "\n".join([heading] + body + rest + [""])
+            f = rewrite_flow(c, SID, without(KEPT, PR_MISSING), reply=reply)
+            if not step("F1 (%s): the compaction, the read and the audit spawn run, and the spawn is allowed" % short,
+                        flow_why(f)):
+                continue
+            step("F1: the heading %r starts the MISSING list, so a rewrite that drops its PR %s is refused at Stop, naming it"
+                 % (heading, PR_MISSING), rewrite_block_why(f["stop"], PR_MISSING))
+        finally:
+            c.cleanup()
+
+
+def case_f2_rewrite_after_earlier_block_is_judged():
+    """F2: the rewrite check judges a Stop that follows an earlier block (stop_hook_active true). The chain: the first
+    Stop blocks for the audit, the audit spawns, and the rewrite drops the audit's MISSING PR. The next Stop, with
+    stop_hook_active true, blocks naming it. The Stop after that, on the same unchanged handoff, passes: one block per
+    chain. A rewrite that keeps every token then passes and clears the flag. Red on the old check, which skips every
+    Stop with stop_hook_active true."""
+    c = Case("f2-chain")
+    try:
+        f = rewrite_flow(c, SID, without(KEPT, PR_MISSING), chained=True)
+        if not step("the compaction, the read and the audit spawn run, and the spawn is allowed", flow_why(f)):
+            return
+        step("the Stop before the audit spawn blocks for the audit", audit_block_why(f["first"]))
+        step("F2: a rewrite that drops the audit's MISSING PR %s is refused at the Stop that follows an earlier block, "
+             "naming it" % PR_MISSING, rewrite_block_why(f["stop"], PR_MISSING))
+        step("F2: the next Stop, on the handoff unchanged since that block, passes",
+             rewrite_passes_why(stop_at(c, SID, active=True)))
+        put(c.handoff(SID), handoff_with(KEPT))
+        step("F2: a rewrite that keeps every token passes the Stop that follows an earlier block",
+             rewrite_passes_why(stop_at(c, SID, active=True)))
+        step("F2: the passing Stop clears the rewrite flag",
+             "" if not os.path.isfile(c.state("%s.rewrite" % SID)) else "the rewrite flag is still set after the pass")
+    finally:
+        c.cleanup()
+
+
+def case_f3_closed_feedback_done_may_be_dropped():
+    """F3, green control: a closed feedback id the audit lists under DONE (answered, closed or withdrawn) may go in the
+    rewrite, so a rewrite that drops it passes Stop. Twin: the same id, listed under neither DONE nor STALE, is refused.
+    Green on the old code, where the DONE list already frees the id. The brief's DONE wording is pinned in
+    test_precompact_handoff.py."""
+    head = ["MISSING", "- `%s` open PR with no line in the handoff" % PR_MISSING,
+            "STALE", "- `%s` no longer standing" % BASE_FB_STALE,
+            "DONE", "- `%s` merged" % BASE_PR_DONE]
+    baseline = BASELINE + (BASE_FB_CLOSED,)
+    c1 = Case("f3-done")
+    try:
+        f = rewrite_flow(c1, SID, KEPT, reply="\n".join(head + ["- `%s` answered" % BASE_FB_CLOSED, ""]),
+                         baseline=baseline)
+        if not step("the compaction, the read and the audit spawn run, and the spawn is allowed", flow_why(f)):
+            return
+        step("F3: a rewrite that drops %s, which the audit lists under DONE, passes Stop" % BASE_FB_CLOSED,
+             rewrite_passes_why(f["stop"]))
+    finally:
+        c1.cleanup()
+    c2 = Case("f3-twin")
+    try:
+        f = rewrite_flow(c2, SID, KEPT, reply="\n".join(head + [""]), baseline=baseline)
+        if not step("the compaction, the read and the audit spawn run, and the spawn is allowed", flow_why(f)):
+            return
+        step("F3 twin: a rewrite that drops %s, listed under neither DONE nor STALE, is refused" % BASE_FB_CLOSED,
+             rewrite_block_why(f["stop"], BASE_FB_CLOSED))
+    finally:
+        c2.cleanup()
+
+
+def case_f6_missing_handoff_passes_and_keeps_flag():
+    """F6, pinned as it is, green: with the handoff file gone at Stop, Stop passes and the rewrite flag stays set. The
+    rewrite cannot be read, so it is not judged, and the flag waits for a Stop that can read it."""
+    c = Case("f6-gone")
+    try:
+        post, rd = compact(c, SID)
+        if not step("--post-compact and the Read exit 0", exit_why(post) or exit_why(rd)):
+            return
+        spawn = guard_call(c, SID, "Agent", AUDIT_SPAWN)
+        if not step("the Audit: spawn is allowed", allowed_why(spawn)):
+            return
+        if not step("the audit spawn sets the rewrite flag",
+                    "" if os.path.isfile(c.state("%s.rewrite" % SID)) else "no %s.rewrite flag after the spawn" % SID):
+            return
+        os.remove(c.handoff(SID))
+        stop = stop_at(c, SID)
+        step("F6: with the handoff file gone, Stop passes", rewrite_passes_why(stop))
+        step("F6: with the handoff file gone, the rewrite flag stays set",
+             "" if os.path.isfile(c.state("%s.rewrite" % SID)) else "the rewrite flag was cleared with no handoff read")
+    finally:
+        c.cleanup()
+
+
 def main() -> int:
     print("Part 1: SessionEnd pointer, SessionStart reorient (hooks/precompact_handoff.py)")
     case_session_end_clear_writes_pointer()
@@ -3258,6 +3379,10 @@ def main() -> int:
     case_stop_quiet_while_audit_runs()
     case_failed_precompact_passes_and_clears()
     case_rewrite_check_cost()
+    case_f1_heading_spellings_start_the_list()
+    case_f2_rewrite_after_earlier_block_is_judged()
+    case_f3_closed_feedback_done_may_be_dropped()
+    case_f6_missing_handoff_passes_and_keeps_flag()
 
     if FAILED:
         print()
