@@ -112,7 +112,7 @@
         "kind": "guard",
         "ref": "roles-third-round-steps-up"
       },
-      "test": "hooks/test_guard.py::floor step-up: builder Round 3 of 3 on sonnet is denied"
+      "test": "hooks/test_guard.py::floor step-up: reviewer Round 3 of 3 on haiku is denied"
     },
     "roles-resume-by-name": {
       "mechanism": {
