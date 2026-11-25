@@ -55,8 +55,9 @@ rules' prompt, and every other Stop sends the two newer rules' prompt.
 A finding writes one line to guard.log through `guard_core.record` (decision `noted`; for the older reason, rule =
 the first older rule id it names, else the first newer rule id it names, else `reply-judge`; for a `new_rules` item, rule = its id; matched = `stop=<n> <reason>`). The
 advisor reads the older rules' lines at each cull; the owner reads the two newer rules' lines at his review.
-guard_core loads on a finding, and on a judged Stop whose Why yours line
-cites a route id a row holds (route_match.surface reads it). A failed write is swallowed.
+Every Stop with a reply imports decision_watch, which imports guard, which loads guard_core and the rule families. So a
+finding's write adds no load. route_match loads on a judged Stop whose Why yours line cites a route id a row holds. A failed
+write is swallowed.
 
 Fail open. Any model error, timeout or odd answer prints one line on stderr, exits 0, and
 refuses nothing. A finding never refuses: the hook runs async, and a finding on an older rule prints
@@ -404,7 +405,7 @@ def has_input_needed(reply):
 def log_finding(session_id, stop_n, rule, reason):
     """Write one guard.log line for a finding under `rule`. Never raises."""
     try:
-        import guard_core  # lazy: a Stop with no finding loads no guard
+        import guard_core  # already loaded by decision_watch's import of guard
         guard_core.set_log_session(session_id)
         guard_core.record("Stop", "noted", rule, "stop=%d %s" % (stop_n, " ".join(reason.split())))
     except Exception:
