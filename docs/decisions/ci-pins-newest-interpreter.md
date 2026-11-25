@@ -17,14 +17,15 @@ The consultant reads the ruling this way; the owner's words are quoted above.
 
 ## The mistake and its harm
 
-- Since commit 638d672ffb (2026-09-16, the first commit that set a Python pin), CI pins Python 3.11 on 40 lines: 38 in `.github/workflows/checks.yml`, 2 in `.github/workflows/lane-touched-tests.yml`. No reason is on record.
-- The owner's Mac runs Python 3.15.
-- On macOS, `os.waitid` is missing before Python 3.13 (`lint/test_verdict.py:48`). A macOS run on 3.11 lacks it; the owner's 3.15 Mac has it. Pull request 3869 (branch `hang-stop-zombie-no-waitid`) is the fix for the hang check that reads it.
+- CI carries its Python pin as 40 literal copies: 38 in `.github/workflows/checks.yml`, 2 in `.github/workflows/lane-touched-tests.yml`. All 40 say 3.15.
+- Nothing moves the pin. Each bump is a hand edit of 40 lines.
+- The owner's Mac runs Python 3.15. On macOS, `os.waitid` is missing before Python 3.13 (`lint/test_verdict.py:48`), so a pin below 3.13 runs that check without it.
 
 ## State
 
-- Main still pins 3.11.
-- Lane `ci-python-pin-moves` moves the pin. The consultant's plan: try 3.15 first, then 3.12, and pin the newest that passes its checks. Any fallback reason is written here.
+- Main pins 3.15 on all 40 lines. Nothing moves the pin yet.
+- Lane `ci-python-pin-follows-newest` gives the pin one home. The daily run tries the next Python and says when it passes (no new timer). Other repos take the same pin, with an explicit carve-out.
+- The lane waits on the open PRs that hold `.github/workflows/checks.yml`. Any fallback reason is written here.
 - The floor for product code stays 3.9, checked by `lint/check_python_floor.py`.
 - Unknown: the Python on the owner's Windows machine and in cloud sessions.
 
