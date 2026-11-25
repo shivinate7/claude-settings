@@ -17,8 +17,8 @@ docstring and any other string are not read. A name a prompt constant is built f
     ordinary hyphenated word (`red-run`, `test-practices`) has no such first segment and is left
     alone.
 
-WHAT IT CANNOT SEE. A prompt constant not in PROMPT_CONSTANTS (the other *_PROMPT constants of
-hooks/call_judge.py, the prompts of other hook files) is not read. A prose id in a family no
+WHAT IT CANNOT SEE. A prompt constant not in PROMPT_CONSTANTS (a new prompt constant, the prompts
+of other hook files) is not read. A prose id in a family no
 anchor uses is not read, and an id split across two joined strings is not read. A hyphenated word
 that starts with a family word reads as an id; a false alarm is cleared by renaming the word.
 
@@ -40,7 +40,20 @@ import rule_audit  # noqa: E402  the one home of the anchor pattern and the anch
 # hooks/ file -> {prompt constant: how its strings read}.
 PROMPT_CONSTANTS = {
     "reply_judge.py": {"JUDGED_RULES": "ids", "INSTRUCTIONS": "prose"},
-    "call_judge.py": {"SPAWN_PROMPT": "prose"},
+    "call_judge.py": {
+        "OPUS_ASK_PROMPT": "prose",
+        "OVERRIDE_ASK_PROMPT": "prose",
+        "OPUS_SCOPE_PROMPT": "prose",
+        "SPAWN_PROMPT": "prose",
+        "PAST_RULING_ITEM": "prose",
+        "JUDGE_ITEMS": "prose",
+        "QUESTION_PROMPT": "prose",
+        "PAGE_PROMPT": "prose",
+        "NONE_DIRECTION_RULE": "prose",
+        "WIDENING_TEMPLATE": "prose",
+    },
+    "decision_watch.py": {"JUDGE_INSTRUCTIONS": "prose"},
+    "feedback_guard.py": {"PROMPT": "prose"},
     "sendmessage_state.py": {"WORDING_PROMPT": "prose"},
     "prose_judge.py": {"COMMON": "prose", "RULES": "prose"},
 }

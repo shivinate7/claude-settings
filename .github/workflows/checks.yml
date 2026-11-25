@@ -567,6 +567,10 @@ jobs:
         if: ${{ !cancelled() && (needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_any == 'true') }}
         run: python3 lint/check_cost_pins.py
 
+      - name: Prompt rule-id lint
+        if: ${{ !cancelled() && (needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_any == 'true') }}
+        run: python3 lint/check_prompt_rule_ids.py
+
       # A static read of the mutant tables of hooks/mutate_guard.py and janitor/mutate_sweep.py: each anchor sits once where its entry says.
       # It reads every anchor in one pass, in about a second, and names each bad one. The mutation run's own pre-check covers ambiguity only
       # for guard and audit targets.
