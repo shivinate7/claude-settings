@@ -2047,6 +2047,38 @@ class ReadyPassLine(unittest.TestCase):
         lines = self.pass_lines(r)
         self.assertEqual(lines[1:], [], "a PASS keeps a line that only quotes the ready-pass format mid-line: %r" % r.stdout)
 
+    LONG = merge.READY_PASS_FMT.format(checks=", ".join("step%02d" % i for i in range(60)), sha="1234abcde")  # a 523-byte pass line
+    EDGE_GAP = OVERLAP + 44  # the line starts this far before a chunk edge: past OVERLAP, so the next chunk reads it from mid-line
+
+    def edge_run(self, before):
+        """Run a wrapped command that prints `before` bytes of filler, then LONG on its own line, and exits 0. LONG starts at byte `before` of the run."""
+        code = ("import sys\n"
+                "out = sys.stdout.buffer\n"
+                "out.write(b'x' * %d + b'\\n')\n" % (before - 1)
+                + "out.write(%r.encode() + b'\\n')\n" % self.LONG
+                + "out.flush()\n")
+        with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as d:
+            return run(code, log=os.path.join(d, "v.log"))
+
+    def test_a_kept_line_that_starts_before_a_chunk_edge_prints_whole(self):
+        """bin/verdict reads the run in CHUNK-byte pieces, each starting OVERLAP bytes before the last one ended. LONG starts EDGE_GAP bytes
+        before an edge and runs past it. The next piece then starts mid-line, and the scan keeps the first piece's copy, which stops at the
+        edge, so the line prints cut. The edges are CHUNK, where the first piece ends, and 2 * CHUNK - OVERLAP, where the second ends."""
+        self.assertGreater(len(self.LONG), self.EDGE_GAP, "the fixture line must run past the edge")
+        for at in (CHUNK - self.EDGE_GAP, 2 * CHUNK - OVERLAP - self.EDGE_GAP):
+            with self.subTest(line_starts_at=at):
+                r = self.edge_run(at)
+                lines = self.pass_lines(r)
+                self.assertEqual(r.returncode, 0)
+                self.assertEqual(lines[1:], [self.LONG], "a kept line that starts %d bytes before a chunk edge prints cut, not whole: %r"
+                                 % (self.EDGE_GAP, lines[1:]))
+
+    def test_a_kept_line_well_inside_a_chunk_prints_whole(self):  # control: the same line in a run of the same size, away from any edge
+        r = self.edge_run(CHUNK + 1000)
+        lines = self.pass_lines(r)
+        self.assertEqual(r.returncode, 0)
+        self.assertEqual(lines[1:], [self.LONG], "a kept line well inside a chunk does not print whole: %r" % (lines[1:],))
+
     def test_kept_forms_are_fixed_prefixes_of_both_merge_formats(self):
         kept = getattr(load_verdict_module(), "READY_PASS_KEPT", None)
         self.assertIsNotNone(kept, "bin/verdict holds no READY_PASS_KEPT constant, so no ready-pass line is kept")
