@@ -22,15 +22,15 @@ What is exempt.
 
 How it splits sentences.
 - It calls `split_sentences` in `lint/ste_lint.py`, the one splitter. It builds no second one.
-- That splitter keeps "e.g.", "i.e.", a version number such as 3.15 and a file name such as merge.py whole.
+- That splitter keeps "e.g.", "i.e.", a version number and a file name such as merge.py whole.
   The check also keeps a month abbreviation before a day number whole, as in "Nov. 25", which the splitter breaks today.
   It also keeps a stop inside an inline code span whole.
   The check does both itself, so the pins that child repos hold on `lint/ste_lint.py` do not move.
 
 Why: the repo's practice is one entry per line, sorted, in one home (decision `one-layout-every-repo`).
 A ruling kept on one long line breaks that practice: two lanes that add a sentence to it add the same line, and git reports a conflict.
-A measured 57 of 308 merges of main into lane branches conflicted since Nov 18, 2026.
-Decision `lanes-run-no-full-ci-job` held its ruling as one line of over 4,000 characters and conflicted in 5 of 17 merges.
+Merges of main into lane branches conflicted, and the rate is unmeasured.
+Decision `lanes-run-no-full-ci-job` held its ruling as one long line, which also conflicted in merges.
 
 Mistake it guards: a lane adds a sentence to a long ruling line, and the next lane that does the same cannot merge without a hand fix.
 
