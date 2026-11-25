@@ -72,7 +72,7 @@ def holder_id(env, payload_session_id=None):
     """The caller's holder id: `session_X` for a cloud id `cse_X`, else the local session id, else the hook payload's. None when none is set.
     A cloud value that is set but not of the form cse_X gives no id: it never falls through to the local or payload id."""
     if env.get(override.LANE_ENV):
-        return override.remote_session_id(env)
+        return override.session_id_in(env)
     return env.get(LOCAL_ENV) or payload_session_id or None
 
 
