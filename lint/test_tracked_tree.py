@@ -333,6 +333,15 @@ class ManifestCases(unittest.TestCase):
             tracked_tree.tracked("lint", tree)
         self.assertIn(MANIFEST_NAME, str(caught.exception), "the error for a manifest with no lint/ file names no manifest")
 
+    def test_a_file_added_through_the_manifest_lists_in_the_copy(self):
+        dest = self.export("added")
+        write(os.path.join(dest, "lint", "zz_new.py"), "Y = 5\n")
+        add = getattr(tree_export, "manifest_add", None)
+        self.assertTrue(callable(add), "hooks/tree_export.py has no manifest_add(dest, paths): an added file never reaches the copy's listing")
+        add(dest, ["lint/zz_new.py"])
+        got = self.listed(lambda: tracked_tree.tracked("lint", dest), "the exported copy's lint/")
+        self.assertIn("zz_new.py", got, "the copy's lint/ lists %s, not the file manifest_add added" % (got,))
+
 
 if __name__ == "__main__":
     unittest.main()

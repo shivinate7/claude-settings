@@ -223,6 +223,20 @@ class TreeExportManifestCases(unittest.TestCase):
             got = sorted(line for line in handle.read().split("\n") if line)
         self.assertEqual(got, want, "the manifest lists %s, git lists %s at the sha" % (got, want))
 
+    def test_manifest_add_puts_an_added_path_in_the_copys_manifest_and_keeps_the_rest(self):
+        repo, sha = make_fixture(os.path.join(ROOT, "add"), files=MANIFEST_FILES)
+        want = tracked_paths(repo, sha) + ["lint/zz_new.py"]
+        dest = os.path.join(ROOT, "add-export")
+        os.makedirs(dest)
+        error = tree_export.export_tree(repo, sha, dest)
+        self.assertIsNone(error, "the export of the manifest fixture failed: %s" % error)
+        add = getattr(tree_export, "manifest_add", None)
+        self.assertTrue(callable(add), "hooks/tree_export.py has no manifest_add(dest, paths): an --add file never reaches the copy's manifest")
+        add(dest, ["lint/zz_new.py"])
+        with open(os.path.join(dest, MANIFEST_NAME), encoding="utf-8", newline="") as handle:
+            got = sorted(line for line in handle.read().split("\n") if line)
+        self.assertEqual(got, sorted(want), "manifest_add left the copy's manifest as %s, want the export's paths and lint/zz_new.py" % (got,))
+
 
 if __name__ == "__main__":
     unittest.main()
