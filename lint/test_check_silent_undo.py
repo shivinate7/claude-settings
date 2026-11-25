@@ -3637,6 +3637,48 @@ class OctopusCommonBase(MainLineDrop, unittest.TestCase):
                 problems, _ = octopus_verdict(self.r.dir, head)
                 self.assertEqual(problems, [], "a clean octopus with %s holding the line is refused: %r" % (carrier, problems))
 
+    def upstream_two_ahead_of_local_main(self):
+        """origin/main takes two commits that local main never takes: the first adds LINE to app.txt, the second deletes
+        `line 5`, which feat never touches. feat edits `line 15`, so app.txt is read on both sides of a merge. Local main is
+        put back at the cut, so origin/main is two commits ahead of it, and origin/HEAD tracks origin/main."""
+        self.ORIGIN_HEAD = True
+        self.cut_feat("feat edits line 15", feat_txt="feat\n", app_txt=BODY.replace("line 15\n", "line 15 feat\n"))
+        r = self.r
+        cut = r.sh("rev-parse", "main")
+        self.main_commit("upstream adds LINE", self.T1, app_txt=BODY + self.LINE + "\n")
+        self.main_commit("upstream deletes line 5", self.T2, app_txt=BODY.replace("line 5\n", "") + self.LINE + "\n")
+        r.sh("update-ref", "refs/heads/main", cut)
+        self.assertEqual(r.sh("rev-list", "--count", "main..origin/main"), "2", "premise: origin/main is not two commits ahead of local main")
+        self.assert_origin_head(True)
+
+    def merge_upstream_into(self, branch, drop=False):
+        """A new branch from feat that merges origin/main with no conflict. With drop, the merge commit sets app.txt to
+        upstream's copy less LINE, the hand-dropped line. -> the merge's sha."""
+        r = self.r
+        r.sh("checkout", "-q", "-b", branch, "feat")
+        r.sh("merge", "--no-commit", "--no-ff", "origin/main")
+        if drop:
+            r.put("app.txt", BODY.replace("line 5\n", "").replace("line 15\n", "line 15 feat\n"))
+            r.sh("add", "-A")
+        r.sh("commit", "-q", "-m", "Merge origin/main into " + branch, date=self.T3)
+        return r.sh("rev-parse", "HEAD")
+
+    def test_a_clean_merge_of_upstream_ahead_of_local_main_is_not_refused(self):  # control
+        """Local main trails origin/main by two commits, and the merge loses no line. check() finds nothing: `line 5` is in the
+        merge base, so upstream's deletion of it is not a loss, whatever local main still holds."""
+        self.upstream_two_ahead_of_local_main()
+        head = self.merge_upstream_into("clean")
+        self.assertEqual(self.parent_count(head), 2, "premise: the head is a merge of two parents")
+        self.assertEqual(self.r.verdict(head), [], "a clean merge of origin/main, with local main behind it, is refused")
+
+    def test_a_hand_drop_of_upstream_line_with_local_main_behind_is_refused(self):
+        """The merge drops LINE, which origin/main added and local main does not hold. The finding names LINE and origin/main."""
+        self.upstream_two_ahead_of_local_main()
+        origin = self.r.sh("rev-parse", "origin/main")
+        head = self.merge_upstream_into("drop", drop=True)
+        self.assert_dropped(head, origin)
+        self.assert_drops(self.r.verdict(head), origin, head)
+
 
 class DefaultBase(unittest.TestCase):
     """With no --upstream, a local run judges the branch against its base: the upstream the branch tracks, which for a
