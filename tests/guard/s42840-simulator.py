@@ -28,7 +28,7 @@ if os.name != "nt":
     LOG_FAMILY[lease_ps_label] = FAMILY
     LOG_CHECKS = LOG_CHECKS + ((lease_ps_label, lease_fake_ps_check()),)
 else:
-    skip_case("simulator: the boot, hold and bypass rules, every case of the family", NO_SIMULATOR)
+    skip_case("section 42840 (simulator): the boot, hold, bypass, route, lease and fake-ps cases, which need the POSIX fakes", NO_SIMULATOR)
 
 
 

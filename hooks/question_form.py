@@ -10,6 +10,11 @@ question-form holds the ruling; rule `style-question-form` holds the text.
 page_item_hit, which filters the ArtifactData writes by collection and url and then calls item_hit; a write to another page gets only the check for an option keyed none. Nothing here writes a file. The only processes it starts are the git reads of past_rulings (the roadmap step notes, and the ruled store: one ls-tree, one cat-file, and one more when an entry names `lands_in`), for a caller that makes a model call anyway.
 
     past_rulings(text, repo_root) -> (candidates, unknown)   the decision, debt and step rulings the judge reads
+    named_rulings(text, ids)      -> ids named by a `Based on (ruling):` line: the code allow of item 8
+    ruling_time(candidates, id), ruling_decides(candidates, id)   the cited ruling's own date and one sentence, from its listed line
+    split_questions(text, starts) -> one piece of text per question, its Based on lines kept with it
+    labels_block(questions)       -> the units under the labels Q1, Q2, ... that code gives the judge (the judge never counts)
+    past_ruling_text(reason, ids, candidates, questions, listed, context) -> the refusal text of a past-ruling verdict, '' to pass
     key_overlap(reply, earlier)   -> clashing option keys     lint/report_guard.py rule question-keys
 
 THE FORM. A decision on the page (in `context`), or a chat question with 2+ options (in `question`):
@@ -2235,7 +2240,8 @@ RULING_EXTRA_CAP = 600  # the most a record's ruling section adds past INDEX_CAP
 RULING_HEADING = re.compile(r"^##[ \t]+The ruling[ \t]*$", re.I | re.M)
 RULING_WORDS = re.compile(r"ruling|owner|shiv", re.I)
 SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+")
-DATE_STAMP = re.compile(r"\b20\d\d-\d\d-\d\d(?: \d\d:\d\d)?")
+UNCHECKED_MARK = " (unchecked, not law)"  # the ruled store's mark on an entry no reader has checked: the one text of it
+DATE_IN_TEXT = re.compile(r"\b20\d\d-\d\d-\d\d(?: \d\d:\d\d)?")
 WORD = re.compile(r"[a-z]{4,}")
 STOPWORDS = frozenset(("that", "this", "with", "from", "have", "will", "should", "would", "could", "there", "their",
                        "about", "which", "when", "what", "were", "been", "into", "than", "then", "them", "they",
@@ -2298,15 +2304,15 @@ def _units(section):
 def _owner_sentences(section) -> str:
     """The units of `section` (see _units) that end past INDEX_CAP and carry a ruling word (RULING_WORDS), joined
     with a space, at most RULING_EXTRA_CAP characters in all, the space before them included. When they do not all
-    fit, the one with the newest date stamp comes first, then the rest in document order (a later ruling sits late
+    fit, the one with the newest date comes first, then the rest in document order (a later ruling sits late
     in a long section); a unit that does not fit is skipped. The kept ones read in document order. "" when none."""
     found, pos = [], 0
     for unit in _units(section):
         end = pos + len(unit)
         pos = end + 1
         if end > INDEX_CAP and RULING_WORDS.search(unit):
-            stamps = DATE_STAMP.findall(unit)
-            found.append((len(found), max(stamps) if stamps else "", unit))
+            dates = DATE_IN_TEXT.findall(unit)
+            found.append((len(found), max(dates) if dates else "", unit))
     picked, size = [], 1
     for index, _stamp, unit in sorted(found, key=lambda item: item[1], reverse=True):  # stable: ties keep order
         cost = len(unit) + bool(picked)
@@ -2470,7 +2476,7 @@ def _ruled_candidates(roots, unknown, words):
             # The sort is stable: most shared words first, and the newest first among equal counts.
             for _count, entry in sorted(newest, key=lambda pair: -pair[0])[:RULED_TOP]:
                 ruling = " ".join(str(entry.get("ruling", "")).split())[:INDEX_CAP]
-                mark = " (unchecked, not law)" if ruled_store.is_unchecked(entry) else ""
+                mark = UNCHECKED_MARK if ruled_store.is_unchecked(entry) else ""
                 lines.append("ruled:%s: %s (owner %s; open, not on main; supersedes %s)%s"
                              % (entry.get("id", "?"), ruling, entry.get("at", "?"),
                                 ruled_store.supersedes_text(entry), mark))
@@ -2532,13 +2538,226 @@ def candidate_ids(candidates) -> list:
     return [c.split(": ", 1)[0] for c in candidates]
 
 
-def candidates_block(candidates, unknown) -> str:
-    """The text added after the judge prompt's reply line: the candidate rulings, then the sources not searched."""
+def candidates_block(candidates, unknown, questions=None) -> str:
+    """The text added after the judge prompt's reply line: the candidate rulings, then the sources not searched, then
+    (with `questions`) the labelled questions of labels_block."""
     text = "\n\nPast rulings (item 8), one per line as `<id>: <text>`:\n" + (
         "\n".join(candidates) if candidates else "(none found)")
     if unknown:
         text += ("\nNot searched: %s. A source not searched never means the question is clear."
                  % ", ".join(unknown))
+    return text + (labels_block(questions) if questions else "")
+
+
+def _plain_records(text) -> str:
+    """`text` with `docs/decisions/<stem>.md` written as `decisions/<stem>`, the same record."""
+    return re.sub(r"(?<=[\w-])\.md\b", "", re.sub(r"(?<![\w/-])docs/(?=(?:decisions|debts)/)", "", text))
+
+
+def _names_id(text, name) -> bool:
+    """Whether `text` holds `name` as a whole token: not inside a longer word, path or slug."""
+    return bool(re.search(r"(?<![\w/-])%s(?![\w/-])" % re.escape(name), text))
+
+
+def _slugs(ruling_id) -> list:
+    """The names a text may give `ruling_id`: the full id, and its slug (the part after the last "/" or after "ruled:")."""
+    slug = ruling_id.rsplit("/", 1)[-1] if "/" in ruling_id else ruling_id.split("ruled:", 1)[-1]
+    return [ruling_id] + ([slug] if slug != ruling_id else [])
+
+
+def cited_rulings(text, ids) -> list:
+    """The ids of `ids`, in order, that `text` names by the full id or by its slug."""
+    text = _plain_records(text)
+    return [i for i in ids if any(_names_id(text, name) for name in _slugs(i))]
+
+
+_LIST_MARK = re.compile(r"^[ \t>]*(?:[-*+]|\d{1,9}[.)])?[ \t]*")
+
+
+def is_based_line(line) -> bool:
+    """Whether `line` is a Based on label line, plain, quoted or listed."""
+    return bool(BASED_LABEL.match(_LIST_MARK.sub("", line, count=1)))
+
+
+def named_rulings(text, ids) -> list:
+    """The ids of `ids`, in order and once, that a `Based on (ruling):` line of `text` names by id or slug. The one
+    code reader of the allow in PAST_RULING_ITEM; a Based on line of another kind and a mention elsewhere name none.
+    A line may sit in a quote or a list."""
+    lines = "\n".join(_LIST_MARK.sub("", line, count=1) for line in text.splitlines())
+    body = "\n".join(m.group(2) for m in BASED_LINE.finditer(lines) if m.group(1).strip().lower() == "ruling")
+    return cited_rulings(body, ids)
+
+
+def _listed_ruling(candidates, ruling_id) -> str:
+    """The text of the listed line of `ruling_id` after its id, else ""."""
+    prefix = ruling_id + ": "
+    return next((c[len(prefix):] for c in candidates if c.startswith(prefix)), "")
+
+
+TIME_UNKNOWN = "time unknown"
+_OWNER_DATE = re.compile(r"\b(?:owner|ruling)\b[^.;\n]{0,40}?(%s)" % DATE_IN_TEXT.pattern, re.I)
+_RULED_OWNER_DATE = re.compile(r"\(owner[ ,]+(%s)" % DATE_IN_TEXT.pattern)
+
+
+def ruling_time(candidates, ruling_id) -> str:
+    """The date of the cited ruling itself, from its listed line: the one beside its owner marker, else the line's first
+    date (a later date in the line is a later edit, never the ruling's time). "time unknown" when the line has none. A
+    ruled-store line ends in `(owner <at>; ...)`, which is read before any word of the ruling's own text."""
+    body = _listed_ruling(candidates, ruling_id)
+    if ruling_id.startswith("ruled:"):
+        found = _RULED_OWNER_DATE.findall(body)
+        if found:
+            return found[-1]
+    owned = _OWNER_DATE.search(body)
+    if owned:
+        return owned.group(1)
+    first = DATE_IN_TEXT.search(body)
+    return first.group(0) if first else TIME_UNKNOWN
+
+
+DECIDES_MAX = 240  # the most characters of the one sentence that says what a ruling decides
+_MARKER_LEAD = re.compile(r"((?:[^:\n]|(?<=\d):(?=\d)){1,120}):\s+")
+_QUOTES = "\"“”"
+_DECIDES_END = re.compile(r"(?<=[.!?])[%s]?\s+" % _QUOTES)
+
+
+def ruling_decides(candidates, ruling_id) -> str:
+    """What the cited ruling decides: the first sentence of its listed line after its marker ("Owner, <date>, page item
+    9:"), read by code from the record, never from the judge's reason. The sentence ends at its first sentence end, or at
+    the close of a quote that opens it, whichever comes first; it is cut at DECIDES_MAX. "" when the line has none."""
+    body = _listed_ruling(candidates, ruling_id).strip()
+    if body.endswith(UNCHECKED_MARK):
+        body = body[:-len(UNCHECKED_MARK)]
+    if ruling_id.startswith("ruled:"):
+        body = body.rsplit(" (owner ", 1)[0]  # the store's own metadata tail
+    lead = _MARKER_LEAD.match(body)
+    if lead and re.search(r"\b(?:owner|ruling)\b", lead.group(1), re.I):
+        body = body[lead.end():]
+    body = body.strip()
+    if body and body[0] in _QUOTES:
+        closing = re.search("[%s]" % _QUOTES, body[1:])
+        if closing:
+            body = body[1:closing.start() + 1]
+    sentence = _DECIDES_END.split(body.strip(" " + _QUOTES), 1)[0].strip(" " + _QUOTES)
+    if len(sentence) > DECIDES_MAX:
+        sentence = sentence[:DECIDES_MAX].rsplit(" ", 1)[0].rstrip(" ,;:") + "..."
+    return sentence
+
+
+def split_questions(text, starts) -> list:
+    """`text` cut into one piece per question. `starts` are the line numbers (from 0) where a question sits; a line of
+    a Based on label (plain, quoted or listed) never starts one. A piece runs to the next question's line, so its own
+    Based on lines stay with it. Text before the first question belongs to no question, so a Based on line there passes
+    nothing. `[text]` when no line starts a question."""
+    lines = text.splitlines()
+    starts = sorted(i for i in set(starts) if 0 <= i < len(lines) and not is_based_line(lines[i]))
+    if not starts:
+        return [text]
+    bounds = starts + [len(lines)]
+    return ["\n".join(lines[a:b]) for a, b in zip(bounds, bounds[1:])]
+
+
+# ------------------------------------------------------------------ the question units: one cut, labelled by code
+#
+# Both paths cut the asked text into question units once (split_questions, or a box's own questions) and call these
+# functions with the units. Code gives each unit its label Q1, Q2, ... in the text the judge reads (labels_block), and the
+# judge's answer lists the labels a listed ruling covers (`questions`). The judge never counts. The answer can only narrow
+# which units are refused: a unit passes only when its own Based on (ruling) line names the cited ruling.
+
+_QUESTION_LEAD = re.compile(r"^[\s>*_`-]*(?:input needed[\s*_:]*)?", re.I)
+_LABEL_NAME = re.compile(r"Q(\d{1,4})", re.I)
+QUESTION_WORDS = 8  # how many first words name a question in a refusal
+LABEL_WORDS = 24  # how many first words tell a unit apart in the judge's labelled list
+
+
+def unit_label(number) -> str:
+    """The label code gives the `number`th unit (from 1)."""
+    return "Q%d" % number
+
+
+def _first_words(question, limit, first_line=True) -> str:
+    """The first `limit` words of `question` (its first non-blank line, or all its lines; a Based on line is no part of it),
+    with "..." when cut."""
+    lines = [line for line in question.splitlines() if _QUESTION_LEAD.sub("", line).strip() and not is_based_line(line)]
+    text = (lines[0] if first_line else " ".join(lines)) if lines else ""
+    words = _QUESTION_LEAD.sub("", text).split()
+    return " ".join(words[:limit]) + ("..." if len(words) > limit else "")
+
+
+def labels_block(questions) -> str:
+    """The text added after the judge's reply line: each question unit under its label, one line each, so the judge
+    answers with the labels code gave and never counts the questions itself."""
+    lines = ["%s: %s" % (unit_label(n), _first_words(q, LABEL_WORDS, first_line=False)) for n, q in enumerate(questions, 1)]
+    return ("\n\nThe code cut the text above into %d question%s and labelled them, one per line as `<label>: <its first "
+            "words>`:\n%s" % (len(lines), "" if len(lines) == 1 else "s", "\n".join(lines)))
+
+
+def _listed_units(listed, count):
+    """The unit numbers (from 1) that the judge's list of labels names, in order, or None when the list is missing, empty,
+    not a list, or holds a label that names no unit: the caller then judges every unit."""
+    if not isinstance(listed, list) or not listed:
+        return None
+    numbers = []
+    for label in listed:
+        match = _LABEL_NAME.fullmatch(label.strip()) if isinstance(label, str) else None
+        if not match or not 1 <= int(match.group(1)) <= count:
+            return None
+        numbers.append(int(match.group(1)))
+    return numbers
+
+
+_BASED_RULING_MENTION = re.compile(r"^[ \t>*_`+-]*(?:\d{1,9}[.)])?[ \t*_`]*based on[^\n]{0,6}ruling", re.I | re.M)
+BASED_LINE_HINT = ('A Based on (ruling) line is read only when it sits on its own line under its question, starting '
+                   '"Based on (ruling):".')
+
+
+def _based_line_unattached(units, context) -> bool:
+    """True when `context` holds more Based on (ruling) lines than the units read as their own (a bold label, a line
+    before the first question): the code could not attach one."""
+    seen = len(_BASED_RULING_MENTION.findall(context))
+    read = sum(1 for unit in units for m in BASED_LINE.finditer("\n".join(_LIST_MARK.sub("", ln, count=1)
+                                                                     for ln in unit.splitlines()))
+               if m.group(1).strip().lower() == "ruling")
+    return seen > read
+
+
+def past_ruling_text(reason, ids, candidates, questions, listed=None, context=None) -> str:
+    """The refusal text of a past-ruling verdict, or "" when no question is refused. `reason` is the judge's answer, read
+    only for the listed ids it cites; `ids` the listed ids, `candidates` the listed lines, `questions` the text of each
+    question unit with its own Based on lines (unit n is labelled Q<n>). `listed` is the judge's list of labels of the
+    units a cited ruling covers. A unit passes only when each cited ruling is named in its own Based on (ruling) line,
+    so a line in one unit never passes its neighbour, and nothing the judge answers passes a unit that names none. A
+    list narrows which units are refused: a listed unit is judged and an unlisted one never is. With no list, or a list
+    with a label that names no unit, every unit that names no cited ruling is refused and the text says "one of the
+    questions". The text names the one unit it refuses by label and first words ("this question" when there is one unit).
+    `context` is the whole text the units were cut from (default: the units): when it holds a Based on (ruling) line that
+    no unit read, the text adds BASED_LINE_HINT. The one home of the text for both paths: the id, its time and one
+    sentence of what it decides, both read from the listed line, and the remedy line to add. None of the judge's words
+    reach it."""
+    cited = cited_rulings(reason, ids)
+    questions = list(questions) or [""]
+    unnamed = [[i for i in cited if i not in named_rulings(q, ids)] for q in questions]
+    numbers = _listed_units(listed, len(questions))
+    judged = range(len(questions)) if numbers is None else sorted({n - 1 for n in numbers})
+    refused = [k for k in judged if unnamed[k]]
+    if not refused:
+        return ""
+    if len(questions) == 1:
+        target = "this question"
+    elif numbers is None or len(refused) > 1:
+        target = "one of the questions"
+    else:
+        target = '%s ("%s")' % (unit_label(refused[0] + 1), _first_words(questions[refused[0]], QUESTION_WORDS))
+    ruling_id = unnamed[refused[0]][0]
+    when = "%s (%s)" % (ruling_id, ruling_time(candidates, ruling_id))
+    text = "%s may decide %s; it may be stale." % (when, target)
+    decides = ruling_decides(candidates, ruling_id)
+    if decides:  # quoted, and with no colon before it: a ruling that opens with a verb is a fact here, never an order
+        text += ' The ruling reads "%s"%s' % (decides, UNCHECKED_MARK if _listed_ruling(candidates, ruling_id).endswith(UNCHECKED_MARK) else "")
+    text += (" A question that names the ruling passes. Its line reads: Based on (ruling): %s, may be stale: "
+             "<why it may be stale>" % when)
+    if _based_line_unattached(questions, "\n".join(questions) if context is None else context):
+        text += ". " + BASED_LINE_HINT
     return text
 
 
@@ -2547,12 +2766,8 @@ def ruling_cite(reason, ids, strict=False) -> str:
     `decisions/..` or `debts/..` record that was not shown. With `strict` (a call that judges item 8 alone), also
     "bogus" when it names such a record anywhere, or names no shown id. "cited" when it names a shown id and is not
     bogus. "" for any other refusal (a form item): without `strict`, an unshown id named mid-reason stays one."""
-    # `docs/decisions/<stem>.md` is the same record as `decisions/<stem>`.
-    reason = re.sub(r"(?<=[\w-])\.md\b", "", re.sub(r"(?<![\w/-])docs/(?=(?:decisions|debts)/)", "", reason))
-
-    def names(i):
-        return re.search(r"(?<![\w/-])%s(?![\w/-])" % re.escape(i), reason)
-    shown = [i for i in ids if names(i) or ("/" in i and names(i.split("/", 1)[1]))]
+    reason = _plain_records(reason)
+    shown = cited_rulings(reason, ids)
     opening = RECORD_REF.match(reason.lstrip(" \t\n*_`'\"([>"))
     if opening and opening.group(0) not in ids:
         return "bogus"
@@ -2576,13 +2791,14 @@ def _all_strings(value):
 
 def chat_units(tool_input) -> list:
     """(marker text, words text) for each question of a box with 2+ options: the question text that may carry the
-    Unvetted line, and every string of the question, for the word overlap."""
+    Unvetted line, and every string of the question, one per line (a `Based on` line starts its own line), for the
+    word overlap and the named-ruling read."""
     questions = tool_input.get("questions") if isinstance(tool_input, dict) else None
     units = []
     for q in questions if isinstance(questions, list) else []:
         options = q.get("options") if isinstance(q, dict) else None
         if isinstance(options, list) and len([o for o in options if isinstance(o, dict)]) >= 2:
-            units.append((str(q.get("question") or ""), " ".join(_all_strings(q))))
+            units.append((str(q.get("question") or ""), "\n".join(_all_strings(q))))
     return units
 
 
@@ -2595,7 +2811,7 @@ def page_units(judged) -> list:
         if "new_str" in write:
             units.append((write["new_str"], write["new_str"]))
         elif isinstance(data, dict):
-            units.append((str(data.get("context") or ""), " ".join(_all_strings(data))))
+            units.append((str(data.get("context") or ""), "\n".join(_all_strings(data))))
     return units
 
 

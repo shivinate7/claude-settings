@@ -1,0 +1,1 @@
+- guard-log-rule-shift: A form refusal that names a listed id now logs under rule question-judge where main logged past-ruling, so guard.log counts per rule shift (hooks/call_judge.py `form_refusal` and `main`). Seen: 2026-11-25 x1

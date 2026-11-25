@@ -2,7 +2,7 @@
 
 ## The ruling
 
-Rule `brief-claim-has-probe` in `hooks/guard.py` refuses an Agent or Task brief to a builder or a test-author that claims what main passes or refuses for an input. Main here is main, origin/main or "today". The verbs are passes, allows, accepts, refuses, rejects and blocks. The brief passes when it carries the probe that showed the claim. Its home is `brief_claim_gaps` in `hooks/guard.py`, beside the other brief checks (`marker_scan`, `builder_third_round`). Layer: the coordinator's order, 2026-11-07 CST, after the incident below.
+Rule `brief-claim-has-probe` in `hooks/guard.py` refuses an Agent or Task brief to a builder or a test-author that claims what main passes or refuses for an input. Main here is main, origin/main or "today". The verbs are passes, allows, accepts, refuses, rejects and blocks. The brief passes when it carries the probe that showed the claim. Its home is `brief_claim_gaps` in `hooks/guard.py`, beside the other brief checks (`marker_scan`, `step_up_reason`). Layer: the coordinator's order, 2026-11-07 CST, after the incident below.
 
 - The mistake (2026-11-07 16:08 CST, PR #1581): a test-author brief said main passes `globalHotkey: Ctrl+Alt+2` and "password: none for guests and visitors". Main refused all of them. The brief was written from memory of main. The builder narrowed the rule to match, and the narrowing let through secrets that main refuses. A fix check caught it before merge.
 - The harm: an agent builds to a false picture of main. The error is shipped as a test or a rule, and it looks reviewed because the brief said so.

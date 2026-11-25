@@ -939,7 +939,8 @@ def decide_worktree(where: str, entry: dict, attended: bool = False, agent_rule:
                         and _own_lock_ready(where, path, batch, lock_idle))
             if not own_lock:
                 return {"path": path, "action": "keep", "reason": "locked: %s" % holder}
-    live = git_reads.worktree_live_session(path)
+    # This verdict has the dirty, locked and unmerged keeps, so a record whose folder is gone stands in no tree.
+    live = git_reads.worktree_live_session(path, absent_is_out=True)
     if live is None:
         return {"path": path, "action": "keep", "reason": "unreadable-subject"}
     if live:
