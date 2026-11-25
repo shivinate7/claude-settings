@@ -66,10 +66,10 @@ IF_VALUES = {
     MACOS_STEP: "runner.os=='macOS'",
     "Run the touched PowerShell tests": "!cancelled()&&runner.os=='Windows'",
 }
-# The lines of the two run steps that are meant to differ, stripped. The Windows step keeps the PowerShell arm and its comment;
-# the macOS step must not have them, and RunBodies pins that.
+# The arm line of the Windows run step, stripped. The macOS step must not have it, and RunBodies pins that. The comment
+# above the arm is comment-only, so body_lines leaves it out.
 PS1_ARM = '*.test.ps1) if [ "$RUNNER_OS" = Windows ]; then return 77; fi; echo "no PowerShell step on $RUNNER_OS"; return 1 ;;'
-MEANT_TO_DIFFER = ("# 77 is a skip: on Windows the PowerShell step below runs it.", PS1_ARM)
+MEANT_TO_DIFFER = (PS1_ARM,)
 # The run job's whole `if:`, squashed. A literal false or a negation of it skips every leg, and no test goes red.
 RUN_JOB_IF = "github.event.pull_request.draft&&needs.touched.outputs.any=='true'"
 
@@ -253,11 +253,12 @@ def named_run_step(text, name):
 
 
 def gate_problem(what, raw, want):
-    """None when the `if:` value `raw` is `${{ want }}` whole, else the one cause for `what`. `want` is squashed."""
+    """None when the `if:` value `raw` is `${{ want }}` whole, else the one cause for `what`. `want` is squashed. The compare
+    is case-insensitive, as GitHub compares strings in an expression; a negation is still a different value."""
     expr = re.fullmatch(r"\$\{\{(.*)\}\}", drop_comment(raw or "").strip())
     if expr is None:
         return "%s has no ${{ }} if: value" % what
-    if squash(expr.group(1)) != want:
+    if squash(expr.group(1)).lower() != want.lower():
         return "%s gates on %r, want %r" % (what, squash(expr.group(1)), want)
     return None
 
@@ -274,8 +275,15 @@ def run_job_if_problem(text):
 
 
 def body_lines(body):
-    """The stripped lines of a run body, without blank lines and without the lines meant to differ."""
-    return [ln for ln in (raw.strip() for raw in (body or "").split("\n")) if ln and ln not in MEANT_TO_DIFFER]
+    """The stripped lines of a run body, without blank lines, comment-only lines and the lines meant to differ. A line is a
+    comment only where the shell reads one (code_lines), so a `#` inside quotes is a line of text."""
+    out = []
+    for raw, code in zip((body or "").split("\n"), code_lines(body or "")):
+        line = raw.strip()
+        if not line or line in MEANT_TO_DIFFER or (line.startswith("#") and not code.strip()):
+            continue
+        out.append(line)
+    return out
 
 
 def code_lines(body):
@@ -633,13 +641,13 @@ class BodyCompareIgnoresComments(unittest.TestCase):
         self.assertEqual(run_body_lines(text, WINDOWS_STEP), mac, "the Windows and macOS run bodies differ on the real file")
         win = named_run_step(text, WINDOWS_STEP)
         with self.subTest("a comment-only line and a blank line"):
-            edited = mutate_block(text, win, "          set -u\n", "          set -u\n          # don't add a rule here\n\n")
+            edited = mutate_block(text, win, "        run: |\n", "        run: |\n          # don't add a rule here\n\n")
             self.assertEqual(run_body_lines(edited, WINDOWS_STEP), mac,
                              "a comment-only or blank line in the Windows run body fails the body compare")
-        with self.subTest("a command edit"):
-            edited = mutate_block(text, win, "          set -u\n", "          set -e\n")
+        with self.subTest("an added command line"):
+            edited = mutate_block(text, win, "        run: |\n", "        run: |\n          set -e\n")
             self.assertNotEqual(run_body_lines(edited, WINDOWS_STEP), mac,
-                                "a command edit in the Windows run body passes the body compare")
+                                "an added command line in the Windows run body passes the body compare")
         with self.subTest("a # line inside a multi-line string"):
             self.assertEqual(body_lines('echo "first\n# second\nlast"\n'), ['echo "first', "# second", 'last"'],
                              "a # line inside a multi-line string is dropped as a comment")
@@ -655,7 +663,7 @@ class IfCompareCaseInsensitive(unittest.TestCase):
         self.assertIsNotNone(step, f"no run step is named {MACOS_STEP!r}")
         problem = if_problem(step, IF_VALUES[MACOS_STEP])
         self.assertIsNone(problem, problem)
-        line = "        if: ${{ runner.os == 'macOS' }}"
+        line = re.search(r"^        if: .*$", step, re.M).group(0)  # the step's own if: line, whatever its spelling
         for value in ("runner.os == 'macos'", "runner.os == 'MACOS'"):
             with self.subTest(value=value):
                 edited = mutate_block(text, step, line, "        if: ${{ %s }}" % value)
