@@ -1545,6 +1545,55 @@ class RecordSlugsTests(unittest.TestCase):
         rc, out, hits = self.prose_run({}, {legacy: PROSE_HEAD + [SENT]}, rolled_out=False)
         self.assertEqual(hits, [(legacy, 5)], "the decisions folder of an unrolled tree was not read:\n" + out)
 
+    # The sentence count and the fence read (prose_problem, sentence_count, fenced). The sentence cases are the
+    # `test_prose_sentence_` ones, the fence cases the `test_prose_fence_mark_` ones. A red case is a false verdict the
+    # builder must fix. A green control keeps a verdict that must stay.
+
+    def test_prose_sentence_etc_before_a_new_sentence_is_refused(self):
+        # ste_lint protects every "etc.", so a stop before a capital word reads as no sentence end.
+        line = line_of(240, "Each lane reads the record, the branch, etc. Then it stops and reads ", ".")
+        rc, out, hits = self.prose_run({}, {REC: PROSE_HEAD + [line, SENT]})
+        self.assertEqual(hits, [(REC, 5), (REC, 6)], "etc. before a capital word ends a sentence, so the line of two "
+                         "sentences was not refused:\n" + out)
+        self.assertEqual(rc, 1, out)
+
+    def test_prose_sentence_etc_before_a_comma_is_one_sentence(self):
+        # Green control: "etc.," is no sentence end, and a fix that stops splitting at etc. must keep it that way.
+        line = line_of(240, "Each lane reads the record, the branch, etc., and then it stops and reads ", ".")
+        rc, out, hits = self.prose_run({}, {REC: PROSE_HEAD + [line, SENT]})
+        self.assert_only_sentinel(rc, out, hits, 6, "etc., before a word is one sentence, so the line of one sentence "
+                                  "was refused")
+
+    def test_prose_sentence_no_before_a_new_sentence_is_refused(self):
+        # ste_lint protects "No.", so "No. The lane" reads as no sentence end and a second sentence passes.
+        line = line_of(240, "The answer to the lane is No. The lane stops and reads ", ".")
+        rc, out, hits = self.prose_run({}, {REC: PROSE_HEAD + [line, SENT]})
+        self.assertEqual(hits, [(REC, 5), (REC, 6)], "No. before a capital word ends a sentence, so the line of two "
+                         "sentences was not refused:\n" + out)
+        self.assertEqual(rc, 1, out)
+
+    def test_prose_sentence_no_before_a_number_is_one_sentence(self):
+        # Green control: "No. 25" names an issue, so its dot is no sentence end.
+        line = line_of(240, "The lane reads Issue No. 25 and then it stops and reads ", ".")
+        rc, out, hits = self.prose_run({}, {REC: PROSE_HEAD + [line, SENT]})
+        self.assert_only_sentinel(rc, out, hits, 6, "No. before a number names an issue, so the line of one sentence "
+                                  "was refused")
+
+    def test_prose_sentence_quoted_sentence_inside_a_sentence_is_one(self):
+        # A stop inside a quote the writer puts in a line is still one sentence of that line.
+        line = line_of(240, 'The owner said "yes. build it" and the lane read the record once, and then it stops and reads ', ".")
+        rc, out, hits = self.prose_run({}, {REC: PROSE_HEAD + [line, SENT]})
+        self.assert_only_sentinel(rc, out, hits, 6, "a stop inside a quote split a line of one sentence in two")
+
+    def test_prose_fence_mark_triple_backtick_code_span_is_no_fence(self):
+        # A backtick fence's info string holds no backtick, so "```x```" is a code span, and a line that starts with it
+        # opens no fence: it and the line after it are read as prose.
+        line = "```x``` " + sentences(240, 2)
+        rc, out, hits = self.prose_run({}, {REC: PROSE_HEAD + [line, SENT]})
+        self.assertEqual(hits, [(REC, 5), (REC, 6)], "a line that starts with a triple-backtick code span was read as a "
+                         "fence, so the lines from it on were not read as prose:\n" + out)
+        self.assertEqual(rc, 1, out)
+
 
 READY_STEP = "Record slug length"  # the step that reads the section folder; also its name in .github/workflows/checks.yml
 # The text hooks/test_guard.py looks for when a duplicate number stops its run: `section number <n> is on <k> section files`.
