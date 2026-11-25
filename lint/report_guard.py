@@ -190,7 +190,7 @@ import sys
 HERE = os.path.dirname(os.path.realpath(__file__))
 sys.path.insert(0, HERE)
 from _transcript import (  # noqa: E402
-    ARTIFACT_DATA, SEND_TOOLS, delivered_tool_use_ids, inactive_tool_use_ids, is_last_human, items_write, last_incoming_index, last_reply, page_read_ran, page_writer_id, peer_sender, tool_verb,
+    ARTIFACT_DATA, SEND_TOOLS, delivered_tool_use_ids, inactive_tool_use_ids, is_last_human, is_stop_feedback, items_write, last_incoming_index, last_reply, page_read_ran, page_writer_id, peer_sender, tool_verb,
     read_transcript, records_after_last_human, send_targets, tool_results, tool_uses)
 import layout  # noqa: E402
 import _clause  # noqa: E402
@@ -1135,16 +1135,28 @@ def spawn_models(records):
     return found
 
 
+def _refused(records, i):
+    """True when the report at `records[i]` was refused: the next record, past the harness's system records and
+    other isMeta records, is the Stop hook's feedback record."""
+    for rec in records[i + 1:]:
+        if is_stop_feedback(rec):
+            return True
+        if rec.get("type") != "system" and not rec.get("isMeta"):
+            return False
+    return False
+
+
 def records_since_report(records, text):
     """The records after the session's previous report, else all of them. `text` is the reply being judged:
-    its own record is not a previous report. A report is the module's own shape test, `report_shape_ok`."""
+    its own record is not a previous report. A report is the module's own shape test, `report_shape_ok`.
+    A report the Stop hook refused is no previous report: the session's correction answers it."""
     texts = [(i, _reply_text(rec)) for i, rec in enumerate(records)]
     texts = [(i, reply) for i, reply in texts if reply is not None]
     if texts and block_text(texts[-1][1]) == block_text(text):
         texts.pop()
     start = 0
     for i, reply in texts:
-        if report_shape_ok(reply):
+        if report_shape_ok(reply) and not _refused(records, i):
             start = i + 1
     return records[start:]
 
