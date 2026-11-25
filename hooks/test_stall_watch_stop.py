@@ -3854,7 +3854,8 @@ def CI61_checkin_with_an_error_result_does_not_count():
 @case
 def CI62_merge_tool_forms_close_only_their_own_pr():
     """CI62. the merge tool called bare (merge N --confirm), and bin/merge without --confirm, close the wait only
-    when they name the waited PR. Another PR's merge blocks, and the reason names only the waited PR"""
+    when they name the waited PR. Another PR's merge blocks, and the reason names only the waited PR. The dry-run
+    form pins the ask half: it closes the ask, so no block prints. The cancel half is CI126"""
     return closer_pair(merge_bin(CI_PR, cmd="merge"), merge_bin(CI_OTHER_PR, cmd="merge"), "bare merge") + (
         closer_pair(merge_bin(CI_PR, confirm=False), merge_bin(CI_OTHER_PR, confirm=False),
                     "bin/merge without --confirm"))
@@ -4826,7 +4827,7 @@ def CI125_queued_green_verdict_does_not_end_the_wait_before_the_merge():
 def CI126_dry_run_merge_does_not_close_the_wait():
     """CI126. bin/merge N without --confirm is a preview that merged nothing, so it leaves the CI wait open: the
     --confirm merge after it closes the wait, and the cancel line prints. Control: the --confirm merge alone prints
-    the same line"""
+    the same line. It pins the cancel half of a dry run: the wait stays for the real merge. The ask half is CI62"""
     recs, call_id = cron_set(RET_A)
     dry = merge_bin(CI_PR, confirm=False)
     confirmed = merge_bin(CI_PR)
