@@ -271,11 +271,11 @@ MUTATIONS = [
     ("worktree-remove: a process read that fails no longer refuses when a record's folder is gone",
      '    if standing is None:\n        return False',
      '    if False:\n        return False', "guard",
-     'stale_record_process_read_fails_refused_case'),
+     'a process read that raises refuses the remove'),
     ("worktree-remove: an unreadable session record no longer allows the remove with a note",
      '    if live is None:\n        return None',
      '    if False:\n        return None', "guard",
-     'stale_record_parent_gone_forced_remove_noted_case'),
+     'a record under an absent parent, is noted as unconfirmed'),
     ("worktree-remove: any session record counts as live, recycled pid included",
      '    diff = actual - started\n    if diff > SESSION_LIVE_TOLERANCE_MS:\n'
      '        return None\n    return diff >= -SESSION_LIVE_TOLERANCE_MS',
