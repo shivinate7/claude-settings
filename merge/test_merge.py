@@ -5749,6 +5749,68 @@ class GhHalf(Env):
         self.assertNotIn("reverted on", out, "a merge of an older head of this branch reverted the claim:\n" + out)
         self.assertFalse(self.reverted(), "a merge of an older head of this branch reverted the claim on feat")
 
+    def side_commit(self):
+        """A commit on origin/main's history that is not the PR's head: the second parent of the merges a case puts on main. -> its sha."""
+        sh(self.other, "git", "fetch", "-q", "origin")
+        return sh(self.other, "git", "commit-tree", sh(self.other, "git", "rev-parse", "origin/main^{tree}"),
+                  "-p", sh(self.other, "git", "rev-parse", "origin/main"), "-m", "a side commit, not the head")
+
+    def fixture_scope(self):
+        """-> (merges on origin/main's first-parent line, whether the PR head is an ancestor of origin/main), read after the run."""
+        sh(self.co, "git", "fetch", "-q", "origin")
+        merges = int(sh(self.co, "git", "rev-list", "--merges", "--first-parent", "--count", "origin/main"))
+        on_main = subprocess.run(["git", "-C", self.co, "merge-base", "--is-ancestor", self.head(), "origin/main"]).returncode == 0
+        return merges, on_main
+
+    @contextlib.contextmanager
+    def head_missing_after_the_merge_call(self):
+        """A patch for a clone that does not hold the PR head, after the merge call. This clone holds the head, so its id is swapped for an id the
+        clone does not hold, and the real git runs on that: `cat-file -e` fails, and the ancestor read exits 128, which branch_is_ancestor answers None.
+        Only the reads made after the merge call are swapped."""
+        missing = "0" * 40
+        real_git, real_ancestor = merge.git, merge.ancestor
+        def git_without_the_head(cwd, *a, input=None):
+            if MERGE_CALL in self.calls() and a == ("cat-file", "-e", f"{self.head()}^{{commit}}"):
+                a = ("cat-file", "-e", f"{missing}^{{commit}}")
+            return real_git(cwd, *a, input=input)
+        def ancestor_without_the_head(cwd, tip, base):
+            if MERGE_CALL in self.calls() and tip == self.head():
+                tip = missing
+            return real_ancestor(cwd, tip, base)
+        with unittest.mock.patch.object(merge, "git", git_without_the_head), unittest.mock.patch.object(merge, "ancestor", ancestor_without_the_head):
+            yield
+
+    def assert_a_refusal_off_a_full_window(self, rc, out):
+        """The fixture holds a full window of main and the head off main, so the refused head reads as not merged: the run refuses, the claim is
+        reverted as a refusal is, and the merge call is sent once."""
+        merges, on_main = self.fixture_scope()  # the scope first: the subject below holds only for a full window with the head off main
+        self.assertGreaterEqual(merges, merge.MAIN_MERGE_WINDOW, "the fixture did not fill the window, so the full-window read is not under test\n" + out)
+        self.assertFalse(on_main, "the head is an ancestor of main, so the fixture is not a head off main\n" + out)
+        self.assertEqual(rc, 1, "a refused head off a full window of main was not read as a refusal\n" + out)
+        self.assertNotIn("merge: #7 merged as ", out, "a head off main was read as merged\n" + out)
+        self.assertIn("reverted on feat", out, "a head off main read as unknown, so the claim was not reverted as a refusal\n" + out)
+        self.assertTrue(self.reverted(), "the claim is not reverted on feat\n" + out)
+        self.assertEqual(self.calls().count(MERGE_CALL), 1, "the refused merge was sent again\n" + out)
+        self.assertFalse(self.lock_ref(), "the merge lock was not released\n" + out)
+
+    def test_a_405_merge_reply_with_the_pr_open_and_a_full_window_of_main_without_the_head_reads_not_merged_and_reverts(self):
+        # The merge call lands nothing. Main's newest 50 merges are others, and the head is off main: the window is full, and the read finds the head off main.
+        self.set(merge_replies=[[rest_err(405, "Merge already in progress"), False]], read_open_after_put=True)
+        side = self.side_commit()
+        with self.after_the_merge_call(lambda: self.merge_onto_main(merge.MAIN_MERGE_WINDOW, second=side)):
+            rc, out = self.go()
+        self.assert_a_refusal_off_a_full_window(rc, out)
+
+    def test_a_405_merge_reply_with_the_pr_open_and_a_full_window_of_main_whose_clone_lacks_the_head_reads_not_merged_and_reverts(self):
+        # The same window and refused merge, and this clone does not hold the head. A head the clone lacks is not on main, so the refusal stands.
+        self.set(merge_replies=[[rest_err(405, "Merge already in progress"), False]], read_open_after_put=True)
+        side = self.side_commit()
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(self.after_the_merge_call(lambda: self.merge_onto_main(merge.MAIN_MERGE_WINDOW, second=side)))
+            stack.enter_context(self.head_missing_after_the_merge_call())
+            rc, out = self.go()
+        self.assert_a_refusal_off_a_full_window(rc, out)
+
     def test_a_red_check_named_http_500_is_a_refusal_before_the_claim(self):
         # the head's one checks read is red; its name carries "HTTP 500". A red head is refused before any claim, so nothing is reverted
         before = self.head()
