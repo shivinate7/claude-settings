@@ -1237,6 +1237,9 @@ def _names_a_file(item):
 _CODE_NEED_RE = re.compile(
     r"\bneeds?\b[^`;]*?\b(?:code\s*:|(?:helpers?|functions?|methods?|class(?:es)?|symbols?|constants?|modules?"
     r"|types?|apis?)\s*:?)\s*`([A-Za-z_][\w.]*)(?:\(\))?`", re.I)
+# The symbol may come first: "needs `x` from PR #N".
+_CODE_NEED_FROM_RE = re.compile(
+    r"\bneeds?\b[^`;]*?`([A-Za-z_][\w.]*)(?:\(\))?`\s+(?:from|in|of|out\s+of)\s+(?:PRs?|pull\s+requests?)\s*#?\s*\d+", re.I)
 # A measured conflict says where it was measured, then the file it names.
 _MEASURED_CONFLICT_RE = re.compile(
     r"\b(?:measured\s+(?:a\s+)?conflicts?|conflicts?\s+measured|merge-tree\s+shows\s+a\s+conflict)\s+in\b(.*)",
@@ -1266,48 +1269,91 @@ def _pr_numbers(text):
     return {a or b for a, b in _PR_REF_RE.findall(text)}
 
 
-# A PR that the item waits on may be the subject of the clause, with no waiting word ahead of it: "PR #N must merge
-# first", "PR #N merges before it", "PR #N blocks it", "PR #N is the blocker". A bare "merged" or "awaits review"
-# is context, so a modal, "first" or "before", or a blocking verb is needed. "The batch merges first" names no PR.
-_PR_SUBJECT_RE = re.compile(
-    r"(?:\b(?:PRs?|pull\s+requests?)\s*#?\s*(\d+)|#(\d+))\b['\u2019]?s?\s+(?:"
-    r"(?:must|should|will|has\s+to|have\s+to|needs\s+to|is\s+to|to)\s+(?:merge|land)\b"
-    r"|(?:merges?|lands?)\s+(?:first|before)\b"
-    r"|(?:blocks?|blocking|gates?)\b|is\s+(?:the|a|still\s+the)\s+blocker\b|is\s+blocking\b)", re.I)
+# A PR is named by number (`PR #N`, `#N`, `pull request N`) or by a definite noun with no number: "the stamp PR",
+# "the stamp lane's PR". "a PR", "its own PR" and a lane name such as pr-reader name no other lane's PR.
+_PR_REF_NAMED_RE = re.compile(
+    r"\b(?:PRs?|pull\s+requests?)\s*#?\s*(?P<a>\d+)\b|#(?P<b>\d+)\b"
+    r"|(?:\b(?:the|that|this|those|these|other|another)\s+(?:[\w'’-]+\s+){0,3}|['’]s\s+)"
+    r"(?<![\w/.-])(?:PRs?|pull\s+requests?)(?![\w/#-]|\.\w)(?!\s*#?\s*\d)", re.I)
+# The PR is the subject of the clause and the clause puts it ahead of the item: "must merge", an ordering word
+# ("first", "before", "ahead") with no review or waiting word of its own before it, or "blocks it". A PR that "will
+# merge today", "awaits review" or "blocks nothing" orders nothing, and neither does one that already merged.
+_PR_DONE_RE = re.compile(
+    r"['’]?s?\s*(?:(?:was|is|got|has|had|have|already|just)\s+)*(?:merged|landed|closed)\b", re.I)
+_PR_MUST_RE = re.compile(
+    r"(?:['’]s\s+\w+\s+)?\s*(?:must|has\s+to|have\s+to|needs\s+to|is\s+to|to)\s+(?:be\s+)?"
+    r"(?:merged?|land(?:ed|s)?)\b", re.I)
+_PR_BLOCKS_RE = re.compile(
+    r"\s*(?:(?:blocks?|blocking|gates?)\b(?!\s+(?:nothing|no|none|neither|zero)\b)"
+    r"|is\s+(?:the|a|still\s+the)\s+blocker\b|is\s+blocking\b)", re.I)
+_PR_ORDER_RE = re.compile(r"(?:\W+[\w'’-]+){0,5}?\W+(?:first|before|ahead|beforehand|prior)\b", re.I)
+_PR_OWN_WAIT_RE = re.compile(r"\b(?:waits?|waiting|awaits?|awaiting|pending|reviews?|reviewed)\b", re.I)
 _MERGE_FIRST_RE = re.compile(r"(?<![\w/.-])(?:merges?|lands?)\s+(?:first|before)\b", re.I)
+# A PR that the item waits on, named after a waiting word, is no wait when it already merged and says when:
+# "(PR #N merged at 13:02)".
+_PR_MERGED_AT_RE = re.compile(
+    r"\s*(?:(?:was|is|got|already|just)\s+)*(?:merged|landed|closed)\b(?:\s+(?:at|on|today|yesterday|earlier|already|in"
+    r"|\d)|\s*\))", re.I)
 # A wait on the owner's answer, ruling or decision is no wait on a PR or merge that the answer is about.
 _PERSON_WAIT_RE = re.compile(
     r"\b(?:owner|answers?|rulings?|decisions?|repl(?:y|ies)|verdicts?|approvals?|sign-?offs?|go-ahead|grants?"
     r"|picks?|choices?|yes)\b", re.I)
 _JOINS_RE = re.compile(r"\b(?:and|or|then|plus)\b|[&+]", re.I)
+_ABOUT_RE = re.compile(r"\b(?:on|about|regarding|over|whether|if|re|of|for)\b", re.I)
 
 
 def _waits_on_a_person(between):
-    """True when the words between a waiting word and the PR it names say the wait is on the owner's answer."""
+    """True when the words between a waiting word and the merge it names say the wait is on the owner's answer."""
     return (bool(_PERSON_WAIT_RE.search(between)) and not _JOINS_RE.search(between)
-            and not re.search(r"['\u2019]s\s*$", between))
+            and not re.search(r"['’]s\s*$", between))
+
+
+def _answer_about_a_pr(between):
+    """True when the words before a PR say the wait is on the owner's answer ABOUT it: a person word, then "on",
+    "about" or "of" before the PR. "the owner merges #N", "the grant lane PR #N" and "owner-page PR #N" make the
+    person or a name the PR's neighbour, not a reader of it, so the wait is on the PR."""
+    last = None
+    for last in _PERSON_WAIT_RE.finditer(between):
+        pass
+    return (last is not None and not _JOINS_RE.search(between) and not re.search(r"['’]s\s*$", between)
+            and bool(_ABOUT_RE.search(between[last.end():])))
+
+
+def _orders_the_item(rest):
+    """True when the clause text after a PR, whose subject it is, puts that PR ahead of the item."""
+    if _PR_DONE_RE.match(rest):
+        return False
+    if _PR_MUST_RE.match(rest) or _PR_BLOCKS_RE.match(rest):
+        return True
+    order = _PR_ORDER_RE.match(rest)
+    return bool(order and not _PR_OWN_WAIT_RE.search(order.group(0)))
 
 
 def _wait_targets(unit):
-    """What the unit waits on: each PR number the item says it waits on, and None for a merge or landing it
-    waits on with no PR reference. A wait is a waiting word before the PR or merge, or the PR as the subject of
-    "must merge first", "blocks it" or "is the blocker". Backticked text is masked, so a symbol is no clause."""
+    """What the unit waits on: each PR number the item says it waits on, None for a PR with no number and for a
+    merge or landing it waits on with no PR reference. A wait is a waiting word before the PR or merge, or the PR as
+    the subject of a clause that puts it ahead of the item ("must merge first", "blocks it"). Backticked text is
+    masked, so a symbol is no clause."""
     masked = re.sub(r"`[^`\n]*`", lambda m: "x" * len(m.group(0)), unit)
     targets = []
     for clause in re.split(r"[;,\n]", masked):
-        for m in _PR_SUBJECT_RE.finditer(clause):
-            targets.append(m.group(1) or m.group(2))
-        if _PR_SUBJECT_RE.search(clause) is None and _MERGE_FIRST_RE.search(clause):
+        ordered = False
+        for ref in _PR_REF_NAMED_RE.finditer(clause):
+            if _orders_the_item(clause[ref.end():]):
+                targets.append(ref.group("a") or ref.group("b"))
+                ordered = True
+        if not ordered and _MERGE_FIRST_RE.search(clause):
             targets.append(None)
         wait = _UNSTARTED_WAIT_WORD_RE.search(clause)
-        if not wait:
-            continue
+        if not wait or any(not clause[r.end():wait.start()].strip() for r in _PR_REF_NAMED_RE.finditer(clause)
+                           if r.end() <= wait.start()):
+            continue  # no waiting word, or the PR itself is what waits ("PR #N awaits review before it merges")
         tail = clause[wait.end():]
-        refs = list(_PR_REF_RE.finditer(tail))
+        refs = list(_PR_REF_NAMED_RE.finditer(tail))
         if refs:
             for ref in refs:
-                if not _waits_on_a_person(tail[:ref.start()]):
-                    targets.append(ref.group(1) or ref.group(2))
+                if not (_answer_about_a_pr(tail[:ref.start()]) or _PR_MERGED_AT_RE.match(tail[ref.end():])):
+                    targets.append(ref.group("a") or ref.group("b"))
         elif _MERGE_WORD_RE.search(tail) and not _waits_on_a_person(tail[:_MERGE_WORD_RE.search(tail).start()]):
             targets.append(None)
     return targets
@@ -1319,7 +1365,9 @@ def _checkable_wait(item, targets):
     any wait."""
     if any(_names_a_file(m.group(1)) for m in _MEASURED_CONFLICT_RE.finditer(item)):
         return True
-    needs = [_pr_numbers(m.group(0)) for m in _CODE_NEED_RE.finditer(item) if _is_symbol(m.group(1))]
+    needs = [_pr_numbers(m.group(0))
+             for m in list(_CODE_NEED_RE.finditer(item)) + list(_CODE_NEED_FROM_RE.finditer(item))
+             if _is_symbol(m.group(1))]
     return bool(needs) and all(t is None or any(not n or t in n for n in needs) for t in targets)
 
 
