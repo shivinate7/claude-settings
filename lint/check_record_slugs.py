@@ -270,7 +270,8 @@ PROSE_TABLE = re.compile(r"^\s*\|")
 PROSE_QUOTE_MARK = re.compile(r"^ {0,3}>[ \t]?")  # the blockquote marker
 PROSE_LIST_MARK = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s+")
 PROSE_QUOTE = re.compile(r'^(?:"[^"]*"|\u201c[^\u201d]*\u201d)$')  # the whole line is one quote
-MONTH_DOT = re.compile(r"\b(Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sept?|Oct|Nov|Dec)\.(?= \d)")  # "Nov. 25": ste_lint's splitter breaks here
+CODE_SPAN = re.compile(r"`[^`\n]*`")
+MONTH_DOT =re.compile(r"\b(Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sept?|Oct|Nov|Dec)\.(?= \d)")  # "Nov. 25": ste_lint's splitter breaks here
 
 
 def fenced(lines):
@@ -291,8 +292,10 @@ def fenced(lines):
 
 def sentence_count(text):
     """How many sentences `text` holds, by ste_lint.split_sentences, the one splitter (it keeps e.g., i.e., 3.15, merge.py
-    whole). A month abbreviation before a day number is no sentence end, so the dot is dropped before the split."""
-    return len(ste_lint.split_sentences(MONTH_DOT.sub(lambda m: m.group(1), text)))
+    whole). A month abbreviation before a day number, and a stop inside an inline code span, are no sentence end, so the
+    split reads them with their dot hidden."""
+    hidden = CODE_SPAN.sub(lambda m: re.sub(r"[.!?]", ste_lint._DOT, m.group(0)), text)
+    return len(ste_lint.split_sentences(MONTH_DOT.sub(lambda m: m.group(1) + ste_lint._DOT, hidden)))
 
 
 def prose_problem(line):
