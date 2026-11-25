@@ -46,7 +46,7 @@ import time
 site = sys.modules.get("sitecustomize")
 site_file = getattr(site, "__file__", None) if site is not None else None
 print("SITE_FILE", os.path.realpath(site_file) if site_file else "none")
-if "absent" in sys.argv[2:]:  # TestCase._callSetUp absent on the class, as a Python that renamed it would have it
+if "absent" in sys.argv[2:] or "deleted" in sys.argv[2:]:  # TestCase._callSetUp unreadable ("absent") or gone ("deleted"), as a Python that renamed it would have it
     import importlib.machinery
 
     class Absent(object):
@@ -69,7 +69,10 @@ if "absent" in sys.argv[2:]:  # TestCase._callSetUp absent on the class, as a Py
 
             def exec_module(module):
                 load(module)
-                module.TestCase._callSetUp = Absent(module.TestCase._callSetUp)
+                if "deleted" in sys.argv[2:]:
+                    del module.TestCase._callSetUp
+                else:
+                    module.TestCase._callSetUp = Absent(module.TestCase._callSetUp)
 
             spec.loader.exec_module = exec_module
             return spec
@@ -387,6 +390,46 @@ class Leak(unittest.TestCase):
         self.assertTrue(True)
 '''
 
+# A frame opened at module level, outside any case, that no stop ever closes. The cases around it keep their rows.
+LEAK_MODULE = '''import unittest
+
+
+class Seed(unittest.TestCase):
+    def test_a(self):
+        pass
+
+
+unittest.TestResult().startTest(Seed("test_a"))
+
+
+class Module(unittest.TestCase):
+    def test_b_plain(self):
+        self.assertTrue(True)
+
+    def test_c_plain(self):
+        self.assertTrue(True)
+'''
+
+# A case that starts a second frame for itself on the runner's own result and never stops it. The runner's stop closes
+# that second frame, so the runner's first frame stays open. The case keeps its row, and so do the cases after it.
+LEAK_OWN = '''import unittest
+
+
+class Own(unittest.TestCase):
+    def run(self, result=None):
+        Own.runner_result = result
+        return super().run(result)
+
+    def test_a_opens_a_frame_on_the_runner_result(self):
+        Own.runner_result.startTest(self)
+
+    def test_b_plain(self):
+        self.assertTrue(True)
+
+    def test_c_plain(self):
+        self.assertTrue(True)
+'''
+
 # An async case: its asyncSetUp seconds are fixture time, apart from the case's own seconds.
 ASYNC = '''import time
 import unittest
@@ -410,6 +453,15 @@ class SetupError(unittest.TestCase):
 
     def test_case(self):
         self.assertTrue(True)
+'''
+
+# A fresh process that imports unittest, then reports whether asyncio or unittest.async_case is loaded.
+IMPORTS_PROBE = '''import os
+import sys
+site = sys.modules.get("sitecustomize")
+print("SITE_FILE", os.path.realpath(site.__file__) if site is not None and getattr(site, "__file__", None) else "none")
+import unittest  # noqa: F401
+print("LOADED asyncio=%s async_case=%s" % ("asyncio" in sys.modules, "unittest.async_case" in sys.modules))
 '''
 
 
@@ -869,28 +921,49 @@ class RowFails(unittest.TestCase):
 
 
 class OpenFrame(unittest.TestCase):
-    def test_open_frame_at_flush_keeps_later_rows_and_names_it(self):
-        folder = case_folder(self)
-        write(folder, "fixture_leak.py", LEAK)
-        unarmed = run_module(folder, "fixture_leak", armed=False, report=True)
-        self.assertEqual(result_line(unarmed), "RESULT ran=3 failures=0 errors=0 skipped=0",
-                         "the unarmed control run did not pass its three cases: %r" % unarmed.stderr[-300:])
-        armed = run_module(folder, "fixture_leak", report=True)
+    def assert_open_frame(self, module, folder, ran_line, cases, named):
+        """The unarmed control runs as ran_line says. The armed run keeps one row per (case, outcome) in cases, and
+        writes one stderr line that names the open frame."""
+        unarmed = run_module(folder, module, armed=False, report=True)
+        self.assertEqual(result_line(unarmed), ran_line,
+                         "the unarmed control run is not %r: %r" % (ran_line, unarmed.stderr[-300:]))
+        armed = run_module(folder, module, report=True)
         scope_ok(self, armed)
         self.assertEqual(result_line(armed), result_line(unarmed),
                          "the armed run's outcome differs from the unarmed run's")
         rows = rows_of(folder) or []
-        for case in ("Leak.test_b_plain", "Leak.test_c_plain"):
+        for case, outcome in cases:
             got = [row for row in rows if row.get("case") == case]
-            self.assertEqual(len(got), 1, "%s has %d rows, want one: the frame an earlier case left open dropped it"
+            self.assertEqual(len(got), 1, "%s has %d rows, want one: an open frame dropped its row"
                              % (case, len(got)))
-            self.assertEqual(got[0].get("outcome"), "pass",
-                             "%s outcome is %r, want 'pass'" % (case, got[0].get("outcome")))
+            self.assertEqual(got[0].get("outcome"), outcome,
+                             "%s outcome is %r, want %r" % (case, got[0].get("outcome"), outcome))
         notes = [line for line in armed.stderr.splitlines() if line.startswith("case_times:")]
         self.assertEqual(len(notes), 1, "the open frame at flush wrote %d case_times stderr lines, want one: %s"
                          % (len(notes), notes))
-        self.assertIn("Leak.test_a_leaves_frame_open", notes[0],
-                      "the stderr line does not name the open frame: %r" % notes[0])
+        self.assertIn(named, notes[0], "the stderr line does not name the open frame: %r" % notes[0])
+
+    def test_open_frame_at_flush_keeps_later_rows_and_names_it(self):
+        folder = case_folder(self)
+        write(folder, "fixture_leak.py", LEAK)
+        self.assert_open_frame("fixture_leak", folder, "RESULT ran=3 failures=0 errors=0 skipped=0",
+                               [("Leak.test_b_plain", "pass"), ("Leak.test_c_plain", "pass")],
+                               "Leak.test_a_leaves_frame_open")
+
+    def test_frame_opened_outside_any_case_keeps_rows(self):
+        folder = case_folder(self)
+        write(folder, "fixture_leak_module.py", LEAK_MODULE)
+        self.assert_open_frame("fixture_leak_module", folder, "RESULT ran=3 failures=0 errors=0 skipped=0",
+                               [("Module.test_b_plain", "pass"), ("Module.test_c_plain", "pass")],
+                               "Seed.test_a")
+
+    def test_case_frame_on_runner_result_keeps_its_row(self):
+        folder = case_folder(self)
+        write(folder, "fixture_leak_own.py", LEAK_OWN)
+        self.assert_open_frame("fixture_leak_own", folder, "RESULT ran=4 failures=0 errors=0 skipped=0",
+                               [("Own.test_a_opens_a_frame_on_the_runner_result", "pass"),
+                                ("Own.test_b_plain", "pass"), ("Own.test_c_plain", "pass")],
+                               "Own.test_a_opens_a_frame_on_the_runner_result")
 
 
 class ArmWithoutCallSetUp(unittest.TestCase):
@@ -911,6 +984,21 @@ class ArmWithoutCallSetUp(unittest.TestCase):
         notes = [line for line in armed.stderr.splitlines() if line.startswith("case_times:")]
         self.assertEqual(len(notes), 1, "the absent TestCase._callSetUp wrote %d case_times stderr lines, want one: %s"
                          % (len(notes), notes))
+
+    def test_deleted_call_setup_writes_one_line_naming_it(self):
+        folder = case_folder(self)
+        write(folder, "fixture_child.py", CHILD)
+        unarmed = run_module(folder, "fixture_child", armed=False, report=True, flags=("deleted",))
+        armed = run_module(folder, "fixture_child", report=True, flags=("deleted",))
+        scope_ok(self, armed)
+        self.assertEqual(armed.returncode, unarmed.returncode, "the armed run exited %d, the unarmed %d"
+                         % (armed.returncode, unarmed.returncode))
+        self.assertEqual(result_line(armed), result_line(unarmed),
+                         "the armed run's outcome differs from the unarmed run's")
+        notes = [line for line in armed.stderr.splitlines() if line.startswith("case_times:")]
+        self.assertEqual(len(notes), 1, "the deleted TestCase._callSetUp wrote %d case_times stderr lines, want one: %s"
+                         % (len(notes), notes))
+        self.assertIn("_callSetUp", notes[0], "the stderr line does not name the missing call: %r" % notes[0])
 
 
 class AsyncFixture(unittest.TestCase):
@@ -954,6 +1042,19 @@ class SetupTraceback(unittest.TestCase):
         self.assertEqual(armed_text, unarmed_text,
                          "the armed setUp traceback differs from the unarmed one: armed frames %s, unarmed frames %s"
                          % (frames, unarmed_frames))
+
+
+class ArmImports(unittest.TestCase):
+    def test_armed_import_unittest_loads_no_asyncio(self):
+        folder = case_folder(self)
+        loaded = "LOADED asyncio=False async_case=False"
+        unarmed = run_py(folder, ["-c", IMPORTS_PROBE], armed=False)
+        self.assertIn(loaded, unarmed.stdout, "the unarmed control shows a module loaded after import unittest: %r"
+                      % unarmed.stdout[-300:])
+        armed = run_py(folder, ["-c", IMPORTS_PROBE])
+        scope_ok(self, armed)
+        self.assertIn(loaded, armed.stdout, "the armed arm loaded asyncio or unittest.async_case on import unittest: %r"
+                      % armed.stdout[-300:])
 
 
 if __name__ == "__main__":
