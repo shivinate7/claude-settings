@@ -414,7 +414,8 @@ MODELS_REASON = owner_line(
 UNSTARTED_REASON = owner_line(
     "Unstarted guard", "this turn ran a builder, and Next holds no \"Unstarted:\" line")
 UNSTARTED_FILE_REASON = owner_line(
-    "Unstarted guard", "an Unstarted item waits on another lane's merge or PR and names no shared file")
+    "Unstarted guard", "an Unstarted item waits on another lane's merge or PR and names no code need or measured "
+    "conflict, and a shared file alone is no reason to wait")
 
 
 # is_last_human and tool_uses live in lint/_transcript.py, imported above.
@@ -1167,8 +1168,10 @@ UNSTARTED_RE = re.compile(
     r"(?:^[ \t]*|[;.]\s+)(?:\*\*Next:?\*\*:?\s*)?(?:[-*+]\s+)?unstarted:", re.M | re.I)
 
 
-# An item that waits on another lane's merge, PR or landing must name the file the two lanes share, so the wait is
-# checkable. No word exempts it: the owner or the load brake may also be in the sentence.
+# A lane starts at once and settles a conflict at its merge of main. An item may wait on another lane's merge, PR
+# or landing only as a code need (`needs PR #N's code: `symbol``) or a measured conflict in a named file. A wait
+# that names only a shared file, or a code need with no symbol, is refused. No word exempts it: the owner or the
+# load brake may also be in the sentence.
 _UNSTARTED_LANE_WAIT_RE = re.compile(
     r"\b(?:PRs?|pull requests?|merges?|merged|merging|land(?:s|ed|ing)?)\b|#\d+", re.I)
 # "none" or "nothing", bare, in bold or in parentheses, says no item waits.
@@ -1214,9 +1217,24 @@ def _names_a_file(item):
     return False
 
 
+# A code need names the symbol it builds on in backticks: a name, with dots or call parens, never a path.
+_CODE_NEED_RE = re.compile(r"\bneeds?\b[^`;]*?\bcode\s*:\s*`[A-Za-z_][\w.]*(?:\(\))?`", re.I)
+# A measured conflict says where it was measured, then the file it names.
+_MEASURED_CONFLICT_RE = re.compile(r"\b(?:measured\s+(?:a\s+)?conflict|merge-tree\s+shows\s+a\s+conflict)\s+in\b(.*)",
+                                   re.I | re.S)
+
+
+def _checkable_wait(item):
+    """True when a wait on another lane names a code need with its symbol, or a measured conflict in a file."""
+    if _CODE_NEED_RE.search(item):
+        return True
+    return any(_names_a_file(m.group(1)) for m in _MEASURED_CONFLICT_RE.finditer(item))
+
+
 def unstarted_problem(text, spawned):
     """The refusal reason when a builder ran this turn and Next's `Unstarted:` line is missing, or waits on
-    another lane's merge, PR or landing and names no shared file. '' when the line is fine."""
+    another lane's merge, PR or landing with no code need (a symbol) and no measured conflict (a file).
+    '' when the line is fine."""
     if "builder" not in spawned:
         return ""
     block = block_text(text, keep_indent=True)
@@ -1225,7 +1243,7 @@ def unstarted_problem(text, spawned):
         return UNSTARTED_REASON
     item = _unstarted_item(block, found)
     if (not _UNSTARTED_NONE_RE.match(item) and _UNSTARTED_LANE_WAIT_RE.search(item)
-            and not _names_a_file(item)):
+            and not _checkable_wait(item)):
         return UNSTARTED_FILE_REASON
     return ""
 
