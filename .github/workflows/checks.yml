@@ -219,7 +219,7 @@ jobs:
 
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
         with:
-          python-version: "3.11"
+          python-version: "3.15"
 
       - name: Workflow supply-chain audit (zizmor)
         if: ${{ !cancelled() }}
@@ -862,7 +862,7 @@ jobs:
 
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
         with:
-          python-version: "3.11"
+          python-version: "3.15"
 
       # A step below that has a scope condition and reads no .md file skips a docs-only pull request (`code` is false,
       # ci-scope.sh). A step that reads a .md file also runs when its doc groups change. Every suite step reads the records-only
@@ -1099,7 +1099,7 @@ jobs:
 
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
         with:
-          python-version: "3.11"
+          python-version: "3.15"
 
       - name: Janitor sweep fixture suite
         if: ${{ (needs.scope.outputs.code == 'true' && needs.scope.outputs.sweep == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
@@ -1252,7 +1252,7 @@ jobs:
 
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
         with:
-          python-version: "3.11"
+          python-version: "3.15"
 
       - name: Janitor triggers fixture suite (SessionEnd hook + launchd installer)
         if: ${{ needs.scope.outputs.code == 'true' }}
@@ -1359,7 +1359,7 @@ jobs:
 
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
         with:
-          python-version: "3.11"
+          python-version: "3.15"
 
       - name: install.sh checkout-detection suite (shard 1 of 3)
         if: ${{ needs.scope.outputs.code == 'true' }}
@@ -1394,7 +1394,7 @@ jobs:
 
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
         with:
-          python-version: "3.11"
+          python-version: "3.15"
 
       - name: install.sh checkout-detection suite (shard 2 of 3)
         if: ${{ needs.scope.outputs.code == 'true' }}
@@ -1429,7 +1429,7 @@ jobs:
 
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
         with:
-          python-version: "3.11"
+          python-version: "3.15"
 
       - name: install.sh checkout-detection suite (shard 3 of 3)
         if: ${{ needs.scope.outputs.code == 'true' }}
@@ -1465,7 +1465,7 @@ jobs:
 
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
         with:
-          python-version: "3.11"
+          python-version: "3.15"
 
       - name: Merge tool git-half fixture suite
         if: ${{ needs.scope.outputs.code == 'true' }}
@@ -1508,7 +1508,7 @@ jobs:
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
         if: ${{ needs.scope.outputs.checks_guard == 'true' }}
         with:
-          python-version: "3.11"
+          python-version: "3.15"
 
       # The deny cases of rule page-item-design render a page through hooks/guard.py's checker, which needs
       # Playwright and Chromium. The same pinned copy checks-shoot installs; NODE_PATH below lets the guard's node find it.
@@ -1563,7 +1563,7 @@ jobs:
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
         if: ${{ needs.scope.outputs.checks_guard == 'true' }}
         with:
-          python-version: "3.11"
+          python-version: "3.15"
 
       # The deny cases of rule page-item-design render a page through hooks/guard.py's checker, which needs
       # Playwright and Chromium. The same pinned copy checks-shoot installs; NODE_PATH below lets the guard's node find it.
@@ -1621,7 +1621,7 @@ jobs:
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
         if: ${{ needs.scope.outputs.checks_guard == 'true' }}
         with:
-          python-version: "3.11"
+          python-version: "3.15"
 
       # The deny cases of rule page-item-design render a page through hooks/guard.py's checker, which needs
       # Playwright and Chromium. The same pinned copy checks-shoot installs; NODE_PATH below lets the guard's node find it.
@@ -1675,7 +1675,7 @@ jobs:
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
         if: ${{ needs.scope.outputs.checks_guard == 'true' }}
         with:
-          python-version: "3.11"
+          python-version: "3.15"
 
       # The deny cases of rule page-item-design render a page through hooks/guard.py's checker, which needs
       # Playwright and Chromium. The same pinned copy checks-shoot installs; NODE_PATH below lets the guard's node find it.
@@ -1724,7 +1724,7 @@ jobs:
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
         if: ${{ needs.scope.outputs.shoot == 'true' }}
         with:
-          python-version: "3.11"
+          python-version: "3.15"
 
       - name: Install the pinned Playwright and Chromium, no apt step
         if: ${{ needs.scope.outputs.shoot == 'true' }}
@@ -1956,7 +1956,7 @@ jobs:
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
         if: ${{ needs.scope.outputs.checks_macos == 'true' || needs.scope.outputs.sweep == 'true' || github.event_name != 'pull_request' }}
         with:
-          python-version: "3.11"
+          python-version: "3.15"
 
       # The mac-tagged slice of the guard suite, on every event that runs macOS (R61, owner pick b, Nov 12): the full guard suite
       # runs on Linux and Windows, and on macOS only this slice. No step cap: bin/verdict stops the step only on a hang (decision hang-stop); the job cap stays as the net. The slice runs far shorter than the shard
@@ -2213,7 +2213,7 @@ jobs:
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
         if: ${{ needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request' }}
         with:
-          python-version: "3.11"
+          python-version: "3.15"
 
       - name: CI wake-up fixture suite
         if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
@@ -2293,7 +2293,7 @@ jobs:
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
         if: ${{ needs.scope.outputs.checks_windows == 'true' || github.event_name != 'pull_request' }}
         with:
-          python-version: "3.11"
+          python-version: "3.15"
 
       - name: Report the Windows environment
         if: ${{ (needs.scope.outputs.checks_windows == 'true' || github.event_name != 'pull_request') && !cancelled() }}
@@ -2418,7 +2418,7 @@ jobs:
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
         if: ${{ needs.scope.outputs.guard == 'true' }}
         with:
-          python-version: "3.11"
+          python-version: "3.15"
 
       # The per-mutant verdicts stay across a rerun of this run (decision hang-stop: a stopped run resumes). The shard step writes one
       # verdict file per mutant into this folder (hooks/mutate_shared.py reads MUTATE_VERDICT_DIR; a verdict from other code is ruled out
@@ -2490,7 +2490,7 @@ jobs:
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
         if: ${{ needs.scope.outputs.guard == 'true' }}
         with:
-          python-version: "3.11"
+          python-version: "3.15"
 
       # The per-mutant verdicts stay across a rerun of this run (decision hang-stop: a stopped run resumes). The shard step writes one
       # verdict file per mutant into this folder (hooks/mutate_shared.py reads MUTATE_VERDICT_DIR; a verdict from other code is ruled out
@@ -2553,7 +2553,7 @@ jobs:
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
         if: ${{ needs.scope.outputs.guard == 'true' }}
         with:
-          python-version: "3.11"
+          python-version: "3.15"
 
       # The per-mutant verdicts stay across a rerun of this run (decision hang-stop: a stopped run resumes). The shard step writes one
       # verdict file per mutant into this folder (hooks/mutate_shared.py reads MUTATE_VERDICT_DIR; a verdict from other code is ruled out
@@ -2631,7 +2631,7 @@ jobs:
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
         if: ${{ needs.scope.outputs.mutation_report == 'true' }}
         with:
-          python-version: "3.11"
+          python-version: "3.15"
 
       - name: Mutation report and known defects
         if: ${{ needs.scope.outputs.mutation_report == 'true' }}
@@ -2682,7 +2682,7 @@ jobs:
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
         if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
         with:
-          python-version: "3.11"
+          python-version: "3.15"
 
       - name: Guard fixture suite (shard 1 of 5)
         if: ${{ ((github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() && (needs.scope.outputs.code == 'true' || github.event_name == 'pull_request') && needs.scope.outputs.windows_guard == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
@@ -2716,7 +2716,7 @@ jobs:
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
         if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
         with:
-          python-version: "3.11"
+          python-version: "3.15"
 
       - name: Guard fixture suite (shard 2 of 5)
         if: ${{ ((github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() && (needs.scope.outputs.code == 'true' || github.event_name == 'pull_request') && needs.scope.outputs.windows_guard == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
@@ -2750,7 +2750,7 @@ jobs:
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
         if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
         with:
-          python-version: "3.11"
+          python-version: "3.15"
 
       - name: Guard fixture suite (shard 3 of 5)
         if: ${{ ((github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() && (needs.scope.outputs.code == 'true' || github.event_name == 'pull_request') && needs.scope.outputs.windows_guard == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
@@ -2784,7 +2784,7 @@ jobs:
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
         if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
         with:
-          python-version: "3.11"
+          python-version: "3.15"
 
       - name: Guard fixture suite (shard 4 of 5)
         if: ${{ ((github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() && (needs.scope.outputs.code == 'true' || github.event_name == 'pull_request') && needs.scope.outputs.windows_guard == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
@@ -2818,7 +2818,7 @@ jobs:
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
         if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
         with:
-          python-version: "3.11"
+          python-version: "3.15"
 
       - name: Guard fixture suite (shard 5 of 5)
         if: ${{ ((github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() && (needs.scope.outputs.code == 'true' || github.event_name == 'pull_request') && needs.scope.outputs.windows_guard == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
@@ -2856,7 +2856,7 @@ jobs:
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
         if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
         with:
-          python-version: "3.11"
+          python-version: "3.15"
 
       - name: Merge launcher fixture suite
         if: ${{ ((github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() && (needs.scope.outputs.code == 'true' || github.event_name == 'pull_request') && (needs.scope.outputs.checks_windows_merge == 'true' || github.event_name != 'pull_request')) && needs.scope.outputs.records_only_skip != 'true' }}
@@ -2899,7 +2899,7 @@ jobs:
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
         if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
         with:
-          python-version: "3.11"
+          python-version: "3.15"
 
       - name: Merge tool git-half fixture suite (shard 2 of 10)
         if: ${{ ((github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() && (needs.scope.outputs.code == 'true' || github.event_name == 'pull_request') && (needs.scope.outputs.checks_windows_merge == 'true' || github.event_name != 'pull_request')) && needs.scope.outputs.records_only_skip != 'true' }}
@@ -2934,7 +2934,7 @@ jobs:
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
         if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
         with:
-          python-version: "3.11"
+          python-version: "3.15"
 
       - name: Merge tool git-half fixture suite (shard 3 of 10)
         if: ${{ ((github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() && (needs.scope.outputs.code == 'true' || github.event_name == 'pull_request') && (needs.scope.outputs.checks_windows_merge == 'true' || github.event_name != 'pull_request')) && needs.scope.outputs.records_only_skip != 'true' }}
@@ -2969,7 +2969,7 @@ jobs:
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
         if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
         with:
-          python-version: "3.11"
+          python-version: "3.15"
 
       - name: Merge tool git-half fixture suite (shard 4 of 10)
         if: ${{ ((github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() && (needs.scope.outputs.code == 'true' || github.event_name == 'pull_request') && (needs.scope.outputs.checks_windows_merge == 'true' || github.event_name != 'pull_request')) && needs.scope.outputs.records_only_skip != 'true' }}
@@ -3004,7 +3004,7 @@ jobs:
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
         if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
         with:
-          python-version: "3.11"
+          python-version: "3.15"
 
       - name: Merge tool git-half fixture suite (shard 5 of 10)
         if: ${{ ((github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() && (needs.scope.outputs.code == 'true' || github.event_name == 'pull_request') && (needs.scope.outputs.checks_windows_merge == 'true' || github.event_name != 'pull_request')) && needs.scope.outputs.records_only_skip != 'true' }}
@@ -3039,7 +3039,7 @@ jobs:
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
         if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
         with:
-          python-version: "3.11"
+          python-version: "3.15"
 
       - name: Merge tool git-half fixture suite (shard 6 of 10)
         if: ${{ ((github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() && (needs.scope.outputs.code == 'true' || github.event_name == 'pull_request') && (needs.scope.outputs.checks_windows_merge == 'true' || github.event_name != 'pull_request')) && needs.scope.outputs.records_only_skip != 'true' }}
@@ -3074,7 +3074,7 @@ jobs:
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
         if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
         with:
-          python-version: "3.11"
+          python-version: "3.15"
 
       - name: Merge tool git-half fixture suite (shard 7 of 10)
         if: ${{ ((github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() && (needs.scope.outputs.code == 'true' || github.event_name == 'pull_request') && (needs.scope.outputs.checks_windows_merge == 'true' || github.event_name != 'pull_request')) && needs.scope.outputs.records_only_skip != 'true' }}
@@ -3109,7 +3109,7 @@ jobs:
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
         if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
         with:
-          python-version: "3.11"
+          python-version: "3.15"
 
       - name: Merge tool git-half fixture suite (shard 8 of 10)
         if: ${{ ((github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() && (needs.scope.outputs.code == 'true' || github.event_name == 'pull_request') && (needs.scope.outputs.checks_windows_merge == 'true' || github.event_name != 'pull_request')) && needs.scope.outputs.records_only_skip != 'true' }}
@@ -3144,7 +3144,7 @@ jobs:
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
         if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
         with:
-          python-version: "3.11"
+          python-version: "3.15"
 
       - name: Merge tool git-half fixture suite (shard 9 of 10)
         if: ${{ ((github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() && (needs.scope.outputs.code == 'true' || github.event_name == 'pull_request') && (needs.scope.outputs.checks_windows_merge == 'true' || github.event_name != 'pull_request')) && needs.scope.outputs.records_only_skip != 'true' }}
@@ -3179,7 +3179,7 @@ jobs:
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
         if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
         with:
-          python-version: "3.11"
+          python-version: "3.15"
 
       - name: Merge tool git-half fixture suite (shard 10 of 10)
         if: ${{ ((github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() && (needs.scope.outputs.code == 'true' || github.event_name == 'pull_request') && (needs.scope.outputs.checks_windows_merge == 'true' || github.event_name != 'pull_request')) && needs.scope.outputs.records_only_skip != 'true' }}
@@ -3215,7 +3215,7 @@ jobs:
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
         if: ${{ needs.scope.outputs.checks_windows_sweep == 'true' || needs.scope.outputs.sweep == 'true' || github.event_name != 'pull_request' }}
         with:
-          python-version: "3.11"
+          python-version: "3.15"
 
       - name: Janitor sweep fixture suite
         if: ${{ (needs.scope.outputs.checks_windows_sweep == 'true' || github.event_name != 'pull_request') && !cancelled() && needs.scope.outputs.code == 'true' }}
@@ -3255,7 +3255,7 @@ jobs:
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
         if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
         with:
-          python-version: "3.11"
+          python-version: "3.15"
 
       - name: Config watch fixture suite
         if: ${{ ((github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() && (needs.scope.outputs.checks_windows_rest == 'true' || github.event_name != 'pull_request')) && needs.scope.outputs.records_only_skip != 'true' }}
@@ -3405,7 +3405,7 @@ jobs:
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
         if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
         with:
-          python-version: "3.11"
+          python-version: "3.15"
 
       - name: Guard wrappers fixture suite
         if: ${{ ((github.event_name != 'pull_request' || !github.event.pull_request.draft) && !cancelled() && (needs.scope.outputs.checks_windows_rest_2 == 'true' || github.event_name != 'pull_request')) && needs.scope.outputs.records_only_skip != 'true' }}

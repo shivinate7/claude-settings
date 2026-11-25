@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Fails when a product file in hooks/ or lint/ needs a newer Python than the 3.9 floor.
 
-README.md and lint/ste_lint.py state a floor of Python 3.9 for the guards and the lint. CI runs 3.11, so a
+README.md and lint/ste_lint.py state a floor of Python 3.9 for the guards and the lint. CI runs 3.15, so a
 3.10+ call passes CI and crashes a guard on a 3.9 install, where the guard fails open. The incident:
 `glob.iglob(root_dir=...)` (3.10). Two passes read each product file. vermin (`-t=3.9-`, `--eval-annotations`)
 finds newer calls, modules and syntax. An ast pass finds a union type `int | None`, which vermin does not flag.
