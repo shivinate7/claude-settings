@@ -270,11 +270,12 @@ class WorkflowShape(unittest.TestCase):
         self.assertTrue(any(calls_script(st) for st in step_blocks(job)), "no run step calls the script")
         self.assertTrue(checkout_steps(job), "the job calls the script but checks out nothing, so the file is not on the runner")
 
-    def test_concurrency_group_is_keyed_on_the_pr_number(self):
+    def test_concurrency_group_is_the_workflow_name_and_pr_number(self):
+        # The exact group the workflow emits: one group per workflow and PR. A rename or an extra key fails it.
         conc = concurrency_of(self.text(), self.job())
         self.assertIsNotNone(conc, "the workflow has no concurrency block")
-        self.assertIn("github.event.pull_request.number", conc.get("group", ""),
-                      "the concurrency group is not keyed on the PR number")
+        self.assertEqual(conc.get("group"), "${{ github.workflow }}-${{ github.event.pull_request.number }}",
+                         "the concurrency group is not the workflow name and the PR number")
 
     def test_concurrency_never_cancels_in_progress(self):
         conc = concurrency_of(self.text(), self.job())
