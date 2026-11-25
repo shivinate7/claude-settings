@@ -37,7 +37,9 @@ The script lint/conflict_hotspots.py (branch conflict-hotspots, in flight) will 
 ## Consultant picks
 
 The consultant chose these.
-The owner has not ruled on them.
+The owner's 11:12 CST reply, "please build yes", replied to the plan row "One entry per line, sorted, with a check" (the plan's words).
+The "Where order cannot matter" wording is the consultant's.
+The owner has not ruled on the other picks.
 
 - Where order cannot matter, the lines are sorted.
 - Record prose holds one sentence per line.
