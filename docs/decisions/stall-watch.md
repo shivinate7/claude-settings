@@ -146,7 +146,7 @@ lists each open background shell and background agent that has been quiet longer
 For a shell, the signal is its output file, and each log its
 command names must be quiet too. A relative log resolves against the call record's `cwd`, after any sure `cd` the command makes (`named_logs`, above). A shell whose
 output file is not found is listed as unknown. It prints one systemMessage that tells the model to stop
-the shell or tell the owner. A job is listed once per crossing, at the first Stop after its stall crossed (see below).
+the shell or tell the owner. A job whose read raises gets one `unread` row, and it hides no other job's rows. A job is listed once per crossing, at the first Stop after its stall crossed (see below).
 
 If the shared names module fails to load, the check prints nothing. A false "still running" alarm is
 worse than a missed stall, and the guard already refuses every call in that state (owner ruling,
@@ -196,13 +196,13 @@ record. An empty transcript, or one whose every tool_use in the read window has 
 read is listed.
 Age rule (`AGENT_LONG`, 1800 s, a consultant's pick, undoable). It rests on the owner's ruling of 20:27 CST Nov 24, 2026
 (question QQ, option c: one check-in per long agent, no whole-suite run guard). `STALL_WATCH_LONG` sets another age.
-In `stop()`, a background agent whose launch is at least that old blocks the Stop, whether busy or quiet, inside an open
-call or not, with its transcript found or not. The launch time is set from the launch record (`scan_jobs`). A resume record (`toolUseResult.resumedAgentId`) reopens a closed agent, and the 1800 s limit counts from the latest resume. A notice or TaskStop closes an agent only if it is newer than its latest launch or resume.
-An agent with no readable launch time does not block. The block names each such agent,
+In `stop()`, a background agent whose age (from its launch, or its latest resume) is at least that old blocks the Stop, whether busy or quiet, inside an open
+call or not, with its transcript found or not. The launch time is set from the launch record (`scan_jobs`). A resume record (`toolUseResult.resumedAgentId`) reopens an agent that a notice or TaskStop closed, and the 1800 s limit counts from its latest resume.
+An agent with no readable launch time does not block, and its row says so (`launch time unread`). The block names each such agent,
 `Agent "<description>" (<id>) has run <N> min and has not finished.`, and adds `; it is waiting on its own background work`
 when its notice carried the waiting text. It then gives `AGENT_CHECKIN_REMEDY`: set one one-time check-in, at most 30 minutes
-ahead, whose text names the id, then stop. A check-in clears the agent when it was made at or after the crossing (launch plus
-`AGENT_LONG`), its text names the id as a whole token (`checked_in`), and its result was not an error. Any check-in tool in
+ahead, whose text names the id, then stop. A check-in clears the agent when it was made at or after the crossing (its age's start, the launch or the latest resume, plus
+`AGENT_LONG`), its text names the id as a whole token (`checked_in`), its result was not an error, and it is set at most `AGENT_CHECKIN_AHEAD` (30 minutes, the remedy's limit) ahead. `delay_minutes` or `at` sets how far ahead; the larger counts when both are given. A check-in with neither, or with a value that does not read, counts. Any check-in tool in
 `CI_CHECKIN_TOOLS` counts; the remedy names `send_later`. An error result voids the check-in it answers. The block is set at
 each Stop until a check-in clears the agent. But `stop()` returns at once when `stop_hook_active` is true, and the run after
 a block carries that flag. So one block is not repeated within the same run of Stops. The next Stop that is not such a run checks again.
@@ -217,7 +217,7 @@ Cost (rule `outcomes-mechanize-rules`, each check states its cost): no process, 
 running agent, and one read of the transcript's end for each quiet agent not yet listed and not waiting, pinned by
 `A8_cost_one_stat_per_running_agent_and_a_read_only_when_quiet` in `hooks/test_stall_watch_stop.py`. The age rule and the
 waiting rule add no stat and no read. They use the record pass that `scan_jobs` already makes. Their extra work is a byte
-test per line, and `ci_events` on each check-in or error line (unmeasured). Each healthy agent past `AGENT_LONG` costs one
+test per line, `ci_events` on each check-in or error line, and one JSON parse per check-in each time an agent is checked for it (unmeasured). Each healthy agent past `AGENT_LONG` costs one
 blocked Stop and one check-in (its false alarms).
 
 - P1 [notes] Launch to final finish of a background agent: 95th percentile 32.5 min over 9196 launches in 8 days. Over 30 min:
@@ -225,9 +225,7 @@ blocked Stop and one check-in (its false alarms).
   plan (agent report, Nov 24, 2026); the command behind it is not on record. Checked never.
 
 Limits: a session that is idle with no Stop sees nothing until its next Stop. The age rule runs only at a Stop, and a
-foreground agent is never checked. A TaskStop, or a terminal notice without the waiting text, closes an agent id for the
-whole transcript. So an agent resumed under that id is never listed or blocked (debt `agent-resume-reads-closed`, an agent
-resumed after it closed). An agent stuck inside one tool call is not quiet-listed. The age rule catches it only at
+foreground agent is never checked. A TaskStop, or a terminal notice without the waiting text, closes an agent id. A resume newer than that close reopens the agent: it is listed when quiet and blocked at the age, with the 1800 s counted from the latest resume. A resume newer than a waiting notice clears the waiting flag. An agent stuck inside one tool call is not quiet-listed. The age rule catches it only at
 `AGENT_LONG`, so a shorter stall is missed. A model turn longer than the quiet age would list a busy agent. Measured on 5
 local agent transcripts (559 records, 2026-11-07): the longest gap between records was 206 s, under the 300 s quiet age.
 
@@ -241,7 +239,7 @@ The `--hook` path exits 0 and never refuses. The `--stop` path refuses a Stop fo
 - Long age: `AGENT_LONG`, 1800 seconds, a consultant's pick (undoable). `STALL_WATCH_LONG` sets another number of seconds.
 - A job counts as finished when the transcript holds a completion notice with status completed, failed,
   killed or stopped (as a user record, or as an attachment record of type queued_command), or a
-  "Successfully stopped task: <ID>" result of a TaskStop call. In the Stop check, a completed notice that holds the
+  "Successfully stopped task: <ID>" result of a TaskStop call. In the Stop check, a terminal notice that holds the
   waiting text does not count for an agent (see Waiting agents above).
 
 Reason: the PreToolUse path runs only at a tool call, and on Windows it does nothing. No process id

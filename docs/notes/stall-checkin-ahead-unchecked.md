@@ -1,1 +1,0 @@
-- stall-checkin-ahead-unchecked: hooks/stall_watch.py:1177-1182 (`checked_in`) accepts a check-in scheduled hours ahead, since it sets no upper time bound. The remedy at hooks/stall_watch.py:1173 says at most 30 minutes ahead, but nothing enforces it. Decision: stall-watch (the stall watch decision). Seen: 2026-11-24 x1
