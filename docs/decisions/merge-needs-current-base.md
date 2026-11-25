@@ -2,7 +2,7 @@
 
 ## The ruling
 
-Owner pick A for R42 part 2 (per-lane merge). Rule M3, per lane: the head must merge cleanly with the base tip. Its own run must be green, or still pending under a lane-lint PASS that names its live head, or the head sits on a green proof (below). The head need not hold the tip.
+Owner pick A for R42 part 2 (per-lane merge). Rule M3, per lane: the head must merge cleanly with the base tip. Its own run must be green, or still pending under a lane-lint PASS that names its live head, or the head sits on a green proof (below). Under the stamp value `"first-proof"` (CI live on the base) "green" means the `all-jobs-passed` rollup is green. A pending run with no lane-lint PASS refuses, and the refusal says to run `merge --lane-lint N` or wait for the run. `"first-proof"` is the consultant's pick of 13:58 CST, Nov 24 2026, undoable and not a ruling; the owner may reverse it. Under `"none"` no run is read. The head need not hold the tip.
 
 Owner ruling `own-merge-on-lint-pass` (owner, 2026-11-15 18:21 CST, typed "B for sure") added the pending case. Main's run after the merge is the check, and a red main gets a revert or a fix (ruling Q5 v).
 
@@ -31,7 +31,8 @@ Residual risk: a clean merge can still break a suite, and a head can merge befor
 
 Kind: process
 Home: merge/merge.py
+Check: `merge/test_merge.py` class `LocalConfirmNeedsProof`
 
-Cost: per merge, one read of the head's run and two `git merge-tree --write-tree` starts (unmeasured). A carried proof adds, per page-only commit walked, 3 git starts (two `git log`, one `git diff-tree`), and per clean base merge walked, 8 git starts (two `git log`, `git rev-list`, `git merge-base --is-ancestor`, two `git rev-parse`, `git merge-tree`, one `git rev-parse` of the tree), plus one base fetch per walk; the count grows with the depth of the stack (unmeasured by a test). On the relayed path, each merge commit met also runs the config read of `heals_stale_page` (unmeasured by a test). A confirm makes 2 GitHub reads at any depth (unmeasured by a test). A pending head adds one paged read of the repo's comments and the carry checks (unmeasured).
+Cost: per merge, one read of the head's run and two `git merge-tree --write-tree` starts (unmeasured). A carried proof adds, per page-only commit walked, 3 git starts (two `git log`, one `git diff-tree`), and per clean base merge walked, 8 git starts (two `git log`, `git rev-list`, `git merge-base --is-ancestor`, two `git rev-parse`, `git merge-tree`, one `git rev-parse` of the tree), plus one base fetch per walk; the count grows with the depth of the stack (unmeasured by a test). On the relayed path, each merge commit met also runs the config read of `heals_stale_page` (unmeasured by a test). A confirm makes 2 GitHub reads at any depth (unmeasured by a test). Under `"first-proof"` the head's check runs, statuses and workflow runs add up to 3 reads, or up to 6 when the proof is carried (debt `confirm-proof-reads-per-merge`). A pending head adds one paged read of the repo's comments and the carry checks (unmeasured).
 
 Risk: likely. Lanes merge while main moves, so main often moves under a green or pending head.
