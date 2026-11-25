@@ -1965,10 +1965,10 @@ class RewriteAfterMissingReportTests(unittest.TestCase):
         return {"type": "system", "subtype": "stop_hook_summary", "hookErrors": ["Stop hook: send the report now."],
                 "hasOutput": True, "level": "suggestion"}
 
-    def refused_turn(self, reports):
-        """The turn's records: a test-author haiku spawn, then each of `reports` (a report the Stop hook refused), each
-        followed by the summary and the feedback record. The caller appends the correction."""
-        records = [human("do the task"), tool_use_msg("Agent", self.TEST_AUTHOR), tool_result_msg(),
+    def refused_turn(self, reports, spawn=None):
+        """The turn's records: a spawn (test-author haiku by default), then each of `reports` (a report the Stop hook
+        refused), each followed by the summary and the feedback record. The caller appends the correction."""
+        records = [human("do the task"), tool_use_msg("Agent", spawn or self.TEST_AUTHOR), tool_result_msg(),
                    tool_use_msg("Bash", {"command": "git commit -m x"}), tool_result_msg()]
         for report in reports:
             records += [assistant_text(report), self.summary_record(), self.feedback_record()]
@@ -2029,8 +2029,78 @@ class RewriteAfterMissingReportTests(unittest.TestCase):
         self.assertIsNotNone(out, "the correction named test-author sonnet after two refusals, which ran no sonnet, and passed")
         self.assertIn(self.WRONG_NAME, out["reason"])
 
+    # reports-done-names-models, record-writer. A report refused for a wrong model name leaves no missing-report marker,
+    # so the correction's Stop is a rewrite that must still judge its model names against the refused report's window.
+    # Both Stops run through main() on one session and one transcript, as the harness sends them. No marker is planted.
+    RW_SPAWN = {"subagent_type": "record-writer", "model": "haiku", "prompt": "write the record"}
+    RW_SONNET = "> **Done** BUILT the record, PR #7 (record-writer sonnet)\n> **Next** Unstarted: none"
+    RW_HAIKU = "> **Done** BUILT the record, PR #7 (record-writer haiku)\n> **Next** Unstarted: none"
+    RW_WRONG = "'record-writer sonnet' matches no record-writer spawn, which ran haiku"
+    RW_WINDOW = {"record-writer": ["haiku"]}
 
-REPORT_NO_LINE = "> **Done** BUILT abc123\n> **Deviations** none\n> **Next** ship it"
+    def refuse_sonnet(self):
+        """Stop 1, not a rewrite: the turn's record-writer haiku spawn, then the report naming record-writer sonnet. That
+        Stop blocks for the wrong name, and the rewrite that follows reads the same session."""
+        out = self.run_hook(self.refused_turn([], spawn=self.RW_SPAWN) + [assistant_text(self.RW_SONNET)], False)
+        self.assertIsNotNone(out, "the report naming record-writer sonnet, which the turn never ran, was not refused")
+        self.assertEqual(out["decision"], "block")
+        self.assertIn(self.RW_WRONG, out["reason"])
+
+    def correction_records(self, correction):
+        """The transcript at Stop 2: the refused report, its summary and the feedback record, then the correction."""
+        return self.refused_turn([self.RW_SONNET], spawn=self.RW_SPAWN) + [assistant_text(correction)]
+
+    def test_rw_record_writer_sonnet_report_refused_control(self):
+        # Control: the first Stop refuses the wrong name, so the rewrite below has a refusal behind it.
+        self.refuse_sonnet()
+
+    def test_rw_record_writer_feedback_keeps_the_refused_window(self):
+        # Control: the refused report and its feedback record cut no window, so the correction is
+        # judged against the same spawns as the refused report.
+        refused = self.refused_turn([], spawn=self.RW_SPAWN) + [assistant_text(self.RW_SONNET)]
+        self.assertEqual(self.window_of(refused, self.RW_SONNET), self.RW_WINDOW)
+        self.assertEqual(self.window_of(self.correction_records(self.RW_HAIKU), self.RW_HAIKU), self.RW_WINDOW,
+                         "the feedback record after a refused report cut the window the correction is judged against")
+
+    def test_rw_record_writer_wrong_name_after_refusal_blocks(self):
+        # Red today: the refusal wrote no marker, so the rewrite is quiet and the correction naming sonnet passes.
+        self.refuse_sonnet()
+        records = self.correction_records(self.RW_SONNET)
+        self.assertEqual(self.window_of(records, self.RW_SONNET), self.RW_WINDOW,
+                         "the correction's window is not the refused report's window, so its spawn is judged against nothing")
+        out = self.run_hook(records, True)
+        self.assertIsNotNone(out, "the correction named record-writer sonnet, which no record-writer spawn in its window ran, "
+                                  "and passed: the refusal left no marker, so the rewrite was quiet")
+        self.assertEqual(out["decision"], "block")
+        self.assertIn(self.RW_WRONG, out["reason"])
+
+    def test_rw_record_writer_haiku_correction_after_refusal_passes(self):
+        # Control: the correction names the window's haiku record-writer, so the rewrite passes.
+        self.refuse_sonnet()
+        out = self.run_hook(self.correction_records(self.RW_HAIKU), True)
+        self.assertIsNone(out, out and out["reason"])
+
+    def test_rw_record_writer_no_role_correction_after_refusal_passes(self):
+        # Control: the correction's Done line names no role at all, so no model name is judged.
+        self.refuse_sonnet()
+        reply = "> **Done** BUILT the record, PR #7\n> **Next** Unstarted: none"
+        out = self.run_hook(self.correction_records(reply), True)
+        self.assertIsNone(out, out and out["reason"])
+
+    def test_rw_real_owner_message_cuts_the_window_plain_passes(self):
+        # Control: a real owner message cuts the window and anchors the turn. The turn after it has
+        # no commit, so it is unlanded and its Done line is not judged for landing format, and the haiku spawn before the
+        # message is out of the window, so the sonnet name passes.
+        reply = "> **Done** the record, PR #7 (record-writer sonnet)\n> **Next** Unstarted: none"
+        records = [human("do the task"), tool_use_msg("Agent", self.RW_SPAWN), tool_result_msg(),
+                   tool_use_msg("Bash", {"command": "git commit -m x"}), tool_result_msg(),
+                   assistant_text(self.RW_HAIKU), human("the owner's next message"), assistant_text(reply)]
+        self.assertEqual(self.window_of(records, reply), {}, "a spawn sits after the owner's message")
+        out = self.run_hook(records, False)
+        self.assertIsNone(out, out and out["reason"])
+
+
+REPORT_NO_LINE ="> **Done** BUILT abc123\n> **Deviations** none\n> **Next** ship it"
 
 
 def report_lines(*deviations):
