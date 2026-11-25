@@ -74,9 +74,11 @@ plain Opus ask writes it, and so does the model ask (grant_model_ask, call_judge
 opus in an owner prompt, judged once. A hold with `end` "report" ends at the session's next report or at `until`
 (DEFAULT_ASK_LENGTH after it was set), whichever comes first; the one reader, model_override, tells that from the
 transcript, and the guard and the turn-end model line both call it. It lifts a spawn only on its own model, so a held
-sonnet lifts no Opus ceiling. A held model ends on a judge yes for another model (the file is replaced), on a judge
-error or timeout (the file is deleted), and on his end words `no <model>` and `<model> off` (no judge call). A judge no
-keeps it. Cost: a prompt that names no model makes no call and reads no file; one that names a model other than opus
+sonnet lifts no Opus ceiling, and a held Fable lifts a Fable spawn only (a keyword `opus 2h` lifts Opus spawns only). A
+held model ends on a judge yes for another model (the file is replaced), on a judge error or timeout (the file is
+deleted), on his end words `no <model>` and `<model> off` (no judge call), and on a judge no when the turn negates it
+("Do not use haiku"; the guard also reads that turn, so a call before the hook deletes the file sees no hold). A judge no
+that negates another model keeps it. Cost: a prompt that names no model makes no call and reads no file; one that names a model other than opus
 costs one tail read, one Haiku call and one file write or delete.
 A step grant also lifts that ask, and nothing else: the owner's grant that triage writes on the lane's
 roadmap step (decision agent-model-cap). take() reads it only on an Opus spawn refusal that no Opus override
@@ -154,6 +156,7 @@ MODEL_NEGATIONS = {"not", "no", "never", "except", "without", "dont", "don't", "
 MODEL_NEGATION_PAIRS = {("instead", "of"), ("rather", "than")}  # negate only when they stand just before the model word
 # A span of the model word's clause ends at one of these: a negation before it reaches no further ("Not sonnet but haiku").
 MODEL_SPAN_BREAKS = {"and", "but"}
+MODEL_CLAUSE_BREAK = re.compile(r"[.;,!?:\n\u2013\u2014]+")  # a negation reaches only to the end of its own clause
 NEGATION_SPAN = 3  # a negation within this many words before or after a role word negates it
 PLAIN_LIST = re.compile(r"(?:[\s,&]|\b(?:and|or|plus)\b)*", re.I)  # the only text that may join two role words
 SPELLED_UNIT = r"h(?:ours?|rs?)|m(?:ins?|inutes?)"
@@ -207,8 +210,12 @@ _step_read = None  # the step id the last take() read for its step decision, for
 NO_OVERRIDE = "No override lifts this refusal."
 
 
-def offer(rule, spawn_role=None, agent_id=None):
-    """The line an owner types to lift a refusal of this rule, for the call that was refused."""
+def offer(rule, spawn_role=None, agent_id=None, spawn_model=None):
+    """The line an owner types to lift a refusal of this rule, for the call that was refused. For the Opus ceiling's refusal
+    of a spawn on another model (Fable), `opus 2h` lifts nothing, so the line names the owner's own word and `override`."""
+    if rule == OPUS_RULE and spawn_role is not None and _family(spawn_model or "opus") != "opus":
+        return ("To allow this %s spawn, say %s in your own words for this spawn, or type `override` for this one act."
+                % (_family(spawn_model).capitalize(), _family(spawn_model).capitalize()))
     if rule == OPUS_RULE and spawn_role is not None:
         role = opus_role(str(spawn_role))
         by_role = " or `opus %ss 2h` for this role" % role if role else ""
@@ -317,6 +324,31 @@ def _write_opus(session_id, path, at, length, role, said=None, log=True, model=N
 def _strip_blocks(prompt):
     """The prompt with each pasted or machine-tag block replaced by a marker: that text is not the owner's words."""
     return BLOCKS.sub("[pasted text]", prompt)
+
+
+def model_mentions(text, family):
+    """(named, negated) for the whole words of `text` that hold the model family `family` (also inside claude-haiku-4-5 and
+    haiku-4.5), read after the pasted and machine blocks are cut (_strip_blocks): `named` is true for a mention no negation
+    reaches, `negated` for one a negation reaches. A mention is negated when, between it and the start of its clause
+    (MODEL_CLAUSE_BREAK) or the nearest word of MODEL_SPAN_BREAKS before it, stands a word of MODEL_NEGATIONS or one ending
+    n't; a pair of MODEL_NEGATION_PAIRS negates only when it stands just before the mention. So "Not sonnet but haiku",
+    "Instead use haiku" and "Skip the checks and run it on haiku" name haiku, and "don't use haiku" negates it. The one
+    reader of that reach: guard.owner_names_model (a turn that negates any mention names nothing) and the end of a held
+    model (_turn_negates_hold, grant_model_ask)."""
+    mention = re.compile(r"(?<![A-Za-z])%s(?![A-Za-z])" % re.escape(family), re.I)
+    named = negated = False
+    for clause in MODEL_CLAUSE_BREAK.split(_strip_blocks(text or "")):
+        words = [w.lower() for w in ROLE_WORDS.findall(clause)]
+        for at, word in enumerate(words):
+            if not mention.search(word):
+                continue
+            hit = tuple(words[max(at - 2, 0):at]) in MODEL_NEGATION_PAIRS
+            for i in range(at - 1, -1, -1):
+                if hit or words[i] in MODEL_SPAN_BREAKS:
+                    break
+                hit = words[i] in MODEL_NEGATIONS or words[i].endswith(("n't", "n\u2019t"))
+            named, negated = named or not hit, negated or hit
+    return named, negated
 
 
 def _strip_quotes(text):
@@ -693,9 +725,11 @@ def grant_model_ask(session_id, prompt, at, judge=None, transcript=None, source=
     the Opus ask's; one prompt reaches one judge. The roles named, the length and the end are the Opus ask's reading
     (_ask_scope; MODEL_ROLES for a model other than opus): a length he states is the hold's `until`; with none it ends at
     the next report or after DEFAULT_ASK_LENGTH.
-    A held model ends only on a judge yes for another model (the file is replaced), a judge error (the file is deleted:
-    his words could not be read, so no model he named earlier stays on), or his end words (_grant_end_word). A judge no
-    keeps it. A judge that answers a model the words do not name is an odd answer, so an error.
+    A held model ends on a judge yes for another model (the file is replaced), a judge error (the file is deleted:
+    his words could not be read, so no model he named earlier stays on), his end words (_grant_end_word), or a judge no
+    when this turn negates the held model ("Do not use haiku": model_mentions; a later model word ends the earlier one).
+    A judge no that negates another model, or names the held one with no negation, keeps it, and so does a held Opus (it
+    ends on `opus off`). A judge that answers a model the words do not name is an odd answer, so an error.
     Cost: for a prompt that names no model other than opus, nothing: the word test runs before any file read. For one
     that does, one tail read, one judge call (call_judge.model_ask, a Haiku call of at most OPUS_ASK_TIMEOUT s) and one
     file write or delete. No scope read."""
@@ -716,7 +750,9 @@ def grant_model_ask(session_id, prompt, at, judge=None, transcript=None, source=
         print("override: model ask clears the held model: %s" % " ".join(str(exc).split()), file=sys.stderr)
         family = None
     if family is False:
-        return None
+        hold = _read_hold(path)  # a judge no keeps the held model, unless this turn negates it
+        negated = isinstance(hold, dict) and hold["judged"] and hold["model"] != "opus" and model_mentions(text, hold["model"])[1]
+        return _end_hold(session_id, path, hold["model"], "the owner's turn negates it") if negated else None
     if family not in _names_models(text):  # an error, an odd answer, or a model the words do not name
         return _end_hold(session_id, path, why="the judge could not read the owner's words")
     scope = _ask_scope(text) if family == "opus" else _ask_scope(text, model_role, MODEL_ROLES)
@@ -1013,17 +1049,36 @@ def _report_since(at, transcript, records=None, report_ok=None):
     return False
 
 
+def _turn_negates_hold(hold, transcript=None, records=None):
+    """True when `hold` is a judged hold of a model other than Opus and the owner's latest typed turn (the transcript at path
+    `transcript`, or the parsed `records`) negates a mention of that model (model_mentions): "Do not use haiku" after a held
+    haiku. A later model word ends the earlier one, and the prompt hook ends the hold on a judge no or an error
+    (grant_model_ask); this read ends it for a call that comes before the hook has deleted the file, or when the hook did not
+    run. An Opus hold, and the keyword file (`opus 2h`, no `model` key), end only on `opus off` and their own length, as on
+    main. Cost, on demand: one backward read to the owner's last turn."""
+    if not hold["judged"] or hold["model"] == "opus":
+        return False
+    if records is not None:
+        text = next((t for t in (_owner_text(rec) for rec in reversed(records)) if t is not None), None)
+    else:
+        text = latest_owner_text(transcript)
+    return model_mentions(text, hold["model"])[1]
+
+
 def model_override(session_id, transcript=None, records=None, report_ok=None, at=None):
     """The session's live model hold as a dict (_read_hold), else None: the one reader the guard and the turn-end model line
-    share, so the two cannot disagree. Live means the pass file reads, `at` (now by default) is before its `until`, and a
+    share, so the two cannot disagree. Live means the pass file reads, `at` (now by default) is before its `until`, a
     hold with `end` "report" has no report after it (_report_since, from the transcript at path `transcript` or the parsed
-    `records`). A file with no `at` cannot tell, so only `until` ends it. Cost, on demand: one open of the pass file; for a
-    hold that ends at the report, the replies since it. It writes nothing."""
+    `records`), and the owner's latest typed turn does not negate its model (_turn_negates_hold). A file with no `at`
+    cannot tell, so only `until` ends it. Cost, on demand: one open of the pass file; for a hold that ends at the report,
+    the replies since it; for a judged hold of a model other than Opus, one read of the owner's last turn. It writes nothing."""
     path = _path(session_id, "opus")
     hold = _read_hold(path) if path else None
     if not isinstance(hold, dict) or (now() if at is None else at) >= hold["until"]:
         return None
     if hold["end"] == HOLD_END_REPORT and hold["at"] is not None and _report_since(hold["at"], transcript, records, report_ok):
+        return None
+    if _turn_negates_hold(hold, transcript, records):
         return None
     return hold
 
@@ -1031,8 +1086,9 @@ def model_override(session_id, transcript=None, records=None, report_ok=None, at
 def _take_opus(session_id, spawn_role, at, transcript=None, model=None):
     """OPUS_LIFTED when the session's pass file covers a spawn of spawn_role on `model` now, OPUS_UNREAD when the file
     exists but cannot be read, else None. A held model lifts only a spawn on that model (`model` None is an Opus spawn,
-    the Opus ceiling's own call): a held sonnet lifts no Opus ceiling. A hold that ends at the report is not read as live
-    after a report in the transcript at path `transcript`."""
+    the Opus ceiling's own call): a held sonnet lifts no Opus ceiling, a keyword Opus file (`opus 2h`) lifts no Fable
+    spawn, and a held Fable lifts a Fable spawn only. A hold that ends at the report is not read as live after a report in
+    the transcript at path `transcript`, and a judged hold the owner's latest typed turn negates is not live (_turn_negates_hold)."""
     path = _path(session_id, "opus")
     if path is None:
         return None
@@ -1047,6 +1103,8 @@ def _take_opus(session_id, spawn_role, at, transcript=None, model=None):
     if hold["model"] != ("opus" if model is None else _family(model)):
         return None
     if hold["end"] == HOLD_END_REPORT and hold["at"] is not None and _report_since(hold["at"], transcript):
+        return None
+    if _turn_negates_hold(hold, transcript):
         return None
     return OPUS_LIFTED
 
@@ -1136,9 +1194,9 @@ def step_read():
 def take(session_id, agent_id, at, rule=None, spawn_role=None, cwd=None, transcript=None, model=None):
     """LIFTED when the override lifts this refusal (a one-act override is spent), UNREAD when its file
     exists but cannot be read, else None. Of calls racing for one one-act override, only the one that
-    creates its claim marker wins. For the Opus spawn refusal (rule OPUS_RULE with a spawn_role) the Opus
-    override is read first, then the step grant (STEP_LIFTED or STEP_UNREAD), so a lift either one covers
-    spends no one-act override. `cwd` is the call's directory, where the step grant is read.
+    creates its claim marker wins. For the Opus ceiling refusal (rule OPUS_RULE with a spawn_role: a spawn on Opus or
+    on Fable) the pass file is read first, on the spawn's own model (_take_opus), then the step grant (STEP_LIFTED or
+    STEP_UNREAD) for a spawn on Opus only, so a lift either one covers spends no one-act override. `cwd` is the call's directory, where the step grant is read.
     For the model floor and the role row (HOLD_ONLY_RULES) it reads the pass file for a spawn on `model`, but those
     refusals pass no spawn model, so the file never matches and a held model lifts neither (the floor reads the owner's
     word, `owner_names_model`; the row reads the hold, `role_hold_verdict`, both in the guard). `transcript` is the
@@ -1149,7 +1207,7 @@ def take(session_id, agent_id, at, rule=None, spawn_role=None, cwd=None, transcr
     if opus == OPUS_LIFTED:
         return opus
     step = None
-    if rule == OPUS_RULE and spawn_role is not None:
+    if rule == OPUS_RULE and spawn_role is not None and _family(model or "opus") == "opus":  # a step grant is an Opus grant
         try:  # an error in the step read is no lift, and it never stops the override read below
             step = _take_step(session_id, spawn_role, cwd)
         except Exception:
