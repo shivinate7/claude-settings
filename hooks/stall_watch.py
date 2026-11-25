@@ -1179,7 +1179,7 @@ AGENT_CHECKIN_REMEDY = ("A background agent that runs this long needs one check-
 
 def checkin_minutes_ahead(when, text):
     """How many minutes ahead a check-in set at epoch seconds when asks to wake: the larger of its delay_minutes (a
-    number or a string of digits) and its `at` time (ISO-8601, an offset-less one read in the local_time clock's
+    number or a string of digits), its delaySeconds / 60 and its `at` time (ISO-8601, an offset-less one read in the local_time clock's
     offset) minus when. text is the check-in's input as JSON. None when it holds neither, or neither reads: a
     check-in of another tool, or an unreadable value, is not judged here."""
     try:
@@ -1190,15 +1190,22 @@ def checkin_minutes_ahead(when, text):
             waits.append(float(delay))
         elif isinstance(delay, (int, float)) and not isinstance(delay, bool):
             waits.append(delay)
+        seconds = inp.get("delaySeconds")  # a ScheduleWakeup check-in
+        if isinstance(seconds, (int, float)) and not isinstance(seconds, bool):
+            waits.append(seconds / 60)
         at = inp.get("at")
         if isinstance(at, str) and when is not None:
             import datetime
             import local_time  # the one home of the clock, as in the guard's ci_wait_minutes
             raw = at.strip()
-            target = datetime.datetime.fromisoformat(raw[:-1] + "+00:00" if raw[-1:] in ("Z", "z") else raw)
-            if target.tzinfo is None:
-                target = target.replace(tzinfo=local_time.clock().tzinfo)
-            waits.append((target.timestamp() - when) / 60)
+            try:
+                target = datetime.datetime.fromisoformat(raw[:-1] + "+00:00" if raw[-1:] in ("Z", "z") else raw)
+            except ValueError:  # an `at` that does not read leaves the waits already read standing
+                target = None
+            if target is not None:
+                if target.tzinfo is None:
+                    target = target.replace(tzinfo=local_time.clock().tzinfo)
+                waits.append((target.timestamp() - when) / 60)
         return max(waits) if waits else None
     except Exception:  # an input that does not read is not judged
         return None
@@ -1321,11 +1328,12 @@ def stop():
                     except OSError:
                         busy = False
                     if not busy:
-                        rows.append("%s: background agent, no activity for %ds: %s%s %s" % (
-                            job, idle, real, until, AGENT_REMEDY + unread))
+                        # an unread launch time leads the row, so the long-run check's gap is named, not buried
+                        rows.append("%s: background agent, %sno activity for %ds: %s%s %s" % (
+                            job, "launch time unread, " if unread else "", idle, real, until, AGENT_REMEDY + unread))
                         return
                 if unread:  # its age is unknown, so the long-run test could not run: say so, once
-                    rows.append("%s: background agent,%s" % (job, unread.strip(" ")[1:-1]))
+                    rows.append("%s: background agent, %s" % (job, unread.strip(" ")[1:-1]))
                 return
             watched = [p for p in named if os.path.isabs(p) or cwd]
             unwatched = list(unresolved) + [p for p in named if p not in watched]
@@ -1342,8 +1350,8 @@ def stop():
         for job, spec in open_jobs.items():
             try:
                 read_job(job, spec)
-            except Exception:  # one job that does not read never hides the rows of the others
-                rows.append("%s: unread, the check could not read this job; stop it or tell the owner" % job)
+            except Exception as exc:  # one job that does not read never hides the rows of the others
+                rows.append("%s: unread, the check could not read this job (%s); stop it or tell the owner" % (job, type(exc).__name__))
         if long_rows:
             reason = " ".join(long_rows) + " " + AGENT_CHECKIN_REMEDY
             out["decision"] = "block"
