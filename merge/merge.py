@@ -134,7 +134,7 @@
                           without it, one `all` section. A failed read prints `unknown` on stderr and exits 1, with no count. Stands alone; takes no lock, merges and posts nothing.
                           Cost: the one comment list read (one call per 100 comments); no file, process or timer.
   merge --main-run SHA    one line, `main run <sha9>: <outcome>. <detail>`: the verdict on the push run of commit SHA (7 to 40 hex) on main, judged against the push run before it
-                          (main_run_verdict). Outcomes: green; no verdict (a run that ran no suite); carried (red with nothing new, or a red job skipped, marked `not re-run`);
+                          (main_run_verdict). Outcomes: green; no verdict (a run that ran no suite); superseded (a push run cancelled before any job started, which a newer push run replaced: exit 0, the newer run is the verdict); carried (red with nothing new, or a red job skipped, marked `not re-run`);
                           first red (a new red check or test on a first attempt, or a red job that names no test: prints `gh run rerun <id> --failed`, blames nothing); new break
                           (the new name red again on the re-run: names this run's commit and pull request); cleared or did not clear (the run is a revert of a red main);
                           unknown (a failed read, a run still going, no earlier run: exit 1). Stands alone; takes no lock and no merge role, merges and writes nothing.
@@ -375,8 +375,8 @@ RERUN_IN_FLIGHT = "is a re-run still going"  # base_state words an unknown re-ru
 BREAKING_MERGE = "breaking merge:"  # base_state words the first red run with a green parent, once its re-run is red again, with it
 MAIN_RUNS_READ = 50  # the runs of the base one read holds: base_state and main_run_verdict read one page, never every page
 MAIN_RUN_BASE = "main"  # the branch `merge --main-run` judges
-RUN_OUTCOMES = RUN_GREEN, RUN_NO_VERDICT, RUN_CARRIED, RUN_FIRST_RED, RUN_NEW_BREAK, RUN_UNKNOWN, RUN_CLEARED, RUN_DID_NOT_CLEAR = (
-    "green", "no verdict", "carried", "first red", "new break", "unknown", "cleared", "did not clear")  # the outcome words of a main run's verdict line; one spelling each
+RUN_OUTCOMES = RUN_GREEN, RUN_NO_VERDICT, RUN_CARRIED, RUN_FIRST_RED, RUN_NEW_BREAK, RUN_UNKNOWN, RUN_CLEARED, RUN_DID_NOT_CLEAR, RUN_SUPERSEDED = (
+    "green", "no verdict", "carried", "first red", "new break", "unknown", "cleared", "did not clear", "superseded")  # the outcome words of a main run's verdict line; one spelling each
 CLEAR_RULE_NO_EVIDENCE = "workflow_dispatch"  # an event that carries no push-skip evidence: clear_rule.empty_without_evidence then asks only whether a suite ran
 
 def load_clear_rule():
@@ -1935,7 +1935,7 @@ class Host:
         The judgment is clear_rule.judge, the one home of the selection (which runs of the base decide, what clears a red run, what makes a job red, which run broke the base, what an
         empty run is); the CI alarm calls the same file. Here: one page of the base's runs read from GitHub (`flows` are the workflow paths on the base), the jobs and the workflow file
         at a run's head read when the judgment asks (one read each; a failed read is unknown, with GitHub's own words), and the verdict's words. One page of runs, never every page: the
-        base's history is long. A run that did not succeed costs one jobs read, and a clear candidate one more. A newest-first walk of the push group's green runs costs one jobs read each,
+        base's history is long. A run that did not succeed costs one jobs read, and a clear candidate one more; so does a cancelled run that a newer run of its group is above (superseded_run). A newest-first walk of the push group's green runs costs one jobs read each,
         down to the first that is not empty.
         A cancelled run with no red job that nothing clears keeps its line, in the unknown detail and beside a red verdict. It is named with `gh run rerun <id>` only when its
         `head_sha` is the head_sha of the newest run on the page read (any status, any event in BASE_EVENTS, from the unfiltered list): runs on the base start at its head, and a re-run tests the run's own commit. Never named for a run with a red job or a re-run in flight.
@@ -5007,9 +5007,10 @@ def main_run_verdict(host, sha, base=MAIN_RUN_BASE):
     - first red: a new red job or test on a first attempt, or a red job that names no test (a step timeout). The line names `gh run rerun <id> --failed`; nothing is blamed.
     - new break: a new name red again on the re-run (`blames`, the one home of when a merge is blamed). The line names this run's commit, never an earlier one.
     - cleared or did not clear: the run is a revert (a line of its commit message says `This reverts commit`, REVERT_OF_LINE) of a red base, and it is green with every red job re-run, or it is not.
-    - unknown: a failed read, the run or the run before still going, a cancelled run, no run of `sha` on the page, or no earlier run to tell new from carried. Unknown never reads green, first red or carried.
+    - superseded: a cancelled run with no job started that a newer push run replaced (clear_rule.superseded_run, the one home of that test). Its commit has no verdict of its own; the newer run's verdict covers it. Exit 0.
+    - unknown: a failed read, the run or the run before still going, a cancelled run that is not superseded, no run of `sha` on the page, or no earlier run to tell new from carried. Unknown never reads green, first red or carried.
     Job rules: Host.red_jobs (what makes a job red) and clear_rule (what a suite is). Failing names: Host.failed_lines and failing_names, as red_line prints them.
-    Cost: one runs read (one page) and one jobs read for the run; on a red run one log read per failed job. The run before costs one jobs read, and a run stepped over (cancelled, or with no suite) one more each; when it was red and the run is not a revert,
+    Cost: one runs read (one page) and one jobs read for the run (a cancelled run with a newer run of its group costs that one read to tell it superseded); on a red run one log read per failed job. The run before costs one jobs read, and a run stepped over (cancelled, or with no suite) one more each; when it was red and the run is not a revert,
     one log read per failed job of it. Nothing else."""
     sha9 = sha[:9]
 
@@ -5048,6 +5049,11 @@ def main_run_verdict(host, sha, base=MAIN_RUN_BASE):
         if now["status"] != "completed":
             return line(RUN_UNKNOWN, f"run {now['id']} (attempt {attempt}) is still {now['status']}, so it has no verdict yet")
         if now["conclusion"] == "cancelled":
+            def group(r):
+                return (r["path"], host.BASE_EVENTS[r["event"]])
+            if clear_rule.superseded_run(now, runs, jobs_of, group):
+                newest = max((r for r in runs if r["id"] > now["id"] and group(r) == group(now)), key=lambda r: r["id"])
+                return line(RUN_SUPERSEDED, f"run {now['id']} was cancelled before any job started, and run {newest['id']} (now {newest['conclusion'] or newest['status']}) replaced it, so this commit has no verdict of its own; run {newest['id']} covers it")
             return line(RUN_UNKNOWN, f"run {now['id']} was cancelled, so it has no verdict")
         jobs = jobs_of(now)
         passed = now["conclusion"] in ("success", "skipped", "neutral")

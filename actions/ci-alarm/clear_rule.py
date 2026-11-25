@@ -257,6 +257,29 @@ def empty_without_evidence(jobs, event):
     return not (event == "push" and concluded("push-skip", jobs, "success") and concluded("scope", jobs, "skipped"))
 
 
+def job_started(job):
+    """True when a job row shows the job ran. Measured on GitHub (Nov 2026, the `stable` workflow's job-level concurrency group, cancel-in-progress false: a pending job a newer run replaced):
+    the row has `started_at` (the cancel time), `runner_id` 0 and `steps` []. A job that ran has steps. Unmeasured: the shape of a pending workflow-level run that a newer run of its group
+    replaced (no jobs, or rows like that one). A row with no `steps` key is judged by `started_at`, a shape only the test fixtures give."""
+    if "steps" in job:
+        return bool(job["steps"])
+    return bool(job.get("started_at"))
+
+
+def superseded_run(run, runs, jobs, key):
+    """True when `run` is a cancelled run that no job started in and that a newer run of its file and group replaced (decision test-strategy-reset, the replaced push run). GitHub cancels a pending
+    run of a concurrency group when a newer run of the group arrives; the run proves nothing, and the verdict is the one the newer run's turn gives. A cancel with no newer run is a human cancel,
+    and a cancel after a job started is a real cancel: neither is superseded. `runs` is the page, any status; a run is newer when its id is larger. `key(r)` is r's (file, group), the same
+    key the caller judges by, and None for a run the caller does not judge. `jobs(run)` is the run's jobs, called only for a cancelled run that has a newer run, and it raises or gives None on a failed read."""
+    if run.get("status") != "completed" or run.get("conclusion") != "cancelled":
+        return False
+    mine = key(run)
+    if mine is None or not any(n["id"] > run["id"] and key(n) == mine for n in runs):
+        return False
+    rows = jobs(run)
+    return rows is not None and not any(job_started(j) for j in rows)
+
+
 def red_stays(r_jobs, n_jobs):
     """Step one, needs no workflow file: True when a red job of R is missing from N or not passed in N. Such a red is certain, whatever any
     job's `if:` says, so a caller that finds it never reads the workflow file."""
@@ -380,11 +403,12 @@ def judge(runs, flows, ignore, caps, jobs_of, text_of, detail=True):
     failed push (one group). A failed run R with at least one red job is cleared by a run N of the same file and another group only when N is newer than R, is the newest completed run of its
     own group, concluded success, and `clears` holds (the workflow file read at N's head: one read per such N, none for a cancelled R). So a green nightly that ran other jobs never clears a failed push,
     and a newer green push run clears a red nightly. An R with no red job is never cleared by that rule. N's jobs are read only when R has a red job or is cancelled with no red job, and such an N exists.
-    A run that did not succeed with no red job: a timed-out job explains it; else a cancelled run R is unknown, never swapped for an older run, unless a run N clears it. R is then on a commit older
+    A superseded run (`superseded_run`: cancelled, no job started, a newer run of its file and group on the page in any status) is stepped over like an empty run: the older run of its group is the verdict.
+    A run that did not succeed with no red job: a timed-out job explains it; else a cancelled run R is unknown, never swapped for an older run unless it is superseded, or a run N clears it. R is then on a commit older
     than the base's head. N clears it when it is such a candidate on another head than R's, every job R ran (not skipped) is in N by exact name with every entry of that name success, and every job R
     skipped is in N. An R with no jobs stays unknown. Any other run that did not succeed is red (a broken workflow file runs no job).
     An empty run is no verdict (empty_without_evidence): the newest run of a group that is not empty is the group's verdict, so an older red run stays red; a page with no run of the group that is not
-    empty keeps the newest run. A schedule run is judged as it is. A newest-first walk of the push group's green runs costs one jobs read each, down to the first that is not empty."""
+    empty keeps the newest run. A schedule run is judged as it is. A newest-first walk of the push group's green runs costs one jobs read each, down to the first that is not empty. A cancelled run that has a newer run of its group on the page costs one jobs read, to see whether a job started."""
     events = base_events()
     judged = [r for r in runs if (r["status"] == "completed" or (r.get("run_attempt") or 1) > 1)
               and r["event"] in events and r["name"] not in ignore and r["path"].split("@")[0] in flows]
@@ -411,13 +435,15 @@ def judge(runs, flows, ignore, caps, jobs_of, text_of, detail=True):
 
         def empty(r):  # a green run of the push group that ran no suite and carries no evidence: no verdict; one jobs read, cached
             return r["conclusion"] == "success" and r["event"] in rule and empty_without_evidence(jobs(r), r["event"])
-        newest, settled = {}, set()  # per (file, group): the newest run, but never an empty one while an older run of the group is not; with none, the newest run
+        def group(r):  # (file, group) of a run the judgment reads, else None
+            return (r["path"], events[r["event"]]) if r["event"] in events and r["name"] not in ignore and r["path"].split("@")[0] in flows else None
+        newest, settled = {}, set()  # per (file, group): the newest run, but never an empty or superseded one while an older run of the group is not; with none, the newest run
         for r in judged:  # newest first
             key = (r["path"], events[r["event"]])
             if key in settled:
                 continue
             newest.setdefault(key, r)
-            if not empty(r):
+            if not empty(r) and not superseded_run(r, runs, jobs, group):
                 newest[key] = r
                 settled.add(key)
         age = {r["id"]: i for i, r in enumerate(judged)}  # `judged` is newest first
