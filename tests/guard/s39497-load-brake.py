@@ -1598,6 +1598,98 @@ LOG_FAMILY["GUARD_SHARD: the shards are disjoint and hold every case"] = "misc"
 FIXTURELESS_CHECKS.add(shard_split_check)
 
 
+# The runner must fail a case whose printed reason leads with another rule. The check below runs this runner
+# in a child on the real section files plus one probe section. The probe's two cases name a stand-in guard (add's `guard`),
+# a script that prints `records-page-ready: x` for the wrong-rule probe and `records-page: x` for the control. The child
+# runs only the two probes (MUTATE_ONLY). The check runs that child once per GUARD_RULE_EXACT value: exact, unset and
+# report. It is a log check in every run, beside shard_split_check.
+RULE_EXACT_PROBE = "rule-exact probe"
+RULE_EXACT_WRONG = RULE_EXACT_PROBE + ": a reason that leads with records-page-ready fails a case that wants records-page"
+RULE_EXACT_CONTROL = RULE_EXACT_PROBE + " control: a reason that leads with records-page passes"
+RULE_EXACT_STAND_IN = (
+    "import json, sys\n"
+    "command = str(json.loads(sys.stdin.read() or '{}').get('tool_input', {}).get('command', ''))\n"
+    "reason = 'records-page: x' if 'right-rule' in command else 'records-page-ready: x'\n"
+    "print(json.dumps({'hookSpecificOutput': {'permissionDecision': 'deny', 'permissionDecisionReason': reason}}))\n"
+)
+
+
+def rule_exact_probe_section(stand_in):
+    """The probe section the child loads: two Bash cases judged by the stand-in, one wrong, one right."""
+    return (
+        "# section 99990\n"
+        "FAMILY = \"misc\"\n"
+        "add(%r, \"deny\", \"records-page\", guard=%r, command=\"wrong-rule probe\")\n"
+        "add(%r, \"deny\", \"records-page\", guard=%r, command=\"right-rule probe\")\n"
+    ) % (RULE_EXACT_WRONG, stand_in, RULE_EXACT_CONTROL, stand_in)
+RULE_EXACT_LABEL = "GUARD_RULE_EXACT: exact fails a case whose reason leads with another rule, and passes the control"
+
+
+def rule_exact_selftest_check():
+    """Exact matching, read by one child run of the probe section for each GUARD_RULE_EXACT value: exact, the unset
+    default, and report. The wrong-rule probe must FAIL under exact and under the default, and must PASS under report,
+    which fails no rule check. The report must name the mismatch in all three runs, and the control must PASS in all
+    three. section_child_run strips every GUARD_ key from the environment and sets only the ones it is given, so the
+    default run has no GUARD_RULE_EXACT key at all. The stand-in must judge the wrong-rule probe deny, so a red names
+    the rule gap and nothing else."""
+    folder = tempfile.mkdtemp(dir=ROOT)
+    stand_in = os.path.join(folder, "rule-exact-stand-in.py")
+    with open(stand_in, "w", encoding="utf-8") as f:
+        f.write(RULE_EXACT_STAND_IN)
+    sections = os.path.join(folder, "sections")
+    os.mkdir(sections)
+    build_with_extra("s99990-rule-exact-probe.py", rule_exact_probe_section(stand_in))(sections)
+
+    def probe_run(rule_exact):
+        """The probe section's child with GUARD_RULE_EXACT set to rule_exact, or unset when it is None.
+        -> (lines, wrong, control, problem): the two probes' verdict lines, and problem "" when the child gave
+        one verdict per probe."""
+        extra = {"MUTATE_ONLY": RULE_EXACT_PROBE}
+        if rule_exact is not None:
+            extra["GUARD_RULE_EXACT"] = rule_exact
+        rc, out = section_child_run(sections, family="misc", extra_env=extra)
+        if rc is None:
+            return [], "", "", "the child run did not end within 300 s"
+        lines = out.splitlines()
+        wrong = [line for line in lines if line[:4] in ("PASS", "FAIL") and RULE_EXACT_WRONG in line]
+        control = [line for line in lines if line[:4] in ("PASS", "FAIL") and RULE_EXACT_CONTROL in line]
+        if len(wrong) != 1 or len(control) != 1:
+            return [], "", "", ("the child gave %d wrong-rule and %d control verdict lines, want 1 each; its last line: %s"
+                                % (len(wrong), len(control), (lines or [""])[-1][:100]))
+        return lines, wrong[0], control[0], ""
+
+    # (label, the GUARD_RULE_EXACT value or None for unset, whether the wrong-rule probe passes, the cause a red names)
+    modes = (
+        ("GUARD_RULE_EXACT=exact", "exact", False, "exact does not fail a reason that leads with another rule"),
+        ("GUARD_RULE_EXACT unset", None, False,
+         "the default does not match exactly, so a flipped default goes silent"),
+        ("GUARD_RULE_EXACT=report", "report", True, "report fails no rule check, so a rule mismatch fails no case"),
+    )
+    for label, rule_exact, wrong_passes, cause in modes:
+        lines, wrong, control, problem = probe_run(rule_exact)
+        if problem:
+            return False, "%s: %s" % (label, problem)
+        if "deny" not in wrong.split("(want")[0]:
+            return False, "%s: the stand-in did not judge the wrong-rule probe as deny: %s" % (label, wrong[:110])
+        mismatch = [line for line in lines if line.startswith("rule-mismatch") and RULE_EXACT_WRONG in line]
+        if not mismatch or "records-page-ready" not in mismatch[0]:
+            return False, ("%s: the report names no mismatch for the wrong-rule probe, so the detector is not in this run"
+                           % label)
+        if not control.startswith("PASS"):
+            return False, "%s: the control probe, whose reason leads with its own rule, did not pass: %s" % (
+                label, control[:110])
+        if wrong.startswith("PASS") != wrong_passes:
+            return False, "%s: the wrong-rule probe %s: %s" % (
+                label, "failed" if wrong_passes else "passed", cause)
+    return True, ("exact and the default fail the wrong-rule probe, report passes it, and each names the mismatch; "
+                  "the control passes in all three")
+
+
+LOG_CHECKS_EXTRA.append((RULE_EXACT_LABEL, rule_exact_selftest_check))
+LOG_FAMILY[RULE_EXACT_LABEL] = "misc"
+FIXTURELESS_CHECKS.add(rule_exact_selftest_check)
+
+
 # =========================================================================== agent role model
 #
 # Rule agent-role-model (decision agent-model-cap). Three parts, one reader of the table:

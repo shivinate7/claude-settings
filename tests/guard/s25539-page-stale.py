@@ -218,7 +218,7 @@ def build_wp_broken():
 
 
 lazy_fixture([WP_BROKEN], build_wp_broken)
-add("page-stale: a behind page is refused as guard-crash when question_form.py will not import", "deny", None,
+add("page-stale: a behind page is refused as guard-crash when question_form.py will not import", "deny", "guard-crash",
     carries=("guard-crash",), tool="Artifact", cwd=PQ_REPO, guard=os.path.join(WP_BROKEN, "hooks", "guard.py"),
     file_path=WP_BEHIND, url=PQ_URL)
 

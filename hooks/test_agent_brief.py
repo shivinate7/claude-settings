@@ -24,6 +24,9 @@ the hook prints one JSON object on stdout and exits 0:
 - The staged-diff line holds `git diff --cached --stat`. It appears once for each type that
   commits (builder, test-author, record-writer, designer and any other type) and never for a
   read-only type. Decision lanes-start-in-tool-worktrees.
+- The commit-evidence line (`Commit the test evidence ...`) appears once, word for word, in the brief of each writer
+  role: builder, test-author, record-writer and designer, and of a general or missing type, which the hook treats
+  as a writer. No read-only type gets it.
 - A plugin-namespaced type (`my-plugin:builder`) gets the scope of its bare name. The match ignores
   case: `Builder` and `explore` get the scope and the line set of their role.
 - When the payload's cwd holds a .github/stamp.json whose cite.form is set, one brief line
@@ -118,6 +121,22 @@ READER_RULES = [
     "- Make no gh call unless your brief names it.",
     "- Report in 25 lines or fewer unless the brief sets a cap. Order: Done, Deviations, Input Needed, Next.",
 ]
+# The commit-evidence line goes to every writer: the four writer roles, and a general or missing type, which the hook
+# treats as a writer. Its place in the brief is not pinned here: line_set_check leaves it out, and the commit-evidence
+# cases below pin its text and its readers.
+COMMIT_EVIDENCE_LINE = ("- Commit the test evidence your work made this round (a test-result bundle) in your worktree. "
+                        "Never leave it untracked there. If your scope does not cover the file, report its path instead.")
+EVIDENCE_KEYS = ("Commit the test evidence", "Never leave it untracked")  # stable fragments: a line of any wording that holds one counts
+# (label, agent type) for each writer. A missing type is MISSING: payload() then leaves agent_type out of the JSON.
+EVIDENCE_WRITERS = [
+    ("builder", "builder"),
+    ("test-author", "test-author"),
+    ("record-writer", "record-writer"),
+    ("designer", "designer"),
+    ("a general (unknown) type", "some-new-agent"),
+    ("a missing agent type", MISSING),
+]
+EVIDENCE_NONWRITERS = ["reviewer", "Explore", "Plan", "claude-code-guide", "design-reviewer", REFUTER]
 PUSH_KEY = "Push only with"
 TRAILER_KEY = "End each commit message with"
 RECORD_KEY = "Name no record path"
@@ -357,6 +376,7 @@ def line_set_check(expected, staged=False):
         rules = [line for line in text.split("\n") if not line.startswith("- Scope")]
         if staged:
             rules = [line for line in rules if STAGED_KEY not in line]
+        rules = [line for line in rules if not any(key in line for key in EVIDENCE_KEYS)]  # its own cases: commit evidence
         noted = rendered_rules()  # the note rules have their own cases below, so a line that holds one is left out here
         rules = [line for line in rules if not any(rule in line for rule in noted)]
         if rules == expected:
@@ -389,6 +409,71 @@ add("line set: refuter gets the six-line set", "context", payload(REFUTER), line
 for _t in ["my-plugin:reviewer", "ns:Explore"]:
     add("line set: plugin-prefixed %s gets the six-line set" % _t, "context", payload(_t),
         line_set_check(READER_RULES))
+
+
+# COMMIT EVIDENCE: a writer commits the test evidence its work made in its own worktree and never leaves it untracked
+# there. The line goes to every writer once per brief. A read-only role never commits, so it never gets the line.
+def evidence_lines(text):
+    """The lines of the brief that hold a commit-evidence fragment, whatever their wording."""
+    return [line for line in text.split("\n") if any(key in line for key in EVIDENCE_KEYS)]
+
+
+def evidence_word_check(agent_type):
+    """Build a check: the brief for `agent_type` holds COMMIT_EVIDENCE_LINE word for word, as one whole line."""
+    def check():
+        text, problem = context_for(payload(agent_type))
+        if problem:
+            return problem
+        if COMMIT_EVIDENCE_LINE not in text.split("\n"):
+            return "no line is the commit-evidence line %r" % COMMIT_EVIDENCE_LINE[:90]
+        return None
+    return check
+
+
+def evidence_once_check(agent_type):
+    """Build a check: exactly one line of the brief holds a commit-evidence fragment, so the line is not repeated."""
+    def check():
+        text, problem = context_for(payload(agent_type))
+        if problem:
+            return problem
+        hits = evidence_lines(text)
+        if len(hits) != 1:
+            return "want one line that holds a commit-evidence fragment, got %d" % len(hits)
+        return None
+    return check
+
+
+def evidence_absent_check(agent_type):
+    """Build a check: no line of the brief holds a commit-evidence fragment. Used for each role that never commits."""
+    def check():
+        text, problem = context_for(payload(agent_type))
+        if problem:
+            return problem
+        hits = evidence_lines(text)
+        if hits:
+            return "a role that never commits gets a commit-evidence line: %r" % hits[0][:90]
+        return None
+    return check
+
+
+def standing_rules_check():
+    """Every role still gets the standing rules line, whether or not it gets the commit-evidence line."""
+    for agent_type in TYPES + ["Plan", "claude-code-guide", "some-new-agent", MISSING]:
+        text, problem = context_for(payload(agent_type))
+        if problem:
+            return problem
+        if WRITER_RULES[0] not in text.split("\n"):
+            return "agent type %r holds no %r line" % (agent_type, WRITER_RULES[0])
+    return None
+
+
+for _name, _t in EVIDENCE_WRITERS:
+    add("commit evidence: %s gets the line word for word" % _name, "custom", fn=evidence_word_check(_t))
+for _name, _t in EVIDENCE_WRITERS:
+    add("commit evidence: %s gets the line once per brief" % _name, "custom", fn=evidence_once_check(_t))
+for _t in EVIDENCE_NONWRITERS:
+    add("commit evidence control: %s gets no commit-evidence line" % _t, "custom", fn=evidence_absent_check(_t))
+add("commit evidence control: every role still gets the standing rules line", "custom", fn=standing_rules_check)
 
 
 def git_line_check(want):

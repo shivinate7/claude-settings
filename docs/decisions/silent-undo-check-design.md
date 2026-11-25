@@ -15,6 +15,7 @@
   commit added on the branch alone is the branch's. A merge of three or more parents is not read, and the
   check reports it as UNKNOWN only after the other reads finish. The merge tool refuses an UNKNOWN that
   carries a finding, and the reason flag cannot lift it (step notes-union-batch-revival).
+- **Refs read.** The lost-line read uses upstream, then the first of `origin/HEAD`, `origin/main`, `main` whose commit differs from upstream's. A ref at upstream's commit holds no line upstream lacks, so an unpushed local `main` counts. A `default` argument to `check()` replaces that list. A failed read of upstream's commit is UNKNOWN. Why: with `origin/HEAD` present (every real clone) the check never read local `main`, so a merge that dropped a line held only there passed. The same gap failed 4 `OctopusCommonBase` subtests on a Mac (default branch `main`) and passed on Linux CI. This order is the check's alone. Decision `default-branch-read-order` ("the first ref that resolves wins") governs the branch-delete rule, the sweep and the push guard, not this check. This is a consultant's reading, undoable, not an owner ruling.
 - **Revived note.** A note the branch deleted is back at head, because a union merge of main put it back
   (decision `notes-merge-union`). The check replays the branch's own commits and counts copies per note.
   A note is its slug, or its whole line when it has no slug form. A rebase leaves no merge, so it is not read
