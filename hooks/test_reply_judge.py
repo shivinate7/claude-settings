@@ -899,24 +899,24 @@ def case_malformed_new_field_prints_nothing_and_logs_nothing_for_it():
 
 
 # --------------------------------------------------------------------------- every-reply: the note's reason
-# The reply judge's log-only record, its "Log only" bullet: a finding on the older prompt prints its note
-# "unless its reason names only newer rules". So a reason that names an older id and a newer id prints its
-# note, and a reason that names only newer ids prints none. The second case is the green control; it also
-# covers the suppress branch in hooks/reply_judge.py, `if not any(r in reason for r in NEW_RULES)`, which no
-# case reached before.
+# A finding on the older prompt prints its note unless its reason names a newer rule: the suppress branch in
+# hooks/reply_judge.py, `if not any(r in reason for r in NEW_RULES)`. So a reason that names an older id and a
+# newer id prints nothing, and its verdict still gets its guard.log line. The green control is a reason that
+# names only newer ids: it prints nothing either. A reason that names only older ids prints its note (case F1).
 
 MIXED_REASON = ("output-never-paste-passing-output: paste the verdict, not the run's output; "
                 "also parallelism-keep-going: name the event the wait ends on.")
 NEWER_ONLY_REASON = "parallelism-keep-going: name the event the wait ends on."
 
 
-def case_reason_naming_an_older_and_a_newer_id_still_prints_the_note():
+def case_reason_naming_an_older_and_a_newer_id_is_logged_and_prints_no_note():
     config = sample_config("note-mixed")
     run = run_hook(MARK, answer=two_field_answer(False, MIXED_REASON, []), config=config, session=SESSION_ALPHA)
-    note = note_of(run)
     check("note, mixed reason: exit 0", run.code == 0, run.code)
-    check("note, mixed reason: the note prints, because the reason also names an older rule",
-          isinstance(note, str) and OLDER_ID in note, run.out)
+    check("note, mixed reason: nothing printed, because the reason also names a newer rule",
+          run.out.strip() == "", run.out)
+    check("note, mixed reason: the verdict is still logged, under its older rule",
+          guard_rules(config) == [OLDER_ID], guard_rules(config))
 
 
 def case_reason_naming_only_newer_ids_prints_no_note():
@@ -2863,7 +2863,7 @@ CASES = (
     case_f2_prompts_ask_for_two_fields,
     case_two_new_entries_and_no_older_reason_log_two_lines_and_print_nothing,
     case_malformed_new_field_prints_nothing_and_logs_nothing_for_it,
-    case_reason_naming_an_older_and_a_newer_id_still_prints_the_note,
+    case_reason_naming_an_older_and_a_newer_id_is_logged_and_prints_no_note,
     case_reason_naming_only_newer_ids_prints_no_note,
     case_new_rule_ids_are_the_claude_md_anchors,
     case_ignored_stop_imports_no_guard_family_module,
