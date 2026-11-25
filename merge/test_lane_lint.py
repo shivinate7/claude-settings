@@ -4311,6 +4311,20 @@ class ReadyChecks(CiJobStub, tm.RecordsEnv):
         self.assertEqual(self.host.readies, [], "the pull request went ready on a red ready check")
         self.assertNotIn("ready after its draft run shows", out)
 
+    def test_pre_ready_refuses_a_head_config_whose_requiredChecks_the_running_tool_does_not_know(self):
+        self.assertNotIn(UNKNOWN_REQUIRED, merge.PINNED_STRINGS, "premise: the running tool takes %r, so the head stamp is one it does not refuse" % UNKNOWN_REQUIRED)
+        self.pre_ready_lane()
+        head = self.own_writes({CONFIG_PATH: config_on_main(self, requiredChecks=UNKNOWN_REQUIRED)})
+        names = tm.sh(self.other, "git", "diff", "--name-only", "origin/main...%s" % head).split()
+        self.assertIn(CONFIG_PATH, names, "precondition: the draft's diff against origin/main does not touch %s, so the case probes nothing" % CONFIG_PATH)
+        self.use_ci_job(steps_for(), 0)
+        refs_before = self.refs()
+        rc, out = self.pre_ready()
+        self.assertEqual(rc, 1, "the ready run did not refuse a head stamp the running tool does not know: " + out)
+        assert_refused_head_config(self, out, REFUSED_REQUIRED)
+        self.assertEqual(self.host.readies, [], "the draft went ready on a head stamp the running tool does not know: " + out)
+        self.assertEqual(self.refs(), refs_before, "the ready run pushed a ref beside a head stamp the running tool does not know: " + out)
+
     def test_declared_steps_that_pass_run_ci_job_once_on_the_tree_pushed_and_mark_ready(self):
         names = ["check invariants", "records page"]  # two steps, one run
         self.declare(names)
@@ -9086,6 +9100,119 @@ class CombineHint(LaneFixture):
         self.assertFalse(tm.tree_listed(self.co, dead_wt), "the dead lane lint tree stays registered after the sweep")
         self.assertTrue(os.path.isdir(live_tmp), "a lane lint tree whose pid is alive was removed")
         self.assertTrue(tm.tree_listed(self.co, live_wt), "the live lane lint tree lost its registration")
+
+
+# The running tool judges a PR head's .github/stamp.json with its own parser (merge.py parse_config) when the PR's diff against its base touches
+# the file. The values below are ones the running tool refuses; each case asserts that premise before it runs.
+CONFIG_PATH = ".github/stamp.json"
+UNKNOWN_REQUIRED = "second-proof"  # a requiredChecks value: not in merge.PINNED_STRINGS
+UNKNOWN_KEY = "mergeQueue"  # a merge-block key: not in merge.MERGE_FIELDS
+REFUSED_REQUIRED = "merge.requiredChecks is not valid: 'second-proof'"  # the parser's reason for UNKNOWN_REQUIRED
+REFUSED_KEY = "unknown field in the merge block: mergeQueue"  # the parser's reason for UNKNOWN_KEY
+
+
+def main_config_text(env):
+    """origin/main's stamp, read from env.other, the second clone that pushes main in these cases."""
+    tm.sh(env.other, "git", "fetch", "-q", "origin")
+    return tm.sh(env.other, "git", "show", "origin/main:" + CONFIG_PATH)
+
+
+def config_on_main(env, **merge_fields):
+    """origin/main's stamp with `merge_fields` set or added in its merge block: the shape of each head stamp here, so a case changes one field."""
+    cfg = json.loads(main_config_text(env))
+    cfg["merge"].update(merge_fields)
+    return json.dumps(cfg, indent=2) + "\n"
+
+
+def assert_refused_head_config(test, out, reason):
+    """The refusal is the one line that quotes the parser's `reason`, and that line has three parts: (a) the reason itself, (b) the tool at stable
+    does not know this value or key yet, (c) the remedy: land the tool change first, wait until stable holds it, then change the stamp in a second PR.
+    One assert per part, so a failure names the part it lacks."""
+    lines = [line for line in out.splitlines() if reason in line]
+    test.assertTrue(lines, "(a) no line quotes the parser's reason %r: %s" % (reason, out))
+    line = lines[0]
+    test.assertIn("stable", line, "(b) the refusal does not name stable: " + out)
+    test.assertRegex(line, r"(?i)not know", "(b) the refusal does not say stable does not know this value or key yet: " + out)
+    test.assertRegex(line, r"(?i)\bfirst\b", "(c) the remedy does not say to land the tool change first: " + out)
+    test.assertRegex(line, r"(?i)\buntil\b.*\bstable\b", "(c) the remedy does not wait until stable holds the tool change: " + out)
+    test.assertRegex(line, r"(?i)\bsecond (PR|pull request)\b", "(c) the remedy does not put the stamp change in a second PR: " + out)
+
+
+class ConfigAtPrHead(LaneFixture):
+    """`merge --lane-lint 7` judges the PR head's stamp with the running tool's parser when the PR's diff against origin/main touches the file.
+    A stamp the tool refuses stops the lint before any PASS line, with the refusal's three parts. A stamp it takes passes. A PR that leaves the
+    file alone is not judged, even when its head holds a stamp the tool refuses, inherited from a main that was fixed after the lane was cut."""
+
+    def setUp(self):
+        super().setUp()
+        self.use_ci_job(PASSING, 0)  # a lint that ran passes, so a refusal that ran one would read as a pass
+
+    def head_with_config(self, text):
+        """The lane's head gains one commit that sets the stamp to `text`, cut from origin/main, so the diff against main is that file alone. -> the head."""
+        return self.push_lane({CONFIG_PATH: text}, from_main=True)
+
+    def assert_diff_touches_config(self, head):
+        """Scope before subject: the PR's diff against origin/main names the stamp, so the judgement applies to this head."""
+        tm.sh(self.other, "git", "fetch", "-q", "origin")
+        names = tm.sh(self.other, "git", "diff", "--name-only", "origin/main...%s" % head).split()
+        self.assertIn(CONFIG_PATH, names, "precondition: the PR's diff against origin/main does not touch %s, so the case probes nothing" % CONFIG_PATH)
+
+    def test_lane_lint_refuses_a_head_config_whose_requiredChecks_the_running_tool_does_not_know(self):
+        self.assertNotIn(UNKNOWN_REQUIRED, merge.PINNED_STRINGS, "premise: the running tool takes %r, so the head stamp is one it does not refuse" % UNKNOWN_REQUIRED)
+        head = self.head_with_config(config_on_main(self, requiredChecks=UNKNOWN_REQUIRED))
+        self.assert_diff_touches_config(head)
+        rc, out = self.run_lane("--lane-lint", "7")
+        self.assertEqual(rc, 1, "the lint did not refuse a head stamp the running tool does not know: " + out)
+        self.assertEqual(pass_lines(out), [], "a refused head stamp still printed a PASS line: " + out)
+        assert_refused_head_config(self, out, REFUSED_REQUIRED)
+
+    def test_lane_lint_refuses_a_head_config_with_a_merge_key_the_running_tool_does_not_know(self):
+        self.assertNotIn(UNKNOWN_KEY, merge.MERGE_FIELDS, "premise: the running tool takes the key %r, so the head stamp is one it does not refuse" % UNKNOWN_KEY)
+        head = self.head_with_config(config_on_main(self, **{UNKNOWN_KEY: True}))
+        self.assert_diff_touches_config(head)
+        rc, out = self.run_lane("--lane-lint", "7")
+        self.assertEqual(rc, 1, "the lint did not refuse a head stamp with a merge key the running tool does not know: " + out)
+        self.assertEqual(pass_lines(out), [], "a refused head stamp still printed a PASS line: " + out)
+        assert_refused_head_config(self, out, REFUSED_KEY)
+
+    def test_lane_lint_refuses_a_head_config_that_is_not_json_with_its_own_line_naming_the_file(self):
+        head = self.head_with_config("")  # an empty file: the empty state, and not valid JSON
+        self.assert_diff_touches_config(head)
+        rc, out = self.run_lane("--lane-lint", "7")
+        self.assertEqual(rc, 1, "the lint did not refuse a head stamp that is not JSON: " + out)
+        self.assertEqual(pass_lines(out), [], "a head stamp that is not JSON still printed a PASS line: " + out)
+        lines = [line for line in out.splitlines() if CONFIG_PATH in line and re.search(r"(?i)json", line)]
+        self.assertTrue(lines, "no line names %s and says it is not JSON: %s" % (CONFIG_PATH, out))
+
+    def test_lane_lint_passes_a_head_config_that_adds_a_ready_check_the_running_tool_takes(self):  # the control: passes on the old code too
+        head = self.head_with_config(config_on_main(self, readyChecks=["STE lint", "A new ready check"]))
+        self.assert_diff_touches_config(head)
+        rc, out = self.run_lane("--lane-lint", "7")
+        self.assertEqual(rc, 0, "a head stamp the running tool takes was refused: " + out)
+        self.assertEqual(len(pass_lines(out)), 1, "the lint of a head stamp the running tool takes printed no single PASS line: " + out)
+
+    def test_lane_lint_does_not_judge_a_pr_that_leaves_the_config_alone(self):  # the control: passes on the old code too
+        self.assertNotIn(UNKNOWN_REQUIRED, merge.PINNED_STRINGS, "premise: the running tool takes %r, so the inherited stamp is one it does not refuse" % UNKNOWN_REQUIRED)
+        good = main_config_text(self)
+        tm.put_base_config(self, config_on_main(self, requiredChecks=UNKNOWN_REQUIRED), takes_head=False)  # main holds the refused stamp when the lane is cut
+        head = self.push_lane({"own.txt": "lane 7\n"}, from_main=True)  # the head inherits that stamp and changes no other file
+        tm.put_base_config(self, good, takes_head=False)  # main is fixed after the cut
+        inherited = tm.sh(self.other, "git", "show", "%s:%s" % (head, CONFIG_PATH))
+        self.assertIn(UNKNOWN_REQUIRED, inherited, "precondition: the head does not hold the stamp the running tool refuses, so the case probes nothing")
+        names = tm.sh(self.other, "git", "diff", "--name-only", "origin/main...%s" % head).split()
+        self.assertNotIn(CONFIG_PATH, names, "precondition: the PR's diff against origin/main touches %s, so the case does not leave the stamp alone" % CONFIG_PATH)
+        rc, text = self.lint_run("--lane-lint", "7", head=head, pushed=True)
+        self.assertEqual(rc, 0, "a PR that leaves the stamp alone was refused for the stamp its base held when it was cut: " + text)
+        self.assertEqual(len(pass_lines(text)), 1, "the lint of a PR that leaves the stamp alone printed no single PASS line: " + text)
+        self.assertNotIn(UNKNOWN_REQUIRED, text, "the lint named the inherited stamp's value, so the stamp was judged: " + text)
+
+    def test_lane_lint_refusal_remedy_never_names_the_claude_settings_ref_variable(self):
+        head = self.head_with_config(config_on_main(self, requiredChecks=UNKNOWN_REQUIRED))
+        self.assert_diff_touches_config(head)
+        rc, out = self.run_lane("--lane-lint", "7")
+        self.assertEqual(rc, 1, "the lint did not refuse a head stamp the running tool does not know, so there is no remedy to read: " + out)
+        self.assertIn(REFUSED_REQUIRED, out, "the refusal does not quote the parser's reason, so there is no remedy to read: " + out)
+        self.assertNotIn("CLAUDE_SETTINGS_REF", out, "the refusal's remedy names CLAUDE_SETTINGS_REF, the target a session must not set: " + out)
 
 
 class MergeLockReasons(unittest.TestCase):
