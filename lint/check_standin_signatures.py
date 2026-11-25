@@ -19,8 +19,10 @@ in the test file, where X is the product's module name: the stand-in is the thir
 is a finding when it lacks a keyword the product passes, unless it takes `**kwargs`, or when it takes fewer
 positional parameters than the largest call passes, unless it takes `*args`. A bound method's `self` does not
 count. A patch of the product module the check cannot resolve (`patch.object(*target)` in any paired file,
-`patch("X.name")`, `patch.multiple(X, name=...)`, `new_callable=`) is counted as not judged, with no finding.
-Anything else (a Mock, an imported name, a call result, a patch of a name the product does not define as a
+`patch("X.name")`, `patch.multiple(X, name=...)`, `new_callable=`, `patch.object(X, "name", **kwargs)`) is counted
+as not judged, with no finding. So is a replacement of a product function with no patch call: an assignment
+`X.name = ...` or `setattr(X, ...)`, where the name is a function the product defines, or `setattr` takes a name
+that is not a literal. Anything else (a Mock, an imported name, a call result, a patch of a name the product does not define as a
 literal) is counted, not judged; a patch of a literal name the product does not define is out of scope.
 
 Prints one `test_X.py:LINE` line per finding, with the remedy, and one `N stand-ins not judged` line when N is
@@ -122,7 +124,19 @@ def unresolved_form(call, stem, targets, defined):
         names_module = (isinstance(target, ast.Name) and target.id in targets) or (
             isinstance(target, ast.Constant) and target.value == stem)
         return names_module and any(kw.arg is None or kw.arg in defined for kw in call.keywords)
+    if isinstance(call.func, ast.Name) and call.func.id == "setattr" and len(call.args) >= 2:
+        target, name = call.args[0], call.args[1]
+        if isinstance(target, ast.Name) and target.id in targets:
+            literal = isinstance(name, ast.Constant) and isinstance(name.value, str)
+            return not literal or name.value in defined
     return False
+
+
+def unresolved_assignment(node, targets, defined):
+    """True when node stores to `X.name` on the product module for a function the product defines: a plain
+    assignment replaces the function with an expression this check does not judge. A constant is out of scope."""
+    return (isinstance(node, ast.Attribute) and isinstance(node.ctx, ast.Store) and node.attr in defined
+            and isinstance(node.value, ast.Name) and node.value.id in targets)
 
 
 def standin_expr(call):
@@ -219,8 +233,8 @@ def check_standins(product_path, test_paths):
         targets = module_aliases(tree, stem)
         sites = []
         collect_sites(tree, [tree], targets, sites)
-        not_judged += sum(1 for node in ast.walk(tree) if isinstance(node, ast.Call)
-                          and unresolved_form(node, stem, targets, defined))
+        not_judged += sum(1 for node in ast.walk(tree) if (isinstance(node, ast.Call)
+                          and unresolved_form(node, stem, targets, defined)) or unresolved_assignment(node, targets, defined))
         for call, scopes in sites:
             literal = call.args[1] if len(call.args) > 1 else None
             if isinstance(literal, ast.Constant) and isinstance(literal.value, str):
@@ -232,7 +246,7 @@ def check_standins(product_path, test_paths):
                 continue
             expr = standin_expr(call)
             if expr is None:
-                if any(kw.arg == "new_callable" for kw in call.keywords):
+                if any(kw.arg in ("new_callable", None) for kw in call.keywords):
                     not_judged += 1
                 continue
             got = judge.callable_of(expr, scopes)
