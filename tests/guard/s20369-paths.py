@@ -416,6 +416,20 @@ add("test-author: Edit of janitor/mutate_sweep.py is allowed", "allow", tool="Ed
     file_path="janitor/mutate_sweep.py", **A)
 add("test-author: Edit of HOOKS/mutate_guard.py is allowed (case folds)", "allow", tool="Edit",
     file_path="HOOKS/mutate_guard.py", **A)
+# ---- the mutant folder: hooks/mutants/<rule-slug>.py holds one file of rows per rule (decision section-number-clash-ready).
+# Each such .py file is a mutation test, so a test-author writes it and a builder never does. The name prefix
+# `hooks/mutants_x.py` is a near miss, and stays product code.
+MUTANT_FILE = "hooks/mutants/aa-first.py"
+add("test-author: Write of %s is allowed" % MUTANT_FILE, "allow", tool="Write", file_path=MUTANT_FILE, **A)
+add("test-author: Edit of %s is allowed" % MUTANT_FILE, "allow", tool="Edit", file_path=MUTANT_FILE, **A)
+add("builder-test: Write of %s is refused" % MUTANT_FILE, "deny", rule=BT, tool="Write",
+    file_path=MUTANT_FILE, carries=("test-author", "Report"), **B)
+add("builder-test: Edit of %s is refused" % MUTANT_FILE, "deny", rule=BT, tool="Edit",
+    file_path=MUTANT_FILE, carries=("test-author", "Report"), **B)
+add("builder-test: Write of HOOKS/mutants/AA-FIRST.PY is refused (case folds)", "deny", rule=BT, tool="Write",
+    file_path="HOOKS/mutants/AA-FIRST.PY", carries=("test-author", "Report"), **B)
+add("builder-test: Write of hooks/mutants_x.py is allowed (a prefix is a near miss)", "allow", tool="Write",
+    file_path="hooks/mutants_x.py", **B)
 
 # ---- workflow test-run steps. A test-author may add or remove a whole test-run step in a workflow; nothing else there.
 # A builder may change any workflow line, except one that disables tests in a test-runner line. Each author row and
