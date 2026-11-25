@@ -2,9 +2,10 @@
 
 ## The ruling
 
-Rule `brief-destructive-git` in `hooks/guard.py` refuses an Agent, Task or Workflow spawn to a writing role whose brief orders a working-tree discard (rule `shared-trees-no-destructive-git`). Its home is `brief_destructive_hit`, called at step 9e2, after the brief-claim check at step 9e. Layer: the coordinator's lane brief, 2026-11-08 CST.
+Rule `brief-destructive-git` in `hooks/guard.py` refuses an Agent, Task or Workflow spawn to a writing role whose brief orders a working-tree discard (rule `shared-trees-no-destructive-git`). Read-only roles pass; the rule judges writing roles. Its home is `brief_destructive_hit`, called at step 9e2, after the brief-claim check at step 9e. Layer: the coordinator's lane brief, 2026-11-08 CST.
 
 - The mistake: a lane's brief ordered an agent to run `git reset --hard` (lane reviewed-sends-back). No guard read a brief for destructive git.
+- The false alarms: the rule refused briefs that only forbade or reported an act. Measured on 2026-11-25 at 08:40 CST by a grep of guard.log: six refusals of that kind, two logged as false alarms.
 - The harm: the agent obeys in a shared tree and loses another session's uncommitted work, or stalls on the shell guard's refusal and works around it.
 - What is read: backtick spans, fenced lines, and lines led by `$ `. Each runs through the shell guard's own `split_segments` (`hooks/guard_core.py`) and `shared_tree_match` (`hooks/guard_shared_tree.py`), so the verb list is the shell guard's constant, never a copy (rule `building-allow-list-is-the-constant`). No subject read: a brief has no tree.
 - Each Workflow `agent()` call is read for its prompt and `agentType`, whatever its model. An unread `agentType` is judged as a writing role. An unread prompt passes.
@@ -16,12 +17,16 @@ Rule `brief-destructive-git` in `hooks/guard.py` refuses an Agent, Task or Workf
   - a prohibition: a negator in the same clause, within 4 words before the span; `avoid` and `without` only as the word right before it; emphasis marks stripped
   - each later span of a prohibition list, where a comma joins two spans ("Never run `a`, `b`, or `c`.")
   - a heading with a negator then a run verb within 2 words ("Never run:") covers its bullet run, across blank lines and into a fence under it
+  - a backtick span whose own text holds a negator in its clause before its first git word
+  - a backtick span followed directly by "-free"
+  - a backtick span reported as done: "ran" is the word right before it, or "had run" or "has run" are the two words right before it
 - The override lifts it (`owner-override`).
 - Accepted limits, in `docs/debts/notes.md`. A `$ ` line under "Never run:" is denied. Gerund prohibitions ("avoid running", "instead of") are denied. An earlier negated sentence on a heading line covers an order list. An unread Workflow prompt passes. A list with an aside between spans is denied at the later span. The window crosses a colon. A `~~~` fence is not read. A case-data marker exempts the rest of its line. Claude is unlikely to write these forms by mistake (`guard-guards-mistakes-only`).
 - By design, not a limit: an order with no backticks passes here and meets the shell guard at run time.
+- Known limit: any other wording that only names the act stays refused. A report worded with "ran" is read as a report, never as an order.
 - Cost: pure text work inside the guard call already running. No process start, no file written.
 
-Protected by the `brief-destructive-git:` cases in `hooks/test_guard.py` (64 cases and 2 override checks), red before the rule landed, and one mutant in `hooks/mutate_guard.py`.
+Protected by the `rule9` test family under `tests/guard/` (80 `brief-destructive-git:` cases and 2 override checks, counted 2026-11-25), red before the rule landed, and one mutant in `hooks/mutate_guard.py`.
 
 Kind: process
 Home: hooks/guard.py
