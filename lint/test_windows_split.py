@@ -1064,9 +1064,10 @@ def hardening_problems(text):
         problems.append(f"MERGE_TESTS appears {n} times in checks.yml, in {merge_homes}, want 1 in checks-windows-merge (the slice's env)")
     # A shard value outside a full step's own env (job, workflow or $GITHUB_ENV) would cut that suite's cases in every run.
     for var in SHARD_VAR.values():
+        # The Linux merge shard steps are full steps too (LINUX_MERGE_CMD), so their MERGE_SHARD is one of the homes.
         homes = sum(1 for j in all_jobs(text).values() for st in j["steps"]
                     if isinstance(st.get("env"), dict) and var in st["env"]
-                    and (key(st) in REQUIRED or st.get("run") == MACOS_GUARD))
+                    and (key(st) in REQUIRED or st.get("run") == MACOS_GUARD or key(st) == LINUX_MERGE_CMD))
         mentions = sum(strip_comment(line).count(var) for line in text.splitlines())  # a comment that names the var is no home
         if mentions != homes:
             problems.append(f"{var} appears {mentions} times in checks.yml, want {homes} (once per shard step's env)")
