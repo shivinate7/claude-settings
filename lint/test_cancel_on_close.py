@@ -195,9 +195,17 @@ def calls_script(step):
 
 
 def concurrency_of(text, job):
-    """The `concurrency:` mapping: the top-level one, else the job's. None when neither has one."""
-    top = mapping_at(text.split("\n"), "concurrency", 0)
-    return top if top is not None else mapping_at(job.split("\n"), "concurrency", 4)
+    """The one `concurrency:` mapping: the top-level block, else the job's. None when neither has one. Two blocks raise,
+    whether one is top-level and one is in the job or both are top-level: each is a group of its own, and a reader that
+    took the first would leave the other unchecked."""
+    lines, job_lines = text.split("\n"), job.split("\n")
+    top_count = sum(1 for ln in lines if re.match(r"concurrency:", ln))
+    job_count = sum(1 for ln in job_lines if re.match(r" {4}concurrency:", ln))
+    if top_count + job_count > 1:
+        raise AssertionError("the workflow has %d concurrency blocks, want one" % (top_count + job_count))
+    if top_count:
+        return mapping_at(lines, "concurrency", 0)
+    return mapping_at(job_lines, "concurrency", 4)
 
 
 class WorkflowShape(unittest.TestCase):
@@ -276,6 +284,8 @@ class WorkflowShape(unittest.TestCase):
         self.assertIsNotNone(conc, "the workflow has no concurrency block")
         self.assertEqual(conc.get("group"), "${{ github.workflow }}-${{ github.event.pull_request.number }}",
                          "the concurrency group is not the workflow name and the PR number")
+        self.assertEqual(sorted(conc), ["cancel-in-progress", "group"],
+                         "the concurrency block has a key beyond group and cancel-in-progress, or lacks one")
 
     def test_concurrency_never_cancels_in_progress(self):
         conc = concurrency_of(self.text(), self.job())
