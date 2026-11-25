@@ -87,7 +87,7 @@ COUNT_WORD = r"(?:\d|\b(?:none|zero|no)\b)"  # a digit, or a word that says ther
 SEARCH_TOTAL = re.compile(r"total_count|totalCount|issueCount|\bsearch/\w"
                           r"|" + SEARCH_WORD + r".{0,120}" + COUNT_WORD
                           + r"|" + COUNT_WORD + r".{0,120}" + SEARCH_WORD, re.I | re.S)
-# A cost ranking (rule measure-before-priority): code finds the ranking words, the model judges whether the
+# A cost ranking (rule style-measure-before-priority): code finds the ranking words, the model judges whether the
 # ranking names its measure. "most of the time" and "top priority" name no cost, so they never match.
 COST_NOUN = r"(?:cost|spend|drain|sink|driver|bottleneck)s?"
 COST_RANK = re.compile(r"\b(?:costs|spends|eats|burns|takes)\s+the\s+most\b"
@@ -121,7 +121,7 @@ JUDGED_RULES = ("output-start-with-point", "style-cut-narration",
                 "output-never-paste-passing-output", "output-never-hand-off-doable-step",
                 "style-table-gold-column", "questions-go-to-owner",
                 "style-limits-kept-silently", "style-question-form",
-                "verification-counts-from-rest", "measure-before-priority",
+                "verification-counts-from-rest", "style-measure-before-priority",
                 "verification-report-unknown-reads")
 JUDGE_RULE = "reply-judge"  # the guard.log rule when the reason names none of JUDGED_RULES
 REPLY_MAX = 12000  # the prompt rides stdin, so no argv cap; the clip bounds cost and latency only (unmeasured)
@@ -194,7 +194,7 @@ INSTRUCTIONS = (
     "the fix is to read the count or state from REST and confirm each candidate with REST. "
     "Never flag a count read from REST. "
     "Never flag a reply that says a search total was not used or is wrong, and gives the REST count. "
-    "measure-before-priority: a cost claim with no measure may stand, marked unmeasured or not. "
+    "style-measure-before-priority: a cost claim with no measure may stand, marked unmeasured or not. "
     "Flag a cost ranking, such as the biggest cost, the most expensive lane or most of the spend, with no measure, "
     "marked unmeasured or not, only when the same reply also ranks, orders or cuts work on it; "
     "the fix is to cite a figure with its unit and a date, a run id or a sample count, or to drop the work order. "
