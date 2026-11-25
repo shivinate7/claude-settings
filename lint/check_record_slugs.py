@@ -56,7 +56,6 @@ sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
 import layout  # noqa: E402  the one home of where records live (lint/layout.json)
 import _guard_sections  # noqa: E402  the one home of the guard test's section header and faults
 import rule_audit  # noqa: E402  section_dir(): the folder hooks/test_guard.py's SECTION_DIR names
-import ste_lint  # noqa: E402  the one sentence splitter (lint/ste_lint.py split_sentences)
 
 MAX = 32
 ROOT = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
@@ -293,7 +292,9 @@ def fenced(lines):
 def sentence_count(text):
     """How many sentences `text` holds, by ste_lint.split_sentences, the one splitter (it keeps e.g., i.e., 3.15, merge.py
     whole). A month abbreviation before a day number, and a stop inside an inline code span, are no sentence end, so the
-    split reads them with their dot hidden."""
+    split reads them with their dot hidden. ste_lint loads here, not at import: hooks/agent_brief.py imports this module
+    for AGENT_FORM_RULES on every agent start and needs no splitter."""
+    import ste_lint  # the one sentence splitter (lint/ste_lint.py split_sentences)
     hidden = CODE_SPAN.sub(lambda m: re.sub(r"[.!?]", ste_lint._DOT, m.group(0)), text)
     return len(ste_lint.split_sentences(MONTH_DOT.sub(lambda m: m.group(1) + ste_lint._DOT, hidden)))
 

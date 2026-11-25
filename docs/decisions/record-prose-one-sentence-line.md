@@ -30,7 +30,7 @@ How it splits sentences.
 Why: the repo's practice is one entry per line, sorted, in one home (decision `one-layout-every-repo`).
 A ruling kept on one long line breaks that practice: two lanes that add a sentence to it add the same line, and git reports a conflict.
 A measured 57 of 308 merges of main into lane branches conflicted since Nov 18, 2026.
-`docs/decisions/lanes-run-no-full-ci-job.md` held its ruling as one line of over 4,000 characters and conflicted in 5 of 17 merges.
+Decision `lanes-run-no-full-ci-job` held its ruling as one line of over 4,000 characters and conflicted in 5 of 17 merges.
 
 Mistake it guards: a lane adds a sentence to a long ruling line, and the next lane that does the same cannot merge without a hand fix.
 
@@ -43,7 +43,7 @@ Named limits.
   A stop inside a quote that spans several lines still ends a sentence.
 
 Cost: no process, timer or file added.
-In diff mode `added_line_numbers` in `check_record_slugs.py` runs one `git show` of head for each decision record the branch touches, one more at the merge base for each that it edits or renames, and one `git merge-base` when any exists.
+In diff mode `added_line_numbers` in `check_record_slugs.py` runs one `git show` of head for each decision record the branch touches, one more at the merge base for each that it edits or renames, and one `git merge-base` when any exists (unmeasured, not pinned by a test).
 
 Kind: process
 Home: lint/check_record_slugs.py
