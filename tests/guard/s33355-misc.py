@@ -63,7 +63,7 @@ LOG_CHECKS = (
      worktree_live_session_path_unresolvable_case),
     ("liveness: worktree_live_session answers False for a live record whose folder was removed, with the opt-in",
      worktree_live_session_absent_folder_case),
-    ("liveness: worktree_live_session answers False for a record whose cwd sits under a removed folder, "
+    ("liveness: worktree_live_session answers None for a record whose cwd sits under a removed folder, "
      "with the opt-in", worktree_live_session_removed_parent_case),
     ("liveness: worktree_live_session answers None for permission denied on a record's cwd, with or "
      "without the opt-in", worktree_live_session_permission_denied_case),

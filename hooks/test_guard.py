@@ -769,7 +769,7 @@ LOG_RULE_FAMILY = (
     ("liveness: worktree_live_session answers None when", "branch-worktree"),
     ("liveness: worktree_live_session answers False for a live record whose folder was removed",
      "branch-worktree"),
-    ("liveness: worktree_live_session answers False for a record whose cwd sits under a removed folder",
+    ("liveness: worktree_live_session answers None for a record whose cwd sits under a removed folder",
      "branch-worktree"),
     ("liveness: worktree_live_session answers None for permission denied", "branch-worktree"),
     ("liveness: worktree_live_session answers None for an absent target", "branch-worktree"),
