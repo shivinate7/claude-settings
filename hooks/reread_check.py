@@ -121,22 +121,32 @@ def too_big_estimate(result, path):
         return 0
 
 
-def read_flag(sid):
-    """The line ranges read so far, from the session's re-read flag file. The text `1`, or any file that is not that
-    JSON, is no ranges."""
+def handoff_digest(lines):
+    """The sha256 of the handoff's text, from the lines `handoff_lines` returns. It names the text a flag's ranges
+    were read from."""
+    return hashlib.sha256(b"\n".join(lines)).hexdigest()
+
+
+def read_flag(sid, digest):
+    """The line ranges read so far of the handoff text `digest` names, from the session's re-read flag file. Ranges
+    stored for other text, or with no digest (the old file shape), are ranges for text never read: none. The text `1`,
+    or any file that is not that JSON, is no ranges."""
     try:
         with open(ph.reread_flag_path(sid), "r", encoding="utf-8") as f:
             data = json.loads(f.read())
+        if data.get("digest") != digest:
+            return []
         return [(int(a), int(b)) for a, b in data["ranges"]]
     except Exception:
         return []
 
 
-def write_flag(sid, ranges=()):
+def write_flag(sid, digest, ranges=()):
+    """Write the flag file: {"ranges": [[first, last], ...], "digest": sha256 of the text they were read from}."""
     flag = ph.reread_flag_path(sid)
     os.makedirs(os.path.dirname(flag), exist_ok=True)
     with open(flag, "w", encoding="utf-8") as f:
-        f.write(json.dumps({"ranges": [list(r) for r in ranges]}))
+        f.write(json.dumps({"ranges": [list(r) for r in ranges], "digest": digest}))
 
 
 def handoff_lines(handoff):
@@ -190,7 +200,8 @@ def unread_note(payload):
     worked out). It reads the flag and the handoff, so it runs on a refusal only. Never raises."""
     try:
         sid = payload["session_id"]
-        return span_text(unread_ranges(read_flag(sid), len(handoff_lines(ph.handoff_path(sid)))))
+        lines = handoff_lines(ph.handoff_path(sid))
+        return span_text(unread_ranges(read_flag(sid, handoff_digest(lines)), len(lines)))
     except Exception:
         return ""
 
@@ -477,14 +488,15 @@ def note_read(sid, flag, tool_input):
     that cannot be read clears the flag: there is nothing left to read."""
     try:
         lines = handoff_lines(ph.handoff_path(sid))
-        ranges = read_flag(sid)
+        digest = handoff_digest(lines)
+        ranges = read_flag(sid, digest)   # a rewrite changed the text: earlier reads count for none of it
         got = read_range(tool_input, lines)
         if got:
             ranges.append(got)
         if not unread_ranges(ranges, len(lines)):
             os.remove(flag)
-        elif got:
-            write_flag(sid, ranges)
+        else:
+            write_flag(sid, digest, ranges)
     except OSError:
         if os.path.isfile(flag):
             os.remove(flag)
