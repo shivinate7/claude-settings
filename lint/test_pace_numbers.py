@@ -180,7 +180,11 @@ def plain(ts, text="synthetic text"):
     return user_text(ts, text)
 
 
-def write_transcript(folder, records):
+def write_transcript(folder, records, runs_to=None):
+    """The fixture file. runs_to, an HH:MM UTC time, adds one plain record stamped there, so the file's covered
+    span reaches it and a window ending there lies inside the span."""
+    if runs_to:
+        records = list(records) + [plain(at(runs_to))]
     path = os.path.join(folder, "transcript.jsonl")
     with open(path, "w", encoding="utf-8") as f:
         for rec in records:
@@ -226,7 +230,7 @@ class PaceNumbersTests(unittest.TestCase):
             spawn(at("10:05"), "t2"), launched(at("10:05"), "t2", agent_id(2)),
             end("10:10", "10:11", agent_id(1), "t1"),
             end("10:20", "10:21", agent_id(2), "t2"),
-        ))
+        ), runs_to="10:30")
         self.expect(path, "10:00", "10:30", expected_lines(agents=2, most=2, idle=10))
 
     def test_back_to_back_agents_with_a_gap_count_the_gap_as_idle(self):
@@ -235,14 +239,14 @@ class PaceNumbersTests(unittest.TestCase):
             end("10:10", "10:11", agent_id(1), "t1"),
             spawn(at("10:15"), "t2"), launched(at("10:15"), "t2", agent_id(2)),
             end("10:25", "10:26", agent_id(2), "t2"),
-        ))
+        ), runs_to="10:30")
         self.expect(path, "10:00", "10:30", expected_lines(agents=2, most=1, idle=10))
 
     def test_task_named_spawn_starts_a_span_like_agent(self):
         path = write_transcript(self.folder, flat(
             spawn(at("10:00"), "t1", name="Task"), launched(at("10:00"), "t1", agent_id(1)),
             end("10:10", "10:11", agent_id(1), "t1"),
-        ))
+        ), runs_to="10:30")
         self.expect(path, "10:00", "10:30", expected_lines(agents=1, most=1, idle=20))
 
     def test_spans_are_clipped_at_start_and_end_and_outside_spans_are_not_counted(self):
@@ -259,7 +263,7 @@ class PaceNumbersTests(unittest.TestCase):
     def test_agent_with_no_end_notice_runs_to_end_and_is_marked_still_running(self):
         path = write_transcript(self.folder, flat(
             spawn(at("10:00"), "t1"), launched(at("10:00"), "t1", agent_id(1)),
-        ))
+        ), runs_to="10:30")
         self.expect(path, "10:00", "10:30", expected_lines(agents=1, most=1, idle=0, still=1))
 
     def test_shell_command_notice_is_ignored(self):
@@ -269,7 +273,7 @@ class PaceNumbersTests(unittest.TestCase):
             user_text(at("10:04"), notice(shell_id(1), "x1")),
             queued(at("10:05"), notice(shell_id(2), "x2", status=None)),
             end("10:10", "10:11", agent_id(1), "t1"),
-        ))
+        ), runs_to="10:30")
         self.expect(path, "10:00", "10:30", expected_lines(agents=1, most=1, idle=20))
 
     def test_resumed_agent_reopens_only_after_a_send_that_follows_its_end(self):
@@ -279,7 +283,7 @@ class PaceNumbersTests(unittest.TestCase):
             end("10:05", "10:06", agent_id(1), "t1"),
             send(at("10:20"), agent_id(1), "s1"),
             end("10:30", "10:31", agent_id(1), "s1"),
-        ))
+        ), runs_to="10:40")
         self.expect(path, "10:00", "10:40", expected_lines(agents=1, most=1, idle=25))
 
     def test_refused_spawn_starts_no_span(self):
@@ -287,7 +291,7 @@ class PaceNumbersTests(unittest.TestCase):
             spawn(at("10:00"), "t0"), refused(at("10:00"), "t0"),
             spawn(at("10:10"), "t1"), launched(at("10:10"), "t1", agent_id(1)),
             end("10:20", "10:21", agent_id(1), "t1"),
-        ))
+        ), runs_to="10:30")
         self.expect(path, "10:00", "10:30", expected_lines(agents=1, most=1, idle=20))
 
     def test_quoted_notice_and_comment_openers_in_text_do_not_end_or_break_parsing(self):
@@ -298,7 +302,7 @@ class PaceNumbersTests(unittest.TestCase):
             blob(notice(agent_id(1), "t1")),
             snapshot(at("10:04")),
             end("10:10", "10:11", agent_id(1), "t1"),
-        ))
+        ), runs_to="10:20")
         # Scope first: the quoted notice must really sit in a tool_result before the reader is asked about it.
         with open(path, encoding="utf-8") as f:
             on_disk = [json.loads(line) for line in f if line.strip()]
@@ -320,21 +324,21 @@ class PaceNumbersTests(unittest.TestCase):
         self.expect_unknown(path, "10:00", "11:00")
 
     def test_window_with_records_but_no_agent_prints_zero_agents_and_the_whole_window_idle(self):
-        path = write_transcript(self.folder, [plain(at("10:00")), plain(at("10:50"))])
+        path = write_transcript(self.folder, [plain(at("10:00")), plain(at("10:50"))], runs_to="11:00")
         self.expect(path, "10:00", "11:00", expected_lines(agents=0, most=0, idle=60))
 
     def test_failed_notice_ends_a_span(self):
         path = write_transcript(self.folder, flat(
             spawn(at("10:00"), "t1"), launched(at("10:00"), "t1", agent_id(1)),
             end("10:10", "10:11", agent_id(1), "t1", status="failed"),
-        ))
+        ), runs_to="10:30")
         self.expect(path, "10:00", "10:30", expected_lines(agents=1, most=1, idle=20))
 
     def test_killed_notice_ends_a_span(self):
         path = write_transcript(self.folder, flat(
             spawn(at("10:00"), "t1"), launched(at("10:00"), "t1", agent_id(1)),
             end("10:10", "10:11", agent_id(1), "t1", status="killed"),
-        ))
+        ), runs_to="10:30")
         self.expect(path, "10:00", "10:30", expected_lines(agents=1, most=1, idle=20))
 
     def test_send_that_failed_with_is_error_does_not_reopen_a_span(self):
@@ -342,7 +346,7 @@ class PaceNumbersTests(unittest.TestCase):
             spawn(at("10:00"), "t1"), launched(at("10:00"), "t1", agent_id(1)),
             end("10:05", "10:06", agent_id(1), "t1"),
             send(at("10:20"), agent_id(1), "s1"), send_failed(at("10:20"), "s1"),
-        ))
+        ), runs_to="10:30")
         self.expect(path, "10:00", "10:30", expected_lines(agents=1, most=1, idle=25))
 
     def test_send_that_failed_with_success_false_does_not_reopen_a_span(self):
@@ -350,7 +354,7 @@ class PaceNumbersTests(unittest.TestCase):
             spawn(at("10:00"), "t1"), launched(at("10:00"), "t1", agent_id(1)),
             end("10:05", "10:06", agent_id(1), "t1"),
             send(at("10:20"), agent_id(1), "s1"), send_failed_local(at("10:20"), "s1"),
-        ))
+        ), runs_to="10:30")
         self.expect(path, "10:00", "10:30", expected_lines(agents=1, most=1, idle=25))
 
     def test_end_notice_after_end_clips_the_span_and_is_not_still_running(self):
@@ -364,7 +368,7 @@ class PaceNumbersTests(unittest.TestCase):
         path = write_transcript(self.folder, flat(
             spawn(at("10:00"), "t1"), launched(at("10:00"), "t1", agent_id(1)),
             end("10:10:30", "10:11:30", agent_id(1), "t1"),
-        ))
+        ), runs_to="10:30")
         # Window 1800 s, busy 630 s, idle 1170 s = 19.5 min: K is the floor, 19.
         self.expect(path, "10:00", "10:30", expected_lines(agents=1, most=1, idle=19))
 
