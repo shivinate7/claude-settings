@@ -1698,23 +1698,28 @@ class WindowsSplit(unittest.TestCase):
         full_e = unwrap(IF_PIN["python merge/test_merge.py"])
         slice_e = "!cancelled() && github.event_name == 'pull_request' && needs.scope.outputs.code == 'true'"
 
-        def doc(with_slice=False, env="windows-slice", full=full_e):
+        # Ruling (owner, 21:19 CST Nov 24 2026): the base job's full step is off on a ready pull_request, and its slice step runs
+        # there (the R62 merge slice is back). The good doc has both steps in the owner's shape.
+        full_new = full_e.replace("!cancelled() && ", "!cancelled() && github.event_name != 'pull_request' && ", 1)
+
+        def doc(with_slice=False, env="windows-slice", full=full_e, slice_cond=slice_e):
             full_step = f"      - name: Full\n        if: ${{{{ ({scope_condition}) && {full} }}}}\n        run: python merge/test_merge.py\n"
-            slice_step = (f"      - name: Slice\n        if: ${{{{ ({scope_condition}) && {slice_e} }}}}\n        env:\n"
+            slice_step = (f"      - name: Slice\n        if: ${{{{ ({scope_condition}) && {slice_cond} }}}}\n        env:\n"
                           f"          MERGE_TESTS: {env}\n        run: python merge/test_merge.py\n") if with_slice else ""
             return ("jobs:\n  checks-windows-merge:\n    runs-on: windows-latest\n    needs: scope\n    steps:\n"
                     f"      - uses: actions/setup-python@abc # v6\n        if: ${{{{ {scope_condition} }}}}\n" + full_step + slice_step)
 
-        good = doc()
+        good = doc(with_slice=True, full=full_new)
         self.assertEqual(hardening_problems(good), [])
         self.assertFalse(any("MERGE_TESTS appears" in p for p in hardening_problems(good)))
-        self.assertTrue(any("runs 1 times on windows-latest" in p for p in placement_problems(doc(with_slice=True))))
-        self.assertTrue(any("MERGE_TESTS appears 1 times" in p for p in hardening_problems(doc(with_slice=True))))
+        self.assertFalse(any("runs 1 times on windows-latest" in p for p in placement_problems(good)))  # the ready-PR slice is allowed
+        self.assertTrue(hardening_problems(doc(with_slice=True, full=full_new, slice_cond=slice_e.replace(
+            "github.event_name == 'pull_request' && ", ""))))  # a slice on every event runs the cases on the daily too
         self.assertTrue(hardening_problems(doc(full=slice_e)))  # full run on pull_request only: the pin is every event
         for bad in (good.replace("    runs-on: windows-latest\n", "    runs-on: windows-latest\n    env:\n      MERGE_TESTS: windows-slice\n"),
                     "env:\n  MERGE_TESTS: windows-slice\n" + good,
                     good.replace("    steps:\n", "    steps:\n      - run: echo MERGE_TESTS=windows-slice >> $GITHUB_ENV\n")):
-            self.assertTrue(any("MERGE_TESTS appears 1 times" in p for p in hardening_problems(bad)), bad)
+            self.assertTrue(hardening_problems(bad), bad)  # a merge slice env outside its step is a defect
         self.assertTrue(hardening_problems(doc(full=full_e.replace("needs.scope.outputs.code == 'true' || ", ""))))  # the push condition dropped
         # A merge suite step may read its own flag, but not another job's.
         self.assertTrue(any("reads scope flags" in p for p in hardening_problems(doc(full=full_e.replace("outputs.code", "outputs.checks_windows")))))
@@ -1787,8 +1792,16 @@ class WindowsSplit(unittest.TestCase):
                 self.assertIsNotNone(job, f"no windows-latest job named {name}")
                 steps = [st for st in job["steps"] if key(st) == GUARD_CMD]
                 self.assertEqual(len(steps), 1, f"{name} has {len(steps)} full guard steps, want 1")
-                self.assertEqual(step_rest(steps[0], read_scope_condition(job)), unwrap(IF_PIN[GUARD_CMD]),
-                                 f"{name}: the full guard step's condition is not the pinned text (it lacks windows_guard)")
+                rest = step_rest(steps[0], read_scope_condition(job))
+                if name == GUARD_JOB:
+                    # Ruling (owner, 21:19 CST Nov 24 2026): the base job's full step is off on a ready pull_request, and its gate
+                    # is still windows_guard. Named failure: the full step runs beside the slice on a ready pull_request.
+                    self.assertIsNotNone(rest, f"{name}: the full guard step carries no scope condition")
+                    self.assertIn("github.event_name != 'pull_request'", rest, f"{name}: the full guard step runs on a ready pull_request")
+                    self.assertIn("needs.scope.outputs.windows_guard == 'true'", rest, f"{name}: the full guard step lacks windows_guard")
+                else:
+                    self.assertEqual(rest, unwrap(IF_PIN[GUARD_CMD]),
+                                     f"{name}: the full guard step's condition is not the pinned text (it lacks windows_guard)")
 
     def test_checks_sets_no_guard_family(self):
         self.assertEqual([p for p in guard_problems(self.text) if "GUARD_FAMILY" in p], [])
@@ -1802,17 +1815,22 @@ class WindowsSplit(unittest.TestCase):
         full_e = unwrap(IF_PIN[GUARD_CMD])
         slice_e = "!cancelled() && github.event_name == 'pull_request' && needs.scope.outputs.code == 'true'"
 
-        def doc(full=full_e, slice_env=None, scope_condition_=scope_condition, job_if=None, extra="", more=""):
-            # R62: no slice step. slice_env, when given, names a slice step left in the job.
-            slice_step = (f"      - name: Slice\n        if: ${{{{ ({scope_condition_}) && {slice_e} }}}}\n        env:\n"
+        # Ruling (owner, 21:19 CST Nov 24 2026): the base job's full step is off on a ready pull_request and its slice step runs there.
+        full_new = full_e.replace("!cancelled() && ", "!cancelled() && github.event_name != 'pull_request' && ", 1)
+
+        def doc(full=full_e, slice_env=None, scope_condition_=scope_condition, job_if=None, extra="", more="", slice_cond=slice_e):
+            # slice_env, when given, names a slice step of the job, with its condition slice_cond.
+            slice_step = (f"      - name: Slice\n        if: ${{{{ ({scope_condition_}) && {slice_cond} }}}}\n        env:\n"
                           f"          GUARD_TESTS: {slice_env}\n        run: python hooks/test_guard.py\n") if slice_env else ""
             return ("jobs:\n  checks-windows-guard:\n    runs-on: windows-latest\n    needs: scope\n"
                     + (f"    if: {job_if}\n" if job_if else "") + extra + "    steps:\n"
                     f"      - uses: actions/setup-python@abc # v6\n        if: ${{{{ {scope_condition_} }}}}\n"
                     f"      - name: Full\n        if: ${{{{ ({scope_condition_}) && {full} }}}}\n        run: python hooks/test_guard.py\n"
                     + slice_step + more)
-        self.assertEqual(guard_problems(doc()), [])
-        self.assertTrue(guard_problems(doc(slice_env="windows-slice")))  # a slice step is left in the job
+        self.assertEqual(guard_problems(doc(full=full_new, slice_env="windows-slice")), [])
+        self.assertTrue(guard_problems(doc(full=full_new)))  # no slice step: a ready pull_request runs no guard case beside the full step
+        self.assertTrue(guard_problems(doc(full=full_new, slice_env="windows-slice", slice_cond=slice_e.replace(
+            "github.event_name == 'pull_request' && ", ""))))  # a slice on every event runs the guard cases on the daily too
         self.assertTrue(guard_problems(doc(full=slice_e)))  # full suite runs on pull_request only
         self.assertTrue(guard_problems(doc(extra="    env:\n      GUARD_TESTS: windows-slice\n")))  # job-level env
         self.assertTrue(guard_problems(doc(job_if="needs.scope.outputs.code == 'true'")))  # a job-level if on the scoped job
@@ -2598,11 +2616,15 @@ class PushOffDaily(unittest.TestCase):
                 with self.subTest(job=name, event=event):
                     self.assertTrue(runs_on_event(self.jobs.get(name, {}).get("if"), event), f"{name} does not run on {event}")
 
-    def test_each_push_off_job_still_runs_on_a_ready_pull_request(self):
-        # Control, green on the old code: the pull request run keeps every Windows and mutation job.
+    def test_each_push_off_job_still_runs_on_a_ready_pull_request_except_a_windows_shard(self):
+        # Ruling (owner, 21:19 CST Nov 24 2026): a ready pull request runs only the Windows-marked tests, so the shards of guard and
+        # merge (PUSH_OFF_SHARDS) are off on it. Every other Windows and mutation job still runs. Named failure: a shard starts on a
+        # ready pull request, or a job that the ready run needs does not.
         for name in WINDOWS_PUSH_OFF_JOBS + MUTATE_PUSH_OFF_JOBS:
+            want = name not in PUSH_OFF_SHARDS
             with self.subTest(job=name):
-                self.assertTrue(runs_on_event(self.jobs.get(name, {}).get("if"), "pull_request"), f"{name} does not run on a ready pull request")
+                self.assertEqual(runs_on_event(self.jobs.get(name, {}).get("if"), "pull_request"), want,
+                                 f"{name} runs on a ready pull request: {not want}, want {want}")
 
     def test_each_shard_keeps_the_draft_guard_beside_the_push_guard(self):
         # Named failure: a shard's job-level if drops the draft guard, so a draft pull request starts every shard. Control on the old file.
@@ -2620,8 +2642,10 @@ class PushOffPredicates(unittest.TestCase):
         self.assertTrue(push_off_job_if("checks-windows", "github.event_name != 'push'"))
         self.assertTrue(push_off_job_if("checks-mutate-guard", "${{ github.event_name != 'push' }}"))
 
-    def test_the_push_guard_with_the_shard_draft_guard_is_push_off_on_a_shard(self):
-        expr = "${{ github.event_name != 'push' && (github.event_name != 'pull_request' || !github.event.pull_request.draft) }}"
+    def test_the_daily_only_shard_if_is_push_off_on_a_shard(self):
+        # Ruling (owner, 21:19 CST Nov 24 2026): a shard's job-level if is daily only, so it is off on a pull_request too, draft or
+        # ready. The R62 form (the push guard with the draft guard) lets a ready pull_request start a shard, so the ruling takes it out.
+        expr = "${{ (github.event_name != 'pull_request' && github.event_name != 'push') }}"
         self.assertTrue(push_off_job_if("checks-windows-guard-2", expr))
 
     def test_a_push_guard_that_reads_a_flag_is_not_push_off(self):
@@ -2787,25 +2811,88 @@ class ReadyPullShards(unittest.TestCase):
         # A shard's run steps end in the records-only condition, as its base job's do.
         self.assertEqual(condition_problems(self.text, shards), [], "a shard's run step does not end in the records-only condition")
 
-    def test_the_windows_guard_job_keeps_its_full_suite_and_has_no_slice_step(self):
-        # Named failure: checks-windows-guard still runs the windows-slice guard step, so a ready PR runs its cases twice.
+    # Ruling (owner, 21:19 CST Nov 24 2026): a ready PR runs only the tests marked Windows-specific, so each
+    # base job runs its slice step there. The R62 cases below asserted the slice gone; the ruling reverses that.
+    def test_the_windows_guard_job_runs_one_windows_slice_step(self):
+        # Named failure: checks-windows-guard has no windows-slice guard step, so a ready PR runs no Windows-marked guard case.
         jobs = windows_jobs(self.text)
         self.assertIn(GUARD_JOB, jobs, f"no {GUARD_JOB} job")
         keys = [key(st) for st in jobs[GUARD_JOB]["steps"]]
-        self.assertIn(GUARD_CMD, keys, f"{GUARD_JOB} has no full guard step")
-        self.assertNotIn(GUARD_SLICE, keys, f"{GUARD_JOB} still runs {GUARD_SLICE!r}")
+        self.assertEqual(keys.count(GUARD_SLICE), 1, f"{GUARD_JOB} runs {GUARD_SLICE!r} {keys.count(GUARD_SLICE)} times, want 1")
 
-    def test_the_windows_merge_job_has_no_slice_step(self):
-        # Named failure: checks-windows-merge still runs the windows-slice merge step, so a ready PR runs its cases twice.
+    def test_the_windows_merge_job_runs_one_windows_slice_step(self):
+        # Named failure: checks-windows-merge has no windows-slice merge step, so a ready PR runs no Windows-marked merge case.
         jobs = windows_jobs(self.text)
         self.assertIn("checks-windows-merge", jobs, "no checks-windows-merge job")
         keys = [key(st) for st in jobs["checks-windows-merge"]["steps"]]
-        self.assertNotIn(SLICE, keys, f"checks-windows-merge still runs {SLICE!r}")
+        self.assertEqual(keys.count(SLICE), 1, f"checks-windows-merge runs {SLICE!r} {keys.count(SLICE)} times, want 1")
 
-    def test_no_windows_slice_env_is_set_anywhere_in_checks_yml(self):
-        # Named failure: a GUARD_TESTS or MERGE_TESTS windows-slice value is still set in a step, a job or the workflow.
-        self.assertEqual(re.findall(r"(?:GUARD|MERGE)_TESTS:\s*windows-slice", self.text), [],
-                         "a windows-slice env is still set in checks.yml")
+    def test_the_windows_slice_env_is_set_once_on_a_step_of_each_windows_base_job_and_nowhere_else(self):
+        # Named failure: a windows-slice value is set on a job, on the workflow, on a shard, or on a second step, so a run carries it twice.
+        # It reads the parsed step envs, and counts the mentions outside comments, so a comment cannot satisfy it.
+        homes = sorted((name, var) for name, job in windows_jobs(self.text).items() for st in job["steps"]
+                       for var, val in (st.get("env") or {}).items() if val == "windows-slice")
+        self.assertEqual(homes, [(GUARD_JOB, "GUARD_TESTS"), ("checks-windows-merge", "MERGE_TESTS")],
+                         "the windows-slice envs are not one per base job's slice step")
+        mentions = sum(strip_comment(line).count("windows-slice") for line in self.text.splitlines())
+        self.assertEqual(mentions, 2, f"windows-slice appears {mentions} times outside comments in checks.yml, want 2 (one per slice)")
+
+    # Ruling (owner, 21:19 CST Nov 24 2026). Each reads the real checks.yml and the one home of the shard list (PUSH_OFF_SHARDS).
+    def test_each_windows_shard_runs_on_schedule_and_dispatch_and_on_no_draft_ready_or_push_run(self):
+        # Named failure: a shard starts on a push, a draft pull request or a ready pull request, so a PR runs the full suite again.
+        jobs = all_jobs(self.text)
+        for name in PUSH_OFF_SHARDS:
+            self.assertIn(name, jobs, f"{name} is not a job of checks.yml")
+            expr = jobs[name]["if"]
+            self.assertIsNotNone(expr, f"{name} has no job-level if, so every event starts it")
+            for event, draft, want in (("pull_request", True, False), ("pull_request", False, False), ("push", False, False),
+                                       ("schedule", False, True), ("workflow_dispatch", False, True)):
+                with self.subTest(job=name, event=event, draft=draft):
+                    got = eval_with(expr, event, {"records_only_skip": "false"}, draft=draft)
+                    self.assertEqual(got, want, f"{name} on {event} (draft {draft}) runs {got}, want {want}: {expr}")
+
+    def test_each_windows_base_job_runs_its_full_step_on_schedule_and_its_slice_on_a_ready_pull_request(self):
+        # Named failure: a base job's full step runs on a ready pull request (its cases run twice), or its slice runs on a schedule.
+        jobs = windows_jobs(self.text)
+        for base in (GUARD_JOB, "checks-windows-merge"):
+            self.assertIn(base, jobs, f"no {base} job")
+            job = jobs[base]
+            fulls = [st for st in job["steps"] if key(st) == SHARD_CMD[base]]
+            slices = [st for st in job["steps"] if key(st) == SLICE_OF[base]]
+            self.assertEqual(len(fulls), 1, f"{base} has {len(fulls)} full-suite steps, want 1")
+            self.assertEqual(len(slices), 1, f"{base} has {len(slices)} windows-slice steps, want 1")
+            values = flags_in(job["if"], *[st.get("if") for st in job["steps"]])
+            values["records_only_skip"] = "false"
+            with self.subTest(job=base, step="full"):
+                self.assertFalse(runs_with_values(job, fulls[0], "pull_request", values),
+                                 f"{base} full-suite step runs on a ready pull_request: {fulls[0].get('if')}")
+                self.assertTrue(runs_with_values(job, fulls[0], "schedule", values),
+                                f"{base} full-suite step does not run on schedule: {fulls[0].get('if')}")
+            with self.subTest(job=base, step="slice"):
+                self.assertTrue(runs_with_values(job, slices[0], "pull_request", values),
+                                f"{base} windows-slice step does not run on a ready pull_request: {slices[0].get('if')}")
+                self.assertFalse(runs_with_values(job, slices[0], "schedule", values),
+                                 f"{base} windows-slice step runs on schedule: {slices[0].get('if')}")
+
+    def test_a_ready_pull_request_starts_the_seven_windows_jobs_and_no_shard(self):
+        # Named failure: a shard starts on a ready pull_request. The expected set is every Windows job less the shards, so the failure
+        # names each job the run would start beyond the seven.
+        jobs = all_jobs(self.text)
+        windows = sorted(windows_jobs(self.text))
+        self.assertTrue(windows, "checks.yml has no Windows job")
+        values = flags_in(*[jobs[n]["if"] for n in windows])
+        values["records_only_skip"] = "false"
+        started = sorted(n for n in windows if jobs[n]["if"] is None or eval_with(jobs[n]["if"], "pull_request", values))
+        self.assertEqual(started, sorted(set(windows) - set(PUSH_OFF_SHARDS)),
+                         f"a ready pull_request starts {len(started)} Windows jobs, want the seven that are not shards")
+
+
+SLICE_OF = {GUARD_JOB: GUARD_SLICE, "checks-windows-merge": SLICE}  # the slice step key of each Windows base job (owner, 21:19 Nov 24)
+
+
+def flags_in(*exprs):
+    """Every scope output the expressions name, each set to true: the most permissive read of each job's own ifs."""
+    return {flag: "true" for expr in exprs if expr for flag in re.findall(r"needs\.scope\.outputs\.(\w+)", expr)}
 
 
 class ReadyPullFullSuite(unittest.TestCase):
@@ -2826,30 +2913,39 @@ class ReadyPullFullSuite(unittest.TestCase):
             self.assertIn(base, names, f"no {base} job in the full Windows suite")
         return names
 
-    # R62 re-pointed for windows_guard: the owner granted the narrowing (waiting-page item 901 a, 18:20 CST Nov 15).
-    def test_a_ready_pull_request_with_each_suite_flag_set_runs_every_step_of_the_full_suite_jobs(self):
-        # Named failure: a step of a full-suite job is conditioned on a scope flag other than its own, or on code, which a docs-only PR
-        # leaves false. The guard shards read windows_guard, and the merge and rest suites read their own flag (SUITE_FLAG), so this
-        # case sets each one true; the sibling case below sets the guard's false.
+    # R62 re-pointed for windows_guard: the owner granted the narrowing (waiting-page item 901 a, 18:20 CST Nov 15). Re-pointed again for
+    # Ruling (owner, 21:19 CST Nov 24 2026): a ready pull_request runs only the Windows-marked slice, not the full step.
+    def test_a_ready_pull_request_with_each_suite_flag_set_runs_the_slice_and_no_full_step_or_shard_step(self):
+        # Named failure: a ready pull_request runs a base job's full step next to its slice (the cases run twice), or a shard step, or
+        # a step conditioned on a scope flag other than its own, or on code. The guard shards read windows_guard, and the merge and rest
+        # suites read their own flag (SUITE_FLAG), so this case sets each one true; the sibling case below sets the guard's false.
         # The records-only condition is the one a ready pull_request does not meet: with it shut, no run step runs.
         for name in self.suite_jobs():
             job = self.jobs[name]
-            if (shard_base(name) or name) == GUARD_JOB:
+            base = shard_base(name) or name
+            if base == GUARD_JOB:
                 values = {"windows_guard": "true"}
             else:
                 values = {SUITE_FLAG[name]: "true"} if name in SUITE_FLAG else {}
             for st in job["steps"]:
+                if shard_base(name):
+                    want = False  # a shard is off on a ready pull_request at job level (owner, 21:19 CST Nov 24 2026)
+                elif base in SHARD_CMD and key(st) == SHARD_CMD[base]:
+                    want = False  # the full step is off on a ready pull_request; the slice step runs there instead (owner, 21:19)
+                else:
+                    want = True
                 with self.subTest(job=name, step=step_label(st)):
-                    self.assertTrue(runs_with_values(job, st, "pull_request", values),
-                                    f"{name} step {step_label(st)!r} does not run on a ready pull_request with {values or 'no flag set'}")
-                if "run" in st:
+                    self.assertEqual(runs_with_values(job, st, "pull_request", values), want,
+                                     f"{name} step {step_label(st)!r} runs on a ready pull_request: want {want} with {values or 'no flag set'}")
+                if want and "run" in st:
                     with self.subTest(job=name, step=step_label(st), condition="shut"):
                         self.assertFalse(runs_with_values(job, st, "pull_request", dict(values, records_only_skip="true")),
                                          f"{name} step {step_label(st)!r} runs on a ready pull_request with the records-only condition shut")
 
-    def test_a_docs_only_ready_pull_request_keeps_the_guard_shard_steps_off_without_windows_guard(self):
-        # The off side of the gate on the same kind of PR: with windows_guard false, each guard shard's run step is off, and the
-        # steps that only check out and set up still run.
+    def test_a_docs_only_ready_pull_request_runs_no_guard_step_past_the_base_checkout_and_setup(self):
+        # Ruling (owner, 21:19 CST Nov 24 2026). With windows_guard false, the base job's slice and full
+        # step are off, its checkout and setup still run, and no guard shard runs at all on a ready pull_request (job level).
+        # Named failure on the R62 file: a guard shard's checkout or step runs on a ready pull_request, so the shard runs its cases.
         for name in self.suite_jobs():
             if (shard_base(name) or name) != GUARD_JOB:
                 continue
@@ -2857,13 +2953,14 @@ class ReadyPullFullSuite(unittest.TestCase):
             for st in job["steps"]:
                 with self.subTest(job=name, step=step_label(st)):
                     runs = runs_with_values(job, st, "pull_request", {"windows_guard": "false"})
-                    if "run" in st:
+                    if shard_base(name) or "run" in st:
                         self.assertFalse(runs, f"{name} step {step_label(st)!r} runs on a ready pull_request with windows_guard false")
                     else:
                         self.assertTrue(runs, f"{name} step {step_label(st)!r} is a checkout or setup step and does not run on a ready PR")
 
-    def test_a_shard_job_skips_a_draft_pull_request_at_job_level_and_runs_a_ready_one(self):
-        # Control, green on the old code: the draft skip is the shard job's own if, and it stays.
+    def test_a_shard_job_skips_a_draft_pull_request_and_a_ready_one_at_job_level(self):
+        # Ruling (owner, 21:19 CST Nov 24 2026): a shard runs on schedule and dispatch only, so a ready pull_request skips it at
+        # job level too. Named failure: a shard's job-level if lets a ready pull_request start it.
         for name in self.suite_jobs():
             if shard_base(name) is None:
                 continue
@@ -2871,7 +2968,7 @@ class ReadyPullFullSuite(unittest.TestCase):
             with self.subTest(job=name):
                 self.assertIsNotNone(expr, f"{name} has no job-level if, so a draft pull_request starts its shard")
                 self.assertFalse(eval_if(expr, "pull_request", "true", draft=True), f"{name} runs on a draft pull_request: {expr}")
-                self.assertTrue(eval_if(expr, "pull_request", "false", draft=False), f"{name} does not run on a ready pull_request: {expr}")
+                self.assertFalse(eval_if(expr, "pull_request", "false", draft=False), f"{name} runs on a ready pull_request: {expr}")
 
     def test_no_step_of_a_full_suite_job_runs_on_a_draft_pull_request_with_no_flag_set(self):
         # Control, green on the old code: a draft with every flag false runs no suite step, so the R62 change must keep that.
@@ -2885,14 +2982,24 @@ class ReadyPullFullSuite(unittest.TestCase):
     def test_the_full_suite_steps_run_on_schedule_and_dispatch_and_not_on_a_push_with_every_flag_set(self):
         # Re-pointed (owner page item 880, 11:53 CST Nov 15): a push starts no Windows job, so no full suite step runs on a push. The
         # daily schedule and a dispatch still run every step with every flag set. Named failure on the old file: a step runs on a push.
+        # Ruling (owner, 21:19 CST Nov 24 2026): the slice step is the ready-PR step, so it is off on a schedule and a dispatch, and
+        # each base job's full step still runs there. Named failure: a slice step runs on the daily, so the daily runs the cases twice.
+        for base, slice_key in SLICE_OF.items():
+            with self.subTest(job=base):
+                count = sum(key(st) == slice_key for st in self.jobs[base]["steps"])
+                self.assertEqual(count, 1, f"{base} has {count} windows-slice steps, want 1: the daily has no slice step to keep off")
         for name in self.suite_jobs():
             job = self.jobs[name]
             for st in job["steps"]:
+                is_slice = key(st) in SLICE_OF.values()
                 for event in ("push", "schedule", "workflow_dispatch"):
                     with self.subTest(job=name, step=step_label(st), event=event):
                         if event == "push" and name in PUSH_OFF_JOBS:
                             self.assertFalse(runs_on(job, st, event, "true", draft=False),
                                              f"{name} step {step_label(st)!r} runs on a push, which item 880 takes off the push path")
+                        elif is_slice:
+                            self.assertFalse(runs_on(job, st, event, "true", draft=False),
+                                             f"{name} step {step_label(st)!r} runs on {event}: the slice is the ready-PR step only")
                         else:
                             self.assertTrue(runs_on(job, st, event, "true", draft=False),
                                             f"{name} step {step_label(st)!r} does not run on {event} with every flag set")
@@ -4025,11 +4132,16 @@ class ShardFamilies(unittest.TestCase):
                                  f"{label}: a shard total differs from the job count {len(family)}: {got}")
 
     def test_all_jobs_passed_needs_every_shard_job(self):
-        # Named failure: a shard job is missing from all-jobs-passed's needs, so its red cannot block the merge.
+        # Ruling (owner, 21:19 CST Nov 24 2026): the Windows shards of guard and merge (PUSH_OFF_SHARDS) are off on a ready pull
+        # request, so all-jobs-passed does not need them; the daily run carries their red. Named failure: a Linux shard is missing from
+        # the needs, so its red cannot block the merge, or a Windows shard a ready pull request skips is still needed.
         for label, _, _, family in SHARD_SUITES:
             for job in family:
                 with self.subTest(suite=label, job=job):
-                    self.assertIn(job, self.needs, f"{ALL_JOBS_PASSED_JOB} does not need {job}: {self.needs}")
+                    if job in PUSH_OFF_SHARDS:
+                        self.assertNotIn(job, self.needs, f"{ALL_JOBS_PASSED_JOB} needs {job}, which a ready pull request skips")
+                    else:
+                        self.assertIn(job, self.needs, f"{ALL_JOBS_PASSED_JOB} does not need {job}: {self.needs}")
 
     def test_ci_done_needs_every_shard_job(self):
         # Named failure: a shard job is missing from ci-done's needs, so a red run posts no wake comment for it.

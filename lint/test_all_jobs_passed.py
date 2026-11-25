@@ -23,7 +23,7 @@ import unittest
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from test_windows_split import CHECKS, LINUX_GUARD_JOBS, MACOS_JOBS, all_jobs, eval_with, yaml_scalar  # noqa: E402  the one home of the checks.yml path and the guard shards
-from test_windows_split import ALL_JOBS_PASSED_JOB, RECORDS_ONLY_CONDITION, SUITE_FLAG, unwrap  # noqa: E402  the one home of the rollup job name, the records-only skip and the suite flags
+from test_windows_split import ALL_JOBS_PASSED_JOB, PUSH_OFF_SHARDS, RECORDS_ONLY_CONDITION, SUITE_FLAG, unwrap  # noqa: E402  the one home of the rollup job name, the shard list, the records-only skip and the suite flags
 from all_jobs_passed_rules import (ALL_JOBS_PASSED_USES, COMMENT_DELTA_CLAUSE, DELTA_CLAUSES, all_problems,  # noqa: E402  the one home of the rules
                                    child_problems, ci_done_problems, needs_of, needs_problems, off_problems, scope_if_problems,
                                    scope_skips_problems, shape_problems, split_jobs, step_with, steps_problems, steps_part)
@@ -686,27 +686,48 @@ class ShardsRunWithTheirFlagFalse(unittest.TestCase):
             needs[failed]["result"] = "failure"
         return needs
 
-    def test_the_rollup_needs_every_merge_and_rest_shard(self):
-        missing = [name for name in SUITE_FLAG if name not in self.needed]
-        self.assertEqual(missing, [], f"all-jobs-passed does not need these shards, so their results are not in the verdict: {missing}")
+    # Ruling (owner, 21:19 CST Nov 24 2026): a ready pull_request runs only the Windows-marked tests, so the
+    # Windows shards (PUSH_OFF_SHARDS) are off on it, and all-jobs-passed needs merge shard 1 and the rest jobs, not merge shards 2 to 10.
+    def test_the_rollup_needs_merge_shard_one_and_the_rest_jobs_and_no_windows_shard(self):
+        # Named failure: all-jobs-passed needs a Windows shard that a ready pull_request skips, or lacks a job the ready run runs.
+        missing = [name for name in SUITE_FLAG if name not in PUSH_OFF_SHARDS and name not in self.needed]
+        self.assertEqual(missing, [], f"all-jobs-passed does not need these jobs, so their results are not in the verdict: {missing}")
+        needed_shards = [name for name in PUSH_OFF_SHARDS if name in self.needed]
+        self.assertEqual(needed_shards, [], f"all-jobs-passed needs shards a ready pull_request skips: {needed_shards}")
 
-    def test_each_shard_job_still_runs_with_its_flag_false_on_a_ready_pull_request(self):
-        # Named failure: a job-level if that skips the shard with its flag false would make its result skipped, not success.
+    def test_each_suite_job_runs_on_a_ready_pull_request_with_its_flag_false_except_a_windows_shard(self):
+        # Named failure: a job-level if that skips a non-shard job with its flag false would make its result skipped, not success.
+        # A Windows shard is off on a ready pull_request at job level by the ruling, so the case expects it off.
         jobs = all_jobs(self.text)
         for name, flag in SUITE_FLAG.items():
             with self.subTest(job=name):
                 self.assertIn(name, jobs, f"{name} is not a job in checks.yml")
                 expr = jobs[name]["if"]
                 self.assertIsNotNone(expr, f"{name} has no job-level if")
+                if name in PUSH_OFF_SHARDS:
+                    self.assertFalse(eval_with(expr, "pull_request", {"records_only_skip": "false"}),
+                                     f"{name} runs on a ready pull_request; the ruling takes a Windows shard off it: if {expr}")
+                    continue
                 self.assertTrue(eval_with(expr, "pull_request", {flag: "false", "records_only_skip": "false"}, default="true"),
                                 f"{name} is skipped at job level on a ready pull_request with {flag} false: if {expr}")
+
+    def test_a_ready_pull_request_run_with_the_thirteen_shards_skipped_passes_the_rollup(self):
+        # Ruling (owner, 21:19 CST Nov 24 2026). The ready run skips the 13 Windows shards; a skipped job that the rollup needs fails
+        # check.sh, so the rollup must not need them. Named failure: all-jobs-passed needs a shard, so every ready run goes red.
+        needs = self.needs_json()
+        for name in PUSH_OFF_SHARDS:
+            if name in needs:
+                needs[name]["result"] = "skipped"
+        code, out = check_sh(needs)
+        self.assertEqual(code, 0, f"the rollup refuses a ready run whose Windows shards are skipped: {out}")
 
     def test_a_green_rollup_passes_with_each_shard_success_whatever_its_steps_did(self):
         code, out = check_sh(self.needs_json())
         self.assertEqual(code, 0, f"the rollup fails with every job a success: {out}")
 
     def test_a_failed_shard_fails_the_rollup(self):
-        for name in SUITE_FLAG:
+        # Ruling (owner, 21:19 CST Nov 24 2026): the Windows shards are not needed, so the cases below are the needed jobs only.
+        for name in (n for n in SUITE_FLAG if n not in PUSH_OFF_SHARDS):
             with self.subTest(shard=name):
                 self.assertIn(name, self.needed, f"{ALL_JOBS_PASSED_JOB} does not need {name}, so its failure is no verdict")
                 code, out = check_sh(self.needs_json(failed=name))
