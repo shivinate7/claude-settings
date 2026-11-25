@@ -252,12 +252,19 @@ def tag_orphan(env_entries=(), argv_extra=(), holder=None):
     return None
 
 
-def stranded_job(job_env_words, wrappers=0):
-    """The `holder` of a stranded stub: a shell that runs one `sleep` as its child and waits. The
+# THE JOB. A python process, not `sleep`: macOS hides the environment of an Apple platform binary from
+# the guard's read (debt kill-tag-platform-binary-blind), so a `sleep` job reads as foreign there.
+PY_JOB = [sys.executable, "-c", "import time; time.sleep(300)"]
+# The stub's shells, and `env`, which execs into the job. Until the job's exec its pid still shows one.
+LAUNCHERS = ("sh", "env")
+
+
+def stranded_job(job_env_words, wrappers=0, command=PY_JOB):
+    """The `holder` of a stranded stub: a shell that runs `command` as its child and waits. The
     child's environment is set by `job_env_words`: `env NAME=value` gives it a tag, `env -u NAME`
     takes the stub's away. `wrappers` adds that many shell wrappers between the stub and the job.
     The stub's own environment is `env_entries` of tag_orphan."""
-    return ["sh", "-c", '"$@" & wait', "sh"] * (1 + wrappers) + list(job_env_words) + ["sleep", "300"]
+    return ["sh", "-c", '"$@" & wait', "sh"] * (1 + wrappers) + list(job_env_words) + list(command)
 
 
 def child_of(parent):
@@ -278,8 +285,9 @@ def child_of(parent):
 
 
 def stub_job(stub, depth=1):
-    """The pid `depth` levels under `stub`, once that pid has exec'd `sleep`, or None. Until its
-    exec, a forked pid holds its parent's environment, so the tag is read only after it."""
+    """The pid `depth` levels under `stub`, once that pid has exec'd its job (its name is no
+    launcher), or None. Until its exec, a forked pid holds its parent's environment, so the tag is
+    read only after it."""
     pid = stub
     for _ in range(depth):
         pid = child_of(pid)
@@ -291,7 +299,7 @@ def stub_job(stub, depth=1):
                                   text=True, timeout=10).stdout.strip()
         except (OSError, subprocess.SubprocessError):
             return None
-        if comm == "sleep":
+        if comm and comm not in LAUNCHERS:
             return pid
         time.sleep(0.05)
     return None
