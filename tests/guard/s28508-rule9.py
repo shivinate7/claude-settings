@@ -417,6 +417,14 @@ add("first-line marker: builder on opus with no marker in the brief is denied, a
 add("first-line marker: reviewer with no model and Round 2 of 3 after a role word on line one is denied",
     "deny", STEP_UP, tool="Agent", prompt="Reviewer, Round 2 of 3. Lane c204 re-check the diff.",
     subagent_type="reviewer")
+# A fixed-form marker after a role word on line one still steps a reviewer up, so a haiku reviewer is refused.
+# The same marker only in later prose is no marker line, so the reviewer is allowed.
+add("first-line marker: reviewer on haiku with Round 3 of 3 after a role word on line one is denied, round 3 names Sonnet",
+    "deny", STEP_UP, carries=("Reviewer round 3 runs on Sonnet.",), tool="Agent",
+    prompt="Reviewer, Round 3 of 3. Lane c204 re-check the diff.", model="haiku", subagent_type="reviewer")
+add("first-line marker: reviewer on haiku with Round 3 of 3 only in later prose is allowed", "allow",
+    tool="Agent", model="haiku", subagent_type="reviewer",
+    prompt="Reviewer, lane c204: re-check the diff.\nNotes: the review said Round 3 of 3 is next, after this pass.")
 # On the first line only the leftmost marker counts. A second marker later on that line is prose
 # about another step, so it never earns the grant, never adds a step-up deny, and never hides the
 # leftmost one.

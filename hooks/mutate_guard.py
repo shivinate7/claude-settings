@@ -1368,7 +1368,7 @@ MUTATIONS = [
     ("step-up: the first-line round row is dropped, so a Round 3 of 3 behind a role word on line one asks",
      '            hit = rx.search(first)\n            found = [hit] if hit else []',
      '            hit = rx.search(first) if kind != "round" else None\n            found = [hit] if hit else []', "guard",
-     'first-line marker: builder on opus with a role word before Round 3 of 3 on line one is denied under agent-model-cap'),
+     'first-line marker: reviewer on haiku with Round 3 of 3 after a role word on line one is denied, round 3 names Sonnet'),
     ("step-up: round 3 must name its row's model exactly, so an opus reviewer is refused",
      'ROLE_ROUND_EXACT = ("2",)',
      'ROLE_ROUND_EXACT = ("2", "3")', "guard", 'floor step-up: reviewer Round 3 of 3 on opus is denied (the grant is per spawn, not standing)'),
