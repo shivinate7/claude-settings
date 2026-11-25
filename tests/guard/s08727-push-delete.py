@@ -1817,9 +1817,25 @@ for _kind, _text in _spellings(_GRAND):
 for _kind, _text in _spellings(_PARENT)[:1]:
     rm_parent("Bash rm -r its parent with a trailing slash as " + _kind, 'rm -r "%s/"' % _text)
 rm_parent("rm -r the working folder named through its parent", "rm -r ../nogit")
+# The spellings this host does not read are dropped by the loops above. Each dropped case gets its own
+# SKIP row, under the label the other host gives it (the loops' own strings), so a host that loses a case shows it.
+NO_DRIVE_SPELLING = "a drive-letter spelling names no folder on this platform, so only the plain path runs"
+NO_POSIX_SPELLING = "Windows spells the working folder and its parents by drive, so the POSIX spelling does not run here"
 if os.name != "nt":
-    skip_case("rm-parent: the C:/, C:\\ and /c/ spellings of the working folder and its parents",
-              "a drive-letter spelling names no folder on this platform, so only the plain path runs")
+    for _label in ("the working folder", "its parent"):
+        for _kind in ("C:/", "C:\\", "/c/"):
+            skip_case("rm-parent: Bash rm -r %s as %s" % (_label, _kind), NO_DRIVE_SPELLING)
+            if _kind != "/c/":   # `/c/x` is a Git Bash path: PowerShell does not read it
+                skip_case("rm-parent: PowerShell Remove-Item -Recurse %s as %s" % (_label, _kind), NO_DRIVE_SPELLING)
+    for _kind in ("C:/", "C:\\", "/c/"):
+        skip_case("rm-parent: Bash rm -rf its grandparent as " + _kind, NO_DRIVE_SPELLING)
+    skip_case("rm-parent: Bash rm -r its parent with a trailing slash as C:/", NO_DRIVE_SPELLING)
+else:
+    for _label in ("the working folder", "its parent"):
+        skip_case("rm-parent: Bash rm -r %s as posix" % _label, NO_POSIX_SPELLING)
+        skip_case("rm-parent: PowerShell Remove-Item -Recurse %s as posix" % _label, NO_POSIX_SPELLING)
+    skip_case("rm-parent: Bash rm -rf its grandparent as posix", NO_POSIX_SPELLING)
+    skip_case("rm-parent: Bash rm -r its parent with a trailing slash as posix", NO_POSIX_SPELLING)
 
 # ALLOWED: a named folder, a sibling that is not a parent, a folder whose name merely starts with a
 # dot or the working folder's name, a call that is not recursive, and a delete that follows a folder
