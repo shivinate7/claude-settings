@@ -358,7 +358,8 @@ WIDENS_REASON = ("A pick never names an option that widens what a shared tool ac
                  "form of a repo other than " + SETTINGS_REPO + " passes: the owner ruled that "
                  "a repo changes to fit a shared tool, never the tool to fit a repo. A change to the shared tool "
                  "that every repo gets alike, with no repo named as its reason, is not widening. A change that "
-                 "names only " + SETTINGS_REPO + " as where it applies does not widen. Make `recommended` (or `pick`, "
+                 "names only " + SETTINGS_REPO + " as where it applies does not widen, unless it lets the "
+                 "differing form of a repo other than " + SETTINGS_REPO + " pass. Make `recommended` (or `pick`, "
                  "its old name, where the item still uses it) an option where the repo changes to match the "
                  "shared format. When every option widens, add an option that does not widen and "
                  "recommend that one.")
@@ -366,7 +367,8 @@ CHAT_WIDENS_REASON = ("A recommended option never widens what a shared tool acce
                       "form of a repo other than " + SETTINGS_REPO + " passes: the owner ruled that a "
                       "repo changes to fit a shared tool, never the tool to fit a repo. A change to the shared tool "
                       "that every repo gets alike, with no repo named as its reason, is not widening. A change that "
-                      "names only " + SETTINGS_REPO + " as where it applies does not widen. Recommend an option "
+                      "names only " + SETTINGS_REPO + " as where it applies does not widen, unless it lets the "
+                      "differing form of a repo other than " + SETTINGS_REPO + " pass. Recommend an option "
                       "where the repo changes to match the shared format, and give the widening option no "
                       "(Recommended) label.")
 # Older sessions still write these words in chat; the mark keeps refusing them. No card, rule text or

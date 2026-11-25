@@ -182,7 +182,8 @@ INSTRUCTIONS = (
     + WIDENS_LABEL_SENTENCE +
     "Widening means a shared tool is made so that the differing form of a repo other than " + SETTINGS_REPO + " passes. "
     "Never flag a change to the shared tool that every repo gets alike, with no repo named as its reason. "
-    "Also never flag a change that names only " + SETTINGS_REPO + ", the tool's home, as where it applies. "
+    "Also never flag a change that names only " + SETTINGS_REPO + ", the tool's home, as where it applies, "
+    "unless it lets the differing form of a repo other than " + SETTINGS_REPO + " pass. "
     "Never flag an option where the repo changes to match the shared format. "
     "Judge only options the reply offers the owner to pick; never flag a reply that describes the rule itself. "
     "verification-counts-from-rest: flag a reply that names a search's total, such as total_count or a search result total, "

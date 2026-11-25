@@ -200,7 +200,8 @@ WIDENING_TEMPLATE = (
     "the reason. An option that only names a repo, or changes a repo to fit the shared tool, is not widening. "
     "Widening means a shared tool is made so that the differing form of a repo other than %s passes. "
     "Never flag a change to the shared tool that every repo gets alike, with no repo named as its reason. "
-    "Also never flag a change that names only %s, the tool's home, as where it applies. A marked "
+    "Also never flag a change that names only %s, the tool's home, as where it applies, unless it lets the "
+    "differing form of a repo other than %s pass. A marked "
     "option passes this rule. When unsure, allow."
 )
 
@@ -208,7 +209,7 @@ WIDENING_TEMPLATE = (
 def widening_rule():
     """The widening rule's text, with the mark's key from question_form.WIDENS_KEY."""
     import question_form
-    return WIDENING_TEMPLATE % (question_form.WIDENS_KEY, SETTINGS_REPO, SETTINGS_REPO)
+    return WIDENING_TEMPLATE % (question_form.WIDENS_KEY, SETTINGS_REPO, SETTINGS_REPO, SETTINGS_REPO)
 
 
 def __getattr__(name):  # PEP 562: the module constant WIDENING_RULE costs no import until it is read
