@@ -261,11 +261,13 @@ MUTATIONS = [
      '    if False:\n        return False', "guard",
      'worktree remove: a locked tree denies even though it is clean'),
     ("worktree-remove: a live session no longer denies",
-     '    live = worktree_live_session(target, absent_is_out=True)\n    if live is None:\n        return None\n'
-     '    if live:\n        return False',
-     '    live = worktree_live_session(target, absent_is_out=True)\n    if live is None:\n        return None\n'
-     '    if False:\n        return False', "guard",
+     '    live = worktree_live_session(target, absent_is_out=True)\n    if live:\n        return False',
+     '    live = worktree_live_session(target, absent_is_out=True)\n    if False:\n        return False', "guard",
      'worktree remove: a live session standing in a clean tree still denies'),
+    ("worktree-remove: a live process in the tree is ignored when its record's folder is gone",
+     '    standing = _process_stands_in(target)\n    if standing:\n        return False',
+     '    standing = _process_stands_in(target)\n    if False:\n        return False', "guard",
+     'log: a live process in a clean tree refuses the remove'),
     ("worktree-remove: any session record counts as live, recycled pid included",
      '    diff = actual - started\n    if diff > SESSION_LIVE_TOLERANCE_MS:\n'
      '        return None\n    return diff >= -SESSION_LIVE_TOLERANCE_MS',
@@ -1631,6 +1633,12 @@ MUTATIONS = [
      "    except OSError:\n",
      "guard", "liveness: worktree_live_session answers None for permission denied on a record's cwd, "
      "with or without the opt-in"),
+    # A missing parent folder reads unknown, never gone (git_reads._folder_is_gone). Without that rule a record whose
+    # cwd and parent are both absent reads as a gone folder, so a forced remove of a clean tree is allowed unnoted.
+    ("liveness: _folder_is_gone reads a missing parent as a removed folder",
+     '        return parent != path and os.path.isdir(parent)',
+     '        return parent != path', "guard",
+     "log: a forced remove, a record under an absent parent, is noted as unconfirmed"),
     ("liveness: the windows arm reads access-denied (error 5) as CONFIRMED dead",
      '        if error == 87:  # ERROR_INVALID_PARAMETER: no such process\n            return None',
      '        if error in (87, 5):\n            return None',
