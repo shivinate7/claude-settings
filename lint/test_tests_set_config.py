@@ -338,6 +338,19 @@ class TestsSetConfig(unittest.TestCase):
         self.assertTrue(len(found) == 1 and found[0].startswith("test_case.py:"),
                         "an import-time sweep by an AWS_ prefix is not flagged, though the check does not evaluate prefixes: %r" % found)
 
+    def test_prefix_sweep_the_check_cannot_evaluate_says_sweep(self):
+        found = problems_of(PREFIX_SWEEP_OTHER_PREFIX)
+        self.assertEqual(len(found), 1, "an import-time sweep by an AWS_ prefix is not one problem: %r" % found)
+        self.assertIn("sweep", found[0],
+                      "the message for a sweep the check cannot evaluate does not say it is a sweep: %r" % found)
+        self.assertNotIn("removes CLAUDE_CONFIG_DIR", found[0],
+                         "the message for a sweep the check cannot evaluate says it removes CLAUDE_CONFIG_DIR, which the check cannot tell: %r" % found)
+
+    def test_direct_pop_message_is_not_called_a_sweep(self):
+        found = problems_of(POP_NEVER_SET)
+        self.assertEqual(len(found), 1, "a direct pop of CLAUDE_CONFIG_DIR with no set is not one problem: %r" % found)
+        self.assertNotIn("sweep", found[0], "the message for a direct pop of CLAUDE_CONFIG_DIR calls it a sweep: %r" % found)
+
     def test_loop_over_dict_keys_that_pops_the_config_var_is_a_problem(self):
         found = problems_of(DICT_KEY_LOOP)
         self.assertTrue(len(found) == 1 and found[0].startswith("test_case.py:"),
