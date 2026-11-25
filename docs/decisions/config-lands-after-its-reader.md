@@ -26,26 +26,30 @@
 
 - `merge/merge.py` `head_config_refusal` judges a pull request head's `.github/stamp.json` with the running tool's own `parse_config`.
 - It judges only a pull request whose diff against its base touches that file.
-- It runs in the lane lint of a pull request number, and in the ready path before any push.
+- It runs in the lane lint of a pull request number, in the ready path (`draft_step`) and in `confirm()`, each before any claim or push.
 - It does not run under `--fast-checks`, nor for a ref or commit target.
-- Its refusal has three parts: the parser's reason; that the stable branch does not know the value or key yet; the remedy, which is to land the tool change first, wait until the stable branch holds it, then change the file in a second pull request.
+- The refusal gives the parser's reason, then a remedy that follows the cause. The cause comes from the key (`ConfigValueStop.cause`): `requiredChecks` is `newer`, `method` is `either`, and every other key is `wrong`. An unknown field in the merge block is `newer`, whatever its spelling.
+  - `newer` (an unknown key, `requiredChecks`): the stable branch does not know the value or key yet, so every merge in the repo would be refused once the change lands. The remedy: land the tool change first, wait until the stable branch holds it, then change the file in a second pull request.
+  - `either` (`method`): names both causes and each fix. Either the stable branch does not know the value yet, so land the tool change first and wait, then change the file in a second pull request. Or the value is a typo, so fix the file and push.
+  - `wrong` (every other key): the reason and the fix, with no stable clause.
 - A head whose top level or `merge` key is not an object, or whose file is not valid JSON, gets one line with the reason and a fix-first remedy, and no stable part.
 
 ## Limits
 
 - It protects only once this change is on the stable branch.
-- An unreadable diff, a deleted file or an unreadable file is not judged, and the base's stamp decides.
+- An unreadable diff or an unreadable head file is unknown and refuses. So is a stop from the head's parse that is not a verdict on a value: an `ignoreChecks` entry with no name or reason, or a workflow file the caps cannot read.
+- Only a file the pull request deletes is not judged: the base's stamp decides.
 - A run from the pull request's own tree passes by construction, so the check protects only a run of an older tool.
 - It does not retire the older-tool debt, titled "An older merge tool refuses the stamp", which is about machines whose installed tool is older than this change.
 
 ## Cost
 
-- One `git diff --name-only` per judged pull request.
-- A touched file adds one `git show` and one parse.
+- One `git diff --name-status --no-renames origin/<base>...<head> -- .github/stamp.json` per call.
+- A touched file adds one `git show` of the head file and one parse. The parse reads the head's workflow caps: one `git ls-tree` of `.github/workflows`, one `git show` per workflow file, and one `git check-ref-format --branch` per `keepBranches` entry that passes the name check. At head af4a47b89e (the round-2 code head) that is 5 workflow files and 5 `keepBranches` entries, counted with `git ls-tree -r --name-only af4a47b89e -- .github/workflows` and `git show af4a47b89e:.github/stamp.json`.
 - No process, log or timer is added.
 
 Kind: process
 Home: merge/merge.py
-Done check: `merge/test_lane_lint.py` (`ConfigAtPrHead`, `ReadyChecks`) and `merge/test_merge.py` (`ConfigFile`).
+Done check: `merge/test_lane_lint.py`: `ConfigAtPrHead` (lane lint) and the `test_pre_ready_` cases of `ReadyChecks` (ready path). `merge/test_merge.py`: `HeadConfigOnConfirm` (confirm) and `ConfigFile` (the base's stamp, read by the same `parse_config`).
 Source: the consultant's own mistake, 2026-11-25 11:13 CST. No owner ruling.
 Recorded: 2026-11-25 11:49 CST.
