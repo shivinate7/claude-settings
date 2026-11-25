@@ -1937,7 +1937,7 @@ class Host:
         at a run's head read when the judgment asks (one read each; a failed read is unknown, with GitHub's own words), and the verdict's words. One page of runs, never every page: the
         base's history is long. A run that did not succeed costs one jobs read, and a clear candidate one more. A newest-first walk of the push group's green runs costs one jobs read each,
         down to the first that is not empty.
-        A cancelled run with no red job that nothing clears keeps its line, in the unknown detail and beside a red verdict. It is named with `gh run rerun <id>` only when its
+        A cancelled run with no red job that nothing clears keeps its line, in the unknown detail and beside a red verdict. It is named with `gh run rerun <id> --failed` (the passed jobs stay) only when its
         `head_sha` is the head_sha of the newest run on the page read (any status, any event in BASE_EVENTS, from the unfiltered list): runs on the base start at its head, and a re-run tests the run's own commit. Never named for a run with a red job or a re-run in flight.
         A red verdict's detail also holds breaking_line's segment for each red run judged (one per file and group), the head group's first: the first red run with a green parent, as a re-run to try (a first red) or as the breaking merge (red again on its re-run).
         A red verdict also leaves `self.base_facts` for revert_proven, as data the prose cannot carry: `blamed` (the full head shas of the breaking merges), `red` (red runs judged),
@@ -1946,12 +1946,24 @@ class Host:
         if waits_on_no_check(self.required):  # a repo with "none" runs no CI, so the base's runs are not read, whatever they hold (decision private-repos-no-ci); "first-proof" reads no run of the base either
             return "green", ""
         failed = []  # the stop of the first failed read: the judgment sees None and ends unknown, and the detail is that stop's words
+        read = {}  # run id -> its jobs, kept so a cancelled run's segment counts them without a second read
 
         def jobs_of(r):
+            if r["id"] in read:
+                return read[r["id"]]
             try:
-                return self.pages(f"actions/runs/{r['id']}/jobs", "jobs")
+                read[r["id"]] = self.pages(f"actions/runs/{r['id']}/jobs", "jobs")
+                return read[r["id"]]
             except Stop as e:
                 failed.append(e)
+
+        def ran(r):  # -> what the cancelled run's jobs did, from the read the judgment made; "" when that read is not kept
+            jobs = read.get(r["id"])
+            if jobs is None:
+                return ""
+            passed = sum(1 for j in jobs if j.get("conclusion") == "success")
+            stopped = [j["name"] for j in jobs if j.get("conclusion") == "cancelled"]
+            return f": {passed} {'job' if passed == 1 else 'jobs'} passed" + (f", cancelled: {', '.join(stopped)}" if stopped else "")
 
         def text_of(n):  # the workflow file at n's head; a failed or empty read is a stop, never a text
             path, ref = n["path"].split("@")[0], n.get("head_sha")
@@ -1979,7 +1991,7 @@ class Host:
                 raise Stop("a read of the base's jobs or workflow file failed, so the verdict is unknown (decision no-merge-onto-red-main)")
             red = [f"{where(e.run)}: " + "; ".join(e.lines) if e.lines else f"{where(e.run)} ended {e.run['conclusion']} with no red job" for e in judgment.red]
             unknown = [f"run {r['id']} of {r['name']} {RERUN_IN_FLIGHT} (attempt {r['run_attempt']}, {r['status']}) at {str(r.get('head_sha'))[:9]} ({r.get('html_url')})" for r in judgment.unknown]
-            cancelled = [f"{where(r)} {CANCELLED_NO_RED}" + (f". `{RERUN_REMEDY} {r['id']}` re-runs that run's own commit, which is the base's head"
+            cancelled = [f"{where(r)} {CANCELLED_NO_RED}{ran(r)}" + (f". `{RERUN_REMEDY} {r['id']} --failed` re-runs that run's failed and cancelled jobs on its own commit, which is the base's head"
                                                              if r.get("head_sha") and r["head_sha"] == judgment.base_head else "") for r in judgment.cancelled]
             blame = [s for s in (self.breaking_line(judgment.judged, r) for r in judgment.order) if s]
         except (Stop, ValueError, KeyError, TypeError, AttributeError, ImportError) as e:
