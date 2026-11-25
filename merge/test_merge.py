@@ -14245,6 +14245,13 @@ class RedMainBrake(Env):
         rc, out, _ = self.go([main_run(904, "cancelled"), main_run(903, "failure")], jobs)
         self.merged(rc, out)
 
+    def test_a_cancelled_run_no_job_started_in_that_a_newer_run_replaced_does_not_refuse_the_merge(self):
+        """Red on the old code: the cancelled run reads unknown and refuses the merge. Superseded (a newer push run is on the page), the green
+        run below it decides, so the merge goes through (decision no-merge-onto-red-main, the superseded cancel)."""
+        jobs = {1202: [], 1201: [main_job("scope", "success"), main_job("checks", "success", 20)]}
+        rc, out, _ = self.go([main_run(1203, None, status="in_progress"), main_run(1202, "cancelled"), main_run(1201, "success")], jobs)
+        self.assertEqual(rc, 0, "a cancelled run that a newer run replaced refuses the merge:\n" + out)
+
     # The stale-cancel shape (decision no-merge-onto-red-main): main's schedule run R was cancelled on an old head with no red job.
     # The push run N after it, on the new head, passed every job R ran; each case changes one thing of this shape.
     INC_R, INC_N = 1110, 1111
