@@ -2997,6 +2997,29 @@ class CitedExcerptTests(unittest.TestCase):
         self.assertEqual(shown.split("\n")[0], "63: def deep():",
                          "a test cite past line 40 starts at %r, not at its def" % shown.split("\n")[0])
 
+    def test_a_test_cite_to_a_def_at_line_11_shows_limit_rows_from_it(self):
+        # The window runs from the def, whatever line it is on: 40 rows from line 11, which ends at line 50.
+        text = "".join("x%d = %d\n" % (n, n) for n in range(10)) + "def near():\n" + "".join("    v%d = 1\n" % n for n in range(80))
+        rows = self.stale.cited_excerpt("test lint/widget.py::near", text).split("\n")
+        self.assertEqual(rows[0], "11: def near():", "a test cite to a def at line 11 starts at %r, not at its def" % rows[0])
+        self.assertEqual(rows[-1], "50:     v38 = 1",
+                         "a test cite to a def at line 11 ends at %r, want line 50 (40 rows from the def)" % rows[-1])
+
+    def test_a_test_cite_to_a_def_at_line_63_shows_limit_rows_from_it(self):
+        # The same claim past line 40: 40 rows from line 63 of a 200-line file, which ends at line 102.
+        text = "".join("x%d = %d\n" % (n, n) for n in range(62)) + "def deep():\n" + "".join("    v%d = 1\n" % n for n in range(137))
+        rows = self.stale.cited_excerpt("test lint/widget.py::deep", text).split("\n")
+        self.assertEqual(rows[0], "63: def deep():", "a test cite to a def at line 63 starts at %r, not at its def" % rows[0])
+        self.assertEqual(rows[-1], "102:     v38 = 1",
+                         "a test cite to a def at line 63 ends at %r, want line 102 (40 rows from the def)" % rows[-1])
+
+    def test_a_test_cite_to_a_def_five_lines_before_the_end_shows_those_five(self):
+        # The window stops at the file end: a def at line 196 of a 200-line file shows lines 196 to 200, five rows.
+        text = "".join("x%d = %d\n" % (n, n) for n in range(195)) + "def tail():\n" + "".join("    v%d = 1\n" % n for n in range(3)) + "    return 1"
+        shown = self.stale.cited_excerpt("test lint/widget.py::tail", text)
+        self.assertEqual(shown.split("\n"), ["196: def tail():", "197:     v0 = 1", "198:     v1 = 1", "199:     v2 = 1", "200:     return 1"],
+                         "a test cite to a def five lines before the end shows %d rows, want the five from it" % len(shown.split("\n")))
+
     def test_a_read_symbol_excerpt_is_capped_at_the_default_limit_from_its_def(self):
         shown = self.stale.cited_excerpt("read lint/widget.py deep", self.DEEP_LONG)
         self.assertEqual(shown.split("\n")[0], "63: def deep():",
