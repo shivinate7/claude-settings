@@ -1624,6 +1624,13 @@ MUTATIONS = [
      '        if live is None:\n            saw_unreadable = True',
      '        if not session_is_live(record):\n            continue',
      "guard", "liveness: worktree_live_session answers None on an unreadable record under target"),
+    # Every OSError is read as a removed folder, so a permission error on a record's cwd reads as gone. The
+    # permission-denied control (tests/guard/s33355-misc.py) must die: its cwd is unreadable, not absent.
+    ("liveness: _folder_is_gone reads every OSError as a removed folder",
+     "    except (FileNotFoundError, NotADirectoryError):\n",
+     "    except OSError:\n",
+     "guard", "liveness: worktree_live_session answers None for permission denied on a record's cwd, "
+     "with or without the opt-in"),
     ("liveness: the windows arm reads access-denied (error 5) as CONFIRMED dead",
      '        if error == 87:  # ERROR_INVALID_PARAMETER: no such process\n            return None',
      '        if error in (87, 5):\n            return None',
