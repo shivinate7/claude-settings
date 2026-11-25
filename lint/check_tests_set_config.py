@@ -142,23 +142,14 @@ class Names:
         return is_var(node) or (isinstance(node, ast.Name) and (node.id in loop_names or node.id in self.var_names))
 
     def loops_over_var(self, iterable):
-        """True when a loop over `iterable` visits VAR: a tuple or a dict that holds it, or a sweep of os.environ itself."""
-        iterable = self.unwrapped(iterable)
-        return holds_var(iterable) or (isinstance(iterable, ast.Name) and iterable.id in self.var_tuples) \
-            or self.dict_has_var(iterable, ()) or self.is_environ(iterable)
+        """True when a loop over `iterable` may visit VAR: its expression mentions os.environ anywhere, or a tuple or a dict that
+        holds VAR. A name inside a string does not count."""
+        return any(self.is_environ(part) or holds_var(part) or (isinstance(part, ast.Name) and part.id in self.var_tuples)
+                   or self.dict_has_var(part, ()) for part in ast.walk(iterable))
 
-    @staticmethod
-    def unwrapped(node):
-        """`node` without the calls that keep its keys: list(), tuple(), set(), sorted(), iter(), .keys(), .items() and .copy()."""
-        while isinstance(node, ast.Call):
-            if isinstance(node.func, ast.Name) and node.func.id in ("list", "tuple", "set", "frozenset", "sorted", "iter", "reversed") \
-                    and len(node.args) == 1:
-                node = node.args[0]
-            elif isinstance(node.func, ast.Attribute) and node.func.attr in ("keys", "items", "copy") and not node.args:
-                node = node.func.value
-            else:
-                break
-        return node
+    def sweeps_environ(self, iterable):
+        """True when a loop over `iterable` may visit names that the check cannot read: its expression mentions os.environ."""
+        return any(self.is_environ(part) for part in ast.walk(iterable))
 
     def clears_environ(self, call):
         """True for `patch.dict(os.environ, ..., clear=X)` unless X is the constant False, and unless its values name VAR. An X
@@ -245,23 +236,26 @@ def is_patch_dict(item):
     return is_patch_dict_call(item.context_expr)
 
 
-def import_time(body, names, loop_names=()):
+def import_time(body, names, loop_names=(), swept=()):
     """Yield each statement that runs at import time, in source order: the module body, and what sits in its if, for, while, try, with
     and class blocks. A def is skipped, so is a with patch.dict block, whose changes the block undoes, and so is the branch of an
-    `if` on a constant that never runs, and so is the body of `if __name__ == "__main__":`. `loop_names` holds the loop variables that iterate over a tuple naming VAR."""
+    `if` on a constant that never runs, and so is the body of `if __name__ == "__main__":`. `loop_names` holds the loop variables that iterate over a tuple naming VAR or over os.environ; `swept` is the part of it
+    that iterates over os.environ. Each yield is (statement, loop_names, swept)."""
     for node in body:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             continue
         if isinstance(node, ast.With) and any(is_patch_dict(item) for item in node.items):
             continue
-        yield node, loop_names
-        inner = loop_names
+        yield node, loop_names, swept
+        inner, inner_swept = loop_names, swept
         if isinstance(node, ast.For) and names.loops_over_var(node.iter):
             target = node.target
             if isinstance(target, ast.Tuple) and target.elts:  # `for key, value in os.environ.items()`
                 target = target.elts[0]
             if isinstance(target, ast.Name):
                 inner = loop_names + (target.id,)
+                if names.sweeps_environ(node.iter):
+                    inner_swept = swept + (target.id,)
         if isinstance(node, ast.If) and isinstance(node.test, ast.Constant):
             blocks = [node.body if node.test.value else node.orelse]
         elif isinstance(node, ast.If) and is_main_guard(node):
@@ -269,9 +263,9 @@ def import_time(body, names, loop_names=()):
         else:
             blocks = [getattr(node, field, None) or [] for field in ("body", "orelse", "finalbody")]
         for block in blocks:
-            yield from import_time(block, names, inner)
+            yield from import_time(block, names, inner, inner_swept)
         for handler in getattr(node, "handlers", None) or []:
-            yield from import_time(handler.body, names, inner)
+            yield from import_time(handler.body, names, inner, inner_swept)
 
 
 def file_problem(path, rel):
@@ -284,19 +278,24 @@ def file_problem(path, rel):
     names = Names(tree, os.path.dirname(os.path.abspath(path)))
     if any(isinstance(node, ast.FunctionDef) and node.name == "setUpModule" and names.sets_var(node, ()) for node in tree.body):
         return None
-    # The import-time events in source order: ("remove", line) or ("set", line). The file is bad when a removal follows the last set.
+    # The import-time events in source order: ("remove", line, swept) or ("set", line, False). The file is bad when a removal follows
+    # the last set. A removal is swept when it names only a loop variable over os.environ: the check cannot tell which name it removes.
     events = []
-    for node, loop_names in import_time(tree.body, names):
+    for node, loop_names, swept in import_time(tree.body, names):
         line = names.removal_line(node, loop_names)
         if line:
-            events.append(("remove", line))
+            events.append(("remove", line, names.removal_line(node, tuple(name for name in loop_names if name not in swept)) is None))
         elif not isinstance(node, COMPOUND) and names.sets_var(node, loop_names):
-            events.append(("set", getattr(node, "lineno", 0)))
+            events.append(("set", getattr(node, "lineno", 0), False))
     last_set = max([index for index, event in enumerate(events) if event[0] == "set"], default=-1)
-    unset = [line for kind, line in events[last_set + 1:] if kind == "remove"]
+    unset = [(line, swept) for kind, line, swept in events[last_set + 1:] if kind == "remove"]
     if not unset:
         return None
-    return "%s:%d: removes %s at import and never sets it after, so its cases read the real ~/.claude" % (rel, min(unset), VAR)
+    line, swept = min(unset)
+    if swept:
+        return "%s:%d: sweeps os.environ at import, which may remove %s, and never sets it after, so its cases may read the real ~/.claude" \
+            % (rel, line, VAR)
+    return "%s:%d: removes %s at import and never sets it after, so its cases read the real ~/.claude" % (rel, line, VAR)
 
 
 def problems(root):
