@@ -1064,6 +1064,17 @@ class TransitiveWalkFixtures(unittest.TestCase):
         self.assertEqual([m for m, _, _ in self.walk(files, entry="a/entry.mjs")[0]], ["test_guard.py"],
                          "a read on a template or a quoted line is not seen")
 
+    def test_a_case_pattern_that_names_a_md_file_is_no_read(self):
+        # ci-scope.sh's case arm lists skills/impeccable/SKILL.md to set the guard flag, beside merge/install_from_main.sh. A pattern runs
+        # no file, and the .sh of the second name is an extension, not a command word.
+        files = {"a/entry.sh": "case \"$f\" in\n  merge/install_from_main.sh|skills/impeccable/SKILL.md) on=\"$on guard\" ;;\nesac\n"}
+        self.assertEqual(self.walk(files, entry="a/entry.sh")[0], [], "a case pattern that names a .md file counts as a read")
+
+    def test_a_shell_line_that_reads_a_md_file_is_a_hit(self):
+        files = {"a/entry.sh": "cat skills/impeccable/SKILL.md\n"}
+        self.assertEqual([m for m, _, _ in self.walk(files, entry="a/entry.sh")[0]], ["skills/impeccable/SKILL.md"],
+                         "a read in a shell line is not seen")
+
     def test_an_empty_file_reaches_and_reads_nothing(self):
         self.assertEqual(self.walk({"a/entry.py": ""}), ([], False))
 
