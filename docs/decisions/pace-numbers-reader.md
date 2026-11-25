@@ -6,32 +6,42 @@ Numbers two and three of the pace-numbers rule (`reports-batch-pace-numbers`, ro
 
 ```
 agents run: N, most at once: M[ (P still running)]
-minutes with no agent running: K
+minutes with no agent running: K[ (note)][ (note)]
 ```
+
+The notes are defined under "The covered span".
 
 ## Why
 
 Owner, 00:50 CST Nov 25 2026, on the pace line "minutes with no lane running: unknown" (owner task fb-0050-2, the pace-gap task in `docs/todo.md`), word for word: "how is stuff like this unknown? seems like a gap?"
 
-The gap: git, GitHub and guard.log hold no agent start or end. So number three was always "unknown", and number two had no source for the most running at once. The session transcript holds each Agent or Task spawn and each task notice, with its time.
+Git, GitHub and guard.log hold no agent start or end, so numbers two and three had no source there. The session transcript holds each Agent or Task spawn and each task notice, with its time.
 
 ## What counts as a span
 
-- A span opens at the time of an Agent or Task tool_use. The launch result gives the agent id (`toolUseResult.agentId`). A spawn whose result is an error, or has no agent id, opens no span.
-- A span closes at the first task notice for that agent id with status completed, failed or killed (`ENDING_STATUSES`). Failed and killed close it the same as completed.
-- A notice counts only in a queue-operation's content or a user record's text. A notice in a tool_result, a blob copy or an attachment does not count.
-- A notice whose task id matches no agent start is ignored. A background shell command is one case.
-- A SendMessage to the agent after its span closed opens a new span at the send's time. A send while the span is open changes nothing. A send that failed (`is_error` true, or `toolUseResult.success` false) changes nothing. A second end notice while the span is closed changes nothing.
-- Spans are clipped to the window. A span with no end notice runs to the window end and counts as still running. An end notice after the window end clips the span to it and does not make it still running.
+- A span opens at an Agent or Task tool_use (`SPAWN_TOOLS`). Its launch result gives the agent id (`toolUseResult.agentId`). A spawn whose result is an error, or has no agent id, opens no span.
+- A background agent's launch result has `isAsync` true. Its span closes at the earliest copy of its first task notice with status completed, failed or killed (`ENDING_STATUSES`). Failed and killed close it the same as completed.
+- A foreground agent's span closes at its launch result's time. That result has the agent id and no `isAsync` true.
+- A notice counts only in a queue-operation's content, a user record's text, or a queued_command attachment's prompt. Copies of one notice are one stop, at the earliest copy. A notice in a tool_result, a blob copy, or a compaction summary (a user record with `isCompactSummary`) does not count.
+- A notice whose task id matches no agent start is ignored, as is one with no ending status. A background shell command is one case.
+- A SendMessage to the agent after its span closed opens a new span at the send's time. A send while the span is open changes nothing. A send that failed (`is_error` true, or `toolUseResult.success` false) changes nothing.
+- An end notice after a span closed, with no send since, moves the close to that stop. The span then runs to the later stop.
+
+## The covered span
+
+The covered span runs from the transcript's first to its last timestamped record. The window is clipped to it before any count: N, M, P and K use only the part inside it.
+
+- Window time before the first record or after the last is not counted as idle. The idle line says so: `transcript covers from <ISO> on; <minutes> min before it not counted`, or `transcript covers until <ISO>; <minutes> min after it not counted`. `<ISO>` is the span edge in the UTC offset of the window's start. A note prints only for an overhang of one minute or more. `<minutes>` is the floor of the overhang.
+- A window with no minute in common with the covered span, touching at one instant included, prints `unknown:`.
 
 ## What the lines mean
 
 - N counts distinct agents with a span in the window. A resumed agent counts once.
-- M is the most spans open at one moment, clipped to the window.
-- P counts the agents with no end notice in the file. It is appended to the first line only when P is above 0.
-- K is the window length less the time that any span covers, floored to whole minutes.
-- A window with records and no agent prints `agents run: 0, most at once: 0`, and K is the whole window.
-- `unknown: <reason>` prints, and the exit code is 0, for an unreadable file, an empty file, or a window with no record in it.
+- M is the most spans open at one moment. Ends sort before starts at one instant, so back-to-back spans do not overlap.
+- P counts agents whose last span has no end notice anywhere in the file and that overlaps the window. It does not count spans open at the window's end: an end notice after the window end clips the span and does not make the agent still running. P appears on the first line only when above 0.
+- K is the covered part of the window, less the time any span covers, floored to whole minutes. A window with records and no agent prints `agents run: 0, most at once: 0`, and K is the whole covered part.
+- Each note sits in its own parenthesis on the idle line, so both can print.
+- `unknown: <reason>` prints, and the exit code is 0, for an unreadable file, a file that is not valid UTF-8, an empty file, a window with no record in it, or a window with no minute in the covered span.
 - A window time with no UTC offset is an argument error (argparse exit 2). It prints no number and no `unknown:` line.
 
 ## Picks
@@ -40,7 +50,7 @@ These are the consultant session's picks. No owner ruling covers them.
 
 - N counts agents, not spans, so a resumed agent is one.
 - K is floored, not rounded.
-- The lines use the glossary's term "agent". The rule's old "lane" label named a unit the transcript cannot count, since an agent is never a lane (GLOSSARY.md).
+- The lines use the glossary's term "agent". The transcript cannot count lanes: an agent is never a lane (GLOSSARY.md).
 
 ## Cost
 
@@ -63,6 +73,11 @@ Cost: one python start per merge report, on demand (unmeasured: no test counts s
 - test_empty_file_prints_one_unknown_line
 - test_window_with_no_record_in_it_prints_one_unknown_line
 - test_window_with_records_but_no_agent_prints_zero_agents_and_the_whole_window_idle
+- test_window_starting_before_the_first_record_counts_only_from_the_first_record
+- test_window_ending_after_the_last_record_counts_only_up_to_it
+- test_window_inside_the_covered_span_prints_the_plain_line
+- test_window_touching_the_covered_span_prints_one_unknown_line
+- test_window_clear_of_the_covered_span_prints_one_unknown_line
 - test_failed_notice_ends_a_span
 - test_killed_notice_ends_a_span
 - test_send_that_failed_with_is_error_does_not_reopen_a_span
@@ -70,11 +85,23 @@ Cost: one python start per merge report, on demand (unmeasured: no test counts s
 - test_end_notice_after_end_clips_the_span_and_is_not_still_running
 - test_idle_minutes_are_floored_not_rounded_up
 - test_window_time_without_a_utc_offset_exits_with_an_argument_error
+- test_foreground_agent_span_ends_at_its_result
+- test_second_end_notice_without_a_send_extends_the_span
+- test_attachment_only_notice_ends_a_span
+- test_notice_in_queue_user_and_attachment_counts_once
+- test_compaction_summary_quote_does_not_end_a_resumed_span (stays green when summaries count; see Limits)
+- test_invalid_utf8_at_the_end_prints_one_unknown_line (bytes at the end only)
+- test_overhang_under_one_minute_prints_no_note
+- test_overhang_of_61_seconds_prints_one_minute_note
 - PaceNumbersFixtureControlTests.test_fixture_carriers_parse_through_the_shared_readers (the fixture control)
 
 ## Limits
 
 - The reader counts agents of one session's transcript. A lane run as another session is not seen.
+- Agents started by a Workflow call are not seen. The spawn tools are `Agent` and `Task` only (`SPAWN_TOOLS`). The glossary's `agent` term counts them.
+- The foreground-agent shape is not in the one real transcript measured, where all launches were async. Its span rule rests on `test_foreground_agent_span_ends_at_its_result` alone.
+- `test_compaction_summary_quote_does_not_end_a_resumed_span` stays green when summaries count. Its quoted stop repeats the first stop's text, so the earlier copy sets the close. Measured on a copy, 02:03 CST Nov 25 2026. The case needs a quoted stop whose text no other carrier has.
+- A line that is not valid JSON is skipped without a note.
 - The reader gives the idle minutes only. The reason for them is still written by the session.
 - The cloud path is not built. A cloud session's transcript is not read.
 - No CI step (`.github/workflows/checks.yml`) runs `lint/test_pace_numbers.py` yet.
