@@ -5970,7 +5970,7 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
             own = None  # the live head's own state, read once when this tool's commits sit on the proof
             if proof != info["head"]:
                 own = host.head_state(n, info["head"], **proof_kw(needs_proof))
-                if head_not_green(own) is None and not state.startswith("unknown ("):  # a green run of the live head itself proves it, whatever the head under it reads (a draft's skipped or cancelled rollup is no failure of this head). A read of the proof that could not run still refuses, as before
+                if head_not_green(own) is None and not state.startswith("unknown (") and not head_check_red(state):  # a green run of the live head itself proves it over a pending or skipped read of the head under it (a draft's skipped rollup is no failure of this head). A proof that failed (ruling R1: a red parent refuses a clean main merge) or could not be read still refuses, as before
                     say(f"merge: the own run of {info['head'][:9]} is green, so it is the proof, not the checks of {proof[:9]} under it.")
                     proof, state, not_green = info["head"], own, None
                 else:
