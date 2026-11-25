@@ -3435,6 +3435,46 @@ def case_model_word_seed_brief_writes_no_model_hold():
           (hold_json(cfg) or {}).get("model") == "fable", "pass file %r" % (hold_json(cfg),))
 
 
+def case_model_word_negated_held_model_ends_the_hold():
+    """The owner's later turn negates the held model. The judge says no to it, and the hold still ends: a later model word
+    ends the earlier one (decision `agent-model-cap`, The owner's model word)."""
+    cfg, _, _, _ = opus_type("Run the model audit on haiku.", answer={"ok": True, "model": "haiku"}, head=model_head())
+    check("model word: setup, a haiku ask writes the haiku hold", (hold_json(cfg) or {}).get("model") == "haiku",
+          "pass file %r" % (hold_json(cfg),))
+    opus_type("Do not use haiku, it is too weak.", answer={"ok": False}, cfg=cfg, head=model_head())
+    check("model word: a later turn that says do not use haiku ends the haiku hold, though the judge says no",
+          hold_json(cfg) is None, "pass file %r" % (hold_json(cfg),))
+
+
+def case_model_word_negated_other_model_keeps_the_held_model():
+    cfg, _, _, _ = opus_type("Run the model audit on haiku.", answer={"ok": True, "model": "haiku"}, head=model_head())
+    opus_type("Don't use opus, it is too slow.", answer={"ok": False}, cfg=cfg, head=model_head())
+    check("model word: control, a later turn that says don't use opus keeps the haiku hold",
+          (hold_json(cfg) or {}).get("model") == "haiku", "pass file %r" % (hold_json(cfg),))
+
+
+def case_model_word_unreadable_report_shape_ends_the_hold():
+    """A hold that ends at the report: a reply the shape test cannot judge counts as a report, so the hold ends. The two
+    controls are a shape test that says no, which keeps the hold, and one that says yes, which ends it."""
+    override, _ = hooks_modules()
+    held_at = datetime(2026, 10, 18, 18, 0, tzinfo=timezone.utc)
+    reply = {"type": "assistant", "timestamp": "2026-10-18T18:01:00+00:00",
+             "message": {"role": "assistant", "content": [{"type": "text", "text": "> **Done** BUILT abc123"}]}}
+
+    def cannot_run(text):
+        raise RuntimeError("the report shape test cannot load")
+
+    got = override._report_since(held_at, None, records=[reply], report_ok=cannot_run)
+    check("model word: a report shape test that raises counts the reply as a report, so the hold ends",
+          got is True, "got %r" % (got,))
+    got = override._report_since(held_at, None, records=[reply], report_ok=lambda text: False)
+    check("model word: control, a report shape test that says no leaves the reply no report, so the hold stays",
+          got is False, "got %r" % (got,))
+    got = override._report_since(held_at, None, records=[reply], report_ok=lambda text: True)
+    check("model word: control, a report shape test that says yes counts the reply as a report",
+          got is True, "got %r" % (got,))
+
+
 def case_raising_case_does_not_stop_the_run():
     """A case that raises does not stop the run: the case after it still runs, and main returns 1 with a summary."""
     g = globals()
@@ -3664,6 +3704,9 @@ def suite_cases():
         case_model_word_human_turn_origin_still_counts,
         case_model_word_compaction_summary_is_not_the_owners,
         case_model_word_seed_brief_writes_no_model_hold,
+        case_model_word_negated_held_model_ends_the_hold,
+        case_model_word_negated_other_model_keeps_the_held_model,
+        case_model_word_unreadable_report_shape_ends_the_hold,
         case_raising_case_does_not_stop_the_run,
         case_system_exit_in_a_case_is_a_failed_case,
         case_cost_tests,
