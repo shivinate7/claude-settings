@@ -524,6 +524,9 @@ class DailySkipKeepsToolPins(unittest.TestCase):
 
     TOOL_PINS_STEP = "Tool pins (this runner)"
     TOOL_PINS_JOBS = ("checks", "checks-windows", "checks-macos")
+    # The scope outputs a skipped daily sets to true (ci-scope.sh, as test_ci_scope.py's SkippedDaily reads them). Every other
+    # scope flag reads false, as on a real skipped daily.
+    SKIPPED_DAILY = {"records_only_skip": "true", "skip_comment_delta": "true", "tool_pins": "true"}
 
     def test_a_skipped_daily_still_runs_the_tool_pins_steps(self):
         got = run_skip(runs=[run("schedule", created=OLDER)])
@@ -535,11 +538,11 @@ class DailySkipKeepsToolPins(unittest.TestCase):
         for name in self.TOOL_PINS_JOBS:
             with self.subTest(job=name):
                 job = jobs[name]
-                self.assertTrue(eval_value(job["if"], "schedule", "true", results={"scope": "success"}, needs=("scope",),
-                                           values={"records_only_skip": "false"}),
+                self.assertTrue(eval_value(job["if"], "schedule", "false", results={"scope": "success"}, needs=("scope",),
+                                           values=self.SKIPPED_DAILY),
                                 "the %s job's if: must hold when scope succeeded on a skipped daily" % name)
                 step = next(s for s in job["steps"] if s.get("name") == self.TOOL_PINS_STEP)
-                self.assertTrue(eval_if(step["if"], "schedule", "true"),
+                self.assertTrue(eval_value(step["if"], "schedule", "false", values=self.SKIPPED_DAILY),
                                 "the %s job's %s step must run on a skipped daily" % (name, self.TOOL_PINS_STEP))
 
 
