@@ -19,10 +19,10 @@ only as a difference from the head reader's result on the same data, so the head
 import argparse, contextlib, copy, importlib.util, io, json, os, subprocess, sys
 
 CODE_DIRS = ("hooks", "lint", "merge", "actions")
-CONFIG = os.path.join(".github", "stamp.json")
+CONFIG = os.path.join(".github", "stamp.json")  # glossary-ok: the file the readers read, by its real name
 KEYS = {  # the data each reader reads, named in a finding
     "parse_config": CONFIG + " merge block", "ready_job_groups": "merge.readyChecks", "base_job_caps": ".github/workflows",
-    "base_stamp": "kinds", "page_is_generated": "the records page", "pinned_required": "merge.requiredChecks", "cite_form": "cite.form",
+    "base_stamp": "kinds", "page_is_generated": "the records page", "pinned_required": "merge.requiredChecks", "cite_form": "cite.form",  # glossary-ok: the reader's name in merge/merge.py
 }
 PROBE_SECONDS, CATALOG_SECONDS = 300, 120  # unmeasured: the longest read is one worktree add and one generator run
 
@@ -66,7 +66,7 @@ def probe(code_tree, data, base_ref):
         if isinstance(ready, list) and all(isinstance(r, str) for r in ready):
             read("ready_job_groups", lambda: list(merge.ready_job_groups(ready).items()))
     read("base_job_caps", lambda: merge.base_job_caps(data, "HEAD"))
-    read("base_stamp", lambda: merge.base_stamp(data, CONFIG, "HEAD")[1])
+    read("base_stamp", lambda: merge.base_stamp(data, CONFIG, "HEAD")[1])  # glossary-ok: the reader's name in merge/merge.py
     page = merge.RECORDS_PAGE
     if merge.git(data, "cat-file", "-e", f"HEAD:{page}")[0] == 0:  # a tree with no page has none to prove: the generator would stop on it
         untouched = base_ref and merge.git(data, "diff", "--quiet", base_ref, "HEAD", "--", page)[0] == 0
