@@ -3679,6 +3679,27 @@ class OctopusCommonBase(MainLineDrop, unittest.TestCase):
         self.assert_dropped(head, origin)
         self.assert_drops(self.r.verdict(head), origin, head)
 
+    def test_a_failed_read_of_upstream_inside_check_is_unknown(self):
+        """check() reads upstream's commit once more, after resolve_upstream has named it. The fault fails that one read, the
+        call with no ok=. resolve_upstream and the default-ref reads pass ok=, so the fault does not reach them. A failed git
+        read is UNKNOWN (silent-undo-check-design), so check() raises it and does not go on with no upstream sha."""
+        self.upstream_two_ahead_of_local_main()
+        head = self.merge_upstream_into("clean")
+        self.assertEqual(self.r.verdict(head), [], "premise: with no fault, check() gives no finding for the clean merge")
+        real, hits = C.git, []
+
+        def faulty(cwd, *a, **k):
+            if a == ("rev-parse", "--verify", "-q", "origin/main^{commit}") and "ok" not in k:
+                hits.append(a)
+                raise C.Unknown("git rev-parse failed: injected read failure")
+            return real(cwd, *a, **k)
+
+        with unittest.mock.patch.object(C, "git", faulty):
+            with self.assertRaises(C.Unknown, msg="check() went on after the read of upstream's commit failed") as cm:
+                C.check(self.r.dir, "origin/main", head)
+        self.assertEqual(len(hits), 1, "premise: the fault fired %d times, not once at check()'s read of upstream" % len(hits))
+        self.assertIn("injected", str(cm.exception), "check() raised an Unknown that is not the failed read: %r" % str(cm.exception))
+
 
 class DefaultBase(unittest.TestCase):
     """With no --upstream, a local run judges the branch against its base: the upstream the branch tracks, which for a
