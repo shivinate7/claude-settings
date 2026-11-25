@@ -193,6 +193,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `guard-hooks-fail-closed` | Owner, 2026-10-12: a guard whose script or python is missing refuses the call. | [`docs/decisions/guard-hooks-fail-closed.md`](../docs/decisions/guard-hooks-fail-closed.md) |
 | `guard-linked-node-modules` | Yes. | [`docs/decisions/guard-linked-node-modules.md`](../docs/decisions/guard-linked-node-modules.md) |
 | `guard-log-read-weekly` | Owner, 2026-10-13. | [`docs/decisions/guard-log-read-weekly.md`](../docs/decisions/guard-log-read-weekly.md) |
+| `guard-reads-turn-guard-on` | Every file the guard suite reads turns the guard flag on | [`docs/decisions/guard-reads-turn-guard-on.md`](../docs/decisions/guard-reads-turn-guard-on.md) |
 | `guard-remedy-not-to-owner` | Question: where does a Stop refusal's remedy live when the owner sees the refusal in chat? | [`docs/decisions/guard-remedy-not-to-owner.md`](../docs/decisions/guard-remedy-not-to-owner.md) |
 | `guard-that-cries-wolf-is-spent` | CLAUDE.md: "Trust a guard only once it goes red on the defect it guards." The other half: a guard that goes red when nothing is wrong is spent, because the reader stops reading it. | [`docs/decisions/guard-that-cries-wolf-is-spent.md`](../docs/decisions/guard-that-cries-wolf-is-spent.md) |
 | `guards-never-ask` | Question: what does a hook guard do with an act it would have asked the owner about? | [`docs/decisions/guards-never-ask.md`](../docs/decisions/guards-never-ask.md) |
@@ -246,6 +247,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `opus-grant-expires` | An Opus agent is enabled for one repository, on the owner's grant in chat (`roles-opus-override-guarded`). | [`docs/decisions/opus-grant-expires.md`](../docs/decisions/opus-grant-expires.md) |
 | `owner-feedback-inbox` | A hook writes every owner message to a per-session inbox. | [`docs/decisions/owner-feedback-inbox.md`](../docs/decisions/owner-feedback-inbox.md) |
 | `owner-judge-test` | A session asks the owner a decision only when he can judge it from what he already knows. | [`docs/decisions/owner-judge-test.md`](../docs/decisions/owner-judge-test.md) |
+| `pace-numbers-reader` | Numbers two and three of the pace-numbers rule (`reports-batch-pace-numbers`, root CLAUDE.md) come from the session transcript. | [`docs/decisions/pace-numbers-reader.md`](../docs/decisions/pace-numbers-reader.md) |
 | `page-check-at-export` | Owner ruling, item 298 (14:17 CST Nov 6 2026): build both the check at export and the `--check` mode. | [`docs/decisions/page-check-at-export.md`](../docs/decisions/page-check-at-export.md) |
 | `page-item-design` | An item write whose picture the page would refuse, or would draw as a thin strip, is refused at write, with the page's own sentence. | [`docs/decisions/page-item-design.md`](../docs/decisions/page-item-design.md) |
 | `page-never-preselects` | Owner, 2026-11-13 13:04 CST, typed to triage: the waiting page never preselects an answer, and nothing is sent unless the owner presses. | [`docs/decisions/page-never-preselects.md`](../docs/decisions/page-never-preselects.md) |

@@ -1798,28 +1798,86 @@ _PARENT = os.path.realpath(ROOT)
 _GRAND = os.path.dirname(_PARENT)
 
 
-def _spellings(path):
-    """The (kind, text) spellings of one folder that this platform reads."""
-    if os.name != "nt":
+NO_DRIVE_SPELLING = "a drive-letter spelling names no folder on this platform, so only the plain path runs"
+NO_POSIX_SPELLING = "Windows spells the working folder and its parents by drive, so the POSIX spelling does not run here"
+
+
+def _spellings(path, nt=(os.name == "nt")):
+    """The (kind, text) spellings of one folder, as the host `nt` names reads them. Each row below asks for
+    both hosts, so a kind added to either branch is listed for both: run on its own host, SKIP on the other."""
+    if not nt:
         return [("posix", path)]
     forward = path.replace("\\", "/")
     return [("C:/", forward), ("C:\\", path), ("/c/", "/" + forward[0].lower() + forward[2:])]
 
 
-for _label, _folder in (("the working folder", _CWD), ("its parent", _PARENT)):
-    for _kind, _text in _spellings(_folder):
-        rm_parent("Bash rm -r %s as %s" % (_label, _kind), 'rm -r "%s"' % _text)
-        if _kind != "/c/":   # `/c/x` is a Git Bash path: PowerShell does not read it
-            rm_parent("PowerShell Remove-Item -Recurse %s as %s" % (_label, _kind),
-                      'Remove-Item -Recurse "%s"' % _text, tool="PowerShell")
-for _kind, _text in _spellings(_GRAND):
-    rm_parent("Bash rm -rf its grandparent as " + _kind, 'rm -rf "%s"' % _text)
-for _kind, _text in _spellings(_PARENT)[:1]:
-    rm_parent("Bash rm -r its parent with a trailing slash as " + _kind, 'rm -r "%s/"' % _text)
+# The name of each folder row: the list below fills in these templates, and the pin reads the same ones, so a
+# row's name is written once. A template takes the label of a folder, or a spelling kind.
+ROW_BASH = "Bash rm -r %s as %s"
+ROW_PS = "PowerShell Remove-Item -Recurse %s as %s"
+ROW_GRANDPARENT = "Bash rm -rf its grandparent as %s"
+ROW_PARENT_SLASH = "Bash rm -r its parent with a trailing slash as %s"
+
+# Every folder case, for both hosts, in one list: (name, tool, command, runs here, spelling kind). A row
+# that does not run here has junk text (a POSIX path cut into drive form), and only its name is used.
+# One loop registers a run for each row that runs here and a SKIP row for each that does not.
+_FOLDER_ROWS = []
+for _nt in (False, True):
+    _runs = _nt == (os.name == "nt")
+    for _label, _folder in (("the working folder", _CWD), ("its parent", _PARENT)):
+        for _kind, _text in _spellings(_folder, nt=_nt):
+            _FOLDER_ROWS.append((ROW_BASH % (_label, _kind), "Bash",
+                                 'rm -r "%s"' % _text, _runs, _kind))
+            if _kind != "/c/":   # `/c/x` is a Git Bash path: PowerShell does not read it
+                _FOLDER_ROWS.append((ROW_PS % (_label, _kind), "PowerShell",
+                                     'Remove-Item -Recurse "%s"' % _text, _runs, _kind))
+    for _kind, _text in _spellings(_GRAND, nt=_nt):
+        _FOLDER_ROWS.append((ROW_GRANDPARENT % _kind, "Bash",
+                             'rm -rf "%s"' % _text, _runs, _kind))
+    for _kind, _text in _spellings(_PARENT, nt=_nt)[:1]:
+        _FOLDER_ROWS.append((ROW_PARENT_SLASH % _kind, "Bash",
+                             'rm -r "%s/"' % _text, _runs, _kind))
+for _name, _tool, _command, _runs, _kind in _FOLDER_ROWS:
+    if _runs:
+        rm_parent(_name, _command, tool=_tool)
+    else:
+        skip_case("rm-parent: " + _name, NO_POSIX_SPELLING if _kind == "posix" else NO_DRIVE_SPELLING)
 rm_parent("rm -r the working folder named through its parent", "rm -r ../nogit")
-if os.name != "nt":
-    skip_case("rm-parent: the C:/, C:\\ and /c/ spellings of the working folder and its parents",
-              "a drive-letter spelling names no folder on this platform, so only the plain path runs")
+
+# The pin: every row the list above registers, for each tool and each spelling of both hosts, is a case or a
+# SKIP row on this host. Its names come from `_spellings` read for each host and from the row templates, never
+# from the list, so a loop that drops a row from the list shows as a FAIL, not as a count that moved. It is a
+# log check. A section cannot append to LOG_CHECKS_EXTRA yet (section 21304 creates it), so it joins through
+# SKIP_ROWS, which the run appends to LOG_CHECKS with the other log checks.
+SPELLING_PIN_LABEL = "rm-parent: every folder row, each tool and spelling of both hosts, is run or SKIPped on this host"
+
+
+def _folder_row_names(nt):
+    """The names one host's list must hold: a Bash row for each kind of each folder, a PowerShell row for each
+    kind but the Git Bash one, a grandparent row for each kind, and a trailing-slash row for the parent's first kind."""
+    names = []
+    for label, folder in (("the working folder", _CWD), ("its parent", _PARENT)):
+        for kind, _ in _spellings(folder, nt=nt):
+            names.append(ROW_BASH % (label, kind))
+            if kind != "/c/":
+                names.append(ROW_PS % (label, kind))
+    names += [ROW_GRANDPARENT % kind for kind, _ in _spellings(_GRAND, nt=nt)]
+    names += [ROW_PARENT_SLASH % kind for kind, _ in _spellings(_PARENT, nt=nt)[:1]]
+    return names
+
+
+def _spelling_pin():
+    names = {case["name"] for case in CASES} | {label for label, _ in SKIP_ROWS}
+    for nt in (False, True):
+        for name in _folder_row_names(nt):
+            if "rm-parent: " + name not in names:
+                return False, "rm-parent: %s is neither run nor a SKIP row on this host" % name
+    return True, "every folder row, each tool and spelling of both hosts, is run or SKIPped on this host"
+
+
+LOG_FAMILY[SPELLING_PIN_LABEL] = _family(SPELLING_PIN_LABEL)
+FIXTURELESS_CHECKS.add(_spelling_pin)
+SKIP_ROWS.append((SPELLING_PIN_LABEL, _spelling_pin))
 
 # ALLOWED: a named folder, a sibling that is not a parent, a folder whose name merely starts with a
 # dot or the working folder's name, a call that is not recursive, and a delete that follows a folder
