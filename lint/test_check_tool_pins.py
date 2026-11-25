@@ -35,6 +35,58 @@ WINDOWS_GIT_256 = "git version 2.56.1.windows.1"
 # its source. The JS form names its group <version>; Python spells the same named group (?P<version>...).
 SETUP_PYTHON_PIN = re.compile(r"^\s*python\s*v?\s*(?P<version>[^\s]+)\s*$")
 RUN_FOLDER = None  # made in setUpModule, so an import leaks no folder
+PLATFORMS = ("macos", "windows", "linux")  # the keys a `# fix:` line names
+HANG_SECONDS = 600  # a hung version read; the checker's own budget ends it long before this
+
+
+def platform_key():
+    """The platform key a `# fix:` line names for the machine this test runs on."""
+    return {"darwin": "macos", "win32": "windows"}.get(sys.platform, "linux")
+
+
+def fix_mark(tool, platform=None):
+    """The text a case looks for in a fix command: the fix line for `platform` (this machine's by default) echoes it."""
+    return "FIX-%s-%s" % ((platform or platform_key()).upper(), tool.upper())
+
+
+def pin_file(tool, pin, skip=None):
+    """A pin file's text: one pin, then a `# fix:` line for each platform, each echoing its own marker. `skip` leaves out
+    one platform's fix line, so a case can read a machine with no fix for it."""
+    lines = ["%s %s" % (tool, pin)]
+    for platform in PLATFORMS:
+        if platform != skip:
+            lines.append("# fix: %s %s = echo %s" % (tool, platform, fix_mark(tool, platform)))
+    return "\n".join(lines) + "\n"
+
+
+def fake_tool(folder, log, name, output, hang=False):
+    """Writes the fake `name` into `folder`. Each run appends `name` to `log`, then prints `output`; with `hang`, it sleeps
+    instead of printing. Returns the path written. A hang is POSIX only: a Windows caller skips it. Other test suites import
+    this one home (hooks/test_session_start.py, merge/test_merge.py)."""
+    os.makedirs(folder, exist_ok=True)
+    if os.name == "nt":
+        path = os.path.join(folder, name + ".cmd")
+        body = '@echo off\r\necho %s>>"%s"\r\necho %s\r\n' % (name, log, output)
+    else:
+        path = os.path.join(folder, name)
+        body = "#!/bin/sh\necho %s >> %s\n" % (shlex.quote(name), shlex.quote(log))
+        body += ("exec sleep %d\n" % HANG_SECONDS) if hang else ("echo %s\n" % shlex.quote(output))
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(body)
+    os.chmod(path, 0o755)
+    return path
+
+
+def python_shim(folder, log, real=None):
+    """A python3 in `folder` that appends its argv to `log` on each start, then runs the real interpreter (`real`, else this
+    one) with the same argv. A case counts the lines that name a script. POSIX only."""
+    body = "#!/bin/sh\n" + "printf '%s\\n' \"$*\" >> " + shlex.quote(log) + "\n" + "exec " + shlex.quote(real or sys.executable) + " \"$@\"\n"
+    os.makedirs(folder, exist_ok=True)
+    path = os.path.join(folder, "python3")
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(body)
+    os.chmod(path, 0o755)
+    return path
 
 
 def line_ends(out, text):
@@ -59,18 +111,9 @@ class ToolPinsCase(unittest.TestCase):
         self.bin = os.path.join(self.dir, "bin")
         self.log = os.path.join(self.dir, "invoked.log")
 
-    def fake(self, name, output):
-        """A fake tool on PATH. Each run appends its name to the log, then prints `output`."""
-        os.makedirs(self.bin, exist_ok=True)
-        if os.name == "nt":
-            path = os.path.join(self.bin, name + ".cmd")
-            body = '@echo off\r\necho %s>>"%s"\r\necho %s\r\n' % (name, self.log, output)
-        else:
-            path = os.path.join(self.bin, name)
-            body = "#!/bin/sh\necho %s >> %s\necho %s\n" % (shlex.quote(name), shlex.quote(self.log), shlex.quote(output))
-        with open(path, "w", encoding="utf-8") as f:
-            f.write(body)
-        os.chmod(path, 0o755)
+    def fake(self, name, output, hang=False):
+        """A fake tool on PATH. Each run appends its name to the log, then prints `output` (or hangs)."""
+        fake_tool(self.bin, self.log, name, output, hang=hang)
 
     def write(self, text, name=".tool-versions"):
         path = os.path.join(self.dir, name)
@@ -582,6 +625,152 @@ class WindowsAppsTests(ToolPinsCase):
         rc, out = self.run_check("--file", local)
         self.assertEqual(rc, 0, "the same program outside WindowsApps must be checked and match: exit %d: %s" % (rc, out))
         self.assertEqual(self.invoked(), ["pinprobe"], "the program outside WindowsApps must run: log %s" % self.invoked())
+
+
+class BehindCase(ToolPinsCase):
+    """The `--behind <root>` read the session start and the ready run make: one tool, one pin, one fake on PATH."""
+
+    def behind(self, pin, found, text=None, tool="pinprobe"):
+        """Writes the pin file (a fix line for every platform unless `text` is given), fakes `tool` printing `found`, and runs
+        `--behind` on the folder. -> (exit code, output)."""
+        self.fake(tool, "%s %s" % (tool, found))
+        self.write(text if text is not None else pin_file(tool, pin))
+        return self.run_check("--behind", self.dir)
+
+    def behind_lines(self, out):
+        return [line for line in out.splitlines() if "BEHIND" in line]
+
+
+class BehindTests(BehindCase):
+    """A tool older than its pin exits 3 with one BEHIND line that carries the fix. A newer tool is no failure."""
+
+    def test_a_tool_older_than_its_pin_exits_three(self):
+        rc, out = self.behind("9.0", "8.1.0")
+        self.assertEqual(rc, 3, "--behind on a tool older than its pin did not exit 3: exit %s: %s" % (rc, out))
+
+    def test_the_behind_line_names_the_found_version_and_the_path_it_was_read_from(self):
+        rc, out = self.behind("9.0", "8.1.0")
+        lines = self.behind_lines(out)
+        self.assertEqual(len(lines), 1, "expected one BEHIND line, got %r" % out)
+        self.assertIn("8.1.0", lines[0], "the BEHIND line does not name the version found: %s" % lines[0])
+        self.assertIn(self.bin, lines[0], "the BEHIND line does not name the path the tool was read from: %s" % lines[0])
+
+    def test_the_behind_line_carries_this_platforms_fix_and_no_other_platforms_fix(self):
+        rc, out = self.behind("9.0", "8.1.0")
+        lines = self.behind_lines(out)
+        self.assertTrue(lines, "no BEHIND line: %s" % out)
+        self.assertIn(fix_mark("pinprobe"), lines[0], "the BEHIND line does not carry this platform's fix: %s" % lines[0])
+        for platform in PLATFORMS:
+            if platform != platform_key():
+                self.assertNotIn(fix_mark("pinprobe", platform), lines[0],
+                                 "the BEHIND line carries the fix for %s, not this platform: %s" % (platform, lines[0]))
+
+    def test_a_missing_fix_line_for_this_platform_exits_three_and_names_the_platform(self):
+        rc, out = self.behind("9.0", "8.1.0", text=pin_file("pinprobe", "9.0", skip=platform_key()))
+        self.assertEqual(rc, 3, "a tool behind its pin with no fix line for this platform did not exit 3: exit %s: %s" % (rc, out))
+        named = [line for line in out.splitlines() if "pinprobe" in line and platform_key() in line]
+        self.assertTrue(named, "the missing fix line for %s is not named: %s" % (platform_key(), out))
+
+    def test_a_tool_newer_than_its_pin_exits_zero_and_says_ahead(self):
+        rc, out = self.behind("9.0", "9.2.0")
+        self.assertEqual(rc, 0, "a tool newer than its pin is no failure, but --behind exited %s: %s" % (rc, out))
+        self.assertFalse(self.behind_lines(out), "a tool newer than its pin printed a BEHIND line: %s" % out)
+        self.assertIn("ahead", out.lower(), "a tool newer than its pin gave no ahead note: %s" % out)
+
+    def test_a_tool_matching_its_pin_exits_zero_with_no_behind_line(self):
+        rc, out = self.behind("9.0", "9.0.2")
+        self.assertEqual(rc, 0, "a tool matching its pin exited %s under --behind: %s" % (rc, out))
+        self.assertFalse(self.behind_lines(out), "a tool matching its pin printed a BEHIND line: %s" % out)
+
+    def test_a_pin_compares_numbers_so_two_nine_is_behind_two_ten(self):
+        rc, out = self.behind("2.10", "2.9.0")
+        self.assertEqual(rc, 3, "2.9.0 was not behind a 2.10 pin (text order would say ahead): exit %s: %s" % (rc, out))
+
+    def test_a_release_candidate_is_behind_its_final_release(self):
+        rc, out = self.behind("3.15", "3.15.0rc1")
+        self.assertEqual(rc, 3, "3.15.0rc1 was not behind a 3.15 pin: exit %s: %s" % (rc, out))
+
+    def test_a_major_only_pin_is_behind_a_lower_major(self):
+        rc, out = self.behind("3", "2.9.9")
+        self.assertEqual(rc, 3, "2.9.9 was not behind a major-only 3 pin: exit %s: %s" % (rc, out))
+
+    def test_a_major_only_pin_is_ahead_of_a_higher_major(self):
+        rc, out = self.behind("3", "4.0.0")
+        self.assertEqual(rc, 0, "4.0.0 is no failure under a major-only 3 pin, but --behind exited %s: %s" % (rc, out))
+
+    def test_a_tool_that_is_not_installed_exits_one_and_names_it_unknown(self):
+        self.write(pin_file("pinprobe", "9.0"))
+        rc, out = self.run_check("--behind", self.dir)
+        self.assertEqual(rc, 1, "a tool with no version to read did not exit 1: exit %s: %s" % (rc, out))
+        named = [line for line in out.splitlines() if "pinprobe" in line and "unknown" in line]
+        self.assertTrue(named, "the unreadable tool is not named unknown: %s" % out)
+
+    def test_a_tool_that_prints_no_version_exits_one_and_names_it_unknown(self):
+        self.fake("pinprobe", "no version printed here")
+        self.write(pin_file("pinprobe", "9.0"))
+        rc, out = self.run_check("--behind", self.dir)
+        self.assertEqual(rc, 1, "a tool that printed no version did not exit 1: exit %s: %s" % (rc, out))
+        named = [line for line in out.splitlines() if "pinprobe" in line and "unknown" in line]
+        self.assertTrue(named, "the tool that printed no version is not named unknown: %s" % out)
+
+
+class FixLineTests(BehindCase):
+    """A `# fix:` line reads `# fix: <tool> <macos|windows|linux> = <command>`. A malformed one is refused, never skipped."""
+
+    def refused(self, line):
+        self.fake("pinprobe", "pinprobe 8.1.0")
+        self.write("pinprobe 9.0\n%s\n" % line)
+        return self.run_check("--behind", self.dir)
+
+    def test_a_fix_line_naming_an_unknown_platform_is_refused_with_its_line_number(self):
+        rc, out = self.refused("# fix: pinprobe beos = echo x")
+        self.assertEqual(rc, 1, "a fix line for an unknown platform was not refused: exit %s: %s" % (rc, out))
+        self.assertRegex(out, r"line\s*2\b", "the refusal does not name line 2: %s" % out)
+
+    def test_a_fix_line_for_a_tool_no_line_pins_is_refused(self):
+        rc, out = self.refused("# fix: nosuchtool %s = echo x" % platform_key())
+        self.assertEqual(rc, 1, "a fix line for a tool no line pins was not refused: exit %s: %s" % (rc, out))
+
+    def test_a_fix_line_with_no_equals_sign_is_refused(self):
+        rc, out = self.refused("# fix: pinprobe %s echo x" % platform_key())
+        self.assertEqual(rc, 1, "a fix line with no `=` was not refused: exit %s: %s" % (rc, out))
+
+    def test_a_fix_line_with_an_empty_command_is_refused(self):
+        rc, out = self.refused("# fix: pinprobe %s =" % platform_key())
+        self.assertEqual(rc, 1, "a fix line with an empty command was not refused: exit %s: %s" % (rc, out))
+
+
+class BehindControlTests(BehindCase):
+    """Controls, green on the old code: the default and --local exits a behind tool already had. --behind reads the same
+    tools and never changes those verdicts."""
+
+    def test_control_the_default_run_on_a_behind_tool_exits_one_with_a_fail_line(self):
+        self.fake("pinprobe", "pinprobe 8.1.0")
+        pin = self.write(pin_file("pinprobe", "9.0"))
+        rc, out = self.run_check("--file", pin)
+        self.assertEqual(rc, 1, "the default run on a tool behind its pin did not exit 1: exit %s: %s" % (rc, out))
+        self.assertTrue(any(line.startswith("FAIL ") and "pinprobe" in line for line in out.splitlines()),
+                        "the default run printed no FAIL line for pinprobe: %s" % out)
+
+    def test_control_local_on_a_behind_tool_exits_three_as_a_note(self):
+        self.fake("pinprobe", "pinprobe 8.1.0")
+        pin = self.write(pin_file("pinprobe", "9.0"))
+        rc, out = self.run_check("--file", pin, "--local")
+        self.assertEqual(rc, 3, "--local on a tool behind its pin did not exit 3: exit %s: %s" % (rc, out))
+        self.assertFalse(any(line.startswith("FAIL ") for line in out.splitlines()), "--local printed a FAIL line: %s" % out)
+
+
+class BehindCostTests(BehindCase):
+    """The cost of the read: one version command per pin, and none more (decision outcomes-mechanize-rules)."""
+
+    def test_behind_runs_one_version_command_per_pin_and_no_more(self):
+        self.fake("pinprobe", "pinprobe 9.0.0")
+        self.fake("secondprobe", "secondprobe 1.0.0")
+        self.write(pin_file("pinprobe", "9.0") + "secondprobe 1.0\n")
+        rc, out = self.run_check("--behind", self.dir)
+        self.assertEqual(rc, 0, "two tools that match their pins did not pass under --behind: exit %s: %s" % (rc, out))
+        self.assertEqual(sorted(self.invoked()), ["pinprobe", "secondprobe"],
+                         "--behind ran a version command other than one per pin: %r" % self.invoked())
 
 
 if __name__ == "__main__":
