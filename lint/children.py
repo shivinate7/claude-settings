@@ -37,7 +37,9 @@ import sys
 HERE = os.path.dirname(os.path.realpath(__file__))
 DEFAULT_FILE = os.path.join(os.path.dirname(HERE), "docs", "children.txt")
 SELF = "shivinate7/claude-settings"
-NAME = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")
+# A segment never starts with a dash and is never only dots: `..` would climb a path, a leading dash reads as an option.
+SEGMENT = r"(?!-)(?!\.+(?:/|\Z))[A-Za-z0-9_.-]+"
+NAME = re.compile(SEGMENT + "/" + SEGMENT)
 LINE = re.compile(r"(\S+) (\d{4}-\d{2}-\d{2})")
 HTTP_STATUS = re.compile(r"\(HTTP (\d{3})\)\s*$")
 PAGE = 100
