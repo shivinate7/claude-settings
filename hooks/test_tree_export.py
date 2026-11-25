@@ -205,6 +205,24 @@ def tracked_paths(repo, sha):
     return sorted(path.decode("utf-8") for path in done.stdout.split(b"\0") if path)
 
 
+def export_manifest_fixture(name):
+    """The MANIFEST_FILES fixture exported to a new folder ROOT/<name>-export. -> (the folder, the paths git lists at the sha).
+    A failed export raises: it is a broken fixture, not the claim under test."""
+    repo, sha = make_fixture(os.path.join(ROOT, name), files=MANIFEST_FILES)
+    dest = os.path.join(ROOT, name + "-export")
+    os.makedirs(dest)
+    error = tree_export.export_tree(repo, sha, dest)
+    if error is not None:
+        raise RuntimeError("the export of the manifest fixture failed: %s" % error)
+    return dest, tracked_paths(repo, sha)
+
+
+def manifest_rows(dest):
+    """The rows of the manifest in the copy `dest`, in order and raw, so a row written twice shows twice."""
+    with open(os.path.join(dest, MANIFEST_NAME), encoding="utf-8", newline="") as handle:
+        return [line for line in handle.read().split("\n") if line]
+
+
 class TreeExportManifestCases(unittest.TestCase):
     """The export writes a manifest at its root: one archived path per line, the same set git lists at the commit."""
 
@@ -224,18 +242,24 @@ class TreeExportManifestCases(unittest.TestCase):
         self.assertEqual(got, want, "the manifest lists %s, git lists %s at the sha" % (got, want))
 
     def test_manifest_add_puts_an_added_path_in_the_copys_manifest_and_keeps_the_rest(self):
-        repo, sha = make_fixture(os.path.join(ROOT, "add"), files=MANIFEST_FILES)
-        want = tracked_paths(repo, sha) + ["lint/zz_new.py"]
-        dest = os.path.join(ROOT, "add-export")
-        os.makedirs(dest)
-        error = tree_export.export_tree(repo, sha, dest)
-        self.assertIsNone(error, "the export of the manifest fixture failed: %s" % error)
+        dest, listed = export_manifest_fixture("add")
+        want = listed + ["lint/zz_new.py"]
         add = getattr(tree_export, "manifest_add", None)
         self.assertTrue(callable(add), "hooks/tree_export.py has no manifest_add(dest, paths): an --add file never reaches the copy's manifest")
         add(dest, ["lint/zz_new.py"])
-        with open(os.path.join(dest, MANIFEST_NAME), encoding="utf-8", newline="") as handle:
-            got = sorted(line for line in handle.read().split("\n") if line)
+        got = sorted(manifest_rows(dest))
         self.assertEqual(got, sorted(want), "manifest_add left the copy's manifest as %s, want the export's paths and lint/zz_new.py" % (got,))
+
+    def test_manifest_add_writes_a_path_already_listed_or_given_twice_once(self):
+        dest, listed = export_manifest_fixture("dedupe")
+        already = listed[0]  # a path the export already listed
+        self.assertEqual(manifest_rows(dest).count(already), 1, "the export should list %s once before the add" % already)
+        add = getattr(tree_export, "manifest_add", None)
+        self.assertTrue(callable(add), "hooks/tree_export.py has no manifest_add(dest, paths)")
+        add(dest, [already, "lint/zz_twice.py", "lint/zz_twice.py"])
+        rows = manifest_rows(dest)
+        self.assertEqual(rows.count(already), 1, "manifest_add wrote %s again: the manifest lists it %d times, want 1" % (already, rows.count(already)))
+        self.assertEqual(rows.count("lint/zz_twice.py"), 1, "manifest_add wrote lint/zz_twice.py %d times for one path given twice, want 1" % rows.count("lint/zz_twice.py"))
 
 
 class TreeExportPathCases(unittest.TestCase):
@@ -251,6 +275,14 @@ class TreeExportPathCases(unittest.TestCase):
         error = tree_export.export_tree(repo, sha, dest)
         self.assertIsNotNone(error, "the export returned None for a path with a newline, so the copy drops the file with no error")
         self.assertIn("docs/two", error, "the export's error names no path: %s" % error)
+
+    def test_manifest_add_refuses_a_path_with_a_newline_and_names_it(self):
+        dest, _ = export_manifest_fixture("add-newline")
+        add = getattr(tree_export, "manifest_add", None)
+        self.assertTrue(callable(add), "hooks/tree_export.py has no manifest_add(dest, paths)")
+        with self.assertRaises(ValueError, msg="manifest_add listed a path with a newline and raised nothing") as caught:
+            add(dest, ["docs/two\nlines.md"])
+        self.assertIn("docs/two", str(caught.exception), "manifest_add's error names no part of the path: %s" % caught.exception)
 
 
 if __name__ == "__main__":
