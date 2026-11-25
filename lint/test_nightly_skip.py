@@ -15,12 +15,13 @@ The gate also prints the range line, `range: <green daily head>..<this head> (<N
 $GITHUB_STEP_SUMMARY, where N counts the push runs created after the green daily; `range: unknown (no green daily)`
 when there is none.
 
-RUNS_JSON is the stand-in for the runs read: a JSON list of run records in the shape of the Actions runs API, with a
-`jobs` list in the shape of the jobs API on each push run. GITHUB_RUN_ID is this run; its own record does not block.
+RUNS_JSON is the stand-in for the runs read: a JSON list of run records in the shape of the Actions runs API. The gate
+reads no jobs. GITHUB_RUN_ID is this run; its own record does not block.
 The test never reaches the network.
 
     python3 lint/test_nightly_skip.py
 """
+import ast
 import contextlib
 from datetime import datetime, timedelta
 import http.client
@@ -156,27 +157,29 @@ def pushes_since(count):
     return out
 
 
-def live_run_skip(pages, errors=None):
+def live_run_skip(pages, errors=None, head=HEAD):
     """Run the skip's live read once. `pages` maps an event to its pages, each a list of run records: page n of an event is served
-    for `page=n`, and a page past the list is empty. `errors` maps `runs` or `jobs` to an exception that read raises. A push run
-    with no `jobs` key has its jobs read from the stand-in, which reports a push skip that proved it. -> (result, the URLs requested)."""
+    for `page=n`, and a page past the list is empty. `errors` maps `runs` (every runs read) or an event name (`schedule`, `push`) to
+    an exception that read raises. A jobs request gets a push skip that proved the run; it is recorded like any other request, so
+    NoJobsRead can name it. -> (result, the URLs requested)."""
     urls = []
     errors = errors or {}
 
     def api_get(url, token):
         urls.append(url)
         if "/jobs?" in url:
-            if "jobs" in errors:
-                raise errors["jobs"]
             return {"jobs": [job("push-skip"), job("scope", "skipped")]}
         if "runs" in errors:
             raise errors["runs"]
         query = urllib.parse.parse_qs(urllib.parse.urlparse(url).query)
+        event = query["event"][0]
+        if event in errors:
+            raise errors[event]
         number = int(query.get("page", ["1"])[0])
-        served = pages.get(query["event"][0], [])
+        served = pages.get(event, [])
         return {"workflow_runs": served[number - 1] if number <= len(served) else []}
 
-    return run_skip(token="t", run_id=SELF_RUN, api_get=api_get), urls
+    return run_skip(token="t", run_id=SELF_RUN, head=head, api_get=api_get), urls
 
 
 def requested_pages(urls, event):
@@ -521,7 +524,7 @@ class NightlySkipReadErrors(unittest.TestCase):
 
     def run_skip(self, errors):
         """Run the gate on the live read, with the reads named in `errors` raising. -> (result, the URLs requested)."""
-        # The push run has no jobs: the jobs read decides it.
+        # Served as the runs API serves a push run: no jobs key.
         served = {"schedule": [[run("schedule", created=OLDER)]], "push": [[run("push", created=LATE)]]}
         return live_run_skip(served, errors)
 
@@ -546,23 +549,128 @@ class NightlySkipReadErrors(unittest.TestCase):
         self.assert_reached(urls, "event=schedule", "runs")
         self.assert_unknown(got, "runs")
 
-    def test_an_incomplete_read_of_a_jobs_list_is_unknown_not_a_crash(self):
-        # Mistake: jobs_reader catches the same three, so a push run's jobs read cut short escapes main() the same way.
-        got, urls = self.run_skip({"jobs": http.client.IncompleteRead(b"")})
-        self.assert_reached(urls, "/jobs?", "jobs")
-        self.assert_unknown(got, "jobs")
+    # A read error on the live path is unknown. The push runs read is the live read past the first, so it is the one these cases hit.
+    def test_an_incomplete_read_of_the_push_runs_list_is_unknown_not_a_crash(self):
+        # Mistake: a push runs read cut short escapes main() as a traceback, not as unknown.
+        got, urls = self.run_skip({"push": http.client.IncompleteRead(b"")})
+        self.assert_reached(urls, "event=push", "push runs")
+        self.assert_unknown(got, "push runs")
 
-    def test_a_runtime_error_on_a_jobs_list_is_unknown_not_a_crash(self):
-        # Mistake: an Exception from the jobs read, past jobs_reader's three catches, escapes proven() and main().
-        got, urls = self.run_skip({"jobs": RuntimeError("the jobs read broke")})
-        self.assert_reached(urls, "/jobs?", "jobs")
-        self.assert_unknown(got, "jobs")
+    def test_a_runtime_error_on_the_push_runs_list_is_unknown_not_a_crash(self):
+        # Mistake: an Exception from a push runs read escapes main() as a traceback, not as unknown.
+        got, urls = self.run_skip({"push": RuntimeError("the push runs read broke")})
+        self.assert_reached(urls, "event=push", "push runs")
+        self.assert_unknown(got, "push runs")
 
     def test_control_a_url_error_on_the_runs_list_is_already_unknown(self):
         # Control, green on the old code: URLError is one of the three runs_page catches, so this read is already unknown.
         got, urls = self.run_skip({"runs": urllib.error.URLError("unreachable")})
         self.assert_reached(urls, "event=schedule", "runs")
         self.assert_unknown(got, "runs")
+
+
+def named_lines(tree, name):
+    """The lines where the script defines, takes or uses `name`: a function def, an argument, or a name. A comment is not in the
+    tree, and a string holding the name is a constant, not a name."""
+    lines = []
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == name:
+            lines.append(node.lineno)
+        elif isinstance(node, ast.arg) and node.arg == name:
+            lines.append(node.lineno)
+        elif isinstance(node, ast.Name) and node.id == name:
+            lines.append(node.lineno)
+    return sorted(lines)
+
+
+def docstring_ids(tree):
+    """The ids of the string nodes that are a module's, class's or function's docstring: prose that calls nothing."""
+    ids = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)) and node.body:
+            first = node.body[0]
+            if isinstance(first, ast.Expr) and isinstance(first.value, ast.Constant) and isinstance(first.value.value, str):
+                ids.add(id(first.value))
+    return ids
+
+
+def jobs_route_lines(tree):
+    """The lines of the string constants that name a jobs route (`/jobs`), docstrings aside."""
+    prose = docstring_ids(tree)
+    return sorted(node.lineno for node in ast.walk(tree)
+                  if isinstance(node, ast.Constant) and isinstance(node.value, str) and "/jobs" in node.value and id(node) not in prose)
+
+
+class NoJobsRead(unittest.TestCase):
+    """The gate reads no jobs and holds no copy of the push-skip proof: the skip decision needs neither. Each decision path runs on the
+    live read, with its push run served as the runs API serves it: no jobs key. The fake records every request, so a jobs request is
+    named."""
+
+    def assert_reason(self, got, reason):
+        self.assertEqual(got["rc"], 0, "the gate exits %d: %s" % (got["rc"], got["text"][-300:]))
+        self.assertIn(reason, got["text"], "scope: the path did not reach its reason %r: %s" % (reason, got["text"][-300:]))
+
+    def assert_no_jobs_request(self, urls, path):
+        jobs = [u for u in urls if urllib.parse.urlparse(u).path.endswith("/jobs")]
+        self.assertEqual(jobs, [], "the %s path requested a push run's jobs, so the gate still reads jobs: %r" % (path, jobs))
+
+    def script_tree(self):
+        with open(SKIP, encoding="utf-8") as f:
+            return ast.parse(f.read(), SKIP)
+
+    def test_the_skip_path_reads_no_jobs(self):
+        got, urls = live_run_skip({"schedule": [[run("schedule", created=OLDER)]]})
+        self.assertEqual(got["value"], "true", "scope: a green daily at this head with no push since did not skip: %s" % got["text"][-300:])
+        self.assert_no_jobs_request(urls, "skip")
+
+    def test_the_push_after_the_daily_path_reads_no_jobs(self):
+        # The push run is served with no jobs key, so a jobs read of it is the request this case counts.
+        got, urls = live_run_skip({"schedule": [[run("schedule", created=OLDER)]], "push": [[run("push", created=LATE)]]})
+        self.assert_reason(got, "main moved since the green daily")
+        self.assertEqual(got["value"], "false", "scope: a push after the green daily did not give skip=false: %s" % got["text"][-300:])
+        self.assert_no_jobs_request(urls, "run-because-a-push-came-after-the-daily")
+
+    def test_the_red_daily_path_reads_no_jobs(self):
+        pages = {"schedule": [[run("schedule", conclusion="failure", created=NEWER), run("schedule", created=OLDER)]],
+                 "push": [[run("push", created=LATE)]]}
+        got, urls = live_run_skip(pages)
+        self.assert_reason(got, "not success")
+        self.assert_no_jobs_request(urls, "run-because-the-daily-was-red")
+
+    def test_the_head_moved_paths_read_no_jobs(self):
+        cases = {
+            "the newest push run is at another head": ({"schedule": [[run("schedule", created=OLDER)]],
+                                                       "push": [[run("push", sha=OTHER, created=LATE)]]}, "not at this run's head"),
+            "no push since, and the daily is at another head": ({"schedule": [[run("schedule", sha=OTHER, created=OLDER)]]}, "another head"),
+        }
+        for name, (pages, reason) in cases.items():
+            with self.subTest(case=name):
+                got, urls = live_run_skip(pages)
+                self.assert_reason(got, reason)
+                self.assert_no_jobs_request(urls, "run-because-the-head-moved")
+
+    def test_the_script_holds_no_proven_copy(self):
+        # Mistake: the gate's own `proven` is a second copy of the push-skip proof that actions/ci-alarm/clear_rule.py holds.
+        lines = named_lines(self.script_tree(), "proven")
+        self.assertEqual(lines, [], "nightly-skip.py still holds `proven` at lines %r, a second copy of the push-skip proof" % lines)
+
+    def test_the_script_names_no_jobs_route(self):
+        lines = jobs_route_lines(self.script_tree())
+        self.assertEqual(lines, [], "nightly-skip.py still names a jobs route at lines %r" % lines)
+
+    def test_the_script_holds_no_jobs_reader(self):
+        lines = named_lines(self.script_tree(), "jobs_reader")
+        self.assertEqual(lines, [], "nightly-skip.py still holds jobs_reader at lines %r, the gate's jobs read" % lines)
+
+    def test_control_the_route_scan_ignores_comments_and_docstrings_and_counts_strings(self):
+        # Control, green on the old code: the scan reads the tree. A docstring and a comment that name /jobs are no route; a string
+        # holding a `#`, a line break or a lone quote beside /jobs is one.
+        src = ('"""Docstring names the /jobs route."""\n'
+               "# a comment with a lone quote ' and /jobs\n"
+               'HASH = "# not a comment, /jobs"\n'
+               'BLOCK = """\nmulti-line /jobs\n"""\n'
+               'QUOTE = "don\'t read /jobs"\n')
+        self.assertEqual(jobs_route_lines(ast.parse(src)), [3, 4, 7], "the route scan must count the three strings and skip the docstring and comment")
 
 
 def tearDownModule():

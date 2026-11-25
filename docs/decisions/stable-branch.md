@@ -12,7 +12,7 @@ Stable follows each green push run of main, for now. Owner, 12:59 CST Nov 16: "J
 - A green push run covers the Linux fast jobs only (decision `push-skip-on-proven-tree`), so `stable` can sit on a commit whose Windows and mutation jobs have not run. The next daily covers them. The owner accepted this for now.
 - Installers and the merge tool read `stable`. Their fallback is decision `stable-fallback-warn`.
 
-Why: the owner wants `stable` to match main after each merge, which is the simplest rule. A red main is still never installed, because `stable` does not move onto a red run. Restart plan, entry R42 part 2.
+Why: the owner wants `stable` to match main after each merge, which is the simplest rule. The mover moves `stable` on a push or daily run that ends with success, by fast-forward only, and reads no job of the run. So a red run never moves it, and a green run that skipped a suite does (see the green push run bullet above). Restart plan, entry R42 part 2.
 
 Alternative not taken: a last job in the checks workflow, on push to main, in place of a separate workflow file. Refuter, 2026-11-11 22:58 CST, simpler route (b). The design names the `workflow_run` trigger. The owner approved the design in the ruling above.
 

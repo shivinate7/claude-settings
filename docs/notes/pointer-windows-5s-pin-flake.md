@@ -1,0 +1,1 @@
+- pointer-windows-5s-pin-flake: install-no-gap.test.ps1 (line 929 on main) pins "every mixed-id window clears within 5 s", and the pointer-windows job (.github/workflows/checks.yml, about line 1828) flaked on it in Nov 24 runs (reported 04:41-04:59 CST). Measure before changing the pin. Seen: 2026-11-24 x1
