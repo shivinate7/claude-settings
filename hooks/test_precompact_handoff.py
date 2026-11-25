@@ -366,8 +366,8 @@ def case_settings_json():
     path = os.path.join(REPO_ROOT, "settings.json")
     with open(path, "r", encoding="utf-8") as f:
         settings = json.load(f)
-    check("settings: autoCompactWindow is 500000",
-          settings.get("autoCompactWindow") == 500000, "settings: %r" % settings)
+    check("settings: autoCompactWindow is 550000",
+          settings.get("autoCompactWindow") == 550000, "settings: %r" % settings)
     env = settings.get("env", {})
     # R40, the owner's compaction ruling (13:21 CST, Nov 11, "compaction: A"), sets the
     # compaction trigger to 92 in the settings env.
@@ -397,6 +397,15 @@ def case_settings_json():
               and "--reorient" in h.get("command", "")]
     check("settings: a SessionStart hook, matcher 'compact', runs it with --reorient",
           bool(found2), "SessionStart hooks: %r" % session_start)
+
+
+def case_settings_window_reader_reads_550k():
+    """The hook's own window reader, run on the repo's real settings.json, returns 550,000. The pin
+    above only reads the value; this case fails when the reader would ignore it."""
+    with Env(CLAUDE_CONFIG_DIR=REPO_ROOT, CLAUDE_CODE_AUTO_COMPACT_WINDOW=None):
+        got, err = call_under_test("window_limit")
+    expect_value("settings: window_limit reads 550,000 from the repo's settings.json",
+                 got, err, 550000)
 
 
 # --------------------------------------------------------------------------- Stop --nudge
@@ -3770,6 +3779,7 @@ def main() -> int:
     case_reorient_no_state_says_digest_missing()
     case_reorient_failed_state_says_digest_missing()
     case_settings_json()
+    case_settings_window_reader_reads_550k()
     case_nudge()
     case_nudge_exact_boundary()
     case_nudge_uses_last_assistant_entry_and_sums_cache()
