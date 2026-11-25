@@ -53,6 +53,7 @@ OLD_READY_JOB_PREFIX = (MERGE, r're.compile(r"^([a-z][a-z0-9_-]*):(.+)$")', r're
 READY = ["STE lint", "checks-rest:Cost line pins"]  # a job:step name the older regex groups under "checks"
 CI_REF_VARS = ("GITHUB_BASE_REF", "GITHUB_REF")  # read by hook_catalog.py --check, so no verdict may depend on the caller's shell
 PAGE = "docs/records.md"  # the records page, in git's forward slashes
+BAD_BASE_REF = "no-such-base-ref"  # a ref that does not resolve in the head tree, so the diff against it fails
 HAND_LINE = "\nA line by hand: the generator never writes this.\n"
 BROKEN_MERGE = (MERGE, "#!/usr/bin/env python3",
                 '#!/usr/bin/env python3\nraise RuntimeError("fixture: this merge tool does not load")')
@@ -131,13 +132,18 @@ def load_merge(tree, name):
     return module
 
 
-def generated_head(root):
-    """A head tree whose records page is the generator's own page, committed as a base for a pull request."""
-    head = build_tree(root, records=True)
-    gen = subprocess.run([sys.executable, os.path.join("lint", "hook_catalog.py"), "--records-only", "--root", head],
-                         capture_output=True, text=True, cwd=head, env=child_env())
+def regenerate_page(root):
+    """Run the generator on the tree at `root`, so its records page is the one it writes for the records there."""
+    gen = subprocess.run([sys.executable, os.path.join("lint", "hook_catalog.py"), "--records-only", "--root", root],
+                         capture_output=True, text=True, cwd=root, env=child_env())
     assert gen.returncode == 0, gen.stdout + gen.stderr
-    assert os.path.isfile(os.path.join(head, *PAGE.split("/"))), "fixture: the generator wrote no records page"
+    assert os.path.isfile(os.path.join(root, *PAGE.split("/"))), "fixture: the generator wrote no records page"
+
+
+def generated_head(root, config=None):
+    """A head tree whose records page is the generator's own page, committed as a base for a pull request."""
+    head = build_tree(root, config=config, records=True)
+    regenerate_page(head)
     commit_all(head, "records page from the generator")
     return head
 
@@ -330,6 +336,44 @@ class ReaderOnlyPullRequest(unittest.TestCase):
         base = commit_pr(head, {".github/stamp.json": json.dumps(config_with(readyChecks=READY, deadlineMinutes=90), indent=1)})
         self.assertEqual(changed_paths(head, base), [".github/stamp.json"], "fixture: the pull request changes more than the config")
         rc, out = run_step(stable, head, base)
+        self.assertEqual(rc, 1, out)
+        self.assertIn("ready_job_groups", out, out)
+
+    def test_8_control_reader_edit_with_workflow_change_gets_no_waiver(self):
+        d = case_dir()
+        stable = build_tree(os.path.join(d, "stable"), patches=[OLD_READY_JOB_PREFIX])
+        head = build_tree(os.path.join(d, "head"), config=config_with(readyChecks=READY))
+        edits = reader_edit(head)
+        edits[".github/workflows/checks.yml"] = WORKFLOW.replace("timeout-minutes: 30", "timeout-minutes: 40")
+        base = commit_pr(head, edits)
+        self.assertEqual(changed_paths(head, base), [".github/workflows/checks.yml", "merge/merge.py"],
+                         "fixture: the pull request changes more than a reader and a workflow")
+        rc, out = run_step(stable, head, base)
+        self.assertEqual(rc, 1, out)
+        self.assertIn("ready_job_groups", out, out)
+
+    def test_8_control_reader_edit_with_records_page_change_gets_no_waiver(self):
+        d = case_dir()
+        stable = build_tree(os.path.join(d, "stable"), patches=[OLD_READY_JOB_PREFIX])
+        head = generated_head(os.path.join(d, "head"), config=config_with(readyChecks=READY))
+        put(os.path.join(head, "docs", "decisions", "second-record.md"),
+            "# Second record\n\n**Decision.** A second fixture record, added by the pull request.\n\n**Status.** Ruled.\n")
+        regenerate_page(head)
+        base = commit_pr(head, reader_edit(head))
+        self.assertIn(PAGE, changed_paths(head, base), "fixture: the pull request does not change the records page")
+        rc, out = run_step(stable, head, base)
+        self.assertEqual(rc, 1, out)
+        self.assertIn("ready_job_groups", out, out)
+
+    def test_8_control_bad_base_ref_gets_no_waiver(self):
+        d = case_dir()
+        stable = build_tree(os.path.join(d, "stable"), patches=[OLD_READY_JOB_PREFIX])
+        head = build_tree(os.path.join(d, "head"), config=config_with(readyChecks=READY))
+        base = commit_pr(head, reader_edit(head))
+        self.assertEqual(changed_paths(head, base), ["merge/merge.py"], "fixture: the pull request changes more than its reader")
+        resolved = subprocess.run(["git", "rev-parse", "--verify", "--quiet", BAD_BASE_REF], cwd=head, capture_output=True).returncode
+        self.assertNotEqual(resolved, 0, f"fixture: the base ref {BAD_BASE_REF!r} resolves")
+        rc, out = run_step(stable, head, BAD_BASE_REF)
         self.assertEqual(rc, 1, out)
         self.assertIn("ready_job_groups", out, out)
 
