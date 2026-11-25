@@ -165,8 +165,9 @@ except ImportError:  # without it a heredoc body may name a log: at worst a stal
     def strip_heredoc_bodies(cmd, shells_only=False) -> str:
         return cmd
 try:
-    from shared_names import TASK_NOTIFICATION_TAG  # the one home of the notice tag
-except ImportError:  # without the tag no notice can close a job, so Stop prints nothing
+    from shared_names import CI_CHECKIN_TOOLS, TASK_NOTIFICATION_TAG  # the one home of the notice tag and the check-in tools
+except ImportError:  # without the tag no notice can close a job, so Stop prints nothing; without the tools no check-in can be seen, so no CI wait or long-running agent reads as open and Stop never refuses on its own failure
+    CI_CHECKIN_TOOLS = ()
     TASK_NOTIFICATION_TAG = None
 try:
     from shared_names import AGENT_WAITING_TEXT  # the one home of the waiting notice's text
@@ -955,9 +956,8 @@ def stopped_ids(content):
 
 # "finished" is the word actions/ci-done-comment/comment.sh puts in its red line; test CI94 runs that script, so the pattern follows it.
 CI_VERDICT = re.compile(r"^CI (?:finished )?(green|red|cancelled|unknown|none) on \S", re.M)
-CI_KEYS = (b"ready", b"pull_request", b"merge", b"send_later", b"create_trigger", b"CronCreate",
-           b"ScheduleWakeup", b"CI ", b"close", b'"is_error":true', b'"is_error": true')
-CI_CHECKIN_TOOLS = ("send_later", "create_trigger", "CronCreate", "ScheduleWakeup")
+CI_KEYS = ((b"ready", b"pull_request", b"merge") + tuple(t.encode() for t in CI_CHECKIN_TOOLS)
+           + (b"CI ", b"close", b'"is_error":true', b'"is_error": true'))
 # The bytes that mark a line as a possible check-in call or an error result, for scan_jobs's keep_waiting read.
 CHECKIN_KEYS = tuple(t.encode() for t in CI_CHECKIN_TOOLS) + (b'"is_error":true', b'"is_error": true')
 CI_SEGMENT = re.compile(r"[;&|\n]+")
@@ -1123,7 +1123,11 @@ def open_ci_wait(transcript):
     its PR the same way. A
     red verdict keeps it open and voids the check-ins before it. A check-in after the anchor
     covers it, unless its result was an error. A ready call that a PreToolUse hook refused
-    never marked anything: it opens no wait and leaves the wait it found. One streamed read, records in file order."""
+    never marked anything: it opens no wait and leaves the wait it found. One streamed read, records in file order.
+    With no check-in tool names (the shared_names import failed) no check-in can be seen, so it returns None and Stop
+    does not block every ready PR."""
+    if not CI_CHECKIN_TOOLS:
+        return None
     wait = None  # [pr, ids of the check-ins since the anchor]
     marks = []  # [call id, the wait before that ready call] for each ready call not yet answered
     with open(transcript, "rb") as f:
@@ -1308,7 +1312,7 @@ def stop():
             real = path
             if path and base:
                 real = os.path.join(base, re.split(r"[\\/]", path)[-1])
-            if agent and began is not None and now - began >= long_age and not checked_in(job, began + long_age, sent):
+            if CI_CHECKIN_TOOLS and agent and began is not None and now - began >= long_age and not checked_in(job, began + long_age, sent):
                 long_rows.append('Agent "%s" (%s) has run %d min and has not finished%s.' % (
                     desc or "no description", job, (now - began) // 60,
                     "; it " + AGENT_WAITING_TEXT if waiting and AGENT_WAITING_TEXT else ""))

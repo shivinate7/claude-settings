@@ -104,6 +104,7 @@ Text: `OWNER_REFUSAL`. Owner ruling, 2026-11-01 23:31 CST.
 
 - Send the question to the page writer in the same turn it is asked.
 - The route: `send_message` to the page writer by its session id. The refusal names the writer's id when it is known. If the writer is unknown, the refusal names the waiting page: read it with `ArtifactData` get, then `send_message` the question to its writer.
+- A queued desktop send (result text `(delivery: queued;`) counts only when the same turn also sets a one-time check-in that did not fail, or a later record is a message from the writer. Ruling home: decision `questions-go-to-owner` (owner, 10:25 CST 2026-11-25). Set the check-in in the same turn, after the send. At the check-in, the session reads the writer's session to verify the message reached it: that verify is practice, and no check reads it. This line holds no list: the check-in tools (the constant `CI_CHECKIN_TOOLS`) and the failed-send cases are in that decision.
 - In a repo with no waiting page, this check does not refuse. The question box counts instead.
 
 ### Lane pick guard (lane sessions)

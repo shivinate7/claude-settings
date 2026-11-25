@@ -42,6 +42,7 @@ at exit. Every process a report names is killed at exit, with its descendants. T
 those processes themselves.
 """
 
+import ast
 import atexit
 import contextlib
 import importlib.util
@@ -1920,6 +1921,36 @@ def settings_add_no_bash_hook_process():
     problems += expect(len(stall) == 1, f"{len(stall)} Bash hook commands run stall_watch.py --hook, want 1")
     named = [c[:80] for c in every if re.search("mark", c, re.I)]
     problems += expect(not named, f"a PreToolUse command names a marker: {named}")
+    return problems
+
+
+def literal_names(path, names):
+    """(line, text) of each string or bytes literal in `path` that equals one of `names`. The parser reads the literals,
+    so a comment or a longer string never counts."""
+    with open(path, encoding="utf-8") as f:
+        tree = ast.parse(f.read())
+    found = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Constant) and isinstance(node.value, (str, bytes)):
+            text = node.value.decode("utf-8", "replace") if isinstance(node.value, bytes) else node.value
+            if text in names:
+                found.append((node.lineno, text))
+    return found
+
+
+@case
+def ci_keys_hold_no_literal_copy_of_the_checkin_tools():
+    """14. hooks/stall_watch.py holds no literal copy of a check-in tool name. Its CI key list is built from
+    shared_names.CI_CHECKIN_TOOLS, the one home. The same scan of shared_names.py is the control: it finds every name
+    there as a literal, so the scan is not blind."""
+    from shared_names import CI_CHECKIN_TOOLS  # the one home of the check-in tools (hooks/shared_names.py)
+    names = set(CI_CHECKIN_TOOLS)
+    homes = {text for _, text in literal_names(os.path.join(HERE, "shared_names.py"), names)}
+    missing = sorted(names - homes)
+    problems = expect(not missing, f"scope: shared_names.py holds no literal for {missing}, so the scan is blind")
+    copies = literal_names(MODULE, names)
+    problems += expect(not copies, "literal copies of a check-in tool name in %s at lines %s: %s"
+                       % (MODULE, sorted({ln for ln, _ in copies}), sorted({text for _, text in copies})))
     return problems
 
 

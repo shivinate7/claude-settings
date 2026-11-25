@@ -11,7 +11,11 @@ import json
 import os
 import re
 
-SEND_TOOLS = ("mcp__claude-code-remote__send_message", "SendMessage")
+SEND_TOOLS = ("mcp__claude-code-remote__send_message", "mcp__ccd_session_mgmt__send_message", "SendMessage")
+# A desktop send's tool result ends with "(delivery: <state>; message_id: ...)". The state is delivered, queued or undelivered.
+DESKTOP_DELIVERY = "(delivery: "
+DESKTOP_DELIVERED = DESKTOP_DELIVERY + "delivered;"  # the state that means the message reached its session
+DESKTOP_QUEUED = DESKTOP_DELIVERY + "queued;"  # the state that means its session holds the message and has not run it
 CLAUDE_ARTIFACTS_DB = "mcp__claude-artifacts__db_"  # the claude-artifacts page db tools; the verb is the tool name's tail, never an input action
 # The tool-name prefixes of the page db tools, for `name.startswith(ARTIFACT_DATA)`. read_artifact is no db tool, so it never matches.
 ARTIFACT_DATA = ("ArtifactData", "mcp__ArtifactData", CLAUDE_ARTIFACTS_DB)
@@ -291,10 +295,27 @@ def head_moved_since(cwd, base):
         return None
 
 
+# The sender id in the opening tag of a desktop peer message's text.
+CROSS_SESSION_FROM = re.compile(r"<cross-session-message\s[^>]*?\bfrom=\"([^\"]+)\"")
+
+
+def _record_text(rec):
+    content = (rec.get("message") or {}).get("content")
+    if isinstance(content, list):
+        content = "".join(b.get("text", "") for b in content if isinstance(b, dict))
+    return content if isinstance(content, str) else ""
+
+
 def peer_sender(rec):
-    """The id of the session that sent a peer message record (origin.fromSession), else None."""
+    """The id of the session that sent a peer message record, else None. A cloud record names it in
+    origin.fromSession; a desktop record names it in the `from` attribute of its cross-session-message tag."""
     origin = rec.get("origin")
-    found = origin.get("fromSession") if _is_peer(origin) else None
+    if not _is_peer(origin):
+        return None
+    found = origin.get("fromSession")
+    if not (isinstance(found, str) and found):
+        match = CROSS_SESSION_FROM.search(_record_text(rec))
+        found = match.group(1) if match else None
     return found if isinstance(found, str) and found else None
 
 
@@ -392,11 +413,13 @@ def result_text(block):
     return body if isinstance(body, str) else ""
 
 
-def delivered_tool_use_ids(records):
-    """The tool_use ids of sends that reached their session: a tool_result whose text parses as the cloud
-    send_message success body {"status": "delivered"}, and no failure by `failed_tool_use_ids`. Only that cloud
-    body counts: the local SendMessage success shape is not measured, so it fails closed."""
-    failed = failed_tool_use_ids(records)
+def delivered_tool_use_ids(records, include_failed=False):
+    """The tool_use ids of sends that reached their session, with no failure by `failed_tool_use_ids`: a
+    tool_result whose text parses as the cloud send_message body {"status": "delivered"}, or a desktop result
+    whose text holds DESKTOP_DELIVERED. Only the result counts, never the send's input. A queued or undelivered
+    desktop result, and any other shape, fails closed. `include_failed` also reads a failed send whose text reports
+    delivery, so a caller can tell an error with no delivery text from one that carries it."""
+    failed = set() if include_failed else failed_tool_use_ids(records)
     delivered = set()
     for r in records:
         if r.get("type") != "user":
@@ -405,13 +428,46 @@ def delivered_tool_use_ids(records):
             use_id = b.get("tool_use_id")
             if not isinstance(use_id, str) or use_id in failed:
                 continue
+            text = result_text(b)
+            if DESKTOP_DELIVERED in text:
+                delivered.add(use_id)
+                continue
             try:
-                body = json.loads(result_text(b))
+                body = json.loads(text)
             except ValueError:
                 continue
             if isinstance(body, dict) and body.get("status") == "delivered":
                 delivered.add(use_id)
     return delivered
+
+
+def undelivered_tool_use_ids(records):
+    """The tool_use ids of desktop sends whose result carries a delivery state other than delivered (queued or
+    undelivered). A send with no result, or a result with no delivery state, is not read here. The send's input
+    never counts, only its result."""
+    undelivered = set()
+    for r in records:
+        if r.get("type") != "user":
+            continue
+        for b in tool_results(r):
+            text = result_text(b)
+            if isinstance(b.get("tool_use_id"), str) and DESKTOP_DELIVERY in text and DESKTOP_DELIVERED not in text:
+                undelivered.add(b["tool_use_id"])
+    return undelivered
+
+
+def queued_tool_use_ids(records):
+    """The tool_use ids of desktop sends whose result carries the queued state and is no failure (by
+    `failed_tool_use_ids`). Only the result counts, never the send's input."""
+    failed = failed_tool_use_ids(records)
+    queued = set()
+    for r in records:
+        if r.get("type") != "user":
+            continue
+        queued.update(b["tool_use_id"] for b in tool_results(r)
+                      if isinstance(b.get("tool_use_id"), str) and b["tool_use_id"] not in failed
+                      and DESKTOP_QUEUED in result_text(b))
+    return queued
 
 
 def inactive_tool_use_ids(records):

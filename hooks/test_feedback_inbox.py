@@ -288,6 +288,21 @@ SEND = "mcp__claude-code-remote__send_message"
 REPO_ITEM = "- fb-0958-21 [repo] -> repo:acme/widgets"
 REPO_SLUG = "acme/widgets"
 REPO_FAIL_OPEN = "Feedback guard: repo sends not checked"
+DESKTOP_SESSION = "local_6f1c2a7e-0b8d-4c3e-9a51-2d7f4e8b9c01"  # a desktop session the send names
+DESKTOP_MSG_ID = "5c1e9d20-3b7a-4f8e-a6d4-0b2c9e7f1a35"
+
+
+def desktop_result(delivery):
+    """A desktop send's tool result text in the measured form: JSON whose message ends with the delivery state and the
+    message id. A literal, not an import from lint/test_report_guard_page_writer.py: importing that module runs the
+    report file's module-level setup (a run folder and the git opt-out), and this file runs without it."""
+    if delivery == "delivered":
+        middle = 'Message delivered to session %s ("triage"); its turn has started on it.' % DESKTOP_SESSION
+    else:
+        middle = 'Message to session %s ("triage").' % DESKTOP_SESSION
+    text = "Forwarded to Claude Desktop's session messaging: %s (delivery: %s; message_id: %s)" % (
+        middle, delivery, DESKTOP_MSG_ID)
+    return json.dumps({"success": True, "message": text}, separators=(",", ":"))
 
 
 
@@ -2144,6 +2159,26 @@ def case_page_write_without_a_url_is_no_send_proof():
     check("export scan: control, an ArtifactData update of items with no url is no export write", found == [], found)
 
 
+def case_page_desktop_send_must_be_delivered_to_prove_the_item():
+    """A desktop send that names page item 98 proves the item only when its own result says delivered. An undelivered or
+    a queued result does not prove it, under either desktop tool name. The delivered send is the control."""
+    for label, name, tool_input in (
+            ("SendMessage", "SendMessage",
+             {"to": DESKTOP_SESSION, "summary": "ruling", "message": "Ruling on page item 98: a"}),
+            ("send_message", "mcp__ccd_session_mgmt__send_message",
+             {"session_id": DESKTOP_SESSION, "message": "Ruling on page item 98: a"})):
+        p = page_run(new_cfg(), "page-desk-ok-" + label, [("98: a", (PAGE_ITEM,))],
+                     [owner_rec("98: a"), used_rec(name, tool_input, tool_id="d1"),
+                      result_rec("d1", desktop_result("delivered"))])
+        expect_silent("page desktop: control, a delivered %s naming 98 proves the item" % label, p)
+        for delivery in ("undelivered", "queued"):
+            p = page_run(new_cfg(), "page-desk-%s-%s" % (delivery, label), [("98: a", (PAGE_ITEM,))],
+                         [owner_rec("98: a"), used_rec(name, tool_input, tool_id="d1"),
+                          result_rec("d1", desktop_result(delivery))])
+            expect_send_missing("page desktop: a %s %s naming 98 does not prove the item" % (delivery, label),
+                                p, "fb-0958-7", "98")
+
+
 # --------------------------------------------------------------------------- repo cases
 
 def case_repo_send_naming_the_repo_passes():
@@ -2170,6 +2205,26 @@ def case_repo_send_with_error_result_does_not_count():
                   result_rec("s1", CLOUD_UNVERIFIED, is_error=True)])
     expect_repo_unsent("repo: a send_message naming the repo whose result is an error does not prove it", p,
                        "fb-0958-21", REPO_SLUG)
+
+
+def case_repo_desktop_send_must_be_delivered_to_prove_the_repo():
+    """A desktop send that names the repo proves the repo item only when its own result says delivered. An undelivered or
+    a queued result does not prove it, under either desktop tool name. The delivered send is the control."""
+    for label, name, tool_input in (
+            ("SendMessage", "SendMessage",
+             {"to": DESKTOP_SESSION, "summary": "rename", "message": "Filed the rename in `acme/widgets`"}),
+            ("send_message", "mcp__ccd_session_mgmt__send_message",
+             {"session_id": DESKTOP_SESSION, "message": "Filed the rename in `acme/widgets`"})):
+        p = page_run(new_cfg(), "repo-desk-ok-" + label, [("rename", (REPO_ITEM,))],
+                     [owner_rec("rename"), used_rec(name, tool_input, tool_id="d1"),
+                      result_rec("d1", desktop_result("delivered"))])
+        expect_silent("repo desktop: control, a delivered %s naming the repo proves the item" % label, p)
+        for delivery in ("undelivered", "queued"):
+            p = page_run(new_cfg(), "repo-desk-%s-%s" % (delivery, label), [("rename", (REPO_ITEM,))],
+                         [owner_rec("rename"), used_rec(name, tool_input, tool_id="d1"),
+                          result_rec("d1", desktop_result(delivery))])
+            expect_repo_unsent("repo desktop: a %s %s naming the repo does not prove the item" % (delivery, label),
+                               p, "fb-0958-21", REPO_SLUG)
 
 
 def case_repo_slug_match_ignores_case():
@@ -5286,8 +5341,10 @@ CASES = (
     case_export_scan_counts_a_claude_artifacts_db_str_replace_of_items,
     case_artifactdata_get_list_and_query_of_items_are_reads,
     case_page_write_without_a_url_is_no_send_proof,
+    case_page_desktop_send_must_be_delivered_to_prove_the_item,
     case_repo_send_naming_the_repo_passes,
     case_repo_send_with_error_result_does_not_count,
+    case_repo_desktop_send_must_be_delivered_to_prove_the_repo,
     case_repo_slug_match_ignores_case,
     case_repo_send_before_the_owner_record_blocks,
     case_repo_send_naming_another_repo_blocks,
