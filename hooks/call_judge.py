@@ -137,7 +137,9 @@ PAST_RULING_ITEM = (
     "something a standing decision already explains (such as asking what a rule means when a decision says why "
     "it was set so). A question whose `Based on (ruling): ...` line names that ruling (its id or slug) passes: "
     "a re-ask the ruling allows is fine. This item passes when no list follows. "
-    "When you refuse, the reason names the listed id, such as decisions/<name>, and gives the ruling's date."
+    "When you refuse, the reason names the listed id, such as decisions/<name>, and gives the ruling's date. "
+    "When the text asks more than one question, the answer also carries \"question\": the number of the question "
+    "the ruling covers, counting the questions from 1."
 )
 # The question-judge call of lint/report_guard.py (a Stop whose reply asks the owner something): Sonnet, 60 s.
 PAST_RULING_MODEL, PAST_RULING_TIMEOUT = SPAWN_MODEL, 60
@@ -448,8 +450,8 @@ def main():
         if cite and not FORM_ITEM_REASON.match(reason):
             # A listed ruling named in a Based on (ruling) line passes by code, whatever the judge answered. A
             # reason that opens with item 1 to 7 is a form miss that names an id, and keeps the judge's text.
-            named = question_form.named_rulings("\n".join(words for _, words in units), ids)
-            reason = question_form.past_ruling_text(reason, ids, candidates, named, len(units))
+            matched = verdict.get("question")  # names the refused question in the text; never lets one pass
+            reason = question_form.past_ruling_text(reason, ids, candidates, [words for _, words in units], matched)
             if not reason:
                 return 0
         return refuse(payload, tool, args, question_form.PAST_RULING_RULE if cite else rule, reason)

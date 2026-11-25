@@ -3336,11 +3336,23 @@ LIST_ITEM = re.compile(r"^[ ]{0,3}(?:[-*+]|\d{1,9}[.)])(?:[ \t]|$)")
 
 
 def prose_questions(text):
-    """The reply's own prose lines that hold a sentence ending in `?`, outside fenced code, indented code and code
-    spans. A blockquote line counts. Indented code opens after a blank line or another code line, as in CommonMark;
-    inside a list an indented line is list text, never code."""
+    """The reply's own prose lines that hold a sentence ending in `?` (see prose_question_lines)."""
+    return [body for _, body in prose_question_lines(text)]
+
+
+def relay_questions(text):
+    """`text` cut into one piece per prose question, each with its own Based on lines (question_form.split_questions)."""
+    _hooks_on_path()
+    import question_form
+    return question_form.split_questions(text, [n for n, _ in prose_question_lines(text)])
+
+
+def prose_question_lines(text):
+    """(line number from 0, line) of the reply's own prose lines that hold a sentence ending in `?`, outside fenced
+    code, indented code and code spans. A blockquote line counts. Indented code opens after a blank line or another
+    code line, as in CommonMark; inside a list an indented line is list text, never code."""
     found, fenced, code_ok, in_list = [], False, True, False
-    for line in text.splitlines():
+    for number, line in enumerate(text.splitlines()):
         inner = QUOTE_PREFIX.sub("", line, count=1)
         body = inner.strip()
         if body.startswith("```"):
@@ -3360,7 +3372,7 @@ def prose_questions(text):
         elif not indented:
             in_list = False
         if SENTENCE_QUESTION.search(CODE_SPAN.sub("", body)):
-            found.append(body)
+            found.append((number, body))
     return found
 
 
@@ -3431,8 +3443,8 @@ def past_ruling_problem(asked, cwd, whole=None):
     if question_form.ruling_cite(reason, ids, strict=True) != "cited":
         return cannot_run(asked, "the review cited a record that was not in the list")
     # A listed ruling named in a Based on (ruling) line of the reply passes by code, whatever the judge answered.
-    named = question_form.named_rulings(whole or asked, ids)
-    text = question_form.past_ruling_text(reason, ids, candidates, named, len(prose_questions(asked)))
+    text = question_form.past_ruling_text(reason, ids, candidates, relay_questions(whole or asked),
+                                          verdict.get("question"))  # the number only names the refused question
     if not text:
         return ""
     try:

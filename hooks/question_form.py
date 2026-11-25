@@ -11,7 +11,8 @@ page_item_hit, which filters the ArtifactData writes by collection and url and t
 
     past_rulings(text, repo_root) -> (candidates, unknown)   the decision, debt and step rulings the judge reads
     named_rulings(text, ids)      -> ids named by a `Based on (ruling):` line: the code allow of item 8
-    past_ruling_text(reason, ids, candidates, named, questions) -> the refusal text of a past-ruling verdict, '' to pass
+    split_questions(text, starts) -> one piece of text per question, its Based on lines kept with it
+    past_ruling_text(reason, ids, candidates, questions, matched) -> the refusal text of a past-ruling verdict, '' to pass
     key_overlap(reply, earlier)   -> clashing option keys     lint/report_guard.py rule question-keys
 
 THE FORM. A decision on the page (in `context`), or a chat question with 2+ options (in `question`):
@@ -2602,22 +2603,62 @@ def _decides_sentence(reason, ruling_id, wording) -> str:
     return " ".join(kept)
 
 
-def past_ruling_text(reason, ids, candidates, named, questions) -> str:
-    """The refusal text of a past-ruling verdict, or "" when the question passes. `reason` is the judge's answer, `ids`
-    the listed ids, `named` what named_rulings read, `questions` how many questions the text asks. The question passes
-    when every listed ruling the reason cites is named. The one home of the text, for both paths: the id, its time
-    from the listed line, one sentence of what it decides, and the remedy line to add. It holds no order to the
-    session (report_guard.session_wording finds one) and never the word "settles"."""
-    unnamed = [i for i in cited_rulings(reason, ids) if i not in named]
-    if not unnamed:
+def split_questions(text, starts) -> list:
+    """`text` cut into one piece per question. `starts` are the line numbers (from 0) where a question sits; a line of
+    a Based on label never starts one. A piece runs to the next question's line, so its own Based on lines stay with
+    it. Text before the first question joins the first piece. `[text]` when no line starts a question."""
+    lines = text.splitlines()
+    starts = sorted(i for i in set(starts) if 0 <= i < len(lines) and not BASED_LABEL.match(re.sub(r"^[ \t>]+", "", lines[i])))
+    if not starts:
+        return [text]
+    bounds = [0] + starts[1:] + [len(lines)]
+    return ["\n".join(lines[a:b]) for a, b in zip(bounds, bounds[1:])]
+
+
+_QUESTION_LEAD = re.compile(r"^[\s>*_`-]*(?:input needed[\s*_:]*)?", re.I)
+QUESTION_WORDS = 8  # how many first words name a question in a refusal
+
+
+def _question_label(number, question) -> str:
+    """`question N ("first words")` for the `number`th question (from 1) whose text is `question`."""
+    first = next((line for line in question.splitlines() if _QUESTION_LEAD.sub("", line).strip()), "")
+    words = _QUESTION_LEAD.sub("", first).split()
+    return 'question %d ("%s%s")' % (number, " ".join(words[:QUESTION_WORDS]), "..." if len(words) > QUESTION_WORDS else "")
+
+
+def past_ruling_text(reason, ids, candidates, questions, matched=None) -> str:
+    """The refusal text of a past-ruling verdict, or "" when every question passes. `reason` is the judge's answer, `ids`
+    the listed ids, `questions` the text of each question with its own Based on lines (split_questions, or one unit per
+    question of a box). A question passes when each listed ruling the reason cites is named in its own Based on
+    (ruling) line, so a line in one question never passes its neighbour. `matched` is the question number (from 1) the
+    judge said it matched; code reads it only to name the question, never to pass one. The refusal names the one
+    question it refuses: the only one, else the one `matched` points at when that one is refused, else "one of the
+    questions". The one home of the text, for both paths: the id, its time from the listed line, one sentence of
+    what it decides, and the remedy line to add. It holds no order to the session (report_guard.session_wording
+    finds one) and never the word "settles"."""
+    cited = cited_rulings(reason, ids)
+    questions = list(questions) or [""]
+    unnamed = [[i for i in cited if i not in named_rulings(q, ids)] for q in questions]
+    refused = [k for k, missing in enumerate(unnamed) if missing]
+    if not refused:
         return ""
     lint = install_path("lint")
     if lint not in sys.path:
         sys.path.append(lint)
     from report_guard import session_wording  # the one detector of an order to the session
-    ruling_id = unnamed[0]
+    if len(refused) == 1:
+        which = refused[0]
+    else:
+        which = matched - 1 if isinstance(matched, int) and not isinstance(matched, bool) and matched - 1 in refused else None
+    if len(questions) == 1:
+        target = "this question"
+    elif which is None:
+        target = "one of the questions"
+    else:
+        target = _question_label(which + 1, questions[which])
+    ruling_id = unnamed[refused[0] if which is None else which][0]
     when = "%s (%s)" % (ruling_id, ruling_time(candidates, ruling_id))
-    text = "%s may decide %s; it may be stale." % (when, "one of the questions" if questions > 1 else "this question")
+    text = "%s may decide %s; it may be stale." % (when, target)
     decides = _decides_sentence(reason, ruling_id, session_wording)
     if decides:
         text += " " + decides
