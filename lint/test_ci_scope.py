@@ -819,6 +819,12 @@ class GuardReadsReader(unittest.TestCase):
          'GUARD_READ_FILES.append(os.path.join("janitor", "sweep.py"))\n', 2),
         ("extend call", 'GUARD_READ_FILES = [os.path.join("bin", "sim-lease")]\n'
          'GUARD_READ_FILES.extend([os.path.join("janitor", "sweep.py")])\n', 2),
+        ("extend in a def body", 'GUARD_READ_FILES = [os.path.join("bin", "sim-lease")]\n'
+         'def add_sweep():\n    GUARD_READ_FILES.extend([os.path.join("janitor", "sweep.py")])\n', 2),
+        ("rebind in an if", 'GUARD_READ_FILES = (os.path.join("bin", "sim-lease"),)\n'
+         'if True:\n    GUARD_READ_FILES = (os.path.join("janitor", "sweep.py"),)\n', 2),
+        ("item store", 'GUARD_READ_FILES = [os.path.join("bin", "sim-lease")]\n'
+         'GUARD_READ_FILES[0] = os.path.join("janitor", "sweep.py")\n', 2),
         ("empty tuple", "GUARD_READ_FILES = ()\n", 1),
         ("empty list", "GUARD_READ_FILES = []\n", 1),
         ("no assignment", "OTHER = 1\n", None),
