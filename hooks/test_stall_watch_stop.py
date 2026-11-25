@@ -5069,11 +5069,12 @@ def stop_with_reader(transcript_path, reader, stop_hook_active=False):
 
 @case
 def CI130_pr_merged_by_hand_closes_the_wait_before_the_ask():
-    """CI130. the owner merged the PR by hand, so no merge is in the transcript. Before it asks for a check-in, the
-    hook reads the PR's state through pr_state (an injected reader here). merged or closed closes the wait: no ask
-    prints, and a check-in still set gets the delete line. A failed read prints one unknown: line, and the ask shows
-    at most once in the turn, so a Stop again with stop_hook_active set prints nothing. Control: an open PR still
-    gets the ask"""
+    """CI130. the owner merged the PR by hand, so no merge is in the transcript. A wait with a check-in still set
+    reads the PR's state through pr_state (an injected reader here): merged or closed closes the wait, so no ask
+    prints and the check-in gets the delete line. A wait with no check-in starts no process, so the reader is never
+    called, and the ask prints even when the PR was merged by hand. The owner's pick, and the cost rule (no process
+    at Stop for a wait with no check-in) decides it. A failed read cannot reach that wait. A Stop again with
+    stop_hook_active set prints nothing. Control: an open PR still gets the ask"""
     recs, call_id = cron_set(RET_A)
     bare = transcript([ready()])
     checked = transcript([ready()] + recs)
@@ -5091,17 +5092,21 @@ def CI130_pr_merged_by_hand_closes_the_wait_before_the_ask():
 
     problems = []
     for state in ("merged", "closed"):
+        before = len(calls)
         out = stop_with_reader(bare, reader(state))
-        problems += expect(out.strip() == "", f"{state} PR with no check-in: the Stop printed, want no ask: {out[:200]!r}")
+        problems += ["%s PR with no check-in: %s" % (state, p) for p in block_problems(out, pr=CI_PR)]
+        problems += expect(len(calls) == before,
+                           f"{state} PR with no check-in: the PR state was read, which the cost rule forbids: "
+                           f"{calls[before:]!r}")
         out = stop_with_reader(checked, reader(state))
         problems += ["%s PR with a check-in set: %s" % (state, p)
                      for p in cancel_problems(out, CI_PR, ids=[RET_A], tool="CronCreate", not_named=[call_id],
                                               says=["delete"])]
-    problems += expect(CI_PR in calls, f"the PR state was not read before the ask: reads {calls!r}")
+    problems += expect(CI_PR in calls, f"the PR state of a wait with a check-in was not read: reads {calls!r}")
+    before = len(calls)
     out = stop_with_reader(bare, failing)
-    unknown = [line for line in out.splitlines() if "unknown:" in line]
-    problems += expect(len(unknown) == 1, f"a failed read, want one unknown: line: {out[:200]!r}")
-    problems += expect(out.count('"decision"') <= 1, f"a failed read asked more than once in the turn: {out[:200]!r}")
+    problems += ["failed read, no check-in: %s" % p for p in block_problems(out, pr=CI_PR)]
+    problems += expect(len(calls) == before, f"a failed read reached a wait with no check-in: {calls[before:]!r}")
     again = stop_with_reader(bare, failing, stop_hook_active=True)
     problems += expect(again.strip() == "", f"a failed read, Stop again in the turn: want nothing: {again[:200]!r}")
     return problems + ["control, open PR: " + p for p in block_problems(stop_with_reader(bare, reader("open")),
