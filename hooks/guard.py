@@ -1600,7 +1600,9 @@ def handoff_unread_fields(path, payload):
             "lines": reread_check.READ_MAX_LINES, "cap": reread_check.READ_CAP_TOKENS}
 
 # The remedy is reread_check's: its one text serves this refusal and the Stop block. One `%s`: the handoff path.
-COMPACTION_AUDIT_REASON = "Rule (compaction audit): " + reread_check.AUDIT_OWED + reread_check.AUDIT_REMEDY
+# The cite is a literal here, since the refusal-cite scan reads literals; reread_check.AUDIT_CITE is its twin.
+COMPACTION_AUDIT_REASON = "Rule (compaction audit): " + reread_check.AUDIT_OWED + reread_check.AUDIT_REMEDY + (
+    " (decision precompact-handoff, item 16)")
 
 HANDOFF_SECTIONS_REASON = (
     "Rule (handoff-sections): this write would leave the session handoff without a section the "
