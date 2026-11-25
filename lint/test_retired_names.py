@@ -10,8 +10,8 @@ Each is distinctive, so a whole-word match in a tracked file is the old name com
 file, GLOSSARY.md, whose "Not" cells list them, and the generated docs/records.md are the exceptions. A HISTORY
 file may keep its name only on a line whose comment holds the opt-out marker. A retired word in plain
 prose ("the test will pass") is a reviewer's call, not this test's. The widened glossary check will replace this list.
-The whole-tree scan (RepoRetiredNamesTests) and the real GLOSSARY.md cases (RepoGlossaryTests) run here too, so the
-ready check runs what the glossary fixture suite used to run.
+RepoRetiredNamesTests scans each tracked text file for the names in RETIRED_PATTERN, so a retired name cannot return
+in any file. RepoGlossaryTests checks the real GLOSSARY.md. The ready check runs both, from this file.
 """
 import os
 import re
