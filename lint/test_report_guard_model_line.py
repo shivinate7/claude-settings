@@ -181,6 +181,27 @@ class ModelListHomeTests(unittest.TestCase):
         self.assertEqual(set(WORD.findall(check_agent_models.MODEL_NAME.pattern)), set(home),
                          "lint/check_agent_models.py MODEL_NAME names other model words than hooks/shared_names.py holds")
 
+    def test_fable_is_in_the_one_model_list(self):
+        # Read without self.home(), so a home that does not exist yet fails on fable's absence, not on the missing name.
+        import shared_names
+        home = tuple(getattr(shared_names, "MODEL_FAMILIES", ()))
+        self.assertIn("fable", home, "fable is not in the one model list, hooks/shared_names.py MODEL_FAMILIES")
+
+    def test_fable_is_matched_by_the_agent_self_model_scan(self):
+        import check_agent_models
+        self.assertIsNotNone(check_agent_models.MODEL_NAME.search("fable"),
+                             "lint/check_agent_models.py MODEL_NAME does not match fable")
+
+    def test_fable_ranks_above_sonnet_beside_opus(self):
+        # Sonnet is the ceiling for an agent's own role, so a model above it ranks above it. Fable sits beside opus.
+        import guard
+        rank = tuple(guard.ROLE_MODEL_RANK)
+        self.assertIn("fable", rank, "hooks/guard.py ROLE_MODEL_RANK does not hold fable: %r" % (rank,))
+        self.assertGreater(rank.index("fable"), rank.index("sonnet"),
+                           "fable does not rank above sonnet in ROLE_MODEL_RANK: %r" % (rank,))
+        self.assertEqual(abs(rank.index("fable") - rank.index("opus")), 1,
+                         "fable does not sit beside opus in ROLE_MODEL_RANK: %r" % (rank,))
+
     def test_no_file_writes_the_model_list_out_again(self):
         # A literal list in any other reader is a second home. The one assignment to read is in shared_names.py.
         copies = []
