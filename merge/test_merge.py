@@ -8238,6 +8238,45 @@ class ConfigFile(Env):
         rc, out = self.run_merge("7")
         self.assertIn("main is not the default branch (trunk)", out)
 
+UNKNOWN_REQUIRED_CHECKS = "second-proof"  # a requiredChecks value merge.PINNED_STRINGS does not hold: the running tool refuses a stamp that sets it
+
+class HeadConfigOnConfirm(Env):
+    """`merge <pr> --confirm` on a ready pull request, with a green rollup and no lane lint: the head's .github/stamp.json is judged with the running
+    tool's parser when the diff against the base touches it (merge.head_config_refusal), as the ready path judges it. A refused head stamp stops the
+    merge before anything is claimed or merged. A head that leaves the stamp alone merges as before."""
+
+    def lane_writes_config(self, text):
+        """The lane's head gains one commit that sets .github/stamp.json to `text`. -> the head."""
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin")
+        sh(o, "git", "checkout", "-q", "-B", "feat", "origin/feat")
+        put(os.path.join(o, ".github/stamp.json"), text)
+        sh(o, "git", "add", "-A")
+        sh(o, "git", "commit", "-qm", "lane: the stamp")
+        sh(o, "git", "push", "-q", "origin", "feat")
+        return self.head("feat")
+
+    def test_a_ready_pull_request_whose_head_config_the_running_tool_refuses_is_not_merged(self):
+        self.assertNotIn(UNKNOWN_REQUIRED_CHECKS, merge.PINNED_STRINGS, "premise: the running tool takes %r, so the head stamp is one it does not refuse" % UNKNOWN_REQUIRED_CHECKS)
+        head = self.lane_writes_config(json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], requiredChecks=UNKNOWN_REQUIRED_CHECKS))) + "\n")
+        sh(self.other, "git", "fetch", "-q", "origin")
+        names = sh(self.other, "git", "diff", "--name-only", "origin/main...%s" % head).split()
+        self.assertIn(".github/stamp.json", names, "precondition: the PR's diff against origin/main does not touch the stamp, so the case probes nothing")
+        self.assertFalse(self.host.draft, "precondition: the PR is a draft, so the confirm takes the draft step, not the ready path under test")
+        self.assertEqual(self.host.state, "green", "precondition: the PR's rollup is not green, so the refusal would not be the only thing that stops the merge")
+        self.assertEqual(self.host.posted, [], "precondition: a lane lint posted a comment, so the PR had a lint of its own")
+        rc, out, err = self.run_args("7", "--confirm")
+        self.assertNotEqual(rc, 0, "the confirm of a ready PR passed a head stamp the running tool refuses: " + out + err)
+        self.assertFalse(getattr(self.host, "merged", False), "the confirm merged a ready PR whose head stamp the running tool refuses: " + out + err)
+        self.assertIn("merge.requiredChecks is not valid: '%s'" % UNKNOWN_REQUIRED_CHECKS, out + err,
+                      "the refusal does not quote the parser's reason for the head stamp: " + out + err)
+
+    def test_a_ready_pull_request_that_leaves_the_config_alone_merges(self):  # the control: passes on the old code too
+        self.assertEqual(self.host.state, "green", "precondition: the PR's rollup is not green")
+        rc, out, err = self.run_args("7", "--confirm")
+        self.assertEqual(rc, 0, "a ready PR that leaves the stamp alone was refused: " + out + err)
+        self.assertTrue(getattr(self.host, "merged", False), "a ready PR that leaves the stamp alone did not merge: " + out + err)
+
 class ReadyChecksRun(unittest.TestCase):
     """The draft step's ready checks run through ci-job with --pinned: a child's pin names a claude-settings commit, so the
     check runs that commit's harness, never the local copy's. The argv keeps its step names and base as before."""
