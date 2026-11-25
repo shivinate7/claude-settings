@@ -374,6 +374,7 @@ def unvetted(payload, tool, args, rule, why, units):
 
 
 FORM_ITEM_REASON = re.compile(r"\W*(?:item\s*)?[1-7]\b", re.I)
+PAST_ITEM_REASON = re.compile(r"\W*(?:item\s*)?8\b", re.I)
 
 
 def form_refusal(verdict, reason) -> bool:
@@ -383,6 +384,15 @@ def form_refusal(verdict, reason) -> bool:
     if isinstance(item, int) and not isinstance(item, bool) and 1 <= item <= 8:
         return item <= 7
     return bool(FORM_ITEM_REASON.match(reason))
+
+
+def past_ruling_item(verdict, reason) -> bool:
+    """Whether the judge's refusal is of the past-ruling item (8). The verdict's own `item` field decides when it is a
+    whole number from 1 to 8; without one, the reason's opener does (PAST_ITEM_REASON)."""
+    item = verdict.get("item")
+    if isinstance(item, int) and not isinstance(item, bool) and 1 <= item <= 8:
+        return item == 8
+    return bool(PAST_ITEM_REASON.match(reason))
 
 
 def past_ruling_context(payload, units):
@@ -468,6 +478,8 @@ def main():
                                                     "\n".join(texts))
             if not reason:
                 return 0
+        if units and not past and past_ruling_item(verdict, reason):
+            reason = question_form.NO_RULING_NAMED_TEXT  # an item-8 answer that names no listed ruling: none of its words go in
         return refuse(payload, tool, args, question_form.PAST_RULING_RULE if past else rule, reason)
     return 0
 
