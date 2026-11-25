@@ -986,11 +986,32 @@ CITE_VERBS = ("read", "test")  # the words that open a cite, never a name
 CITE_TOKEN = re.compile(r"([^\s,;]+)([\s,;]*)")  # a word and the separator after it
 
 
+def leading_names(tokens):
+    """({path index: [names]}, {token indices of those names and the `and` / `in` words around them}) for each name that sits before its
+    path: `NAME in PATH`, or `NAME and NAME in PATH`. A name here is a symbol word that is no cite verb, `in` or `and`."""
+    def is_name(word):
+        return bool(SYMBOL_WORD.match(word)) and word not in CITE_VERBS + ("in", "and") and not FILE_WORD.search(word)
+    led, covered = {}, set()
+    for start in range(len(tokens)):
+        if start in covered or not is_name(tokens[start][0]):
+            continue
+        names, at = [start], start
+        while at + 2 < len(tokens) and tokens[at + 1][0] == "and" and is_name(tokens[at + 2][0]):
+            at += 2
+            names.append(at)
+        path = at + 2
+        if path < len(tokens) and tokens[at + 1][0] == "in" and SOURCE.match(tokens[path][0]) and not is_name(tokens[path][0]):
+            led[path] = [SYMBOL_WORD.match(tokens[n][0]).group(1) for n in names]
+            covered.update(range(start, path))
+    return led, covered
+
+
 def cite_targets(kind, rest):
     """[(path, word, symbols)] for each file a `read` or `test` backing points at, in the order the cite names them. `word` is the path
     word as written (it may carry a `:N-M` line range, which belongs to that path); `symbols` is the list of names a `path::name` gives, or
     the names that follow the path (`path ALPHA, beta`; a dotted `Class.method` is one name), else empty. A name followed by a space and
-    more lower-case words is prose, not a symbol. Empty for any other kind."""
+    more lower-case words is prose, not a symbol. A name before its path (`NAME in PATH`, `NAME and NAME in PATH`) is a symbol of that
+    path, unless an earlier path of the cite already owns it. Empty for any other kind."""
     if kind == "test":
         node = TEST_CITE.match(rest)
         return [(node.group(1), rest, [rest.rsplit("::", 1)[-1]])] if node else []
@@ -998,11 +1019,17 @@ def cite_targets(kind, rest):
         return []
     raw = [(word, sep) for word, sep in CITE_TOKEN.findall(rest) if word.rstrip(".")]
     tokens = [(word.rstrip("."), sep) for word, sep in raw]
+    leading, leading_at = leading_names(tokens)
     found, collecting = [], False
     for index, (word, sep) in enumerate(tokens):
+        if index in leading_at:
+            collecting = False  # a name, `and` or `in` that leads a later path: the path takes the name
+            continue
         if SOURCE.match(word) and not (collecting and SYMBOL_WORD.match(word) and not FILE_WORD.search(word)):
             named = re.findall(r"::(\w+)", word)
-            found.append((re.split(r"::?\d*", word, maxsplit=1)[0], word, named[-1:]))
+            owned = [name for _, _, symbols in found for name in symbols]
+            held = [name for name in leading.get(index, []) if name not in owned]
+            found.append((re.split(r"::?\d*", word, maxsplit=1)[0], word, named[-1:] or held))
             collecting = not named
             continue
         symbol = SYMBOL_WORD.match(word)
