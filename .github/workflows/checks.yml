@@ -563,8 +563,9 @@ jobs:
         if: ${{ !cancelled() && (needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_any == 'true') }}
         run: python3 lint/check_cost_pins.py
 
-      # A static read of the mutant table: each anchor of hooks/mutate_guard.py sits once where its entry says. It reads every anchor in one
-      # pass, in about a second, and names each bad one. The mutation run's own pre-check covers ambiguity only for guard and audit targets.
+      # A static read of the mutant tables of hooks/mutate_guard.py and janitor/mutate_sweep.py: each anchor sits once where its entry says.
+      # It reads every anchor in one pass, in about a second, and names each bad one. The mutation run's own pre-check covers ambiguity only
+      # for guard and audit targets.
       - name: Mutant anchor census
         if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}
         run: python3 lint/check_mutant_anchors.py
