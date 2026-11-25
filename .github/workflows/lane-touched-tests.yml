@@ -2,8 +2,7 @@ name: lane-touched-tests
 
 # A lane PR is a draft, and checks.yml skips every job on a draft (decision draft-until-reviewed), so a test that
 # fails on Windows or macOS alone first shows in the batch. This workflow runs only the test files a draft touches,
-# on both systems (item 400 a, owner, 2026-11-08 06:08 CST; the macOS leg is back for these runs only, owner, 2026-11-24
-# 22:09 CST). Every job skips on a ready PR. It is not in checks.yml,
+# on Windows and macOS. Every job skips on a ready PR. It is not in checks.yml,
 # not in all-jobs-passed and not a required check. The selector is .github/scripts/touched-tests.py: it names each
 # touched test it does not run, and exits non-zero on a diff it cannot read, and on an unguarded POSIX-only call that a touched
 # heavy suite adds.
@@ -76,7 +75,7 @@ jobs:
 
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
         with:
-          python-version: "3.11"
+          python-version: "3.15"
 
       - name: Select the touched tests
         id: select
@@ -126,7 +125,7 @@ jobs:
 
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
         with:
-          python-version: "3.11"
+          python-version: "3.15"
 
       # The map skill's tests load typescript from this checkout's node_modules, as mod-tests.sh does.
       - name: Install the map skill's packages
@@ -180,7 +179,7 @@ jobs:
           done <<< "$list"
           exit "$failed"
 
-      # The macOS twin of the step above: the same body, with the macOS command map. Each leg's step reads its own map,
+      # The macOS twin of the step above: the same body without the PowerShell arm, with the macOS command map. Each leg's step reads its own map,
       # and a step gated to the other system never runs.
       - name: Run the touched macOS tests
         if: ${{ runner.os == 'macOS' }}
@@ -210,8 +209,6 @@ jobs:
               skills/plain-english-map/tests/*.test.mjs) pick_cmd "$2" && (cd skills/plain-english-map/tests && "${cmd[@]}" "${1##*/}") ;;
               *.test.mjs|*.test.js|*/test_*.mjs) pick_cmd "$2" && "${cmd[@]}" "$1" ;;
               test_*.mjs) pick_cmd "$2" && "${cmd[@]}" "$1" ;;
-              # 77 is a skip: on Windows the PowerShell step below runs it.
-              *.test.ps1) if [ "$RUNNER_OS" = Windows ]; then return 77; fi; echo "no PowerShell step on $RUNNER_OS"; return 1 ;;
               *.py) pick_cmd "$2" && "${cmd[@]}" "$1" ;;
               *.sh) pick_cmd "$2" && "${cmd[@]}" "$1" ;;
               *) echo "no runner for $1"; return 1 ;;

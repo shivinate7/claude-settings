@@ -6,8 +6,8 @@
   - `The old wording was: allow it.` is overruled text. Flagged. A true flag.
   - `The old limit was: 3 per run.` is history. Flagged. A true flag.
 - **Where.** `history_problems` in `lint/hook_catalog.py`, its `was:` test. Its pinned case is `test_c14_limit_old_before_was_colon_flags_as_pinned` in `lint/test_hook_catalog.py`, line 1572.
-- **Decision.** `cull-rules` (no history in the tree). Its home is rule `speak-rewrite-superseded-in-place`.
-- **Frequency.** Unmeasured. The old note called it rare and harmless, with a review date of 2026-11-20. That date has passed.
+- **Decision.** `cull-rules`, ruling 2026-10-17: "No history in the tree." Its home is rule `speak-rewrite-superseded-in-place`; `grep -c 'rule:speak-rewrite-superseded-in-place' CLAUDE.md` prints 1.
+- **Frequency.** Unmeasured.
 - **Retire.** One of two ends:
   - A rule that separates the forms and still flags both true positives. None exists on the text alone. A noun list passes `The old flag was: allow it.`, which is history, because `flag` also names the description `The old flag was: on.`. When a rule separates the forms, the pinned case expects the pass, red first on the current code.
   - The writer rewords the description. This is the working remedy today.
