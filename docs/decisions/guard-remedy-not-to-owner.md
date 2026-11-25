@@ -47,6 +47,17 @@ Text: `MODELS_REASON`, with two detail forms in its brackets.
 - For "no model named for <role>": name that role's model in the Done item.
 - For "'<role> <model>' matches no <role> spawn, which ran <models>": name a model that the spawn ran on.
 
+What the check reads:
+
+- The wrong-name check reads the spawns since the session's last report, not only this turn's (`records_since_report`, `lint/report_guard.py`). With no earlier report, that is the whole transcript. The "no model named" check reads this turn's spawns (`spawned` in `done_models_problem`).
+- A report the Stop hook refused does not cut the window (`_refused`, `is_stop_feedback` in `lint/_transcript.py`).
+- After a wrong-name refusal, the correction is judged for the wrong name alone, against the same window (`WRONG_NAME_MARK`, `NAMES_MARKER`, `rewrite_problems`). After "no model named", no marker is written, as on main, so the correction is not judged for models.
+- A `<plugin>:` prefix on a role is dropped first, so `cs-build:builder` counts as a builder (`spawn_models`).
+
+Mistake it stops: a report that names a model no agent ran, or names none, after earlier reports already named that work. Harm: the owner reads a wrong model for work the owner pays for.
+
+Limit: a Done role with no spawn since the last report still passes.
+
 ### Unstarted guard (landed turns)
 
 Text: `UNSTARTED_REASON`. It applies when the turn ran a builder.
