@@ -4,7 +4,7 @@
 merge/merge.py (Host.base_state) loads this file (`load_clear_rule`) and calls `judge`; actions/ci-alarm/alarm.sh calls this file as a command (`--judge`), which calls `judge` too. One rule, two callers.
 
 The judgment of main (`judge`, `judge_main`, `red_jobs`, `red_job_names`, `breaking_run`, `blames`): from one page of main's runs and the jobs of those it reads, which runs decide, which are red
-and which job names are red. merge.py reads the page and words the verdict; this file holds the selection. It fetches nothing: the caller passes `jobs_of` and `text_of`, each None on a failed read.
+and which job names are red. merge.py reads the page and words the verdict; this file holds the selection. `judge` fetches nothing: the caller passes `jobs_of` and `text_of`, each None on a failed read (merge.py reads through its API client, the `--judge` command through `gh_jobs` and `gh_text`).
 
 The rule. N clears R when every job of R that "may run" in N has conclusion `success` in every N entry of that name. A job of R
 is left out, and N need not have run it, when both hold: it is not red in R, and its job-level `if:` has a top-level `&&`
