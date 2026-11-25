@@ -1,17 +1,18 @@
 #!/usr/bin/env python3
-"""Fails when a change adds an item to a crowded list that is not one item per line.
+"""Fails when a change adds an item to a crowded list that has a line of more than 8 items.
 
     python3 lint/check_list_lines.py --base origin/main [--root DIR] [--exclude PREFIX ...]
     python3 lint/check_list_lines.py --fix PATH
 
 Rule: decision lists-one-line-per-item. A list that holds more than 8 items is crowded. A crowded list that the change
-adds an item to holds one item per line. Where order cannot matter it is also sorted: Python import names, Python set
+adds an item to has no line of more than 8 items (a list wrapped at 8 or fewer a line passes, whatever its length). Where
+order cannot matter it is also sorted: Python import names, Python set
 literals and the alternatives of one shell `case` arm. An ordered list (a Python list or tuple, dict keys, a shell
 array) is never sorted, by the check or by --fix. Only a list the diff against the merge base adds an item to is judged:
 some item of the head list starts on an added line, and the list holds more items than the base list it grew from (the
 base list that shares the most items with it). An edit of an item adds none. A shell `NAME+=(...)` on an added line adds
 to the last `NAME=(...)` before it. An old crowded list the change does not touch never fails, and a diff that only
-removes, edits or reflows items never fails.
+removes, edits or reflows items never fails. A list with no base list that shares half its items is new, and passes.
 A keep marker is a comment on the line above the list (above the `case` line for a shell arm):
 `list-lines-ok: <reason>`. It opts the list out. A marker with no reason fails, and so does a marker on a list that is
 not crowded.
@@ -23,7 +24,7 @@ a multi-line array is read alike. An array with a subscript (`NAME[0]=(`) is not
 lint/code_check_standard.json that the diff adds a line to prints one `not read: <language>` line and passes.
 Python `import a, b` (no `from`) and f-string parts are not read.
 
---fix reflows each crowded list of PATH that is not one item per line, in place: one item per line, a trailing comma,
+--fix reflows each crowded list of PATH that has a line of more than 8 items (or is unsorted where order cannot matter), in place: one item per line, a trailing comma,
 and the Python AST unchanged (sorted only for set literals and import names; it checks the AST before it writes). A list
 with a comment inside it is left alone and named. A shell arm comes out one alternative per line, sorted, each but the
 last ending in `|\\`, the last ending in `)`, and the action on the next line. A shell array comes out one element per line, in its order.
@@ -81,14 +82,15 @@ class Lst:
         return [t for t, _ in self.items]
 
     def per_line(self):
-        """(line, count) of the first line that holds more than one item, or None."""
+        """(line, count) of the first line that holds more than LIMIT items, or None."""
         counts = {}
         for _, line in self.items:
             counts[line] = counts.get(line, 0) + 1
-        return next(((line, n) for line, n in sorted(counts.items()) if n > 1), None)
+        return next(((line, n) for line, n in sorted(counts.items()) if crowded(n)), None)
 
     def faulty(self):
-        """The fault of a crowded list: 'lines' (two or more items on one line), 'order' (one per line, not sorted), or ''."""
+        """The fault of a crowded list: 'lines' (a line holds more than LIMIT items), 'order' (not sorted), or ''. A list
+        wrapped at LIMIT items a line or fewer has no 'lines' fault, whatever its length."""
         if not crowded(len(self.items)):
             return ""
         if self.per_line():
@@ -325,8 +327,8 @@ def failure(path, line, what):
 
 def base_items_of(lst, base_lists):
     """The item texts of the base list that `lst` grew from: the base list that shares the most items with it, provided
-    it shares at least half of the smaller of the two lists; else none (the list is new)."""
-    mine, best, best_key = Counter(lst.texts()), [], (0, 0)
+    it shares at least half of the smaller of the two lists; else None (the list is new)."""
+    mine, best, best_key = Counter(lst.texts()), None, (0, 0)
     for other in base_lists:
         theirs = Counter(other.texts())
         shared = sum((mine & theirs).values())
@@ -362,8 +364,10 @@ def judge(path, lang, head_text, base_text, added):
             base_lists = []  # an unreadable base holds no list: every item reads as new
     out = []
     for lst in cands:
-        if id(lst) not in grown and len(lst.items) <= len(base_items_of(lst, base_lists)):
-            continue
+        if id(lst) not in grown:
+            grew_from = base_items_of(lst, base_lists)
+            if grew_from is None or len(lst.items) <= len(grew_from):  # a new list is no add to an old one
+                continue
         is_crowded = crowded(len(lst.items))
         reason = head.marker(lst)
         if reason is not None:
