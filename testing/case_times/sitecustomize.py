@@ -5,22 +5,25 @@ and every process it starts is covered. Unarmed, this file only runs the next si
 
 Armed (CASE_TIMES=1 and RUNNER_TEMP set), it latches the job file in case_times.arm() and puts one import hook
 on sys.meta_path. When unittest.result first loads, the hook removes CASE_TIMES from the env, so the children a
-suite starts stay unarmed, and it patches TestResult so each test method is recorded. A process that never
-imports unittest records nothing and writes no file.
+suite starts stay unarmed, and it patches TestResult and TestCase's fixture calls so each test method is recorded.
+When unittest.async_case loads (only when a case uses IsolatedAsyncioTestCase), it patches that class's fixture
+calls. A process that never imports unittest records nothing and writes no file.
 """
 import os
 import sys
 
 HERE = os.path.dirname(os.path.realpath(__file__))
 OWN = os.path.realpath(__file__)
-TARGET = "unittest.result"  # unittest/__init__ loads it on every `import unittest`, so the hook fires there
+# unittest/__init__ loads unittest.result on every `import unittest`. unittest.async_case loads only when a case uses
+# IsolatedAsyncioTestCase, so the second target never imports asyncio.
+TARGETS = ("unittest.result", "unittest.async_case")
 
 
 class _UnittestHook(object):
-    """A meta path finder that lets the real loader run, then patches TestResult and drops CASE_TIMES."""
+    """A meta path finder that lets the real loader run, then patches the unittest module it loaded."""
 
     def find_spec(self, fullname, path=None, target=None):
-        if fullname != TARGET:
+        if fullname not in TARGETS:
             return None
         import importlib.machinery
         spec = importlib.machinery.PathFinder.find_spec(fullname, path)
@@ -30,10 +33,16 @@ class _UnittestHook(object):
 
         def exec_module(module):
             load(module)
-            os.environ.pop("CASE_TIMES", None)
             import case_times
-            case_times.patch_result(module.TestResult)
-            case_times.patch_case()
+            if fullname == "unittest.result":
+                os.environ.pop("CASE_TIMES", None)  # the children this process starts stay unarmed
+                case_times.patch_result(module.TestResult)
+                case_times.patch_case()  # guards its own reads: a Python without TestCase._callSetUp runs unwrapped
+                return
+            try:  # a broken async patch must never break the import: the module loads unpatched
+                case_times.patch_async_case(module)
+            except Exception as error:
+                sys.stderr.write("case_times: not armed for %s: %s\n" % (fullname, error))
 
         spec.loader.exec_module = exec_module
         return spec

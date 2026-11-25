@@ -7,14 +7,16 @@ writes no file.
 
 A row has the keys suite, group, case, s, fixture_s and outcome (pass, fail or skip). `s` is the case's own
 seconds and `fixture_s` the seconds its fixtures took, apart from it. unittest rows have group equal to suite:
-a test method is one row, timed from its start to its stop, its setUp and tearDown seconds are its fixture_s,
-and `s` is the rest. A test method's subTests are one row.
+a test method is one row, timed from its start to its stop. Its setUp and tearDown seconds are its fixture_s, and for
+an IsolatedAsyncioTestCase so are its asyncSetUp and asyncTearDown seconds. `s` is the rest. A test method's subTests
+are one row.
 
 The clock is time.perf_counter, read through the time module at each call, so a test can patch it.
 
 The suite name is the file's path relative to the cwd latched at arm time, so a test that removes its cwd or chdirs
 without restoring it changes neither the name nor the run.
 """
+__unittest = True  # unittest hides frames of modules that set this: an armed setUp error then reads as an unarmed one
 import atexit
 import json
 import os
@@ -114,12 +116,16 @@ def _tally(result):
 _OPEN = []  # a frame per case started and not yet stopped in this process, innermost last
 
 
-def _close(test):
-    """Pop the open frame of this test. None when no frame holds it."""
+def _close(test, result):
+    """Pop the open frame of this test on this result. The frames above it were opened after it and never stopped:
+    they are dropped and returned with it. (None, []) when no frame holds the test on the result."""
     for index in range(len(_OPEN) - 1, -1, -1):
-        if _OPEN[index]["test"] is test:
-            return _OPEN.pop(index)
-    return None
+        frame = _OPEN[index]
+        if frame["test"] is test and frame["result"] is result:
+            left_open = _OPEN[index + 1:]
+            del _OPEN[index:]
+            return frame, left_open
+    return None, []
 
 
 def patch_result(cls):
@@ -127,7 +133,8 @@ def patch_result(cls):
     reads the result's own lists: a failure, an error or an unexpected success is fail, a skip is skip.
 
     A case that starts while another case is open in this process, on its own result or the same one, keeps no
-    row: its time is inside the outer case's row, which holds the whole span."""
+    row: its time is inside the outer case's row, which holds the whole span. A frame left open by a case that
+    never stopped is dropped when the case it sits under stops, and one stderr line names it."""
     if getattr(cls, "_case_times_patched", False):
         return
     real_start, real_stop = cls.startTest, cls.stopTest
@@ -138,8 +145,11 @@ def patch_result(cls):
         _OPEN.append(frame)
 
     def stopTest(self, test):
-        frame = _close(test)
+        frame, left_open = _close(test, self)
         try:
+            if left_open:
+                sys.stderr.write("case_times: left open and dropped, no row kept: %s\n"
+                                 % ", ".join(_case_of(opened["test"]) for opened in left_open))
             if frame is not None and not _OPEN:  # nested inside an open case: the outer row holds this time
                 took = time.perf_counter() - frame["t0"]
                 failed, skipped = _tally(frame["result"])
@@ -164,29 +174,42 @@ def _add_fixture(test, seconds):
             return
 
 
-def patch_case():
-    """Wrap TestCase's setUp and tearDown calls so their seconds go to fixture_s, not s. The wrapper only times the
-    call: its result and any exception pass through unchanged."""
-    import unittest.case
-    cls = unittest.case.TestCase
-    if getattr(cls, "_case_times_fixture_patched", False):
+def _timed(real):
+    """Wrap one fixture call so its seconds go to the test's fixture_s, not s. The wrapper only times the call: its
+    result and any exception pass through unchanged."""
+    def call(self):
+        t0 = time.perf_counter()
+        try:
+            return real(self)
+        finally:
+            _add_fixture(self, time.perf_counter() - t0)
+    return call
+
+
+def _wrap_fixture_calls(cls):
+    """Wrap the fixture calls cls defines itself, once per class. A class that only inherits a call is wrapped where
+    its base defines it. A Python that renamed one of them gets one stderr line, and the class runs unwrapped."""
+    if cls.__dict__.get("_case_times_fixture_patched"):
         return
-    real_setup, real_teardown = cls._callSetUp, cls._callTearDown
-
-    def _callSetUp(self):
-        t0 = time.perf_counter()
-        try:
-            return real_setup(self)
-        finally:
-            _add_fixture(self, time.perf_counter() - t0)
-
-    def _callTearDown(self):
-        t0 = time.perf_counter()
-        try:
-            return real_teardown(self)
-        finally:
-            _add_fixture(self, time.perf_counter() - t0)
-
-    cls._callSetUp = _callSetUp
-    cls._callTearDown = _callTearDown
     cls._case_times_fixture_patched = True
+    names = [name for name in ("_callSetUp", "_callTearDown") if name in cls.__dict__]
+    try:
+        reals = [getattr(cls, name) for name in names]  # both are read before either is set
+    except AttributeError as error:
+        sys.stderr.write("case_times: fixture time not kept for %s: %s\n" % (cls.__name__, error))
+        return
+    for name, real in zip(names, reals):
+        setattr(cls, name, _timed(real))
+
+
+def patch_case():
+    """Wrap TestCase's setUp and tearDown calls so their seconds go to fixture_s, not s. Called when unittest.result
+    loads."""
+    import unittest.case
+    _wrap_fixture_calls(unittest.case.TestCase)
+
+
+def patch_async_case(module):
+    """Wrap IsolatedAsyncioTestCase's own fixture calls, which also run asyncSetUp and asyncTearDown. Called when
+    unittest.async_case loads, so the arm never imports asyncio."""
+    _wrap_fixture_calls(module.IsolatedAsyncioTestCase)
