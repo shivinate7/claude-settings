@@ -12,7 +12,7 @@ Consultant's pick, not owner-typed, no time recorded; the owner may reverse it: 
 
 ## Reading of the ruling
 
-The owner's words (21:19 CST Nov 24 2026) are "a ready PR runs only Windows-marked tests". This cut applies them to the guard and merge shards, where the measured time is. The six flag-gated Windows jobs keep their full suite when a PR touches the files they test. That narrower reading is the consultant's pick (23:35 CST Nov 24 2026, undoable). It departs from the plain words. The owner has not confirmed it.
+The owner's words (21:19 CST Nov 24 2026) are "a ready PR runs only Windows-marked tests". This cut applies them to the guard and merge shards, where the measured time is. Five of the six flag-gated Windows jobs keep their full suite when a PR touches the files they test. In the sixth, `checks-windows-merge`, only its two launcher steps run whole; its git-half suite runs as the slice. That narrower reading is the consultant's pick (23:35 CST Nov 24 2026, undoable). It departs from the plain words. The owner has not confirmed it.
 
 ## What runs now
 
@@ -45,7 +45,7 @@ A Windows-only break in an unmarked guard or merge test now reaches main. A read
 
 ## Departs from
 
-- The plain words of the 21:19 CST Nov 24 ruling. Six flag-gated Windows jobs still run whole on a ready PR that touches their files.
+- The plain words of the 21:19 CST Nov 24 ruling. Five flag-gated Windows jobs still run whole on a ready PR that touches their files. The merge job's two launcher steps also run whole.
 - Decision `ci-cut-in-steps`, rule R4a, as it stood on main: Windows shards on a pull request ran under their scope flag. Now the 13 shard jobs do not run on a pull request.
 - The full Windows shards on a ready pull request, from roadmap step R62. Its record lives on the roadmap branch, not on main.
 
