@@ -12,6 +12,8 @@ the hook prints one JSON object on stdout and exits 0:
 - additionalContext holds the standing rules: a scope line that follows `agent_type` from the hook
   input (builder, test-author, reviewer, Explore, record-writer, designer, design-reviewer, refuter), the general scope
   line for any other or missing type, and fewer than 20 lines in all. Each scope line is pinned in full.
+  The standing git line is pinned in full for every type: it names stash, checkout and restore, never reset
+  (decision `agent-worktree-discard-is-noted`: an agent may undo commits in its own worktree).
 - The push line, the commit-trailer line and the record-path line appear for builder,
   test-author, record-writer, designer and any other type; never for reviewer, Explore, Plan,
   claude-code-guide, design-reviewer or refuter, which only read.
@@ -37,6 +39,7 @@ Override the module under test with the env var AGENT_BRIEF_UNDER_TEST.
 import json
 import os
 import importlib.util
+import re
 import shutil
 import subprocess
 import sys
@@ -75,7 +78,7 @@ SCOPE_LINE = {
 GENERAL_LINE = ("- Scope: do only what your brief names. A builder never edits tests; "
                 "a test-author never edits product code; a reviewer and Explore never edit; "
                 "a record-writer edits Markdown only.")
-STASH_LINE = "- Never run git stash, git reset, git checkout <path>, or git restore."
+STASH_LINE = "- Never run git stash, git checkout <path>, or git restore."
 STAGED_KEY = "git diff --cached --stat"  # the stable fragment of the staged-diff line; the wording may change
 # Non-scope lines in hook order, after the scope line. Builder, test-author, record-writer, designer and any
 # unknown type commit and push; reviewer, Explore, Plan, claude-code-guide and design-reviewer do not, so they
@@ -308,8 +311,8 @@ def dispatch(case):
 
 # RULES: each standing rule is in the context. The rule lines are the same for every type.
 RULES = [
-    ("rule: no git stash, git reset, git checkout <path>, or git restore",
-     ("Never run", "git stash", "git reset", "git checkout <path>", "git restore")),
+    ("rule: no git stash, git checkout <path>, or git restore",
+     ("Never run", "git stash", "git checkout <path>", "git restore")),
     ("rule: push only with git push origin HEAD:<branch>",
      ("Push only with", "git push origin HEAD:<branch>")),
     ("rule: no gh call unless the brief names it",
@@ -365,18 +368,33 @@ for _t in ["my-plugin:reviewer", "ns:Explore"]:
 
 
 def stash_check():
-    """The stash line is exact, for every agent type."""
+    """The standing git line is exact, for every agent type."""
     for agent_type in TYPES + ["Plan", MISSING]:
         text, problem = context_for(payload(agent_type))
         if problem:
             return problem
         if STASH_LINE not in text.split("\n"):
-            return "agent type %r lacks the exact stash line" % (agent_type,)
+            return "agent type %r lacks the exact standing git line" % (agent_type,)
     return None
 
 
-add("rules: the stash line is exactly 'Never run git stash, git reset, git checkout <path>, "
-    "or git restore' for every agent type", "custom", fn=stash_check)
+add("rules: the standing git line is exactly 'Never run git stash, git checkout <path>, or git restore' "
+    "for every agent type", "custom", fn=stash_check)
+
+
+def reset_check():
+    """No agent type's context holds the reset verb after the word git: the reset ban is off the standing line."""
+    for agent_type in TYPES + ["Plan", MISSING]:
+        text, problem = context_for(payload(agent_type))
+        if problem:
+            return problem
+        for line in text.split("\n"):
+            if re.search(r"\bgit\b.*\breset\b", line, re.IGNORECASE):
+                return "agent type %r holds the reset verb after git: %r" % (agent_type, line[:90])
+    return None
+
+
+add("rules: no agent type's context holds the reset verb after the word git", "custom", fn=reset_check)
 
 
 def length_check():
