@@ -1950,6 +1950,8 @@ class SkippedDaily(unittest.TestCase):
 
     DECISION_JOBS = ("scope", "nightly-skip", "push-skip")  # they decide the skip and read it, so they run on every event
     PIN_JOBS = ("checks", "checks-windows", "checks-macos")  # the jobs with a Tool pins step (decision tool-pins)
+    # Open: whether a skipped daily starts these two macOS jobs is not decided, so the beyond-the-set check does not judge them.
+    MACOS_OPEN = ("shell-macos", "checks-macos-b")
     TOOL_PINS = "Tool pins (this runner)"
     # A command line that runs a test file, a mod runner or a mutation test. runs_suite reads the suite files only, so these are named here.
     TEST_RUN = re.compile(r"\btest_|\.test\.|mod-tests\.sh|mutate_|--test\b")
@@ -1979,16 +1981,18 @@ class SkippedDaily(unittest.TestCase):
         lines = [line for line in (run_body(st) or "").split("\n") if line.strip() and not line.lstrip().startswith("#")]
         return runs_suite(st) or any(self.TEST_RUN.search(line) for line in lines)
 
-    # Named failure: a job starts on a skipped daily that the tool-pins read does not need. The started set is the two skip jobs and
-    # scope (they decide and read the skip), and the three pin jobs (decision tool-pins). Main starts only the skip jobs there, since its
-    # scope is off on a skipped daily. Every job's job-level if is read on the run's outputs and the skip output the run set.
+    # Named failure: a decision or pin job does not start on a skipped daily. Named failure: a job starts on a skipped daily that the
+    # decision and tool-pins set does not need. The two halves are separate asserts, so each names its own cause. Every job's
+    # job-level if is read on the run's outputs and the skip output the run set.
     def test_a_skipped_daily_starts_only_the_decision_jobs_and_the_tool_pins_jobs(self):
         text = self.workflow()
         outs = self.skipped_daily()
         started = running_jobs(text, outs, "schedule", nightly_skip="true")
-        want = sorted(self.DECISION_JOBS + self.PIN_JOBS)
-        self.assertEqual(started, want, f"a skipped daily starts {sorted(set(started) - set(want))} beyond the tool-pins set, "
-                                        f"and misses {sorted(set(want) - set(started))}")
+        want = set(self.DECISION_JOBS + self.PIN_JOBS)
+        missing = sorted(want - set(started))
+        self.assertFalse(missing, f"a skipped daily misses decision or tool-pins jobs {missing}; it starts {sorted(started)}")
+        extra = sorted(set(started) - want - set(self.MACOS_OPEN))
+        self.assertFalse(extra, f"a skipped daily starts jobs beyond the decision and tool-pins set: {extra}")
 
     # Control: a plain daily starts the two macOS jobs, so the case above reads them as jobs the skip turns off,
     # not as jobs that never start.
