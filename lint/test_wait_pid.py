@@ -50,6 +50,11 @@ TAG = "CLAUDE_CODE_SESSION_ID"
 SESSION = "wait-pid-test-" + uuid.uuid4().hex
 OTHER_SESSION = "wait-pid-other-" + uuid.uuid4().hex
 LIFE = "60"   # a target outlives every case; each case ends it, and cleanup is the backstop
+# The job and the stub are python processes. macOS hides an Apple-signed program's environment (sleep, sh, zsh,
+# env) from other processes of the same user, so a session tag on one of those cannot be read. A python process
+# shows its own environment, so a tag on it reads.
+SLEEPER = [sys.executable, "-c", "import time; time.sleep(%s)" % LIFE]
+STUB_SRC = "import subprocess, sys; subprocess.Popen(sys.argv[1:]).wait()"   # starts its one child, waits for it
 HEARTBEAT_LINE = "wait-pid: still waiting"
 Result = namedtuple("Result", "rc out end elapsed")
 Strand = namedtuple("Strand", "job stub")   # stub is None when the job is itself the PPID-1 pid
@@ -147,18 +152,18 @@ def tag_words(tag):
 
 
 def strand(stub_tag, job_tag, with_stub=True):
-    """A stranded job. With a stub: a detached stub shell (PPID 1) and its one child `sleep`,
-    which holds `job_tag`; the stub holds `stub_tag`. Without: the job alone is the PPID-1 pid.
-    A tag of None means the process holds no session tag. Returns Strand(job pid, stub pid), or
-    None when this host cannot build the shape."""
+    """A stranded job. With a stub: a detached stub (PPID 1, a python process that starts its one child
+    and waits for it) and that child, which holds `job_tag`; the stub holds `stub_tag`. Without: the job
+    alone is the PPID-1 pid. A tag of None means the process holds no session tag. Returns
+    Strand(job pid, stub pid), or None when this host cannot build the shape."""
     env = {k: v for k, v in os.environ.items() if k != TAG}
     if stub_tag:
         env[TAG] = stub_tag
-    job = tag_words(job_tag) + ["sleep", LIFE]
+    job = tag_words(job_tag) + SLEEPER
     if not with_stub:
         pid = detach(job, env)
         return None if pid is None else Strand(pid, None)
-    stub = detach(["sh", "-c", '"$@" & wait', "sh"] + job, env)
+    stub = detach([sys.executable, "-c", STUB_SRC] + job, env)
     if stub is None:
         return None
     for _ in range(100):   # the stub forks the job a moment after it starts
@@ -242,8 +247,8 @@ def hooks_proc_env():
 
 class T(unittest.TestCase):
     def own_child(self):
-        """A live `sleep` that is a child of this test, reaped by a thread the moment it ends."""
-        proc = subprocess.Popen(["sleep", LIFE])
+        """A live python sleeper that is a child of this test, reaped by a thread the moment it ends."""
+        proc = subprocess.Popen(SLEEPER)
         threading.Thread(target=proc.wait, daemon=True).start()
         self.addCleanup(stop, proc.pid)
         return proc.pid
@@ -338,7 +343,8 @@ class T(unittest.TestCase):
         untagged PPID-1 stub. `wait-pid <that pid>` must wait for the job and exit 0."""
         stall = load_stall_watch_tests()
         env = {k: v for k, v in os.environ.items() if k != TAG}
-        job = "env %s=%s tail -f /dev/null; echo done" % (TAG, SESSION)   # never ends, and no planned pause: `; echo` keeps a stub shell above the job
+        job = "env %s=%s %s -c %s; echo done" % (TAG, SESSION, shlex.quote(sys.executable),   # a python job: its tag reads
+                                                 shlex.quote("import time; time.sleep(%s)" % LIFE))   # never ends, and no planned pause: `; echo` keeps a stub shell above the job
         rc, text, _secs, _cmd = stall.run_rewritten(job, shell="/bin/sh", env=env)
         for line in text.splitlines():   # the wrapper exits on a stall, before its own `rm -f LOG`
             log = stall.LOG_RE.search(line) if line.startswith("Log: ") else None
