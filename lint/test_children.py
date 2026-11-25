@@ -3,11 +3,12 @@
 
     python3 lint/test_children.py
 
-The list is one file, docs/children.txt. Each line reads `owner/name <GitHub repo id> <since YYYY-MM-DD>`,
-sorted by name; `#` comment lines and blank lines are allowed. The reader's entry is main(argv, fetch=None),
-which returns the exit code. `--file PATH` reads a fixture instead of the real list. fetch(path) returns the
-parsed GitHub JSON for a REST path and raises for a path it cannot read. No case reaches the network or
-starts a process: run_reader refuses both and fails the case if the reader tries.
+The list is one file, docs/children.txt. Each line reads `owner/name <since YYYY-MM-DD>`, sorted by name; `#`
+comment lines and blank lines are allowed. The public file holds no repo ids. The reader's entry is
+main(argv, fetch=None), which returns the exit code. `--file PATH` reads a fixture instead of the real list.
+fetch(path) returns the parsed GitHub JSON for a REST path and raises for a path it cannot read. A child is read
+from GitHub by its name. No case reaches the network or starts a process: run_reader refuses both and fails the
+case if the reader tries.
 """
 import contextlib
 import importlib.util
@@ -29,39 +30,32 @@ CHILDREN = os.path.join(HERE, "children.py")
 ROSTER = os.path.join(os.path.dirname(HERE), "docs", "children.txt")
 RUN = []  # this run's folder, made once in setUpModule and removed in tearDownModule
 
-# The eight children in file order. sillage's GitHub name is frag-head-beta: the file keeps sillage, and the
-# reader resolves the name by id.
-EIGHT = [
-    ("shivinate7/banchi", "1350816723"),
-    ("shivinate7/degen", "1413478819"),
-    ("shivinate7/home", "1413914462"),
-    ("shivinate7/ios-adblock", "1413478645"),
-    ("shivinate7/joyous", "1413623012"),
-    ("shivinate7/mailaudit", "1313026125"),
-    ("shivinate7/q_max", "1337628957"),
-    ("shivinate7/sillage", "1333311712"),
-]
-ORDERED = "shivinate7/banchi 1350816723 2026-01-05\nshivinate7/sillage 1333311712 2026-02-01\n"
-COMMENTED = ("# child repos\n\nshivinate7/banchi 1350816723 2026-01-05\n\n# later\n"
-             "shivinate7/sillage 1333311712 2026-02-01\n")
-ACTIVE = ("shivinate7/banchi 1350816723 2026-01-05\nshivinate7/degen 1413478819 2026-01-06\n"
-          "shivinate7/sillage 1333311712 2026-02-01\n")
-BANCHI_ONLY = "shivinate7/banchi 1350816723 2026-01-05\n"
-MALFORMED = {  # each goes on line 3 of the file below
-    "id is not digits": "shivinate7/degen 14134x8819 2026-01-06",
-    "date is not YYYY-MM-DD": "shivinate7/degen 1413478819 26-1-6",
-    "name has no owner": "degen 1413478819 2026-01-06",
-    "a field is missing": "shivinate7/degen 1413478819",
+ALPHA = "shivinate7/alpha-example"
+BETA = "shivinate7/beta-example"
+GAMMA = "shivinate7/gamma-example"
+DELTA = "shivinate7/delta-example"
+APP404 = "shivinate7/app-404"
+SELF = "shivinate7/claude-settings"
+ORDERED = "%s 2026-01-05\n%s 2026-02-01\n" % (ALPHA, GAMMA)
+COMMENTED = "# child repos\n\n%s 2026-01-05\n\n# later\n%s 2026-02-01\n" % (ALPHA, GAMMA)
+ACTIVE = "%s 2026-01-05\n%s 2026-01-06\n%s 2026-02-01\n" % (ALPHA, BETA, GAMMA)
+BANCHI_ONLY = "%s 2026-01-05\n" % ALPHA
+EMPTY = "# no children yet\n\n"
+MALFORMED = {  # each goes on line 3 of the file below, after ALPHA on line 2
+    "name has no owner": "beta-example 2026-01-06",
+    "date is not YYYY-MM-DD": "%s 26-1-6" % BETA,
+    "a field is missing": BETA,
+    "a repo id is left in the line": "%s 555002 2026-01-06" % BETA,
 }
-LINE = re.compile(r"\S+/\S+ \d+ \d{4}-\d{2}-\d{2}")
+LINE = re.compile(r"\S+/\S+ \d{4}-\d{2}-\d{2}")
+GH_TEXT = {403: "Forbidden", 404: "Not Found", 500: "Internal Server Error"}
 SCAN_REPOS = [
-    {"id": 1350816723, "full_name": "shivinate7/banchi"},
-    {"id": 1413478819, "full_name": "shivinate7/degen"},
-    {"id": 555001, "full_name": "shivinate7/newrepo"},
-    {"id": 555002, "full_name": "shivinate7/plain"},
-    {"id": 555003, "full_name": "shivinate7/claude-settings"},
+    {"id": 555001, "full_name": ALPHA},
+    {"id": 555002, "full_name": BETA},
+    {"id": 555003, "full_name": GAMMA},
+    {"id": 555004, "full_name": DELTA},
+    {"id": 555005, "full_name": SELF},
 ]
-SCAN_MARKED = ["shivinate7/banchi", "shivinate7/degen", "shivinate7/newrepo", "shivinate7/claude-settings"]
 
 
 def setUpModule():
@@ -86,8 +80,18 @@ def read(path):
         return f.read()
 
 
+def roster_fields():
+    """The fields of each entry line in docs/children.txt, in file order."""
+    return [line.split() for line in read(ROSTER).splitlines() if line.strip() and not line.startswith("#")]
+
+
 def repo(ident, full_name, archived=False):
     return {"id": ident, "full_name": full_name, "archived": archived}
+
+
+def gh_error(path, status):
+    """The error gh_fetch raises for a failed read: the path, then gh's text and status."""
+    return RuntimeError("gh api %s: gh: %s (HTTP %d)" % (path, GH_TEXT[status], status))
 
 
 class NoFetch:
@@ -101,8 +105,9 @@ class NoFetch:
         raise RuntimeError("no GitHub read expected: %s" % path)
 
 
-class ById:
-    """Answers each repo id with a dict. An id that is not in `answers`, or maps to an exception, raises."""
+class ByName:
+    """Answers each read by the child's name. `answers` maps a name to a repo dict, or to a status: a status makes
+    the read fail with gh's error for that status. A path that names no child in `answers` is gh's Not Found."""
 
     def __init__(self, answers):
         self.answers = answers
@@ -110,30 +115,40 @@ class ById:
 
     def __call__(self, path):
         self.calls.append(path)
-        ident = int(re.findall(r"\d+", path)[-1])
-        found = self.answers.get(ident, RuntimeError("404 Not Found: %s" % path))
-        if isinstance(found, Exception):
-            raise found
-        return found
+        for name, found in self.answers.items():
+            if name in path:
+                if isinstance(found, int):
+                    raise gh_error(path, found)
+                return found
+        raise gh_error(path, 404)
 
 
 class ScanFetch:
-    """Answers the owner's repo listing with `repos`. A stamp read answers only for a repo in `marked`, by its
-    full name or its id; any other read raises."""
+    """Answers the owner's repo listing with `repos`. A stamp read answers for a repo in `marked`, by its name or its
+    id in the path. `errors` maps a name to the status its stamp read fails with; any other stamp read is Not Found.
+    `listing_status` makes the listing fail with that status."""
 
-    def __init__(self, repos, marked):
+    def __init__(self, repos, marked, errors=None, listing_status=None):
         self.repos = repos
         self.marked = set(marked)
+        self.errors = errors or {}
+        self.listing_status = listing_status
         self.calls = []
 
     def __call__(self, path):
         self.calls.append(path)
         if "stamp.json" not in path:
+            if self.listing_status:
+                raise gh_error(path, self.listing_status)
             return self.repos
         for item in self.repos:
-            if item["full_name"] in self.marked and (item["full_name"] in path or str(item["id"]) in path):
+            if item["full_name"] not in path and str(item["id"]) not in path:
+                continue
+            if item["full_name"] in self.errors:
+                raise gh_error(path, self.errors[item["full_name"]])
+            if item["full_name"] in self.marked:
                 return {"name": "stamp.json"}
-        raise RuntimeError("404 Not Found: %s" % path)
+        raise gh_error(path, 404)
 
 
 def run_reader(case, argv, fetch):
@@ -162,48 +177,55 @@ def run_reader(case, argv, fetch):
 
 
 class RealRoster(unittest.TestCase):
-    """docs/children.txt, the list the reader reads when no --file is given."""
+    """docs/children.txt, the list the reader reads when no --file is given. The cases pin the list's shape, not its
+    names or its count, so a child added, renamed or removed does not break them."""
 
-    def test_list_prints_the_eight_children_in_order(self):
+    def test_list_prints_each_name_in_file_order(self):
         self.assertTrue(os.path.isfile(CHILDREN), "lint/children.py is missing: there is no reader to run")
-        out = subprocess.run([sys.executable, CHILDREN, "list"], capture_output=True, text=True)
-        self.assertEqual((out.returncode, out.stdout), (0, "".join(name + "\n" for name, _ in EIGHT)), out.stderr)
-
-    def test_names_and_ids_are_the_eight_in_sorted_order(self):
         self.assertTrue(os.path.isfile(ROSTER), "docs/children.txt is missing: the list has no file")
-        rows = [tuple(line.split()[:2]) for line in read(ROSTER).splitlines()
-                if line.strip() and not line.startswith("#")]
-        self.assertEqual(rows, EIGHT, "the list does not hold exactly the eight children, sorted")
+        names = [fields[0] for fields in roster_fields()]
+        out = subprocess.run([sys.executable, CHILDREN, "list"], capture_output=True, text=True)
+        self.assertEqual((out.returncode, out.stdout), (0, "".join(name + "\n" for name in names)), out.stderr)
 
-    def test_each_line_has_a_since_date(self):
+    def test_the_list_is_not_empty(self):
+        self.assertTrue(os.path.isfile(ROSTER), "docs/children.txt is missing: the list has no file")
+        self.assertTrue(roster_fields(), "docs/children.txt has no entry line")
+
+    def test_each_line_is_owner_name_and_since_with_no_repo_id(self):
         self.assertTrue(os.path.isfile(ROSTER), "docs/children.txt is missing: the list has no file")
         bad = [line for line in read(ROSTER).splitlines()
                if line.strip() and not line.startswith("#") and not LINE.fullmatch(line)]
-        self.assertEqual(bad, [], "lines that are not owner/name, id and YYYY-MM-DD")
+        self.assertEqual(bad, [], "docs/children.txt has a line that is not `owner/name YYYY-MM-DD`")
+
+    def test_names_are_sorted_and_unique(self):
+        names = [fields[0] for fields in roster_fields()]
+        self.assertEqual(names, sorted(names), "the names are not in sorted order")
+        self.assertEqual(len(set(names)), len(names), "a name is listed twice")
 
 
 class ListCommand(unittest.TestCase):
     def test_prints_each_name_in_file_order(self):
         code, out, err = run_reader(self, ["--file", fixture(ORDERED), "list"], NoFetch())
-        self.assertEqual((code, out), (0, "shivinate7/banchi\nshivinate7/sillage\n"), err)
+        self.assertEqual((code, out), (0, "%s\n%s\n" % (ALPHA, GAMMA)), err)
 
     def test_skips_comment_and_blank_lines(self):
         code, out, err = run_reader(self, ["--file", fixture(COMMENTED), "list"], NoFetch())
-        self.assertEqual((code, out), (0, "shivinate7/banchi\nshivinate7/sillage\n"), err)
+        self.assertEqual((code, out), (0, "%s\n%s\n" % (ALPHA, GAMMA)), err)
 
     def test_empty_file_lists_nothing(self):
-        code, out, err = run_reader(self, ["--file", fixture("# no children yet\n\n"), "list"], NoFetch())
+        code, out, err = run_reader(self, ["--file", fixture(EMPTY), "list"], NoFetch())
         self.assertEqual((code, out), (0, ""), err)
 
     def test_makes_no_github_read(self):
         fake = NoFetch()
-        run_reader(self, ["--file", fixture(ORDERED), "list"], fake)
+        code, out, err = run_reader(self, ["--file", fixture(ORDERED), "list"], fake)
+        self.assertEqual(code, 0, err)
         self.assertEqual(fake.calls, [], "list read GitHub")
 
     def test_malformed_line_is_refused_with_its_number(self):
         for why, bad in MALFORMED.items():
             with self.subTest(why=why):
-                text = "# child repos\nshivinate7/banchi 1350816723 2026-01-05\n" + bad + "\n"
+                text = "# child repos\n%s 2026-01-05\n%s\n" % (ALPHA, bad)
                 code, out, err = run_reader(self, ["--file", fixture(text), "list"], NoFetch())
                 self.assertEqual((code, out), (2, ""), err)
                 self.assertRegex(err, r"\bline 3\b", "the refusal does not name line 3")
@@ -211,11 +233,11 @@ class ListCommand(unittest.TestCase):
 
 class EverySubcommand(unittest.TestCase):
     def test_malformed_line_is_refused_by_list_active_scan_and_add(self):
-        text = "shivinate7/banchi 1350816723 2026-01-05\nshivinate7/degen 14134x8819 2026-01-06\n"
+        text = "%s 2026-01-05\n%s 26-1-6\n" % (ALPHA, BETA)
         cases = {
-            "list --active": (["list", "--active"], ById({})),
+            "list --active": (["list", "--active"], ByName({})),
             "scan": (["scan"], ScanFetch([], [])),
-            "add": (["add", "shivinate7/home", "1413914462", "2026-01-07"], ById({})),
+            "add": (["add", GAMMA, "2026-01-07"], NoFetch()),
         }
         for why, (tail, fake) in cases.items():
             with self.subTest(why=why):
@@ -228,114 +250,153 @@ class EverySubcommand(unittest.TestCase):
 
 class ListActive(unittest.TestCase):
     def test_drops_an_archived_child(self):
-        fake = ById({1350816723: repo(1350816723, "shivinate7/banchi"),
-                     1413478819: repo(1413478819, "shivinate7/degen", archived=True),
-                     1333311712: repo(1333311712, "shivinate7/sillage")})
+        fake = ByName({ALPHA: repo(555001, ALPHA), BETA: repo(555002, BETA),
+                       GAMMA: repo(555003, GAMMA, archived=True)})
         code, out, err = run_reader(self, ["--file", fixture(ACTIVE), "list", "--active"], fake)
         self.assertTrue(fake.calls, "the fixture never reached the reader")
-        self.assertEqual((code, out), (0, "shivinate7/banchi\nshivinate7/sillage\n"), err)
+        self.assertEqual((code, out), (0, "%s\n%s\n" % (ALPHA, BETA)), err)
 
-    def test_prints_the_current_name_of_a_renamed_child(self):
-        fake = ById({1350816723: repo(1350816723, "shivinate7/banchi"),
-                     1413478819: repo(1413478819, "shivinate7/degen"),
-                     1333311712: repo(1333311712, "shivinate7/frag-head-beta")})
+    def test_a_child_GitHub_answers_404_for_by_name_is_unknown_and_a_rename_is_not_followed(self):
+        fake = ByName({ALPHA: repo(555001, ALPHA), BETA: 404, GAMMA: repo(555003, GAMMA)})
         code, out, err = run_reader(self, ["--file", fixture(ACTIVE), "list", "--active"], fake)
         self.assertTrue(fake.calls, "the fixture never reached the reader")
-        self.assertEqual((code, out), (0, "shivinate7/banchi\nshivinate7/degen\nshivinate7/frag-head-beta\n"), err)
-
-    def test_unreadable_child_is_unknown_on_stderr_and_exits_3(self):
-        fake = ById({1350816723: repo(1350816723, "shivinate7/banchi"),
-                     1333311712: repo(1333311712, "shivinate7/sillage")})
-        code, out, err = run_reader(self, ["--file", fixture(ACTIVE), "list", "--active"], fake)
-        self.assertTrue(fake.calls, "the fixture never reached the reader")
-        self.assertEqual(out, "shivinate7/banchi\nshivinate7/sillage\n", "the readable children were not all listed")
-        unknown = [line for line in err.splitlines() if line.startswith("unknown: shivinate7/degen")]
-        self.assertEqual(len(unknown), 1, "no 'unknown: shivinate7/degen' line on stderr: %r" % err)
+        self.assertEqual(out, "%s\n%s\n" % (ALPHA, GAMMA), "the readable children were not all listed")
+        self.assertEqual(err.splitlines(), ["unknown: %s" % BETA], err)
         self.assertEqual(code, 3)
 
-    def test_asks_github_by_repo_id_and_never_by_name(self):
-        fake = ById({1350816723: repo(1350816723, "shivinate7/banchi"),
-                     1413478819: repo(1413478819, "shivinate7/degen"),
-                     1333311712: repo(1333311712, "shivinate7/sillage")})
+    def test_a_non_404_error_on_a_child_is_unknown_and_exit_3(self):
+        fake = ByName({ALPHA: repo(555001, ALPHA), BETA: 403, GAMMA: repo(555003, GAMMA)})
+        code, out, err = run_reader(self, ["--file", fixture(ACTIVE), "list", "--active"], fake)
+        self.assertTrue(fake.calls, "the fixture never reached the reader")
+        self.assertEqual(out, "%s\n%s\n" % (ALPHA, GAMMA), "the readable children were not all listed")
+        self.assertEqual(err.splitlines(), ["unknown: %s" % BETA], err)
+        self.assertEqual(code, 3)
+
+    def test_asks_github_by_name(self):
+        fake = ByName({ALPHA: repo(555001, ALPHA), BETA: repo(555002, BETA), GAMMA: repo(555003, GAMMA)})
         run_reader(self, ["--file", fixture(ACTIVE), "list", "--active"], fake)
-        for ident in ("1350816723", "1413478819", "1333311712"):
-            self.assertTrue(any(ident in call for call in fake.calls), "no read by id %s: %r" % (ident, fake.calls))
-        for name in ("shivinate7/banchi", "shivinate7/degen", "shivinate7/sillage"):
-            self.assertFalse(any(name in call for call in fake.calls), "a read by name %s: %r" % (name, fake.calls))
+        for name in (ALPHA, BETA, GAMMA):
+            self.assertTrue(any(name in call for call in fake.calls), "no read by name %s: %r" % (name, fake.calls))
 
 
 class AddCommand(unittest.TestCase):
     def test_keeps_the_file_sorted(self):
         path = fixture(ORDERED)
-        code, out, err = run_reader(self, ["--file", path, "add", "shivinate7/degen", "1413478819", "2026-01-06"],
-                                    ById({1413478819: repo(1413478819, "shivinate7/degen")}))
+        code, out, err = run_reader(self, ["--file", path, "add", BETA, "2026-01-06"], NoFetch())
         self.assertEqual(code, 0, err)
         self.assertEqual(read(path).splitlines(), [
-            "shivinate7/banchi 1350816723 2026-01-05",
-            "shivinate7/degen 1413478819 2026-01-06",
-            "shivinate7/sillage 1333311712 2026-02-01",
+            "%s 2026-01-05" % ALPHA,
+            "%s 2026-01-06" % BETA,
+            "%s 2026-02-01" % GAMMA,
         ])
 
-    def test_refuses_a_duplicate_id_under_a_new_name(self):
+    def test_refuses_a_duplicate_name_and_names_it(self):
         path = fixture(ORDERED)
         before = read(path)
-        code, out, err = run_reader(self, ["--file", path, "add", "shivinate7/banchi-two", "1350816723", "2026-02-01"],
-                                    ById({1350816723: repo(1350816723, "shivinate7/banchi")}))
+        code, out, err = run_reader(self, ["--file", path, "add", ALPHA, "2026-02-01"], NoFetch())
         self.assertEqual(code, 2, err)
         self.assertEqual(len(err.strip().splitlines()), 1, "the refusal is not one line: %r" % err)
+        self.assertIn(ALPHA, err, "the refusal does not name the duplicate: %r" % err)
         self.assertEqual(read(path), before, "a refused add changed the list")
 
-    def test_refuses_a_malformed_argument(self):
+    def test_refuses_an_extra_argument_such_as_an_id_with_exit_2(self):
+        path = fixture(EMPTY)
+        before = read(path)
+        code, out, err = run_reader(self, ["--file", path, "add", BETA, "555002", "2026-01-06"], NoFetch())
+        self.assertEqual(code, 2, "an extra argument was not refused: %r" % err)
+        self.assertIn("555002", err, "the refusal does not name the extra argument: %r" % err)
+        self.assertEqual(read(path), before, "a refused add changed the list")
+
+    def test_refuses_a_malformed_argument_and_names_it(self):
         tails = {
-            "no since": ["shivinate7/degen", "1413478819"],
-            "id is not digits": ["shivinate7/degen", "14x", "2026-01-06"],
-            "name has no owner": ["degen", "1413478819", "2026-01-06"],
-            "since is not a date": ["shivinate7/degen", "1413478819", "26-1-6"],
+            "name has no owner": (["beta-example", "2026-01-06"], "beta-example"),
+            "name has two slashes": (["a/b/c", "2026-01-06"], "a/b/c"),
+            "since is not a date": ([BETA, "26-1-6"], "26-1-6"),
         }
-        for why, tail in tails.items():
+        for why, (tail, token) in tails.items():
             with self.subTest(why=why):
-                path = fixture(ORDERED)
+                path = fixture(EMPTY)
                 before = read(path)
-                code, out, err = run_reader(self, ["--file", path, "add", *tail], ById({}))
+                code, out, err = run_reader(self, ["--file", path, "add", *tail], NoFetch())
                 self.assertEqual(code, 2, err)
                 self.assertEqual(len(err.strip().splitlines()), 1, "the refusal is not one line: %r" % err)
+                self.assertIn(token, err, "the refusal does not name %s: %r" % (token, err))
                 self.assertEqual(read(path), before, "a refused add changed the list")
 
-    def test_refuses_claude_settings_as_a_line(self):
-        path = fixture(ORDERED)
+    def test_refuses_an_add_with_no_since(self):
+        path = fixture(EMPTY)
         before = read(path)
-        code, out, err = run_reader(self, ["--file", path, "add", "shivinate7/claude-settings", "555003", "2026-01-07"],
-                                    ById({555003: repo(555003, "shivinate7/claude-settings")}))
+        code, out, err = run_reader(self, ["--file", path, "add", BETA], NoFetch())
         self.assertEqual(code, 2, err)
-        self.assertEqual(read(path), before, "claude-settings was written as a child")
+        self.assertEqual(read(path), before, "a refused add changed the list")
+
+    def test_refuses_claude_settings_in_any_letter_case(self):
+        for name in (SELF, "Shivinate7/claude-settings", "SHIVINATE7/CLAUDE-SETTINGS", "shivinate7/Claude-Settings"):
+            with self.subTest(name=name):
+                path = fixture(EMPTY)
+                before = read(path)
+                code, out, err = run_reader(self, ["--file", path, "add", name, "2026-01-07"], NoFetch())
+                self.assertEqual(code, 2, err)
+                self.assertRegex(err.lower(), "claude-settings", "the refusal does not name claude-settings: %r" % err)
+                self.assertEqual(read(path), before, "claude-settings was written as a child")
 
 
 class ScanCommand(unittest.TestCase):
-    def test_lists_marked_children_not_in_the_file(self):
-        fake = ScanFetch(SCAN_REPOS, SCAN_MARKED)
+    def test_lists_marked_children_not_in_the_file_by_name(self):
+        fake = ScanFetch(SCAN_REPOS, [BETA, GAMMA, SELF])
         code, out, err = run_reader(self, ["--file", fixture(BANCHI_ONLY), "scan"], fake)
         self.assertTrue(fake.calls, "the fixture never reached the reader")
         self.assertEqual(code, 0, err)
-        self.assertEqual(sorted(out.splitlines()), ["shivinate7/degen", "shivinate7/newrepo"], out)
+        self.assertEqual(sorted(out.splitlines()), [BETA, GAMMA], out)
 
     def test_never_lists_claude_settings(self):
-        fake = ScanFetch([{"id": 555003, "full_name": "shivinate7/claude-settings"}], ["shivinate7/claude-settings"])
+        fake = ScanFetch([repo(555005, SELF)], [SELF])
+        code, out, err = run_reader(self, ["--file", fixture(EMPTY), "scan"], fake)
+        self.assertTrue(fake.calls, "the fixture never reached the reader")
+        self.assertEqual((code, out), (0, ""), err)
+
+    def test_compares_by_name_so_a_child_in_the_file_is_not_read_again(self):
+        fake = ScanFetch([repo(555009, ALPHA)], [ALPHA])
         code, out, err = run_reader(self, ["--file", fixture(BANCHI_ONLY), "scan"], fake)
         self.assertTrue(fake.calls, "the fixture never reached the reader")
         self.assertEqual((code, out), (0, ""), err)
-
-    def test_matches_a_renamed_child_by_its_id(self):
-        fake = ScanFetch([{"id": 1333311712, "full_name": "shivinate7/frag-head-beta"}],
-                         ["shivinate7/frag-head-beta"])
-        code, out, err = run_reader(self, ["--file", fixture("shivinate7/sillage 1333311712 2026-02-01\n"), "scan"], fake)
-        self.assertTrue(fake.calls, "the fixture never reached the reader")
-        self.assertEqual((code, out), (0, ""), err)
+        self.assertFalse(any("stamp.json" in call for call in fake.calls),
+                         "a child in the file was read again: %r" % fake.calls)
 
     def test_writes_nothing(self):
         path = fixture(BANCHI_ONLY)
         before = read(path)
-        code, out, err = run_reader(self, ["--file", path, "scan"], ScanFetch(SCAN_REPOS, SCAN_MARKED))
+        code, out, err = run_reader(self, ["--file", path, "scan"], ScanFetch(SCAN_REPOS, [BETA, GAMMA, SELF]))
+        self.assertEqual(code, 0, err)
         self.assertEqual(read(path), before, "scan changed the list")
+
+    def test_a_403_on_a_file_read_is_unknown_when_the_name_holds_404(self):
+        fake = ScanFetch([repo(555404, APP404)], [], errors={APP404: 403})
+        code, out, err = run_reader(self, ["--file", fixture(EMPTY), "scan"], fake)
+        self.assertTrue(fake.calls, "the fixture never reached the reader")
+        self.assertEqual((code, out), (3, ""), "a 403 on a stamp read was taken for no stamp file: %s" % err)
+        self.assertEqual(err.splitlines(), ["unknown: %s" % APP404], err)
+
+    def test_a_403_on_a_file_read_is_unknown_for_a_name_without_404(self):
+        fake = ScanFetch([repo(555001, ALPHA)], [], errors={ALPHA: 403})
+        code, out, err = run_reader(self, ["--file", fixture(EMPTY), "scan"], fake)
+        self.assertTrue(fake.calls, "the fixture never reached the reader")
+        self.assertEqual((code, out), (3, ""), err)
+        self.assertEqual(err.splitlines(), ["unknown: %s" % ALPHA], err)
+
+    def test_a_404_on_a_file_read_is_no_file_even_when_the_name_holds_404(self):
+        fake = ScanFetch([repo(555404, APP404)], [], errors={APP404: 404})
+        code, out, err = run_reader(self, ["--file", fixture(EMPTY), "scan"], fake)
+        self.assertTrue(any("stamp.json" in call for call in fake.calls), "the stamp read never happened")
+        self.assertEqual((code, out, err), (0, "", ""), "a real 404 on a stamp read was reported")
+
+    def test_a_failed_owner_listing_is_one_unknown_line_and_exit_3(self):
+        fake = ScanFetch([], [], listing_status=500)
+        code, out, err = run_reader(self, ["--file", fixture(EMPTY), "scan"], fake)
+        self.assertTrue(fake.calls, "the fixture never reached the reader")
+        self.assertEqual((code, out), (3, ""), err)
+        self.assertEqual(len(err.splitlines()), 1, "a failed listing did not print one line: %r" % err)
+        self.assertTrue(err.startswith("unknown: "), "the failed listing is not an unknown line: %r" % err)
 
 
 class Control(unittest.TestCase):
@@ -352,8 +413,6 @@ class Control(unittest.TestCase):
             self.assertTrue(all(LINE.fullmatch(row) for row in rows), text)
             names = [row.split()[0] for row in rows]
             self.assertEqual(names, sorted(names), text)
-        names = [name for name, _ in EIGHT]
-        self.assertEqual(names, sorted(names))
 
 
 if __name__ == "__main__":
