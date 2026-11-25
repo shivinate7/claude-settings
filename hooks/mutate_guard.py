@@ -3572,6 +3572,11 @@ MUTATIONS = [
      '        sid = payload.get("session_id")\n'
      '        if not sid or not isinstance(sid, str) or not os.path.isfile(ph.reread_flag_path(sid)):',
      "guard", "handoff-unread: a payload that carries agent_id is allowed"),
+    # agent-no-mcp-tools (hooks/guard.py 8c, tests/guard/s43811-agent-no-mcp-tools.py): with the agent-and-MCP test off, an
+    # agent's call to an unlisted MCP tool passes, so the "refused" cases fail. The required name is one of them.
+    ("agent-no-mcp-tools: the agent MCP call is not judged, so an unlisted MCP tool is allowed",
+     'payload.get("agent_id") and tool.startswith("mcp__")', 'False and tool.startswith("mcp__")',
+     "guard", "agent-no-mcp-tools: mcp__computer-use__app_click from a general-purpose agent is refused"),
     # ---- compaction-audit (decision precompact-handoff, item 16): one mutant per arm the rule needs. Each is
     # judged by test_handoff_wave2.py part 4 (target "audit"), so its required name is one of that suite's checks.
     ("compaction-audit: the refusal is never printed",
@@ -4978,25 +4983,27 @@ GUARD_READ_FOLDERS = ("lint", "janitor", "skills", "testing")
 # The files a copied guard reads, relative to the checkout: the simulator lease, the merge tool, and the two CI alarm
 # files the merge tool reads beside it. guard_merge.py loads merge/merge.py (MERGE_TOOL_REL), which reads
 # actions/ci-alarm/events.json (ALARM_EVENTS) and imports actions/ci-alarm/clear_rule.py (load_clear_rule). A copy without
-# clear_rule.py fails that import, so the merge read ends early and never reaches its time limit.
+# clear_rule.py fails that import, so the merge read ends early and never reaches its time limit. settings.json is the
+# guard's allow list for an agent's MCP call (guard.py mcp_allow_entries reads it beside the hooks folder, and
+# test_call_judge.py reads the checkout's copy). Without it a copy reads an empty allow list and covers no MCP tool.
 # lay_out_guard_reads copies them, and the saved-verdict key digests the same files.
 GUARD_READ_FILES = (os.path.join("bin", "sim-lease"), os.path.join("merge", "merge.py"),
                     os.path.join("actions", "ci-alarm", "events.json"),
-                    os.path.join("actions", "ci-alarm", "clear_rule.py"))
-# The folder and file the suites read from the checkout and no copy holds: test_guard.py reads its section files from
-# tests/guard, and test_call_judge.py reads settings.json. lay_out copies neither. The saved-verdict key digests both, so an
-# edit to either misses the saved verdicts.
+                    os.path.join("actions", "ci-alarm", "clear_rule.py"),
+                    os.path.join("settings.json"))
+# The folder the suites read from the checkout and no copy holds: test_guard.py reads its section files from tests/guard.
+# lay_out copies no folder of it. The saved-verdict key digests it, so an edit to it misses the saved verdicts.
 KEY_ONLY_FOLDERS = ("tests/guard",)
-KEY_ONLY_FILES = ("settings.json",)
 
 
 def lay_out_guard_reads(root: str) -> None:
     """Copy into `root` the files of GUARD_READ_FILES, from the checkout, that a copied guard family reads from beside its
-    hooks folder: bin/sim-lease, the merge tool and the CI alarm's events and clear rule. The folders of GUARD_READ_FOLDERS come from the
+    hooks folder: bin/sim-lease, the merge tool, the CI alarm's events and clear rule, and settings.json (the allow list
+    the guard reads for an agent's MCP call). The folders of GUARD_READ_FOLDERS come from the
     callers, through `tracked_tree.copy_tracked` (git's own list, so no file is hand-picked). The simulator refusal imports
     janitor/sweep.py and fails open without it.
     A guard copy gets its own `root`. The override copies sit one folder below `work`, so `main` calls this
-    once on `work`. Cost (rule outcomes-mechanize-rules): per guard-family copy, four files (about 713 KB), and
+    once on `work`. Cost (rule outcomes-mechanize-rules): per guard-family copy, five files (about 761 KB), and
     `main` makes one more under `work`. The folders copy_tracked lays out add git's list (253 files, about 5.4 MB,
     at this commit) to each copy. They stay until the run ends, when `work` is removed. Without these, arms that
     read them fail on every mutant alike, and the clean-layout control (`run_controls`) reads red."""
@@ -5163,11 +5170,11 @@ def verdict_digest(sources):
     """The key this run's saved verdicts are filed under. It digests the guarded text and the suite text of each target
     the run judges, and every file a copied guard can read: the hooks folder the copies come from (mutate_shared.HOOKS_DIR,
     read now so a test can point it elsewhere), then GUARD_READ_FOLDERS and GUARD_READ_FILES under the checkout, the roots
-    lay_out copies from, then KEY_ONLY_FOLDERS and KEY_ONLY_FILES, which the suites read there and no copy holds. An edit to
-    any of them misses the saved verdicts. Each file is keyed by its path relative to its root, never an absolute path, so
-    two checkouts with the same files share verdicts. Cost: a named run reads about 20 MB (511 files under hooks, lint,
-    janitor, skills and testing, plus four files), plus tests/guard (113 files, about 3.4 MB) and settings.json (48 KB) at
-    this commit, once, before its first mutant. None when no verdict folder is named: nothing is digested, saved or reused."""
+    lay_out copies from, then KEY_ONLY_FOLDERS, which the suites read there and no copy holds. An edit to any of them misses
+    the saved verdicts. Each file is keyed by its path relative to its root, never an absolute path, so two checkouts with
+    the same files share verdicts. Cost: a named run reads about 20 MB (511 files under hooks, lint, janitor, skills and
+    testing, plus five files, settings.json among them), plus tests/guard (113 files, about 3.4 MB) at this commit, once,
+    before its first mutant. None when no verdict folder is named: nothing is digested, saved or reused."""
     if not os.environ.get(mutate_shared.VERDICT_DIR_ENV):
         return None
     digest = hashlib.sha256()
@@ -5183,8 +5190,6 @@ def verdict_digest(sources):
         mutate_shared.digest_tree(digest, rel.replace(os.sep, "/"), os.path.join(checkout, rel))
     for folder in KEY_ONLY_FOLDERS:
         mutate_shared.digest_tree(digest, folder, os.path.join(checkout, folder))
-    for rel in KEY_ONLY_FILES:
-        mutate_shared.digest_tree(digest, rel, os.path.join(checkout, rel))
     return digest.hexdigest()
 
 
