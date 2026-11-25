@@ -50,7 +50,16 @@ after the handoff is read, naming the same remedy. The flag is <config dir>/stat
 A spawn that a later guard rule refuses has not run, so it clears nothing. The marker is read as the
 one home reads it (hooks/shared_names.py, EXPLORE_AUDIT_MARKER and BRIEF_MARKERS).
 The guard is a seam too: one JSON payload on stdin, the decision on stdout. An agent's payload
-(`agent_id`) is never refused and clears nothing.
+(`agent_id`) is never refused and clears nothing. An Audit: brief clears the audit flag only when it
+names the session's transcript path (the payload's transcript_path). A spawn that clears the flag sets
+<sid>.rewrite.
+
+Part 10, the rewrite check (hooks/reread_check.py --stop, decision precompact-handoff). The next Stop after
+the audit spawn judges the rewritten handoff. Required: the #N and fb- ids the handoff held at PreCompact
+(the token set state.json keeps), the audit's MISSING ids, and the job ids that stall_watch.scan_jobs shows
+live. The audit's DONE and STALE ids may go. An unreadable audit falls back to the baseline and the live jobs.
+A failed PreCompact state passes and clears the flag with one line. Helper: `precompact_handoff.py
+--audit-brief` prints the brief, and the brief names the transcript path.
 
 Bad stdin. Every mode of both modules exits 0 on empty stdin, a JSON list, JSON null, or
 text that is not JSON. reread_check.py imports precompact_handoff.py; if that import fails,
@@ -1131,17 +1140,25 @@ AGENT_ID = "a7f3c9e10b2d4e58"   # an agent's id on the payload
 ENV_DROP = ("CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_REMOTE", "CLAUDE_CODE_REMOTE_SESSION_ID",
             "CLAUDE_PROJECT_DIR", "PYTHONPATH")
 BASH = {"command": "echo hi"}
+# The session's transcript path, as the payloads carry it. Relative on purpose: every hook here runs with
+# cwd = Case.proj, so a case that reads the transcript writes it there. The rule compares strings, so the
+# brief and the payload name the same path. An Audit: brief clears nothing unless it names this path.
+SESSION_TRANSCRIPT = "transcript-%s.jsonl" % SID
 AUDIT_SPAWN = {"description": "audit", "subagent_type": "Explore", "model": "sonnet",
-               "prompt": "Audit: check the handoff against the repo."}
+               "prompt": "Audit: check the handoff against the repo. Transcript: " + SESSION_TRANSCRIPT}
+# The same Audit: brief with no transcript path: the stray spawn that the path rule refuses.
+PATHLESS_SPAWN = {"description": "audit", "subagent_type": "Explore", "model": "sonnet",
+                  "prompt": "Audit: check the handoff against the repo."}
 PLAIN_SPAWN = {"description": "look", "prompt": "Read the repo and list its tests."}
 QUOTED_SPAWN = {"description": "look", "subagent_type": "Explore", "model": "sonnet",
                 "prompt": "Read the repo.\n\nAudit: this line is quoted, not the first one."}
 BLANK_SPAWN = {"description": "audit", "subagent_type": "Explore", "model": "sonnet",
-               "prompt": "\n\n   Audit: check after blank lines\nmore text"}
+               "prompt": "\n\n   Audit: check after blank lines\nTranscript: " + SESSION_TRANSCRIPT}
+PATHLESS_BLANK = dict(BLANK_SPAWN, prompt="\n\n   Audit: check after blank lines\nmore text")
 # An Explore may run Haiku (HAIKU_ROLES in hooks/guard.py), so an Explore spawn on Haiku passes every rule.
 # A general-purpose spawn on Haiku is refused by agent-model-floor, a rule that runs after compaction-audit.
 HAIKU_AUDIT_SPAWN = {"description": "audit", "subagent_type": "general-purpose", "model": "haiku",
-                     "prompt": "Audit: check the handoff against the repo."}
+                     "prompt": "Audit: check the handoff against the repo. Transcript: " + SESSION_TRANSCRIPT}
 
 
 def step(name, why):
@@ -1164,13 +1181,18 @@ def write_call(c):
     return {"file_path": os.path.join(c.proj, "notes.md"), "content": "x"}
 
 
-def guard_call(c, sid, tool, tool_input, agent_id=None, home=None, extra_env=None, src=None):
+def guard_call(c, sid, tool, tool_input, agent_id=None, home=None, extra_env=None, src=None,
+               transcript=SESSION_TRANSCRIPT):
     """One PreToolUse payload through hooks/guard.py, as Claude Code sends it: (decision, reason).
     An empty stdout is an allow. `agent_id` is set on a call made from inside an agent. `home` is the
     audit marker the home holds for this call (see ROOMY_DISK_SRC); None leaves the home as it is.
-    `extra_env` adds variables to the guard's environment; `src` replaces the launcher (ROOMY_DISK_SRC)."""
+    `extra_env` adds variables to the guard's environment; `src` replaces the launcher (ROOMY_DISK_SRC).
+    `transcript` is the payload's transcript_path (SESSION_TRANSCRIPT by default, as Claude Code sends it);
+    None leaves the key out."""
     body = {"hook_event_name": "PreToolUse", "session_id": sid, "tool_name": tool,
             "tool_input": tool_input, "cwd": c.proj}
+    if transcript:
+        body["transcript_path"] = transcript
     if agent_id:
         body["agent_id"] = agent_id
     env = c.env()
@@ -1255,6 +1277,10 @@ def case_audit_spawn_clears_flag_and_writes_pass():
         if not step("--post-compact wrote the audit flag, so the Audit: spawn has a flag to clear",
                     "" if os.path.isfile(audit_flag(c, SID)) else "no %s.audit flag after --post-compact" % SID):
             return
+        # The path twin runs first: a brief with no transcript path must not clear the flag that the next spawn clears.
+        bare = guard_call(c, SID, "Agent", PATHLESS_SPAWN)
+        step("an Audit: brief that names no transcript path is refused by compaction-audit, so it clears nothing",
+             refused_by(bare, AUDIT_RULE) or names_remedy(bare))
         spawn = guard_call(c, SID, "Agent", AUDIT_SPAWN)
         if not step("the Audit: spawn from the main session is allowed", allowed_why(spawn)):
             return
@@ -1414,6 +1440,9 @@ def case_audit_marker_after_blank_lines_clears():
         if not step("--post-compact wrote the audit flag, so the spawn has a flag to clear",
                     "" if os.path.isfile(audit_flag(c, SID)) else "no %s.audit flag after --post-compact" % SID):
             return
+        bare = guard_call(c, SID, "Agent", PATHLESS_BLANK)
+        step("the same brief after blank lines, with no transcript path, is refused by compaction-audit",
+             refused_by(bare, AUDIT_RULE) or names_remedy(bare))
         spawn = guard_call(c, SID, "Agent", BLANK_SPAWN)
         step("an Audit: spawn whose marker follows blank lines is allowed", allowed_why(spawn))
         step("that spawn clears the audit flag",
@@ -1488,7 +1517,7 @@ def case_audit_marker_judged_like_the_home():
     spawn clears the audit flag. A lowercase `audit:` first line does not carry it: its spawn is refused
     by compaction-audit and clears nothing. The lowercase case is a green control."""
     bold = {"description": "audit", "subagent_type": "Explore", "model": "sonnet",
-            "prompt": "**Audit:** check the handoff against the repo."}
+            "prompt": "**Audit:** check the handoff against the repo. Transcript: " + SESSION_TRANSCRIPT}
     c = Case("bold-audit")
     try:
         compact(c, SID)
@@ -1532,15 +1561,16 @@ def case_reader_follows_the_home_constant():
                 "print(json.dumps(r.audit_spawn(json.loads(sys.argv[1]), ('Agent', 'Task'))))")
 
         def judged(prompt):
-            body = {"session_id": SID, "tool_name": "Agent", "tool_input": {"prompt": prompt}}
+            body = {"session_id": SID, "tool_name": "Agent", "tool_input": {"prompt": prompt},
+                    "transcript_path": SESSION_TRANSCRIPT}
             proc = subprocess.run([sys.executable, "-c", code, json.dumps(body)], cwd=d,
                                   capture_output=True, text=True, env=c.env(), timeout=120)
             return proc.returncode, proc.stdout.strip(), proc.stderr
 
-        rc, out, err = judged("Probe: check the handoff.")
+        rc, out, err = judged("Probe: check the handoff. " + SESSION_TRANSCRIPT)
         step("the reader follows the home: `Probe:` opens an audit brief once the home says `Probe:`",
              "" if (rc == 0 and out == "true") else "rc=%r out=%r err=%r" % (rc, out, tail(err)))
-        rc, out, err = judged("Audit: check the handoff.")
+        rc, out, err = judged("Audit: check the handoff. " + SESSION_TRANSCRIPT)
         step("the reader follows the home: `Audit:` opens no audit brief once the home says `Probe:`",
              "" if (rc == 0 and out == "false") else "rc=%r out=%r err=%r" % (rc, out, tail(err)))
     finally:
@@ -1591,7 +1621,8 @@ def case_stale_sibling_without_audit_flag_path_exits_zero():
 
 PROBE = "Probe:"
 UNPATCHED = "Audit:"
-SPAWN_TAIL = " check the handoff against the repo."
+SPAWN_TAIL = " check the handoff against the repo. Transcript: " + SESSION_TRANSCRIPT
+PATHLESS_TAIL = " check the handoff against the repo."   # the tail with no transcript path: refused by compaction-audit
 
 
 def home_line_why():
@@ -1668,6 +1699,9 @@ def spawn_from_remedy(home, source):
         marker = remedy_marker(text)
         if not step("the %s remedy names a marker" % source, "" if marker else "the remedy names no marker"):
             return
+        bare = guard_call(c, SID, "Agent", dict(AUDIT_SPAWN, prompt=marker + PATHLESS_TAIL), home=home)
+        step("a spawn built from the %s remedy with no transcript path is refused by compaction-audit" % source,
+             refused_by(bare, AUDIT_RULE))
         got = guard_call(c, SID, "Agent", dict(AUDIT_SPAWN, prompt=marker + SPAWN_TAIL), home=home)
         if not step("a spawn built word for word from the %s remedy is allowed" % source, allowed_why(got)):
             return
@@ -2548,27 +2582,33 @@ def case_agent_rewrite_partial_read_keeps_flag_whole_read_clears():
 # work, or the no-flag case proves nothing.
 
 COST_LOG_ENV = "WAVE2_COST_LOG"
-COST_PREAMBLE = "\n".join([
-    "import builtins, os",
-    "_log = os.environ.get(%r)" % COST_LOG_ENV,
-    "_real_open = builtins.open",
-    "_real_stat = os.stat",
-    "def _note(p):",
-    "    if _log and isinstance(p, (str, bytes)):",
-    "        s = os.fsdecode(p)",
-    "        if 'handoffs' in s and os.path.basename(s).endswith('.md'):",
-    "            with _real_open(_log, 'a', encoding='utf-8') as f:",
-    "                f.write(s + chr(10))",
-    "def _open(p, *a, **k):",
-    "    _note(p)",
-    "    return _real_open(p, *a, **k)",
-    "def _stat(p, *a, **k):",
-    "    _note(p)",
-    "    return _real_stat(p, *a, **k)",
-    "builtins.open = _open",
-    "os.stat = _stat",
-    "",
-])
+
+
+def probe_preamble(match, watch_stat=True):
+    """Source that logs, to the file named by COST_LOG_ENV, each path an open (and, with watch_stat, each
+    os.stat) makes where `match` is true. `match` is Python on the name `s`. The one home of the open probe."""
+    lines = [
+        "import builtins, os",
+        "_log = os.environ.get(%r)" % COST_LOG_ENV,
+        "_real_open = builtins.open",
+        "_real_stat = os.stat",
+        "def _note(p):",
+        "    if _log and isinstance(p, (str, bytes)):",
+        "        s = os.fsdecode(p)",
+        "        if %s:" % match,
+        "            with _real_open(_log, 'a', encoding='utf-8') as f:",
+        "                f.write(s + chr(10))",
+        "def _open(p, *a, **k):",
+        "    _note(p)",
+        "    return _real_open(p, *a, **k)",
+        "builtins.open = _open",
+    ]
+    if watch_stat:
+        lines += ["def _stat(p, *a, **k):", "    _note(p)", "    return _real_stat(p, *a, **k)", "os.stat = _stat"]
+    return "\n".join(lines + [""])
+
+
+COST_PREAMBLE = probe_preamble("'handoffs' in s and os.path.basename(s).endswith('.md')")
 COST_SRC = COST_PREAMBLE + "\n" + ROOMY_DISK_SRC
 
 
@@ -2617,6 +2657,429 @@ def case_flagged_call_opens_the_handoff():
         step("the flagged Bash call is refused by handoff-unread", refused_by(got, HANDOFF_RULE))
     finally:
         c.cleanup()
+
+
+# --------------------------------------------------------------------------- part 10
+# The rewrite check (decision precompact-handoff). The audit spawn sets <sid>.rewrite. The next Stop judges the
+# handoff against: the #N and fb- ids the handoff held at PreCompact (state.json keeps them), the audit's MISSING
+# ids, and the job ids that stall_watch.scan_jobs shows live. The audit's DONE and STALE ids may go, and so may a
+# baseline job that is no longer live. The audit's reply is read from the transcript: a heading line MISSING,
+# STALE or DONE, then one item per line, each with one backticked token.
+
+BASE_PR_DONE = "#3840"       # merged; the audit lists it DONE, so the rewrite may drop it
+BASE_PR_OPEN = "#3873"       # open; the audit lists no item for it, so the rewrite keeps it
+BASE_FB_STALE = "fb-1312-1"  # the audit lists it STALE, so the rewrite may drop it
+BASE_FB_OPEN = "fb-1313-2"   # standing; the audit lists no item for it, so the rewrite keeps it
+JOB_DEAD = "bk9dead01"       # launched before PreCompact, finished before the Stop: may be dropped
+JOB_NEW = "bk9new03"         # launched after PreCompact, still running at the Stop: required
+PR_MISSING = "#3900"         # the audit lists it MISSING: required
+AUDIT_AGENT = "a1b2c3d4e5f60718"   # the audit agent's id, on its async launch result
+BASELINE = (BASE_PR_DONE, BASE_PR_OPEN, BASE_FB_STALE, BASE_FB_OPEN, JOB_DEAD)
+KEPT = (BASE_PR_OPEN, BASE_FB_OPEN, JOB_NEW, PR_MISSING)   # what a passing rewrite keeps
+AUDIT_REPLY = "\n".join([
+    "MISSING", "- `%s` open PR with no line in the handoff" % PR_MISSING,
+    "STALE", "- `%s` no longer standing" % BASE_FB_STALE,
+    "DONE", "- `%s` merged" % BASE_PR_DONE, ""])
+TRANSCRIPT_NAME = os.path.basename(SESSION_TRANSCRIPT)
+TRANSCRIPT_PROBE_SRC = (probe_preamble("os.path.basename(s) == %r" % TRANSCRIPT_NAME, watch_stat=False)
+                        + "\n" + ROOMY_DISK_SRC)
+
+
+def handoff_with(tokens):
+    """A handoff that names each token once, in a line of its own."""
+    return "# Handoff\n\n## Goal\nFix the handoff.\n\n## Open\n" + "".join("- `%s` line\n" % t for t in tokens)
+
+
+def rec(kind, blocks, **extra):
+    """One transcript record as the harness writes it. `extra` holds top-level keys such as toolUseResult."""
+    line = {"type": kind, "message": {"content": blocks}, "timestamp": "2026-10-03T10:00:00Z"}
+    line.update(extra)
+    return json.dumps(line)
+
+
+def launch_shell(job, tu):
+    """A background shell call and its launch result. The result carries the job id, as scan_jobs reads it."""
+    call = {"type": "tool_use", "id": tu, "name": "Bash",
+            "input": {"command": "sleep 900", "description": "wait", "run_in_background": True}}
+    result = {"type": "tool_result", "tool_use_id": tu, "content": "Command running in background with ID: " + job}
+    return [rec("assistant", [call]), rec("user", [result], toolUseResult={"backgroundTaskId": job})]
+
+
+def finish(job):
+    """The task notice that ends a background job."""
+    note = "<task-notification>\n<task-id>%s</task-id>\n<status>completed</status>\n</task-notification>" % job
+    return rec("user", [{"type": "text", "text": note}])
+
+
+def spawn_call(tu, tool_input):
+    return rec("assistant", [{"type": "tool_use", "id": tu, "name": "Agent", "input": tool_input}])
+
+
+def spawn_result(tu, content, **extra):
+    return rec("user", [{"type": "tool_result", "tool_use_id": tu, "content": content}], **extra)
+
+
+def write_transcript_at(c, lines):
+    """The session's transcript, where SESSION_TRANSCRIPT names it. The hooks run with cwd = c.proj."""
+    put(os.path.join(c.proj, SESSION_TRANSCRIPT), "\n".join(lines) + "\n")
+
+
+def pre_compact_at(c, sid):
+    return c.run(PRECOMPACT, "", {"session_id": sid, "hook_event_name": "PreCompact",
+                                   "transcript_path": SESSION_TRANSCRIPT, "cwd": c.proj})
+
+
+def stop_at(c, sid, probe_log=None):
+    """The Stop run, with the session's transcript path. With probe_log, the run logs its opens of that transcript."""
+    body = {"session_id": sid, "hook_event_name": "Stop", "stop_hook_active": False,
+            "cwd": c.proj, "transcript_path": SESSION_TRANSCRIPT}
+    if probe_log is None:
+        return c.run(READ_CHECK, "--stop", body)
+    env = c.env()
+    env[COST_LOG_ENV] = probe_log
+    proc = subprocess.run([sys.executable, "-c", TRANSCRIPT_PROBE_SRC, READ_CHECK, "--stop"],
+                          input=json.dumps(body), capture_output=True, text=True, env=env, cwd=c.proj, timeout=120)
+    return Result(proc.returncode, proc.stdout or "", proc.stderr or "")
+
+
+def transcript_probe_hits(log):
+    """The probe log's lines that name the session's transcript. [] when nothing was logged."""
+    if not os.path.isfile(log):
+        return []
+    with open(log, encoding="utf-8") as f:
+        return [line.strip() for line in f if os.path.basename(line.strip()) == TRANSCRIPT_NAME]
+
+
+def audit_judged(c, payload):
+    """hooks/reread_check.py audit_spawn on one payload, in a child process: (rc, stdout, stderr)."""
+    code = ("import json, sys; import reread_check as r; "
+            "print(json.dumps(r.audit_spawn(json.loads(sys.argv[1]), ('Agent', 'Task'))))")
+    proc = subprocess.run([sys.executable, "-c", code, json.dumps(payload)],
+                          cwd=os.path.dirname(os.path.abspath(READ_CHECK)), capture_output=True, text=True,
+                          env=c.env(), timeout=120)
+    return proc.returncode, proc.stdout.strip(), proc.stderr
+
+
+def state_json(c, sid):
+    """The raw text of the session's state/handoff/<sid>.json, or '' when it is missing."""
+    path = c.state("%s.json" % sid)
+    if not os.path.isfile(path):
+        return ""
+    with open(path, encoding="utf-8") as f:
+        return f.read()
+
+
+def rewrite_flow(c, sid, tokens, mode="sync", probe_log=None):
+    """One compaction, one audit and one rewrite. The handoff holds BASELINE at PreCompact. The audit's result is
+    `mode`: sync (AUDIT_REPLY as its tool result), async (the audit still runs: its launch result only), or null
+    (a result the transcript cannot read). Then the handoff becomes handoff_with(tokens), and Stop runs. Returns
+    the runs and the rewrite flag: pre, post, read, spawn (the guard's decision), flag, stop."""
+    put(c.handoff(sid), handoff_with(BASELINE))
+    before = [rec("user", [{"type": "text", "text": "hello"}])] + launch_shell(JOB_DEAD, "tu-dead")
+    write_transcript_at(c, before)
+    pre = pre_compact_at(c, sid)
+    post = c.post_compact(sid)
+    rd = c.read(sid, c.handoff(sid))
+    spawn = guard_call(c, sid, "Agent", AUDIT_SPAWN)
+    flag = os.path.isfile(c.state("%s.rewrite" % sid))
+    after = [spawn_call("tu-audit", AUDIT_SPAWN)]
+    if mode == "sync":
+        after.append(spawn_result("tu-audit", AUDIT_REPLY))
+    elif mode == "null":
+        after.append(spawn_result("tu-audit", None))
+    else:
+        after.append(spawn_result("tu-audit", "Async agent launched", toolUseResult={
+            "isAsync": True, "status": "async_launched", "agentId": AUDIT_AGENT, "outputFile": "/wave2/audit.output"}))
+    after += [finish(JOB_DEAD)] + launch_shell(JOB_NEW, "tu-new")
+    write_transcript_at(c, before + after)
+    put(c.handoff(sid), handoff_with(tokens))
+    stop = stop_at(c, sid, probe_log)
+    return {"pre": pre, "post": post, "read": rd, "spawn": spawn, "flag": flag, "stop": stop}
+
+
+def flow_why(flow):
+    """'' when the compaction, the read and the audit spawn ran, and the spawn was allowed."""
+    return (exit_why(flow["pre"]) or exit_why(flow["post"]) or exit_why(flow["read"])
+            or allowed_why(flow["spawn"]))
+
+
+def rewrite_block_why(stop, token):
+    """'' when Stop blocks, and the reason names `token` and a remedy that keeps it. Else the one cause."""
+    obj = json_or_none(stop.stdout)
+    if stop.returncode != 0 or not (isinstance(obj, dict) and obj.get("decision") == "block"):
+        return "Stop did not block: rc=%r out=%r" % (stop.returncode, tail(stop.stdout))
+    reason = str(obj.get("reason", ""))
+    if token not in reason:
+        return "the block does not name %s: %r" % (token, tail(reason, 160))
+    if "keep" not in reason.lower():
+        return "the block names %s but gives no remedy that keeps it" % token
+    return ""
+
+
+def rewrite_passes_why(stop):
+    return "" if passes(stop) else "Stop blocked: %r" % tail(stop.stdout)
+
+
+def without(tokens, *drop):
+    return tuple(t for t in tokens if t not in drop)
+
+
+def case_audit_brief_names_paths():
+    """The helper's brief names the session's transcript path, and its first line passes audit_spawn."""
+    c = Case("brief")
+    try:
+        proc = c.run(PRECOMPACT, "--audit-brief", {"session_id": SID, "hook_event_name": "PreCompact",
+                                                    "transcript_path": SESSION_TRANSCRIPT, "cwd": c.proj})
+        if not step("--audit-brief exits 0", exit_why(proc)):
+            return
+        step("the audit brief names the session's transcript path",
+             "" if SESSION_TRANSCRIPT in proc.stdout else "the brief names no transcript path: %r" % tail(proc.stdout, 160))
+        rc, out, err = audit_judged(c, {"session_id": SID, "tool_name": "Agent",
+                                        "tool_input": {"prompt": proc.stdout}, "transcript_path": SESSION_TRANSCRIPT})
+        step("the audit brief passes audit_spawn",
+             "" if (rc == 0 and out == "true") else "rc=%r out=%r err=%r" % (rc, out, tail(err)))
+    finally:
+        c.cleanup()
+
+
+def case_foreign_audit_spawn_keeps_flag():
+    """An Audit: brief that names no transcript path is refused by compaction-audit and clears nothing: the audit flag
+    stays, and the next Bash call is still refused. The same brief with the path is allowed."""
+    c = Case("foreign")
+    try:
+        post, rd = compact(c, SID)
+        if not step("--post-compact and the Read exit 0", exit_why(post) or exit_why(rd)):
+            return
+        bare = guard_call(c, SID, "Agent", PATHLESS_SPAWN)
+        step("an Audit: brief that names no transcript path is refused by compaction-audit",
+             refused_by(bare, AUDIT_RULE) or names_remedy(bare))
+        step("the refused brief leaves the audit flag set",
+             "" if os.path.isfile(audit_flag(c, SID)) else "the audit flag was cleared by a brief with no transcript path")
+        step("after it, a Bash call is still refused by compaction-audit",
+             refused_by(guard_call(c, SID, "Bash", BASH), AUDIT_RULE))
+        step("an Audit: brief that names the transcript path is allowed",
+             allowed_why(guard_call(c, SID, "Agent", AUDIT_SPAWN)))
+    finally:
+        c.cleanup()
+
+
+def case_audit_spawn_sets_rewrite_flag():
+    """The Audit: spawn that clears the audit flag also sets <sid>.rewrite, the flag the Stop judgment waits for."""
+    c = Case("rewrite-flag")
+    try:
+        post, rd = compact(c, SID)
+        if not step("--post-compact and the Read exit 0", exit_why(post) or exit_why(rd)):
+            return
+        spawn = guard_call(c, SID, "Agent", AUDIT_SPAWN)
+        if not step("the Audit: spawn is allowed", allowed_why(spawn)):
+            return
+        step("the audit spawn clears the audit flag",
+             "" if not os.path.isfile(audit_flag(c, SID)) else "the audit flag is still set after the spawn")
+        step("the audit spawn sets the rewrite flag, state/handoff/<sid>.rewrite",
+             "" if os.path.isfile(c.state("%s.rewrite" % SID)) else "no %s.rewrite flag after the Audit: spawn" % SID)
+    finally:
+        c.cleanup()
+
+
+def case_precompact_state_holds_tokens():
+    """PreCompact stores the handoff's #N and fb- ids (the baseline) in state.json."""
+    c = Case("state-tokens")
+    try:
+        put(c.handoff(SID), handoff_with(BASELINE))
+        write_transcript_at(c, [rec("user", [{"type": "text", "text": "hello"}])])
+        pre = pre_compact_at(c, SID)
+        if not step("PreCompact exits 0", exit_why(pre)):
+            return
+        raw = state_json(c, SID)
+        if not step("state.json records a good digest run (ok true)",
+                    "" if (json_or_none(raw) or {}).get("ok") is True else "state.json: %r" % tail(raw, 120)):
+            return
+        for token in (BASE_PR_OPEN, BASE_FB_OPEN):
+            step("state.json holds the baseline token %s" % token,
+                 "" if token in raw else "state.json does not hold %s" % token)
+    finally:
+        c.cleanup()
+
+
+def case_stop_blocks_dropped_pr_or_fb():
+    """Stop blocks when the rewrite drops a baseline #N, or a baseline fb- id, that the audit did not list as DONE
+    or STALE. The block names the token and a remedy that keeps it. Two sessions: a PR and a feedback id."""
+    c1 = Case("drop-pr")
+    try:
+        f = rewrite_flow(c1, SID, without(KEPT, BASE_PR_OPEN))
+        if not step("the compaction, the read and the audit spawn run, and the spawn is allowed", flow_why(f)):
+            return
+        step("a rewrite that drops the open PR %s is refused at Stop, naming it and a remedy" % BASE_PR_OPEN,
+             rewrite_block_why(f["stop"], BASE_PR_OPEN))
+    finally:
+        c1.cleanup()
+    c2 = Case("drop-fb")
+    try:
+        f = rewrite_flow(c2, SID, without(KEPT, BASE_FB_OPEN))
+        if not step("the compaction, the read and the audit spawn run, and the spawn is allowed", flow_why(f)):
+            return
+        step("a rewrite that drops the standing fb- id %s is refused at Stop, naming it and a remedy" % BASE_FB_OPEN,
+             rewrite_block_why(f["stop"], BASE_FB_OPEN))
+    finally:
+        c2.cleanup()
+
+
+def case_done_or_stale_token_may_be_dropped():
+    """A rewrite that drops the DONE PR, the STALE id and the dead baseline job passes Stop, and the passing Stop
+    clears the rewrite flag. Its twin: a rewrite that drops a token the audit did not list is refused."""
+    c1 = Case("done-ok")
+    try:
+        f = rewrite_flow(c1, SID, KEPT)
+        if not step("the compaction, the read and the audit spawn run, and the spawn is allowed", flow_why(f)):
+            return
+        step("a rewrite that drops the DONE PR, the STALE id and the dead job passes Stop",
+             rewrite_passes_why(f["stop"]))
+        step("the passing Stop clears the rewrite flag",
+             "" if not os.path.isfile(c1.state("%s.rewrite" % SID)) else "the rewrite flag is still set after the pass")
+    finally:
+        c1.cleanup()
+    c2 = Case("done-twin")
+    try:
+        f = rewrite_flow(c2, SID, without(KEPT, BASE_PR_OPEN))
+        if not step("the compaction, the read and the audit spawn run, and the spawn is allowed", flow_why(f)):
+            return
+        step("the twin: a token the audit did not list is still refused when dropped",
+             rewrite_block_why(f["stop"], BASE_PR_OPEN))
+    finally:
+        c2.cleanup()
+
+
+def case_live_job_id_is_required():
+    """A job that scan_jobs shows live at Stop is required in the rewrite, even though PreCompact did not name it."""
+    c = Case("job-live")
+    try:
+        f = rewrite_flow(c, SID, without(KEPT, JOB_NEW))
+        if not step("the compaction, the read and the audit spawn run, and the spawn is allowed", flow_why(f)):
+            return
+        step("a rewrite that drops the live job %s is refused at Stop, naming it" % JOB_NEW,
+             rewrite_block_why(f["stop"], JOB_NEW))
+    finally:
+        c.cleanup()
+
+
+def case_missing_token_is_required():
+    """A token the audit lists MISSING is required in the rewrite."""
+    c = Case("missing")
+    try:
+        f = rewrite_flow(c, SID, without(KEPT, PR_MISSING))
+        if not step("the compaction, the read and the audit spawn run, and the spawn is allowed", flow_why(f)):
+            return
+        step("a rewrite that drops the audit's MISSING PR %s is refused at Stop, naming it" % PR_MISSING,
+             rewrite_block_why(f["stop"], PR_MISSING))
+    finally:
+        c.cleanup()
+
+
+def case_unreadable_audit_falls_back():
+    """An audit result the transcript cannot read: MISSING is unknown, so nothing is required on its account; a DONE
+    token must still be kept (the baseline holds). Control: keeping the DONE PR passes. Twin: dropping it is refused."""
+    keep = without(KEPT, PR_MISSING)
+    c1 = Case("unreadable-ok")
+    try:
+        f = rewrite_flow(c1, SID, keep + (BASE_PR_DONE, BASE_FB_STALE), mode="null")
+        if not step("the compaction, the read and the audit spawn run, and the spawn is allowed", flow_why(f)):
+            return
+        step("with an unreadable audit, a rewrite that keeps the baseline and the live jobs passes Stop",
+             rewrite_passes_why(f["stop"]))
+    finally:
+        c1.cleanup()
+    c2 = Case("unreadable-drop")
+    try:
+        f = rewrite_flow(c2, SID, keep + (BASE_FB_STALE,), mode="null")
+        if not step("the compaction, the read and the audit spawn run, and the spawn is allowed", flow_why(f)):
+            return
+        step("with an unreadable audit, dropping the baseline DONE PR %s is refused at Stop" % BASE_PR_DONE,
+             rewrite_block_why(f["stop"], BASE_PR_DONE))
+    finally:
+        c2.cleanup()
+
+
+def case_stop_quiet_while_audit_runs():
+    """While the audit agent runs in the background, Stop is quiet even though the rewrite dropped an open PR. Once the
+    audit's reply is in the transcript, the same drop is refused: the twin."""
+    c1 = Case("quiet-async")
+    try:
+        f = rewrite_flow(c1, SID, without(KEPT, BASE_PR_OPEN), mode="async")
+        if not step("the compaction, the read and the audit spawn run, and the spawn is allowed", flow_why(f)):
+            return
+        step("while the audit runs in the background, Stop passes quietly", rewrite_passes_why(f["stop"]))
+    finally:
+        c1.cleanup()
+    c2 = Case("quiet-sync")
+    try:
+        f = rewrite_flow(c2, SID, without(KEPT, BASE_PR_OPEN), mode="sync")
+        if not step("the compaction, the read and the audit spawn run, and the spawn is allowed", flow_why(f)):
+            return
+        step("twin: once the audit's reply is in, the same drop of %s is refused" % BASE_PR_OPEN,
+             rewrite_block_why(f["stop"], BASE_PR_OPEN))
+    finally:
+        c2.cleanup()
+
+
+def case_failed_precompact_passes_and_clears():
+    """A failed PreCompact state (ok false, no baseline) passes the rewrite Stop and clears its flag, with one line that
+    says the baseline was unreadable. The spawn still sets the flag, so the Stop has something to clear."""
+    c = Case("failed-pre")
+    try:
+        put(c.handoff(SID), handoff_with(BASELINE))
+        pre = pre_compact_at(c, SID)   # no transcript on disk: the digest fails
+        if not step("PreCompact exits 0 on a failed digest", exit_why(pre)):
+            return
+        if not step("state.json records the failed run (ok false)",
+                    "" if (json_or_none(state_json(c, SID)) or {}).get("ok") is False
+                    else "state.json: %r" % tail(state_json(c, SID), 120)):
+            return
+        post, rd = compact(c, SID)
+        if not step("--post-compact and the Read exit 0", exit_why(post) or exit_why(rd)):
+            return
+        spawn = guard_call(c, SID, "Agent", AUDIT_SPAWN)
+        if not step("the Audit: spawn is allowed", allowed_why(spawn)):
+            return
+        step("the audit spawn sets the rewrite flag",
+             "" if os.path.isfile(c.state("%s.rewrite" % SID)) else "no %s.rewrite flag after the spawn" % SID)
+        put(c.handoff(SID), handoff_with(without(KEPT, BASE_PR_OPEN)))
+        stop = stop_at(c, SID)
+        step("with a failed PreCompact state, Stop passes without judging the rewrite", rewrite_passes_why(stop))
+        step("the passing Stop clears the rewrite flag",
+             "" if not os.path.isfile(c.state("%s.rewrite" % SID)) else "the rewrite flag is still set after the pass")
+        lines = [ln for ln in (stop.stdout + stop.stderr).splitlines() if ln.strip()]
+        step("the Stop prints one line that says the baseline was unreadable",
+             "" if (len(lines) == 1 and "baseline" in lines[0])
+             else "want one line that names the baseline, got %d line(s): %r" % (len(lines), tail("\n".join(lines), 160)))
+    finally:
+        c.cleanup()
+
+
+def case_rewrite_check_cost():
+    """With no rewrite flag, Stop opens the session's transcript 0 times. The twin: with the flag set by an audit spawn,
+    the same Stop opens it."""
+    c1 = Case("cost-none")
+    try:
+        put(c1.handoff(SID), handoff_with(BASELINE))
+        write_transcript_at(c1, [rec("user", [{"type": "text", "text": "hello"}])])
+        log1 = os.path.join(c1.root, "probe.log")
+        stop = stop_at(c1, SID, probe_log=log1)
+        step("with no rewrite flag, Stop passes", rewrite_passes_why(stop))
+        hits = transcript_probe_hits(log1)
+        step("with no rewrite flag, Stop opens the session's transcript 0 times",
+             "" if not hits else "Stop opened the transcript %d time(s)" % len(hits))
+    finally:
+        c1.cleanup()
+    c2 = Case("cost-flagged")
+    try:
+        log2 = os.path.join(c2.root, "probe.log")
+        f = rewrite_flow(c2, SID, KEPT, probe_log=log2)
+        if not step("the compaction, the read and the audit spawn run, and the spawn is allowed", flow_why(f)):
+            return
+        step("the twin: with the rewrite flag, Stop opens the session's transcript",
+             "" if transcript_probe_hits(log2) else "Stop did not open the transcript")
+    finally:
+        c2.cleanup()
 
 
 def main() -> int:
@@ -2724,6 +3187,20 @@ def main() -> int:
     print("Part 9: the handoff check costs no open of the handoff on a call with no flag (hooks/guard.py, hooks/reread_check.py)")
     case_no_flag_call_opens_no_handoff()
     case_flagged_call_opens_the_handoff()
+
+    print("Part 10: the rewrite check, the audit brief and the transcript path (hooks/reread_check.py, hooks/precompact_handoff.py)")
+    case_audit_brief_names_paths()
+    case_foreign_audit_spawn_keeps_flag()
+    case_audit_spawn_sets_rewrite_flag()
+    case_precompact_state_holds_tokens()
+    case_stop_blocks_dropped_pr_or_fb()
+    case_done_or_stale_token_may_be_dropped()
+    case_live_job_id_is_required()
+    case_missing_token_is_required()
+    case_unreadable_audit_falls_back()
+    case_stop_quiet_while_audit_runs()
+    case_failed_precompact_passes_and_clears()
+    case_rewrite_check_cost()
 
     if FAILED:
         print()
