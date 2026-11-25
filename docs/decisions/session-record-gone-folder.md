@@ -12,11 +12,11 @@ Owner rulings, 2026-11-24:
 Owner answers, 2026-11-25:
 
 - Owner, 2026-11-25 09:54 CST, typed in the consultant's chat, on the withdrawn rule that deleted a trash folder holding a clean pushed clone: "how could this be lost? your idea of deleting something fully clean aka nothing being lost is good, i think it j ust needed more thought?"
-- Owner, 2026-11-25 10:19 CST, on the open question whether the acts' own dirty and live-process checks meet his "commit first" condition: "did i not answer this conceptually?"
+- Owner, 2026-11-25 10:19 CST, on the question whether the acts' own dirty and live-process checks meet his commit-first condition: "did i not answer this conceptually?"
 
 Consultant's reading, 2026-11-25 (not his words; the owner may reverse it):
 
-- A target that is fully clean may be deleted, because nothing is lost. So each act's own dirty and live-process check meets the condition (option a of question QAE, whether the acts' own checks meet the commit-first condition).
+- A target that is fully clean may be deleted, because nothing is lost, though a clean nested clone in a trash folder is still kept (debt `trash-nested-clone-never-reaped`). So each act's own dirty and live-process check meets the condition (option a of question QAE, whether the acts' own checks meet the commit-first condition).
 
 Consultant's picks from round 1 review, not owner rulings:
 
