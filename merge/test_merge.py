@@ -29261,6 +29261,10 @@ class LocalSessionRoleCheck(CloudSession):
     lingers. CS_SESSION_ROLE, when the launcher set it, must agree with the own file (rule (c)).
     run_main is overridden to run as a local session, so the CloudSession assertions (no host read, no lock, no push on a refusal) apply."""
 
+    def setUp(self):
+        CloudSession.setUp(self)
+        self.host.repo = FAKE_REPO  # this checkout's repository: local_standing_repo_refusal reads the host's repo, and FakeHost names none
+
     def run_main(self, *argv, **env):
         """-> (rc, stdout, stderr) of merge.main in a local session: the cloud variables unset, CLAUDE_CODE_SESSION_ID as this case names
         (default LOCAL_SID; None unsets it), and this case's config dir."""
