@@ -1,0 +1,45 @@
+# A decision record holds one sentence per line
+
+## The ruling
+
+A line that a branch adds to a decision record is one sentence, or it is 200 characters or fewer.
+`lint/check_record_slugs.py` refuses a longer line that holds more than one sentence.
+The refusal names the file and the line number.
+
+Owner, 2026-11-25 11:12 CST, on the plan to fix the merge conflicts in long lists: "please build yes -- sonnet workflow imo?"
+
+Which lines it reads.
+- Only a line the branch adds: a line whose count at head is over its count at the merge base, as the notes check counts a note line (decision `notes-merge-union`).
+  An old long line that the branch leaves alone, moves or renames with its file is never judged.
+  A line edited in place is an added line.
+- Only a file in the decisions folder of `lint/layout.json`. A debt, a note or another doc is not read.
+- Only in diff mode: given file arguments, the check reads no git and skips this rule.
+
+What is exempt.
+- A heading, a table row, a line inside fenced code, a one-sentence list item and a line that is one quote.
+  A quote is the whole line between straight or curly quote marks, bare or after `> `.
+  A line of prose around a quote is judged as prose.
+
+How it splits sentences.
+- It calls `split_sentences` in `lint/ste_lint.py`, the one splitter. It builds no second one.
+- That splitter keeps "e.g.", "i.e.", a version number such as 3.15 and a file name such as merge.py whole.
+  The check also keeps a month abbreviation before a day number whole, as in "Nov. 25", which the splitter breaks today.
+  The check does this itself, so the pins that child repos hold on `lint/ste_lint.py` do not move.
+
+Why: the repo's practice is one entry per line, sorted, in one home (decision `one-layout-every-repo`).
+A ruling kept on one long line breaks that practice: two lanes that add a sentence to it add the same line, and git reports a conflict.
+A measured 57 of 308 merges of main into lane branches conflicted since Nov 18, 2026.
+`docs/decisions/lanes-run-no-full-ci-job.md` held its ruling as one line of over 4,000 characters and conflicted in 5 of 17 merges.
+
+Mistake it guards: a lane adds a sentence to a long ruling line, and the next lane that does the same cannot merge without a hand fix.
+
+Named limits.
+- A record that ships with old long lines keeps them until a lane touches a line. The check never rewrites an old line.
+- A list item of two sentences, or an `Owner: "..."` line with a quote of several sentences, is refused. Split it, with the quote marks open across the lines.
+- The check judges sentence count by the STE splitter. A code span with a full stop and a space inside it counts as two sentences.
+
+Cost: no process, timer or file added.
+In diff mode the check runs one `git show` of head for each decision record the branch touches, one more at the merge base for each that it edits or renames, and one `git merge-base` when any exists.
+
+Kind: process
+Home: lint/check_record_slugs.py

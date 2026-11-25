@@ -2,69 +2,447 @@
 
 ## The ruling
 
-Owner, 2026-10-27 (waiting page item 27, option a): a lane runs only the suites its change touches. It never runs a whole CI job locally, `bin/ci-job` included. Until the cutover (decision `all-repos-switch-together`), the batch's integration CI run is the only full run. After it, main's run after each merge is the full run (`roles-each-layer-proves-once`, each layer proves a change once). `bin/ci-job` stays, as a tool any session may run on demand. One exception: a lane runs `merge --lane-lint <pr>` before it hands off, and the batch runner runs it again before the join. `merge --lane-lint` runs `bin/ci-job checks --lint --base origin/<base>` at the lane head. That mode runs the fast `python3 lint/...`, `python3 actions/...` and `bin/ste-changed` steps, chosen from the step commands in checks.yml, and each listed step the change reaches (see the listed-suites pick under "Suites lint does not run" below). It runs no mutation test. It runs a CI step that holds a `[NAME=val ...] python3 <folder>/test_*.py` line, whole, as CI runs it, when the one selector (`hooks/mutate_guard.py --lint-suites <base>`) picks that suite for a file of the lane's diff. The selector follows imports and path reads: a suite is picked for a change to any module that a module it loads imports, or a file it reads by path, and for a change to the suite's own file. Job scope is the linted job plus a sibling pass: a suite the diff picks for another job runs through a second pass over that job (the sibling pass, below). Each other owed suite step prints its line (see "Suites lint does not run" below). A picked suite that fails is a FAIL. A line before the suite that fails, so the shell never reaches it, is an unknown. A selector that cannot run, or runs past its 60 s limit, is an unknown, exit 2. A `uses:` of this repo's own action (`$/actions/<name>`) runs the steps of the tree under test's own `action.yml`. It runs them only when a read of that file, before any step runs, accepts it. The file must be composite. Every step is a `shell: bash` run:. The only expression in a run: is `github.action_path`. Every run: line is a lint command. The steps come from the action's own file, never from a list of action names. The `uses:` step's own `if:` and `continue-on-error:` read as a `run:` step's do. A `uses:` step with its own `env:` is unknown and names the env, since CI hands that env to the action's steps and this runner does not. After a failed install the action reads unknown and names the install. An install before the action runs only when the action will start: its `if:` holds and the read accepts its steps. The action prints one verdict line. It reads FAIL when a step fails (a probe's exit 1 and exit 2 both read FAIL, as CI is red on both), else unknown when a step is unknown, else PASS. A refusal runs no step, and its unknown line names the file, the line or the expression. The PR body has no local source, so a step whose env reads `github.event.pull_request.body` is unknown. The action then reads unknown after its other steps ran, and a FAIL of those still wins. The real two-step `claude-md-cites` action reads unknown for another reason. Its second step's `run:` holds `HEAD_SHA="$(git ...)"` and `export HEAD_SHA`, which are not lint commands. So the read refuses the whole action, names that first line, and runs none of its steps. Cost, per `--lint` run: a selector process (about 7 s, measured 2026-11-13 on this tree), plus a shell process per picked CI step, which runs that step's suites. A local action adds a shell process per step. A given base adds a `git rev-parse` of it. A diff that touches no file a suite loads picks no suite, so it costs only the selector. A picked set grows with the module; debt `lane-lint-hub-cost` holds the counts per module, the checks job's total and the selector's breakdown. The time per suite is unmeasured; the run stays inside `LINT_SECONDS` in `merge/merge.py` or ends unknown (debt `lane-lint-hub-cost`). For the STE lint `uses:` action, it runs `bin/ste-changed <base>`. With no `--base`, `--lint` takes `origin/main` and says so, or prints only an unknown line and exits 2 when `origin/main` is absent. Why: a no-base run skipped the pull-request steps and read as a pass (incident 2026-10-28, batch 5: the comment narration check then failed in CI). With `--base`, ci-job sets `GITHUB_BASE_REF` in each step, as the runner does on a pull request. A lane that adds a record is therefore not red for its stale records page.
+Owner, 2026-10-27 (waiting page item 27, option a): a lane runs only the suites its change touches.
+It never runs a whole CI job locally, `bin/ci-job` included.
+Until the cutover (decision `all-repos-switch-together`), the batch's integration CI run is the only full run.
+After it, main's run after each merge is the full run (`roles-each-layer-proves-once`, each layer proves a change once).
+`bin/ci-job` stays, as a tool any session may run on demand.
+One exception: a lane runs `merge --lane-lint <pr>` before it hands off, and the batch runner runs it again before the join.
+`merge --lane-lint` runs `bin/ci-job checks --lint --base origin/<base>` at the lane head.
+That mode runs the fast `python3 lint/...`, `python3 actions/...` and `bin/ste-changed` steps, chosen from the step commands in checks.yml, and each listed step the change reaches (see the listed-suites pick under "Suites lint does not run" below).
+It runs no mutation test.
+It runs a CI step that holds a `[NAME=val ...] python3 <folder>/test_*.py` line, whole, as CI runs it, when the one selector (`hooks/mutate_guard.py --lint-suites <base>`) picks that suite for a file of the lane's diff.
+The selector follows imports and path reads: a suite is picked for a change to any module that a module it loads imports, or a file it reads by path, and for a change to the suite's own file.
+Job scope is the linted job plus a sibling pass: a suite the diff picks for another job runs through a second pass over that job (the sibling pass, below).
+Each other owed suite step prints its line (see "Suites lint does not run" below).
+A picked suite that fails is a FAIL.
+A line before the suite that fails, so the shell never reaches it, is an unknown.
+A selector that cannot run, or runs past its 60 s limit, is an unknown, exit 2.
+A `uses:` of this repo's own action (`$/actions/<name>`) runs the steps of the tree under test's own `action.yml`.
+It runs them only when a read of that file, before any step runs, accepts it.
+The file must be composite.
+Every step is a `shell: bash` run:.
+The only expression in a run: is `github.action_path`.
+Every run: line is a lint command.
+The steps come from the action's own file, never from a list of action names.
+The `uses:` step's own `if:` and `continue-on-error:` read as a `run:` step's do.
+A `uses:` step with its own `env:` is unknown and names the env, since CI hands that env to the action's steps and this runner does not.
+After a failed install the action reads unknown and names the install.
+An install before the action runs only when the action will start: its `if:` holds and the read accepts its steps.
+The action prints one verdict line.
+It reads FAIL when a step fails (a probe's exit 1 and exit 2 both read FAIL, as CI is red on both), else unknown when a step is unknown, else PASS.
+A refusal runs no step, and its unknown line names the file, the line or the expression.
+The PR body has no local source, so a step whose env reads `github.event.pull_request.body` is unknown.
+The action then reads unknown after its other steps ran, and a FAIL of those still wins.
+The real two-step `claude-md-cites` action reads unknown for another reason.
+Its second step's `run:` holds `HEAD_SHA="$(git ...)"` and `export HEAD_SHA`, which are not lint commands.
+So the read refuses the whole action, names that first line, and runs none of its steps.
+Cost, per `--lint` run: a selector process (about 7 s, measured 2026-11-13 on this tree), plus a shell process per picked CI step, which runs that step's suites.
+A local action adds a shell process per step.
+A given base adds a `git rev-parse` of it.
+A diff that touches no file a suite loads picks no suite, so it costs only the selector.
+A picked set grows with the module; debt `lane-lint-hub-cost` holds the counts per module, the checks job's total and the selector's breakdown.
+The time per suite is unmeasured; the run stays inside `LINT_SECONDS` in `merge/merge.py` or ends unknown (debt `lane-lint-hub-cost`).
+For the STE lint `uses:` action, it runs `bin/ste-changed <base>`.
+With no `--base`, `--lint` takes `origin/main` and says so, or prints only an unknown line and exits 2 when `origin/main` is absent.
+Why: a no-base run skipped the pull-request steps and read as a pass (incident 2026-10-28, batch 5: the comment narration check then failed in CI).
+With `--base`, ci-job sets `GITHUB_BASE_REF` in each step, as the runner does on a pull request.
+A lane that adds a record is therefore not red for its stale records page.
 
-- Suites lint does not run. Every job CI runs for the diff, on any runner, prints one `not run` line for each suite step it owes and does not run (`owed_suites`). The line names the job's runner when that runner is not ubuntu. A step owes its suites when its `if:` reads on and names a scope flag, or, when it names none and has no `python3 <folder>/test_*.py` line, when the scope script sets `code` on. A `hooks/` or `merge/` python suite is the selector's alone, so it is never owed. A suite that the change touches, or a path its `_UNDER_TEST:-` line names, reads unknown and exits 2 (`reached_suites`). Every other owed suite prints one `not run` line that names it and says it runs in CI, and exits 0.
-  - Consultant's pick (2026-11-24 13:28 CST, not owner-typed; the owner may reverse it): the unknown is this narrow self-reach rule, not one for every owed suite. Measure (12:56 CST Nov 24 2026, the last 40 merges to main): unknown for every flag-reached suite read unknown on 39, a path rule on 37, main's lint on 14.
+- Suites lint does not run.
+  Every job CI runs for the diff, on any runner, prints one `not run` line for each suite step it owes and does not run (`owed_suites`).
+  The line names the job's runner when that runner is not ubuntu.
+  A step owes its suites when its `if:` reads on and names a scope flag, or, when it names none and has no `python3 <folder>/test_*.py` line, when the scope script sets `code` on.
+  A `hooks/` or `merge/` python suite is the selector's alone, so it is never owed.
+  A suite that the change touches, or a path its `_UNDER_TEST:-` line names, reads unknown and exits 2 (`reached_suites`).
+  Every other owed suite prints one `not run` line that names it and says it runs in CI, and exits 0.
+  - Consultant's pick (2026-11-24 13:28 CST, not owner-typed; the owner may reverse it): the unknown is this narrow self-reach rule, not one for every owed suite.
+    Measure (12:56 CST Nov 24 2026, the last 40 merges to main): unknown for every flag-reached suite read unknown on 39, a path rule on 37, main's lint on 14.
   - Cost: one `git diff --name-only` per pass that reads an owed suite, and one read of each owed suite file the diff does not change (unmeasured).
-  - Consultant's pick (2026-11-24 19:23 CST, not owner-typed; the owner may reverse it): a step that `.github/stamp.json` lists under `merge.lintSuites` runs under `--lint` when the change reaches it, whatever its language. `lint_suites` reads the list from the tree under test. `listed_reached` is the reach test: the step must be a plain run, not a `uses:`, lint or install step, and not a `python3 <folder>/test_*.py` line (the selector's). Its `if:` must not read false on a pull request. It is reached when the change touches a file the step names in command position, or a path that file's `_UNDER_TEST:-` line names as `$REPO_ROOT/<path>}`. A file path that cannot be resolved (another variable, an absolute path, or one that leaves the checkout) is reached by any changed file of the same name. A diff that cannot be read reaches every listed step that names a file. A listed step the change does not reach reads as an unlisted one does. A reached listed step on a runner this OS cannot stand in for (`listed_foreign`) prints one `unknown` line naming its job and step; the lint exits 2, or 1 when a FAIL also prints. A listed step whose tool is missing reads unknown and names the tool. A listed name the workflow lacks is a FAIL. An absent or empty list changes nothing, and a list that is not a list of names reads unknown. A `.github/stamp.json` that cannot be read as JSON prints one `unknown` line naming the file. A missing file or a missing `lintSuites` key is silent.
+  - Consultant's pick (2026-11-24 19:23 CST, not owner-typed; the owner may reverse it): a step that `.github/stamp.json` lists under `merge.lintSuites` runs under `--lint` when the change reaches it, whatever its language.
+    `lint_suites` reads the list from the tree under test.
+    `listed_reached` is the reach test: the step must be a plain run, not a `uses:`, lint or install step, and not a `python3 <folder>/test_*.py` line (the selector's).
+    Its `if:` must not read false on a pull request.
+    It is reached when the change touches a file the step names in command position, or a path that file's `_UNDER_TEST:-` line names as `$REPO_ROOT/<path>}`.
+    A file path that cannot be resolved (another variable, an absolute path, or one that leaves the checkout) is reached by any changed file of the same name.
+    A diff that cannot be read reaches every listed step that names a file.
+    A listed step the change does not reach reads as an unlisted one does.
+    A reached listed step on a runner this OS cannot stand in for (`listed_foreign`) prints one `unknown` line naming its job and step; the lint exits 2, or 1 when a FAIL also prints.
+    A listed step whose tool is missing reads unknown and names the tool.
+    A listed name the workflow lacks is a FAIL.
+    An absent or empty list changes nothing, and a list that is not a list of names reads unknown.
+    A `.github/stamp.json` that cannot be read as JSON prints one `unknown` line naming the file.
+    A missing file or a missing `lintSuites` key is silent.
   - Cost: one read of `.github/stamp.json` per lint run; with a list, one load of `merge/merge.py` per run (in process); one `git diff --name-only` per run once a listed step names a suite file, so it starts even when no listed step is reached (unmeasured); one `bin/verdict` and one shell per listed step the change reaches.
 - A suite step with no scope flag and no `python3` suite line prints its line only when the scope script sets `code` on, so a docs-only change still reads PASS when its lint CI steps pass.
-- Mistake it guards: lane lint read PASS on PRs 3606 and 3805, whose failing suite it never ran. Both broke main (Nov 21-24 2026).
+- Mistake it guards: lane lint read PASS on PRs 3606 and 3805, whose failing suite it never ran.
+  Both broke main (Nov 21-24 2026).
 
-The lint run has one mutation-test exception to "It runs no mutation test" above. The one named exception (owner, waiting page item 463 a, 2026-11-09 13:09 CST; the next sentence is a paraphrase in glossary terms, and that item holds the owner's exact words): for a lane that changes the mutation test, its own suite is the mutation job, run before the batch. When a lane's diff touches a file that the code matches as `hooks/mutate_*.py` or `hooks/mutate_*.mjs` (today `hooks/mutate_guard.py`, `hooks/mutate_shared.py` and `hooks/mutate_js.mjs`), `merge --lane-lint` does one more thing. It runs the command of each mutation test shard job, a whole CI step each, on that head (see the mutation test below). `janitor/mutate_sweep.py` and the test files are not in that match, so a diff that touches only them runs no mutation test.
+The lint run has one mutation-test exception to "It runs no mutation test" above.
+The one named exception (owner, waiting page item 463 a, 2026-11-09 13:09 CST; the next sentence is a paraphrase in glossary terms, and that item holds the owner's exact words): for a lane that changes the mutation test, its own suite is the mutation job, run before the batch.
+When a lane's diff touches a file that the code matches as `hooks/mutate_*.py` or `hooks/mutate_*.mjs` (today `hooks/mutate_guard.py`, `hooks/mutate_shared.py` and `hooks/mutate_js.mjs`), `merge --lane-lint` does one more thing.
+It runs the command of each mutation test shard job, a whole CI step each, on that head (see the mutation test below).
+`janitor/mutate_sweep.py` and the test files are not in that match, so a diff that touches only them runs no mutation test.
 
-The check (incident 2026-11-01, batches 59 and 60: lane PRs #974, #979, #984, #990 and #1004 joined with shellcheck, ruling kind or STE reds). Both sides run `merge --lane-lint <pr>`, which runs that same `--lint` in a temporary worktree at the lane's head.
+The check (incident 2026-11-01, batches 59 and 60: lane PRs #974, #979, #984, #990 and #1004 joined with shellcheck, ruling kind or STE reds).
+Both sides run `merge --lane-lint <pr>`, which runs that same `--lint` in a temporary worktree at the lane's head.
 
-- The lane runs it before it hands its PR and head off. A red lane does not hand off.
-- The batch runner runs it on each lane head before the join. It refuses a red lane, and that lane fixes and hands off again.
-- Until the cutover (decision `all-repos-switch-together`), the batch runner runs `merge --lane-lint <integration PR number>` on the batch head, after the draft step's page push. A lint PASS is not needed before the ready mark: the PR merges on whichever proof of its head arrives first (decision `draft-until-reviewed`). After the cutover, it runs on a lane PR's head before that PR merges, unless the all-jobs-passed rollup is green on that head (owner ruling `own-lint-skip-green-rollup-a`, 21:01 CST Nov 13, step `merge-lint-skip-green-rollup`): then CI already proved the head and the join skips the lint, for a lane PR as for an integration PR. Gain: about 9 minutes per lane merge, unmeasured. Lose: the lint's checks then run only in CI at merge. A ref target posts no comment, so it cannot satisfy the join. A FAIL keeps the PR a draft. A hand list of checks never stands in for this run (coordinator, 2026-11-06 15:29 CST): one missed the comment narration check in batch 36.
-- The integration PR call runs the mutation test when the diff touches a mutation test file. On its first call per head, no hand-off PASS comment names the integration PR (see the mutation test below). A re-run on an unchanged head skips it only in a session with the recorded `batch-runner` role (a cloud session), because the first run's own PASS now names it. Any other session runs it again. It prints `mutation test run skipped here: it runs at the lane's hand-off lint` when it skips.
-- A PASS on a pull request number posts one comment on it: the marker `<!-- lane-lint -->`, then `PR: #<n>`, `Head: <40-hex head the lint read>` and `Result: PASS`. A FAIL, an unknown and a ref or commit target post nothing. A failed post prints the PASS and a reason line, and exits 0.
-- The comment is the proof. In a cloud session, the join (`merge <pr> --confirm` on a ready PR) needs it before any lock, claim or push, unless the all-jobs-passed rollup is green on the live head (the lane-lint bullet above). The join takes the newest lane-lint comment that names the PR's live head. That comment must come from the repo's owner (`author_association` OWNER) and say `Result: PASS`. Any other comment is ignored: an older head, a FAIL, or a non-owner author. `merge --reviewed` reads a done record as `no lint`, `lint fail` or `lint unknown` (a comment with no readable Result). It leaves that record out of the batch line. Both name `merge --lane-lint <pr>`. A failed read of the comments refuses the join as `lane lint unknown`. A PASS for an earlier head also counts when every later commit is a claim, or when every later commit is a clean merge of main (this comment carry is separate from the step carry in the rerun bullet below). A claim has one parent, a Record-claim trailer, and only record files touched (a stamp kind's folder, or the records page). A clean merge of main has two parents, the second on main, and a tree equal to git's own merge of its parents, with nothing else changed (owner ruling own-850-a-lane-lint-carries-clean-main-merge, 2026-11-14 23:04 CST). A merge with any other change, a conflict-resolved merge, or a tree that differs from git's merge does not count. An unreadable merge-tree is not carried, and the line reads `no lint`. A claim or page commit after a clean merge does not count. `--reviewed` and `--release-check` read the same carry (one home: merge/merge.py::lint_carried). A claim that rewrites a cite in another file reads as a new head, so the lane lints again. A head pushed after the join's read is refused before any merge call. A cloud-session post on shivinate7/claude-settings reads back OWNER (measured pull request 2382, comment 6732994630, 2026-11-09 05:28 UTC). An org-owned repo or a non-OWNER token stays unmeasured, and refuses every join (fail-closed). (read merge/merge.py::lint_check)
-- A FAIL refuses. An unknown refuses unless `--lint-unknown-ok "<reason>"` is given, and the reason is logged. A lint timeout (3600 s) is an unknown that `--lint-unknown-ok` does not lift. The lane re-runs it.
-- No silent pass (owner, 2026-11-07 13:20 CST; definition by the coordinator, 20:35 CST). A `--lint` run that runs no lint CI step is unknown and exits 2. A required CI step is a lint CI step whose `if:` reads true on a pull-request run. When one is skipped, the run is unknown and exits 2. A CI step whose `if:` holds only off a pull request prints `skipped` and does not fail. The PASS line names each skipped CI step. Plain ci-job runs keep their verdicts.
-- Every ready lint runs at once (owner, 2026-11-18 19:32 CST). Owner: "Run every ready lint at once, up to the disk floor; free space first when the disk refuses one." ... "shouldnt this be a general linting rule for prs in general?" The consultant read it as yes at 19:33 CST. So the rule covers every PR's lint, not lane lint only: each `merge --lane-lint` run at hand-off, at the join, or on the batch head. A PR's lint is ready when it is due: at a lane's hand-off, at the join, or on the batch head. Each ready lint runs as its own background command, through `verdict`, with its own Bash timeout (skill `ci-hygiene`). Before each start, the session, local or cloud, reads the 5-minute load and free disk. It starts a lint only while the 5-minute load is under 4 per CPU (owner ruling, chat 20:56 CST Nov 18) and free disk is at or above the disk floor. A lint that the load holds back waits in one queue. A queued lint waits for the load to drop, never for another PR's lint. The disk floor is the smaller of 5% of the disk and 5 GB, the brake's full disk floor (decision `machine-load-brake`, owner pick a, 2026-11-17 13:22 CST). On Linux, memory over 95% also refuses a background lint start at a full machine (owner, 2026-11-19 21:30 CST: "read memory on linux if u can"; decision `machine-load-brake`, the machine-load brake). The guard's brake reads that memory, before the call runs. `merge --lane-lint` itself reads the disk floor only (`refuse_full_disk` in `merge/merge.py`), never memory. There is no count cap. The load gate and the disk floor decide how many lints run. When the disk refuses a lint, free space first. Run the janitor sweep, `python3 ~/.claude/janitor/sweep.py --root <repo> --fast`, preview first and then with `--confirm`, in the background (decision `fg-bash-while-bg`). Then remove the repo's test run folders older than one day (decision `test-temp-standard`). No standalone command does this yet, so until a builder adds one, this step is a gap: report the refusal to the parent. Then retry that PR's lint. A lint the disk still refuses does not hand off or join. Each call has its own worktree under a unique temp name (`merge-wt-`, `merge/merge.py`), and the lint takes no merge lock. Why: the owner's rulings of 2026-11-18 19:32 CST (run at once) and 20:56 CST (hold back while the load is high). The gate covers cloud sessions too, because the two lints that timed out ran in a cloud session (consultant pick, 21:00 CST Nov 18). The wait in the load queue is unmeasured. Cost, per ready PR: a ci-job run, a worktree and a temp folder, started when both gates read open. Each start adds a load read, on demand, with no timer and no file. Unmeasured: the peak count, the wall time of the parallel set, the memory of mutation-test runs (up to three shard runs per lint), git ref-lock contention from concurrent fetches or worktree adds, the effect of the 4-per-CPU gate on CPU contention, and CPU contention that can still push a lint past `LINT_SECONDS`, an unknown that `--lint-unknown-ok` does not lift. The 4-per-CPU value is the owner's approved value. The load gate is separate from the machine-load brake (decision `machine-load-brake`), which never reads the load average (107 on 15 cores while `top` showed half idle). No check holds this rule yet.
-- Rerun of failed checks (owner, 2026-11-19 14:31 CST: "rerun only the failed checks"). Debt `ci-job-lane-lint-cache-miss` (a lane lint never hit the rerun cache) is closed. The coordinator's reading, 23:29 CST Nov 20: a rerun of `ci-job` or `merge --lane-lint` runs only the steps that did not pass at the same key. A pass at the key prints `PASS (cached)` (`cache_key`, `bin/ci-job`). The key holds the step's name, command, shell, folder, base, pushed head, HEAD's parents and message, tree, tool and environment. The checkout's path is not in it. Code-check and zizmor name their script relative to the checkout when it lies inside it (`under`), so two lint worktrees of one tree share a key. A lane lint merges the head into main's tip, with both dates set to the later of the two committer dates (`merge_dates`, `merge/merge.py`). So one head and one tip build the same merged commit, and its saved step passes and saved job pass (`saved_pass_read`) are reused. Owner grant, 2026-11-23 13:42 CST, for that rerun hit. A new main tip misses every key and carries nothing, since the base commit must match. A new commit misses the exact key; a suite step may still carry (the step carry bullet below). The store is local, so another machine misses it. `CI_JOB_NO_CACHE=1` turns it off. `test_a_rerun_runs_only_the_failed_and_the_unrun_steps` in `lint/test_ci_job.py` proves the step part.
-- Step carry across a commit. Owner, 2026-11-23 13:42 CST: key each lane-lint step by the files its suite covers. Owner, 14:07 CST Nov 23, option a: a lint step keeps its PASS across a commit when the selector picks none of its suites; a rare stale PASS is accepted until the PR's CI. Built in `bin/ci-job` (`carry_served`, `carry_delta`, `carry_delta_read`, `carry_scope`) and the SCOPE_FILES mode of `.github/scripts/ci-scope.sh`. A suite-only CI step (`carry_suites`) whose exact key misses prints `PASS (carried)` and runs nothing when all of these hold: its saved pass is at an earlier head that is an ancestor of HEAD; the base commit is the same; this tree is clean; the saved suites equal the step's; the selector picks none of the step's suites for the delta from the saved tree to this tree; and each scope flag the step's `if:` reads is false for that delta. A delta that touches `bin/ci-job`, `hooks/mutate_guard.py` or `.github/stamp.json` never carries. A delta of `docs/records.md` alone picks no suite, so only the flag check decides. A saved pass is saved only from a clean tree. Consultant picks under the 14:07 ruling (the consultant's, undoable): carry only when the selector picks none of the step's suites and the step's own scope flag is false; an unmapped non-Markdown file runs the step (ci-scope.sh sets every flag for it); a dirty tree or an env change never carries; a records-only commit carries; a commit that adds a file under a landed dir (`landed-dirs.txt`) turns on `code`, `guard`, `windows_guard`, `checks_windows` and `shell_macos`, so a step whose `if:` reads one runs; a failed git read turns every suite on. Cost, per carry check: one git ancestor read, at most three git diffs of the saved pair, and no `gh` (pinned by `test_the_carry_check_starts_no_gh_and_at_most_three_git_diffs_of_the_saved_pair` in `lint/test_ci_job.py`). A delta beyond `docs/records.md` also starts one ci-scope.sh run and one selector run, once per delta per run (unmeasured). Unpinned fail-safes: see note `carry-fail-safes-unpinned`.
+- The lane runs it before it hands its PR and head off.
+  A red lane does not hand off.
+- The batch runner runs it on each lane head before the join.
+  It refuses a red lane, and that lane fixes and hands off again.
+- Until the cutover (decision `all-repos-switch-together`), the batch runner runs `merge --lane-lint <integration PR number>` on the batch head, after the draft step's page push.
+  A lint PASS is not needed before the ready mark: the PR merges on whichever proof of its head arrives first (decision `draft-until-reviewed`).
+  After the cutover, it runs on a lane PR's head before that PR merges, unless the all-jobs-passed rollup is green on that head (owner ruling `own-lint-skip-green-rollup-a`, 21:01 CST Nov 13, step `merge-lint-skip-green-rollup`): then CI already proved the head and the join skips the lint, for a lane PR as for an integration PR.
+  Gain: about 9 minutes per lane merge, unmeasured.
+  Lose: the lint's checks then run only in CI at merge.
+  A ref target posts no comment, so it cannot satisfy the join.
+  A FAIL keeps the PR a draft.
+  A hand list of checks never stands in for this run (coordinator, 2026-11-06 15:29 CST): one missed the comment narration check in batch 36.
+- The integration PR call runs the mutation test when the diff touches a mutation test file.
+  On its first call per head, no hand-off PASS comment names the integration PR (see the mutation test below).
+  A re-run on an unchanged head skips it only in a session with the recorded `batch-runner` role (a cloud session), because the first run's own PASS now names it.
+  Any other session runs it again.
+  It prints `mutation test run skipped here: it runs at the lane's hand-off lint` when it skips.
+- A PASS on a pull request number posts one comment on it: the marker `<!-- lane-lint -->`, then `PR: #<n>`, `Head: <40-hex head the lint read>` and `Result: PASS`.
+  A FAIL, an unknown and a ref or commit target post nothing.
+  A failed post prints the PASS and a reason line, and exits 0.
+- The comment is the proof.
+  In a cloud session, the join (`merge <pr> --confirm` on a ready PR) needs it before any lock, claim or push, unless the all-jobs-passed rollup is green on the live head (the lane-lint bullet above).
+  The join takes the newest lane-lint comment that names the PR's live head.
+  That comment must come from the repo's owner (`author_association` OWNER) and say `Result: PASS`.
+  Any other comment is ignored: an older head, a FAIL, or a non-owner author.
+  `merge --reviewed` reads a done record as `no lint`, `lint fail` or `lint unknown` (a comment with no readable Result).
+  It leaves that record out of the batch line.
+  Both name `merge --lane-lint <pr>`.
+  A failed read of the comments refuses the join as `lane lint unknown`.
+  A PASS for an earlier head also counts when every later commit is a claim, or when every later commit is a clean merge of main (this comment carry is separate from the step carry in the rerun bullet below).
+  A claim has one parent, a Record-claim trailer, and only record files touched (a stamp kind's folder, or the records page).
+  A clean merge of main has two parents, the second on main, and a tree equal to git's own merge of its parents, with nothing else changed (owner ruling own-850-a-lane-lint-carries-clean-main-merge, 2026-11-14 23:04 CST).
+  A merge with any other change, a conflict-resolved merge, or a tree that differs from git's merge does not count.
+  An unreadable merge-tree is not carried, and the line reads `no lint`.
+  A claim or page commit after a clean merge does not count.
+  `--reviewed` and `--release-check` read the same carry (one home: merge/merge.py::lint_carried).
+  A claim that rewrites a cite in another file reads as a new head, so the lane lints again.
+  A head pushed after the join's read is refused before any merge call.
+  A cloud-session post on shivinate7/claude-settings reads back OWNER (measured pull request 2382, comment 6732994630, 2026-11-09 05:28 UTC).
+  An org-owned repo or a non-OWNER token stays unmeasured, and refuses every join (fail-closed).
+  (read merge/merge.py::lint_check)
+- A FAIL refuses.
+  An unknown refuses unless `--lint-unknown-ok "<reason>"` is given, and the reason is logged.
+  A lint timeout (3600 s) is an unknown that `--lint-unknown-ok` does not lift.
+  The lane re-runs it.
+- No silent pass (owner, 2026-11-07 13:20 CST; definition by the coordinator, 20:35 CST).
+  A `--lint` run that runs no lint CI step is unknown and exits 2.
+  A required CI step is a lint CI step whose `if:` reads true on a pull-request run.
+  When one is skipped, the run is unknown and exits 2.
+  A CI step whose `if:` holds only off a pull request prints `skipped` and does not fail.
+  The PASS line names each skipped CI step.
+  Plain ci-job runs keep their verdicts.
+- Every ready lint runs at once (owner, 2026-11-18 19:32 CST).
+  Owner: "Run every ready lint at once, up to the disk floor; free space first when the disk refuses one."
+  ...
+  "shouldnt this be a general linting rule for prs in general?"
+  The consultant read it as yes at 19:33 CST.
+  So the rule covers every PR's lint, not lane lint only: each `merge --lane-lint` run at hand-off, at the join, or on the batch head.
+  A PR's lint is ready when it is due: at a lane's hand-off, at the join, or on the batch head.
+  Each ready lint runs as its own background command, through `verdict`, with its own Bash timeout (skill `ci-hygiene`).
+  Before each start, the session, local or cloud, reads the 5-minute load and free disk.
+  It starts a lint only while the 5-minute load is under 4 per CPU (owner ruling, chat 20:56 CST Nov 18) and free disk is at or above the disk floor.
+  A lint that the load holds back waits in one queue.
+  A queued lint waits for the load to drop, never for another PR's lint.
+  The disk floor is the smaller of 5% of the disk and 5 GB, the brake's full disk floor (decision `machine-load-brake`, owner pick a, 2026-11-17 13:22 CST).
+  On Linux, memory over 95% also refuses a background lint start at a full machine (owner, 2026-11-19 21:30 CST: "read memory on linux if u can"; decision `machine-load-brake`, the machine-load brake).
+  The guard's brake reads that memory, before the call runs.
+  `merge --lane-lint` itself reads the disk floor only (`refuse_full_disk` in `merge/merge.py`), never memory.
+  There is no count cap.
+  The load gate and the disk floor decide how many lints run.
+  When the disk refuses a lint, free space first.
+  Run the janitor sweep, `python3 ~/.claude/janitor/sweep.py --root <repo> --fast`, preview first and then with `--confirm`, in the background (decision `fg-bash-while-bg`).
+  Then remove the repo's test run folders older than one day (decision `test-temp-standard`).
+  No standalone command does this yet, so until a builder adds one, this step is a gap: report the refusal to the parent.
+  Then retry that PR's lint.
+  A lint the disk still refuses does not hand off or join.
+  Each call has its own worktree under a unique temp name (`merge-wt-`, `merge/merge.py`), and the lint takes no merge lock.
+  Why: the owner's rulings of 2026-11-18 19:32 CST (run at once) and 20:56 CST (hold back while the load is high).
+  The gate covers cloud sessions too, because the two lints that timed out ran in a cloud session (consultant pick, 21:00 CST Nov 18).
+  The wait in the load queue is unmeasured.
+  Cost, per ready PR: a ci-job run, a worktree and a temp folder, started when both gates read open.
+  Each start adds a load read, on demand, with no timer and no file.
+  Unmeasured: the peak count, the wall time of the parallel set, the memory of mutation-test runs (up to three shard runs per lint), git ref-lock contention from concurrent fetches or worktree adds, the effect of the 4-per-CPU gate on CPU contention, and CPU contention that can still push a lint past `LINT_SECONDS`, an unknown that `--lint-unknown-ok` does not lift.
+  The 4-per-CPU value is the owner's approved value.
+  The load gate is separate from the machine-load brake (decision `machine-load-brake`), which never reads the load average (107 on 15 cores while `top` showed half idle).
+  No check holds this rule yet.
+- Rerun of failed checks (owner, 2026-11-19 14:31 CST: "rerun only the failed checks").
+  Debt `ci-job-lane-lint-cache-miss` (a lane lint never hit the rerun cache) is closed.
+  The coordinator's reading, 23:29 CST Nov 20: a rerun of `ci-job` or `merge --lane-lint` runs only the steps that did not pass at the same key.
+  A pass at the key prints `PASS (cached)` (`cache_key`, `bin/ci-job`).
+  The key holds the step's name, command, shell, folder, base, pushed head, HEAD's parents and message, tree, tool and environment.
+  The checkout's path is not in it.
+  Code-check and zizmor name their script relative to the checkout when it lies inside it (`under`), so two lint worktrees of one tree share a key.
+  A lane lint merges the head into main's tip, with both dates set to the later of the two committer dates (`merge_dates`, `merge/merge.py`).
+  So one head and one tip build the same merged commit, and its saved step passes and saved job pass (`saved_pass_read`) are reused.
+  Owner grant, 2026-11-23 13:42 CST, for that rerun hit.
+  A new main tip misses every key and carries nothing, since the base commit must match.
+  A new commit misses the exact key; a suite step may still carry (the step carry bullet below).
+  The store is local, so another machine misses it.
+  `CI_JOB_NO_CACHE=1` turns it off.
+  `test_a_rerun_runs_only_the_failed_and_the_unrun_steps` in `lint/test_ci_job.py` proves the step part.
+- Step carry across a commit.
+  Owner, 2026-11-23 13:42 CST: key each lane-lint step by the files its suite covers.
+  Owner, 14:07 CST Nov 23, option a: a lint step keeps its PASS across a commit when the selector picks none of its suites; a rare stale PASS is accepted until the PR's CI.
+  Built in `bin/ci-job` (`carry_served`, `carry_delta`, `carry_delta_read`, `carry_scope`) and the SCOPE_FILES mode of `.github/scripts/ci-scope.sh`.
+  A suite-only CI step (`carry_suites`) whose exact key misses prints `PASS (carried)` and runs nothing when all of these hold: its saved pass is at an earlier head that is an ancestor of HEAD; the base commit is the same; this tree is clean; the saved suites equal the step's; the selector picks none of the step's suites for the delta from the saved tree to this tree; and each scope flag the step's `if:` reads is false for that delta.
+  A delta that touches `bin/ci-job`, `hooks/mutate_guard.py` or `.github/stamp.json` never carries.
+  A delta of `docs/records.md` alone picks no suite, so only the flag check decides.
+  A saved pass is saved only from a clean tree.
+  Consultant picks under the 14:07 ruling (the consultant's, undoable): carry only when the selector picks none of the step's suites and the step's own scope flag is false; an unmapped non-Markdown file runs the step (ci-scope.sh sets every flag for it); a dirty tree or an env change never carries; a records-only commit carries; a commit that adds a file under a landed dir (`landed-dirs.txt`) turns on `code`, `guard`, `windows_guard`, `checks_windows` and `shell_macos`, so a step whose `if:` reads one runs; a failed git read turns every suite on.
+  Cost, per carry check: one git ancestor read, at most three git diffs of the saved pair, and no `gh` (pinned by `test_the_carry_check_starts_no_gh_and_at_most_three_git_diffs_of_the_saved_pair` in `lint/test_ci_job.py`).
+  A delta beyond `docs/records.md` also starts one ci-scope.sh run and one selector run, once per delta per run (unmeasured).
+  Unpinned fail-safes: see note `carry-fail-safes-unpinned`.
 
-The main rule (step cross-measure-main-net, incident 2026-11-10). `merge --lane-lint` first merges every head into `origin/<base>` with `git merge-tree --write-tree`, a ref or commit target too. A conflict is a FAIL that names the base. An unreadable merge-tree is an unknown stop. Why: the check once read only pairs of PRs, so a clash that came through main was blamed on the sibling PR, and a head that conflicted with main passed. A PR on main is linted as M when its head lacks main's tip, holds no Record-claim and is not an integration PR. M is the merge commit of the head and the tip, with the message `merge_base_in` writes. Only a full PASS (the lint, the mutation test and the touched tests) pushes M to the PR's branch, with a plain push. It does so only when the checkout's HEAD holds the PR's pushed head as an ancestor. That read does not check that the caller owns the PR. So a checkout on main passes it for an open PR whose head main has already merged. A PR whose head the checkout lacks pushes nothing. The PASS line and the comment name M, so the PASS head is the merged head. A PASS whose head lacks main's tip and was not pushed says `main-in not pushed` and a reason on its PASS line (a closed or fork PR, an integration PR, the batch runner's pre-join call, a Record-claim head, a checkout that does not hold the head or whose ancestry cannot be read, a default branch that cannot be read, or a base that is not the default). A refused push (the branch moved) posts nothing. A FAIL, an unknown, a lifted unknown, a conflict and the batch runner's pre-join call push nothing. A local batch runner records no role, so its call has `pre_join` False. A conflict is never resolved here. M is built and pushed only for an open PR whose head repo is its base repo (a fork, a closed PR, a PR with no repo field and an unreadable repo lint as before and push nothing). The draft run is read on the pre-merge pushed head, and the PASS names M. Why: a head behind main passed the lint on a merge no later step read, and the hand-off head differed from the head that was linted.
+The main rule (step cross-measure-main-net, incident 2026-11-10).
+`merge --lane-lint` first merges every head into `origin/<base>` with `git merge-tree --write-tree`, a ref or commit target too.
+A conflict is a FAIL that names the base.
+An unreadable merge-tree is an unknown stop.
+Why: the check once read only pairs of PRs, so a clash that came through main was blamed on the sibling PR, and a head that conflicted with main passed.
+A PR on main is linted as M when its head lacks main's tip, holds no Record-claim and is not an integration PR.
+M is the merge commit of the head and the tip, with the message `merge_base_in` writes.
+Only a full PASS (the lint, the mutation test and the touched tests) pushes M to the PR's branch, with a plain push.
+It does so only when the checkout's HEAD holds the PR's pushed head as an ancestor.
+That read does not check that the caller owns the PR.
+So a checkout on main passes it for an open PR whose head main has already merged.
+A PR whose head the checkout lacks pushes nothing.
+The PASS line and the comment name M, so the PASS head is the merged head.
+A PASS whose head lacks main's tip and was not pushed says `main-in not pushed` and a reason on its PASS line (a closed or fork PR, an integration PR, the batch runner's pre-join call, a Record-claim head, a checkout that does not hold the head or whose ancestry cannot be read, a default branch that cannot be read, or a base that is not the default).
+A refused push (the branch moved) posts nothing.
+A FAIL, an unknown, a lifted unknown, a conflict and the batch runner's pre-join call push nothing.
+A local batch runner records no role, so its call has `pre_join` False.
+A conflict is never resolved here.
+M is built and pushed only for an open PR whose head repo is its base repo (a fork, a closed PR, a PR with no repo field and an unreadable repo lint as before and push nothing).
+The draft run is read on the pre-merge pushed head, and the PASS names M.
+Why: a head behind main passed the lint on a merge no later step read, and the hand-off head differed from the head that was linted.
 
-The cross rule. A PR number is also measured against each other open PR of its lane (a body with the same session URL, a draft too) and each PR that `--with` names. Why: two PRs of one lane that clash cannot join one batch unless they stack (PRs 1923 and 2112, batch 68). A stack pair is skipped. A clash counts only when both heads merge clean with the base. Any other clash is a report line after the PASS line, and it names the PR that conflicts with the base.
+The cross rule.
+A PR number is also measured against each other open PR of its lane (a body with the same session URL, a draft too) and each PR that `--with` names.
+Why: two PRs of one lane that clash cannot join one batch unless they stack (PRs 1923 and 2112, batch 68).
+A stack pair is skipped.
+A clash counts only when both heads merge clean with the base.
+Any other clash is a report line after the PASS line, and it names the PR that conflicts with the base.
 
-The order: the stack stop, the base check, the cross-measure, then the ci-job run. An unknown in the first three stops before the ci-job run, and `--lint-unknown-ok` never lifts it. A FAIL in the base check or the cross-measure stops there too, as on main: a counted FAIL never runs the ci-job. One refusal lists every FAIL block of those two checks, with no PASS line and no comment. `--lint-unknown-ok` lifts none of them.
+The order: the stack stop, the base check, the cross-measure, then the ci-job run.
+An unknown in the first three stops before the ci-job run, and `--lint-unknown-ok` never lifts it.
+A FAIL in the base check or the cross-measure stops there too, as on main: a counted FAIL never runs the ci-job.
+One refusal lists every FAIL block of those two checks, with no PASS line and no comment.
+`--lint-unknown-ok` lifts none of them.
 
-The missing-tree-file stop (incident 02:12 CST Nov 10, 2026, in the lane-lint lane of PR 2379, head eb8defaba: the lint ran the full 1200 s twice and read unknown, and its Python 3.9 floor tests failed with FileNotFoundError for `lint/check_python_floor.py` and `.github/workflows/checks.yml`, though both were on main and on the head; the cause of the missing files is unmeasured). Before any step, a lint worktree that lacks `lint/check_python_floor.py` or `.github/workflows/checks.yml` while the head's git tree holds it is UNKNOWN. It exits 1, like every lane-lint refusal (exit 2 is argparse's usage code), names the file, and `--lint-unknown-ok` never lifts it. Why: the floor step only crashed on the file, and its FAIL blamed the lane for a defect of the worktree. The check reads the head's git tree, so a head that never held the file is not stopped. Cost: one `git ls-tree` of the head. (read merge/merge.py::refuse_incomplete_tree)
+The missing-tree-file stop (incident 02:12 CST Nov 10, 2026, in the lane-lint lane of PR 2379, head eb8defaba: the lint ran the full 1200 s twice and read unknown, and its Python 3.9 floor tests failed with FileNotFoundError for `lint/check_python_floor.py` and `.github/workflows/checks.yml`, though both were on main and on the head; the cause of the missing files is unmeasured).
+Before any step, a lint worktree that lacks `lint/check_python_floor.py` or `.github/workflows/checks.yml` while the head's git tree holds it is UNKNOWN.
+It exits 1, like every lane-lint refusal (exit 2 is argparse's usage code), names the file, and `--lint-unknown-ok` never lifts it.
+Why: the floor step only crashed on the file, and its FAIL blamed the lane for a defect of the worktree.
+The check reads the head's git tree, so a head that never held the file is not stopped.
+Cost: one `git ls-tree` of the head.
+(read merge/merge.py::refuse_incomplete_tree)
 
-Cost: one ci-job run and one worktree per call (unmeasured), each with one temp folder, except a saved job pass, which runs no ci-job. The parallel start rule above runs one such set per ready PR at once, bounded by the disk floor, which `merge --lane-lint` reads itself, and, on Linux, by memory over 95%, which only the guard's brake reads (owner, 2026-11-19 21:30 CST: "read memory on linux if u can"). The base check adds one `git merge-tree` of the head. The cross rule adds one PR-list read, and two merge-trees for each PR compared (that PR against the base, and against the head), none for a stack pair (unmeasured). A lane with a counted FAIL pays no ci-job run. It runs once at hand-off, once per lane at the join, and once on the batch head before ready (unmeasured). It keeps one ci-job log at the end. The rerun cache adds, per step it may cache, a set of git processes (a temp index, add, write-tree, rev-parse), and per run a read of the trees (unmeasured); a hit runs no step. Each saved step pass is one file under 1 KB in `$XDG_CACHE_HOME`, else in the user's cache folder, at most 300, kept 7 days. Each saved job pass is one file in the clone's git dir, at most three kept (`saved_pass_prune`). A PASS on a PR number adds one REST POST, and one `git push` when the head is behind main (none otherwise). A PASS that gets that far also reads the default branch (`origin/HEAD`, else one `gh api repos/{owner}/{repo}` read), only when every earlier gate allows the push; a failed read pushes nothing and the PASS stands (unmeasured). The join adds one paged read of the repo's comments, and `--reviewed` adds none: it reads the lint comments from the list it already reads (unmeasured). Run serially on main 0e6509a96, the 93 lint steps took about 1290 s of wall time (1 cloud run, step sum 1315 s, reported by the #2443 lane on 2026-11-10) (not pinned). That passed the 1200 s bound. So `--lint` runs its lint steps at once, up to `CI_JOB_LINT_WORKERS` workers, else the smaller of the CPU count and 4. One worker is the serial run. Install steps, plain runs, `--step` and `--plan` stay serial. With 4 workers the same run took 379.5 s (1 sample, this lane's builder run) (not pinned). With more than one worker it adds one thread per worker, one temp folder, and one temp log per lint step. Temp logs are deleted when ci-job ends. One exception: a log whose copy into the run's log failed is kept, with its folder, and named on stderr. Named limit: a kill by merge's timeout (SIGKILL reaches only ci-job) leaves the temp folder and may leave verdict child processes running.
+Cost: one ci-job run and one worktree per call (unmeasured), each with one temp folder, except a saved job pass, which runs no ci-job.
+The parallel start rule above runs one such set per ready PR at once, bounded by the disk floor, which `merge --lane-lint` reads itself, and, on Linux, by memory over 95%, which only the guard's brake reads (owner, 2026-11-19 21:30 CST: "read memory on linux if u can").
+The base check adds one `git merge-tree` of the head.
+The cross rule adds one PR-list read, and two merge-trees for each PR compared (that PR against the base, and against the head), none for a stack pair (unmeasured).
+A lane with a counted FAIL pays no ci-job run.
+It runs once at hand-off, once per lane at the join, and once on the batch head before ready (unmeasured).
+It keeps one ci-job log at the end.
+The rerun cache adds, per step it may cache, a set of git processes (a temp index, add, write-tree, rev-parse), and per run a read of the trees (unmeasured); a hit runs no step.
+Each saved step pass is one file under 1 KB in `$XDG_CACHE_HOME`, else in the user's cache folder, at most 300, kept 7 days.
+Each saved job pass is one file in the clone's git dir, at most three kept (`saved_pass_prune`).
+A PASS on a PR number adds one REST POST, and one `git push` when the head is behind main (none otherwise).
+A PASS that gets that far also reads the default branch (`origin/HEAD`, else one `gh api repos/{owner}/{repo}` read), only when every earlier gate allows the push; a failed read pushes nothing and the PASS stands (unmeasured).
+The join adds one paged read of the repo's comments, and `--reviewed` adds none: it reads the lint comments from the list it already reads (unmeasured).
+Run serially on main 0e6509a96, the 93 lint steps took about 1290 s of wall time (1 cloud run, step sum 1315 s, reported by the #2443 lane on 2026-11-10) (not pinned).
+That passed the 1200 s bound.
+So `--lint` runs its lint steps at once, up to `CI_JOB_LINT_WORKERS` workers, else the smaller of the CPU count and 4.
+One worker is the serial run.
+Install steps, plain runs, `--step` and `--plan` stay serial.
+With 4 workers the same run took 379.5 s (1 sample, this lane's builder run) (not pinned).
+With more than one worker it adds one thread per worker, one temp folder, and one temp log per lint step.
+Temp logs are deleted when ci-job ends.
+One exception: a log whose copy into the run's log failed is kept, with its folder, and named on stderr.
+Named limit: a kill by merge's timeout (SIGKILL reaches only ci-job) leaves the temp folder and may leave verdict child processes running.
 
-The sibling pass (incident 2026-11-22, PR 3481, the lint-main-merge lane, merged on a lane-lint PASS while its CI was pending; main's push run 44748674175 on cdea83be2b then failed job `checks-merge-git`, four `StandingMergeRole` cases, `'FakeHost' has no attribute 'cwd'`). Cause: the lint ran `bin/ci-job checks --lint` only. The selector picked `merge/test_merge.py` for the diff, but that suite sits in the CI step "Merge tool git-half fixture suite" of job `checks-merge-git`, so ci-job printed one `not run  job checks-merge-git: picked merge/test_merge.py; job checks-merge-git runs them, not checks` line (the old tail of `main` in `bin/ci-job`) and ran it nowhere. A `not run` line moves no exit code, so the lint passed. Proved by `python3 bin/ci-job checks --lint --plan --base cdea83be2b^1` at cdea83be2b, which printed that line. The suite passes on today's main, so the failure was in the suite, not in a git or cwd difference of the lint. Fix: after the linted job, `bin/ci-job` makes a second pass over each other job of the same workflow file that holds a picked suite, on an ubuntu runner, and runs that job's picked suite steps, each as CI runs it. Each owed suite step of any other job prints its line (see "Suites lint does not run" above). The list of jobs and suites is the one `.github/workflows/checks.yml` holds, read by the same code that reads the linted job; nothing copies it. The selector runs once per process and the passes read its pick. A job on a Windows or macOS runner names that runner in each `not run` line it prints, for a picked suite or an owed step. A suite run in an earlier pass runs once. A FAIL or unknown in a sibling pass reaches the exit code, so `merge --lane-lint` refuses on it as on any step. A step of a sibling job whose `if:` or `env:` ci-job cannot read prints unknown, never a pass: the guard shards `checks-guard` and `checks-guard-2` read unknown on their `NODE_PATH` expression (debt `guard-lane-lint-unknown`, a guard-touching lane lint ends unknown and needs `--lint-unknown-ok`; guard PRs prove on CI). The whole run still shares the one `LINT_SECONDS` bound, so a lane that picks a long suite such as the merge git half (10.7 min in CI) reads unknown at the bound, never a false pass. Reader: `merge/merge.py` `ci_job_run` reads ci-job's exit code and its FAIL and unknown lines, and the lane reads the PASS line and each sibling `job X:` line. Cost: one extra run of each picked suite of an ubuntu sibling job on each lane lint, bounded by `LINT_SECONDS`, plus one scope script read, one unshallow check and one log file per sibling job that runs (unmeasured). A diff that picks no suite outside the linted job pays none of it, and a cached PASS (`saved_pass_read`) skips the whole run.
+The sibling pass (incident 2026-11-22, PR 3481, the lint-main-merge lane, merged on a lane-lint PASS while its CI was pending; main's push run 44748674175 on cdea83be2b then failed job `checks-merge-git`, four `StandingMergeRole` cases, `'FakeHost' has no attribute 'cwd'`).
+Cause: the lint ran `bin/ci-job checks --lint` only.
+The selector picked `merge/test_merge.py` for the diff, but that suite sits in the CI step "Merge tool git-half fixture suite" of job `checks-merge-git`, so ci-job printed one `not run  job checks-merge-git: picked merge/test_merge.py; job checks-merge-git runs them, not checks` line (the old tail of `main` in `bin/ci-job`) and ran it nowhere.
+A `not run` line moves no exit code, so the lint passed.
+Proved by `python3 bin/ci-job checks --lint --plan --base cdea83be2b^1` at cdea83be2b, which printed that line.
+The suite passes on today's main, so the failure was in the suite, not in a git or cwd difference of the lint.
+Fix: after the linted job, `bin/ci-job` makes a second pass over each other job of the same workflow file that holds a picked suite, on an ubuntu runner, and runs that job's picked suite steps, each as CI runs it.
+Each owed suite step of any other job prints its line (see "Suites lint does not run" above).
+The list of jobs and suites is the one `.github/workflows/checks.yml` holds, read by the same code that reads the linted job; nothing copies it.
+The selector runs once per process and the passes read its pick.
+A job on a Windows or macOS runner names that runner in each `not run` line it prints, for a picked suite or an owed step.
+A suite run in an earlier pass runs once.
+A FAIL or unknown in a sibling pass reaches the exit code, so `merge --lane-lint` refuses on it as on any step.
+A step of a sibling job whose `if:` or `env:` ci-job cannot read prints unknown, never a pass: the guard shards `checks-guard` and `checks-guard-2` read unknown on their `NODE_PATH` expression (debt `guard-lane-lint-unknown`, a guard-touching lane lint ends unknown and needs `--lint-unknown-ok`; guard PRs prove on CI).
+The whole run still shares the one `LINT_SECONDS` bound, so a lane that picks a long suite such as the merge git half (10.7 min in CI) reads unknown at the bound, never a false pass.
+Reader: `merge/merge.py` `ci_job_run` reads ci-job's exit code and its FAIL and unknown lines, and the lane reads the PASS line and each sibling `job X:` line.
+Cost: one extra run of each picked suite of an ubuntu sibling job on each lane lint, bounded by `LINT_SECONDS`, plus one scope script read, one unshallow check and one log file per sibling job that runs (unmeasured).
+A diff that picks no suite outside the linted job pays none of it, and a cached PASS (`saved_pass_read`) skips the whole run.
 
-The mutation test: a head whose diff touches `hooks/mutate_*.py` or `hooks/mutate_*.mjs` (the mutation-test files) runs it, as the command of each CI shard job, one after another (`merge/test_lane_lint.py` pins that a touched `.mjs` file starts it). Main splits the mutation test into three shard jobs: `checks-mutate-guard`, `checks-mutate-guard-b` and `checks-mutate-guard-c`. Each job has one step, "Guard mutation test, shard i/M". The step has its own `MUTATE_SHARD` env, one-line `run:` and `timeout-minutes`. The lint reads all three from the head's checks.yml. It starts each run with that env under that job's cap. It stops before any later shard when one fails or times out, and its FAIL names that job. Some heads stop the lint before the first run, and the stop names the job or the shard. These are a shard step that is absent, a job with no one-line `run:` or no `timeout-minutes`, and an env that does not match its step. A head with no shard step and the old step "Guard mutation test" in `checks-mutate-guard` runs once, as before. A rename reads by its old path (`--no-renames`). A merge base that cannot be read is an unknown stop. The clash check before it reads an unrelated history as unknown, so the lint never lists files from a guess. It runs after a passing lint, or after an unknown lint that `--lint-unknown-ok` lifts, in the lint's own worktree. It prints wall time and killed, survived and unknown mutant counts. The caller decides, not the diff. The hand-off `merge --lane-lint` runs it. The batch runner's pre-join `merge --lane-lint` (a recorded `batch-runner` merge role) skips it when a hand-off PASS comment names the live head, and runs it for any other head. CI runs the same job on the batch head. The PR-number call on the integration PR (`merge --lane-lint <integration PR number>`) has no hand-off PASS comment on its first call per head, so it runs it. Each shard's cap stretches by the machine's 5-minute load per CPU, read once before the first shard starts, so a later shard does not count the earlier shard's own workers: one times at or below one run per CPU, the load itself above that, and at most four times (`mutate_cap_factor`, `mutate_load_per_cpu` in `merge/merge.py`; session pick, not an owner ruling; the ceiling is a first value, unmeasured). A shard cut off at the stretched cap fails the lint with "stopped at cap under load X per CPU" and says it judged no mutant. It is no survivor, no unknown and no wrong cause. Incident: the lane lint of PR 3720 failed twice on time alone at a load of 19 to 27 on 4 CPUs, 2026-11-20. Fewer shards at once was not chosen: the lint runs its shards one after another, and each shard already runs its mutants in parallel.
+The mutation test: a head whose diff touches `hooks/mutate_*.py` or `hooks/mutate_*.mjs` (the mutation-test files) runs it, as the command of each CI shard job, one after another (`merge/test_lane_lint.py` pins that a touched `.mjs` file starts it).
+Main splits the mutation test into three shard jobs: `checks-mutate-guard`, `checks-mutate-guard-b` and `checks-mutate-guard-c`.
+Each job has one step, "Guard mutation test, shard i/M".
+The step has its own `MUTATE_SHARD` env, one-line `run:` and `timeout-minutes`.
+The lint reads all three from the head's checks.yml.
+It starts each run with that env under that job's cap.
+It stops before any later shard when one fails or times out, and its FAIL names that job.
+Some heads stop the lint before the first run, and the stop names the job or the shard.
+These are a shard step that is absent, a job with no one-line `run:` or no `timeout-minutes`, and an env that does not match its step.
+A head with no shard step and the old step "Guard mutation test" in `checks-mutate-guard` runs once, as before.
+A rename reads by its old path (`--no-renames`).
+A merge base that cannot be read is an unknown stop.
+The clash check before it reads an unrelated history as unknown, so the lint never lists files from a guess.
+It runs after a passing lint, or after an unknown lint that `--lint-unknown-ok` lifts, in the lint's own worktree.
+It prints wall time and killed, survived and unknown mutant counts.
+The caller decides, not the diff.
+The hand-off `merge --lane-lint` runs it.
+The batch runner's pre-join `merge --lane-lint` (a recorded `batch-runner` merge role) skips it when a hand-off PASS comment names the live head, and runs it for any other head.
+CI runs the same job on the batch head.
+The PR-number call on the integration PR (`merge --lane-lint <integration PR number>`) has no hand-off PASS comment on its first call per head, so it runs it.
+Each shard's cap stretches by the machine's 5-minute load per CPU, read once before the first shard starts, so a later shard does not count the earlier shard's own workers: one times at or below one run per CPU, the load itself above that, and at most four times (`mutate_cap_factor`, `mutate_load_per_cpu` in `merge/merge.py`; session pick, not an owner ruling; the ceiling is a first value, unmeasured).
+A shard cut off at the stretched cap fails the lint with "stopped at cap under load X per CPU" and says it judged no mutant.
+It is no survivor, no unknown and no wrong cause.
+Incident: the lane lint of PR 3720 failed twice on time alone at a load of 19 to 27 on 4 CPUs, 2026-11-20.
+Fewer shards at once was not chosen: the lint runs its shards one after another, and each shard already runs its mutants in parallel.
 
-It FAILs on any survivor, on any unknown mutant, on any timeout, on a run past the cap, on a command that cannot start, and on no readable report at any exit. Zero tolerance, as in CI (`hooks/mutate_shared.py` run_mutants exits 1 on any survivor, wrong cause, unknown or timeout). It FAILs on an `UNKNOWN` row, a file that read no mutant. A readable report is judged by its counts at any exit code. In the table form the unknown count is the crashed column, and a timeout has its own column. The tally form is the line the job prints, `K of N mutations killed (S survived, W wrong cause, X skipped, U unknown, T timeout)`; `, U unknown` and `, T timeout` print only when that count is not 0. The lint reads each count by its label and FAILs on any wrong-cause, unknown or timeout mutant. A clean tally at a nonzero exit also FAILs, since CI is red on the exit code. A timed-out mutant does not stop the run: the tally still prints, with its `T timeout` count. A command that cannot start (a missing program) prints a FAIL line and no traceback. `--lint-unknown-ok` never lifts a FAIL here.
+It FAILs on any survivor, on any unknown mutant, on any timeout, on a run past the cap, on a command that cannot start, and on no readable report at any exit.
+Zero tolerance, as in CI (`hooks/mutate_shared.py` run_mutants exits 1 on any survivor, wrong cause, unknown or timeout).
+It FAILs on an `UNKNOWN` row, a file that read no mutant.
+A readable report is judged by its counts at any exit code.
+In the table form the unknown count is the crashed column, and a timeout has its own column.
+The tally form is the line the job prints, `K of N mutations killed (S survived, W wrong cause, X skipped, U unknown, T timeout)`; `, U unknown` and `, T timeout` print only when that count is not 0.
+The lint reads each count by its label and FAILs on any wrong-cause, unknown or timeout mutant.
+A clean tally at a nonzero exit also FAILs, since CI is red on the exit code.
+A timed-out mutant does not stop the run: the tally still prints, with its `T timeout` count.
+A command that cannot start (a missing program) prints a FAIL line and no traceback.
+`--lint-unknown-ok` never lifts a FAIL here.
 
 Named limits:
 
-- The trigger omits the files the mutation test also covers: the guard, config watch, decision watch, ruling home, override, call judge and sim-lease targets, with their test suites. Widening costs 11 to 16 min on every guard edit: a debt, not built.
-- The skip at the pre-join lint reads the merge role. A local batch runner records no role, so its pre-join lint always runs the mutation test: the safe direction, one extra run. A failed read of the comments also runs it.
-- The lint times the command on the lane machine against the job cap. CI adds setup time, so a run near the cap can pass here and time out in CI.
+- The trigger omits the files the mutation test also covers: the guard, config watch, decision watch, ruling home, override, call judge and sim-lease targets, with their test suites.
+  Widening costs 11 to 16 min on every guard edit: a debt, not built.
+- The skip at the pre-join lint reads the merge role.
+  A local batch runner records no role, so its pre-join lint always runs the mutation test: the safe direction, one extra run.
+  A failed read of the comments also runs it.
+- The lint times the command on the lane machine against the job cap.
+  CI adds setup time, so a run near the cap can pass here and time out in CI.
 
-Mistake it guards: the mutation-test change that timed out on every target. A PR that changed `hooks/mutate_*.py` joined a batch with no CI-sized mutation test run. Its control run (GitHub Actions run 42620238014) timed out on every target: 670 of 694 mutants unknown. One batch run was lost.
+Mistake it guards: the mutation-test change that timed out on every target.
+A PR that changed `hooks/mutate_*.py` joined a batch with no CI-sized mutation test run.
+Its control run (GitHub Actions run 42620238014) timed out on every target: 670 of 694 mutants unknown.
+One batch run was lost.
 
-Cost: an untouched diff adds one `git diff --name-only` and no run (not pinned). A touched lane pays the shard runs once per hand-off lint, up to three timed runs one after another. A normal lane lint pays no shard run. The batch runner's pre-join lint repeats it only when no hand-off PASS names the live head. The PR-number call `merge --lane-lint <integration PR number>` runs it, so every batch that touches a mutation test file pays up to three more runs at the integration PR's lint (not pinned). Measured on main, 1 run (checks run 43564136731, 2026-11-14, not pinned): job `checks-mutate-guard` took 1266 s of wall time, `checks-mutate-guard-b` 654 s and `checks-mutate-guard-c` 426 s. The first job also holds the progress beat step, which the lint does not run. The three shard steps took 1130 s, 618 s and 400 s, so a lint pays about 2148 s of step time in CI (1 run, not pinned). The lane machine's time for the three is unmeasured. Each shard job has a 60 min cap (provisional, `ci-job-caps`), so the worst case is up to three runs of 60 min. Decision `ci-job-caps` records an older run (42608474160) of the one job, cancelled at the 25 min cap with 616 of 694 mutants killed. Each run is one whole CI step, not a slice of one, and reuses the lint's worktree.
+Cost: an untouched diff adds one `git diff --name-only` and no run (not pinned).
+A touched lane pays the shard runs once per hand-off lint, up to three timed runs one after another.
+A normal lane lint pays no shard run.
+The batch runner's pre-join lint repeats it only when no hand-off PASS names the live head.
+The PR-number call `merge --lane-lint <integration PR number>` runs it, so every batch that touches a mutation test file pays up to three more runs at the integration PR's lint (not pinned).
+Measured on main, 1 run (checks run 43564136731, 2026-11-14, not pinned): job `checks-mutate-guard` took 1266 s of wall time, `checks-mutate-guard-b` 654 s and `checks-mutate-guard-c` 426 s.
+The first job also holds the progress beat step, which the lint does not run.
+The three shard steps took 1130 s, 618 s and 400 s, so a lint pays about 2148 s of step time in CI (1 run, not pinned).
+The lane machine's time for the three is unmeasured.
+Each shard job has a 60 min cap (provisional, `ci-job-caps`), so the worst case is up to three runs of 60 min.
+Decision `ci-job-caps` records an older run (42608474160) of the one job, cancelled at the 25 min cap with 616 of 694 mutants killed.
+Each run is one whole CI step, not a slice of one, and reuses the lint's worktree.
 
-Departs from: owner item 463 a (the paraphrase above, "run before the batch"). Coordinator pick c, 08:30 CST Nov 12: the hand-off lint runs the mutation test, and the batch-ready lint (a call since removed from the merge tool) runs the hand-off lint only, so it skipped the mutation test. CI runs the job on the batch head, and stays the backstop. Coordinator option a, 08:54 CST Nov 12: the pre-join lint skips the run only when a hand-off PASS names the live head, and runs it for any other head. That skip holds only in a session that has recorded the `batch-runner` merge role, which only a cloud session can record. merge.py passes `pre_join = read_merge_role() == "batch-runner"` to `lane_lint`, which also needs a PR number target and `hand_off_pass`. A session with no recorded role runs the mutation test on every call, a re-run on an unchanged head too. The integration PR's own `--lane-lint <integration PR number>` still runs it, a lane choice pending the coordinator. Tests: `merge/test_lane_lint.py` mutation-test cases, about 0.2 s per lint with a stub (unmeasured).
+Departs from: owner item 463 a (the paraphrase above, "run before the batch").
+Coordinator pick c, 08:30 CST Nov 12: the hand-off lint runs the mutation test, and the batch-ready lint (a call since removed from the merge tool) runs the hand-off lint only, so it skipped the mutation test.
+CI runs the job on the batch head, and stays the backstop.
+Coordinator option a, 08:54 CST Nov 12: the pre-join lint skips the run only when a hand-off PASS names the live head, and runs it for any other head.
+That skip holds only in a session that has recorded the `batch-runner` merge role, which only a cloud session can record.
+merge.py passes `pre_join = read_merge_role() == "batch-runner"` to `lane_lint`, which also needs a PR number target and `hand_off_pass`.
+A session with no recorded role runs the mutation test on every call, a re-run on an unchanged head too.
+The integration PR's own `--lane-lint <integration PR number>` still runs it, a lane choice pending the coordinator.
+Tests: `merge/test_lane_lint.py` mutation-test cases, about 0.2 s per lint with a stub (unmeasured).
 
-The ready checks (incident 2026-11-07 05:28 CST, q_max batch 1064): the batch went ready without its check-invariants step and was red in CI on a bare decision cite. One CI cycle was wasted. Incident 2026-11-23: pull requests 3814 and 3815 went ready, failed the `Rules and records move together` check, which only CI ran, and each paid a second CI run of about 42 min (not pinned). Ready now runs that check first, so such a PR stays a draft. A repo names the steps that must pass before a draft goes ready in `merge.readyChecks`, a list of step names in `.github/stamp.json`. A bare name is a step of the checks job. `<job>:<step>` names a step of another job, so a suite that moved to another job still runs (step `ready-checks-job-qualified-steps`). The draft step (`merge <pr> --confirm` on a draft) runs one `bin/ci-job <job> --step NAME ... --base origin/<base>` per job on the tree it would push, before any push and before the ready mark. It does this on every path: the default base, another base, and a Record-claim head. A named local `uses:` action (`$/actions/<name>`) runs in place, as under `--lint`. Merge passes the PR body as `PR_BODY`; with no body, a gap the probe finds reads unknown. `Rules and records move together` is one such action (`actions/claude-md-cites`). Its three probes check that rule files name records rather than copy them, that a record and its citing rules change together, and that each `Facts:` line matches the live state of its PR or branch. A probe's exit 2 reads unknown in this step, not FAIL. A FAIL or an unknown, except the skip below, stops the step with the step lines and the log, and a step that does not pass prints its output under its line. Nothing is pushed and the PR stays a draft. No flag lifts it. The one skip: a listed `uses:` action step that this tool cannot run prints one `skip NAME: an action (uses: X); CI runs it` line and does not stop the run, when another listed step passes. The pass line then ends `, N skipped.` (`READY_PASS_SKIPPED_FMT`, `step_skip` in `merge/merge.py`). Only that exact detail skips. An absent name, a timeout or any other unknown refuses, and so does a run where no listed step passed. The guard reads the skipped pass line as a pass (`_ready_stood_shas` in `hooks/guard_merge.py`). Once the running tool can run the step, the step counts and must pass. Why: the list is read from main, while the tool runs from this computer's copy of `stable`, so a new list entry can outrun its tool. Ruling: owner, 19:46 CST Nov 23, 2026. A repo with no list runs no ready check, and the step prints one line saying so. Cost: one ci-job run per job and one worktree per draft-step ready (unmeasured). That check adds no ci-job start on a pass (a fail adds one base run per failing check, below): its steps are at most three `bin/verdict` starts, one shell each, inside that run, plus one `git diff` and one GitHub read per `Facts:` claim, which reads unknown when it fails (unmeasured). Its time is unmeasured for a step subset. The run passes `--pinned`. Incident 2026-11-08 15:13 CST: the ready check ran q_max's harness from the local copy. So a skill bump on main blocked q_max before its pin moved. Under `--pinned` a `code-check` or `zizmor` step pinned as `<owner>/claude-settings/actions/<name>@<40-hex>` runs from a `git archive` of that commit. A sha the clone lacks is fetched by sha. A pin that cannot be fetched, archived or read reads unknown, never a pass. The ste-lint step stays local: a stale ste-lint pin still exits 3 with its remedy (decision `action-pins-follow-sessions`, CI pins follow the session's tools). A non-sha ref, `--lint`, `--plan` and a run without the flag are unchanged. Cost: at most one fetch and one archive per distinct sha per run. The export is deleted at run end. A fetch keeps its objects and `FETCH_HEAD` in the clone it exports from (beside `ci-job`, else the pointer checkout). Named limits: the `uses:` owner is not checked. A quoted or uppercase 40-hex pin runs the local copy. A kill by merge's timeout leaves at most one export per distinct sha in the temp folder. A fetch that fails for network or auth reads unknown with the pin remedy. Known bypass: a session that marks the PR ready by MCP or `gh pr ready` without running the draft step skips the checks.
+The ready checks (incident 2026-11-07 05:28 CST, q_max batch 1064): the batch went ready without its check-invariants step and was red in CI on a bare decision cite.
+One CI cycle was wasted.
+Incident 2026-11-23: pull requests 3814 and 3815 went ready, failed the `Rules and records move together` check, which only CI ran, and each paid a second CI run of about 42 min (not pinned).
+Ready now runs that check first, so such a PR stays a draft.
+A repo names the steps that must pass before a draft goes ready in `merge.readyChecks`, a list of step names in `.github/stamp.json`.
+A bare name is a step of the checks job.
+`<job>:<step>` names a step of another job, so a suite that moved to another job still runs (step `ready-checks-job-qualified-steps`).
+The draft step (`merge <pr> --confirm` on a draft) runs one `bin/ci-job <job> --step NAME ... --base origin/<base>` per job on the tree it would push, before any push and before the ready mark.
+It does this on every path: the default base, another base, and a Record-claim head.
+A named local `uses:` action (`$/actions/<name>`) runs in place, as under `--lint`.
+Merge passes the PR body as `PR_BODY`; with no body, a gap the probe finds reads unknown.
+`Rules and records move together` is one such action (`actions/claude-md-cites`).
+Its three probes check that rule files name records rather than copy them, that a record and its citing rules change together, and that each `Facts:` line matches the live state of its PR or branch.
+A probe's exit 2 reads unknown in this step, not FAIL.
+A FAIL or an unknown, except the skip below, stops the step with the step lines and the log, and a step that does not pass prints its output under its line.
+Nothing is pushed and the PR stays a draft.
+No flag lifts it.
+The one skip: a listed `uses:` action step that this tool cannot run prints one `skip NAME: an action (uses: X); CI runs it` line and does not stop the run, when another listed step passes.
+The pass line then ends `, N skipped.` (`READY_PASS_SKIPPED_FMT`, `step_skip` in `merge/merge.py`).
+Only that exact detail skips.
+An absent name, a timeout or any other unknown refuses, and so does a run where no listed step passed.
+The guard reads the skipped pass line as a pass (`_ready_stood_shas` in `hooks/guard_merge.py`).
+Once the running tool can run the step, the step counts and must pass.
+Why: the list is read from main, while the tool runs from this computer's copy of `stable`, so a new list entry can outrun its tool.
+Ruling: owner, 19:46 CST Nov 23, 2026.
+A repo with no list runs no ready check, and the step prints one line saying so.
+Cost: one ci-job run per job and one worktree per draft-step ready (unmeasured).
+That check adds no ci-job start on a pass (a fail adds one base run per failing check, below): its steps are at most three `bin/verdict` starts, one shell each, inside that run, plus one `git diff` and one GitHub read per `Facts:` claim, which reads unknown when it fails (unmeasured).
+Its time is unmeasured for a step subset.
+The run passes `--pinned`.
+Incident 2026-11-08 15:13 CST: the ready check ran q_max's harness from the local copy.
+So a skill bump on main blocked q_max before its pin moved.
+Under `--pinned` a `code-check` or `zizmor` step pinned as `<owner>/claude-settings/actions/<name>@<40-hex>` runs from a `git archive` of that commit.
+A sha the clone lacks is fetched by sha.
+A pin that cannot be fetched, archived or read reads unknown, never a pass.
+The ste-lint step stays local: a stale ste-lint pin still exits 3 with its remedy (decision `action-pins-follow-sessions`, CI pins follow the session's tools).
+A non-sha ref, `--lint`, `--plan` and a run without the flag are unchanged.
+Cost: at most one fetch and one archive per distinct sha per run.
+The export is deleted at run end.
+A fetch keeps its objects and `FETCH_HEAD` in the clone it exports from (beside `ci-job`, else the pointer checkout).
+Named limits: the `uses:` owner is not checked.
+A quoted or uppercase 40-hex pin runs the local copy.
+A kill by merge's timeout leaves at most one export per distinct sha in the temp folder.
+A fetch that fails for network or auth reads unknown with the pin remedy.
+Known bypass: a session that marks the PR ready by MCP or `gh pr ready` without running the draft step skips the checks.
 
-The base read of a failing ready check (incident 2026-11-24, pull request 3856). A ready check that FAILs also reads its base: the merge base of HEAD and origin/<base>, the commit the change started from, not origin/<base>'s tip (a branch behind main would otherwise be blamed for what main already fixed, or cleared for what its own start already had). Its row then prints `fail NAME (passes on <sha9>: this change broke it): why`, `fail NAME (also fails on <sha9>): why`, or `fail NAME (base not read: <reason>): why`, where <sha9> is that merge base. The reason says that origin/<base> is absent, that HEAD and origin/<base> share no merge base (no copy is made), that no copy of the merge base could be made, or that the base run gave no verdict. `base_read_phrases` in `merge/merge.py` does this. It runs that one check once, with `--step`, in a throwaway worktree of the merge base. `pre_ready_rows` calls it, so `bin/cheap-lints` and the draft step's ready checks print the same phrase. A passing check causes no base run. The phrase lifts nothing: the row stays a fail, and the ready checks refuse, since a reason flag beside a known red lifts nothing (decision `no-merge-onto-red-main`). Mistake it guards: in pull request 3856 the Silent undo check failed on a branch. An agent guessed that main was red too, and no run showed it. The consultant copied that guess into four briefs unchecked. Three agents and a fix check then passed over a real failure, and the ready checks refused the pull request later. Harm it stops: a guessed base state sends a real failure past review, at a cost of about one hour and one extra review pass. Cost: at most one `git rev-parse`, one `git merge-base`, one worktree added and removed, and one ci-job run per failing check (`test_two_failing_checks_get_one_base_read_each`, `merge/test_lane_lint.py`). A run where every check passes starts none of these (`test_passes_here_runs_no_copy_of_the_base`, same file). The builder measured one base run of the Hook catalog check at 2.3 s, and 1.3 s with its pass cached (one sample, not pinned). A failing base run repeats each time, since ci-job caches passes only. Known gap: debt `base-read-diff-only-check` (a check that reads only the diff reads as `this change broke it` on the merge base).
+The base read of a failing ready check (incident 2026-11-24, pull request 3856).
+A ready check that FAILs also reads its base: the merge base of HEAD and origin/<base>, the commit the change started from, not origin/<base>'s tip (a branch behind main would otherwise be blamed for what main already fixed, or cleared for what its own start already had).
+Its row then prints `fail NAME (passes on <sha9>: this change broke it): why`, `fail NAME (also fails on <sha9>): why`, or `fail NAME (base not read: <reason>): why`, where <sha9> is that merge base.
+The reason says that origin/<base> is absent, that HEAD and origin/<base> share no merge base (no copy is made), that no copy of the merge base could be made, or that the base run gave no verdict.
+`base_read_phrases` in `merge/merge.py` does this.
+It runs that one check once, with `--step`, in a throwaway worktree of the merge base.
+`pre_ready_rows` calls it, so `bin/cheap-lints` and the draft step's ready checks print the same phrase.
+A passing check causes no base run.
+The phrase lifts nothing: the row stays a fail, and the ready checks refuse, since a reason flag beside a known red lifts nothing (decision `no-merge-onto-red-main`).
+Mistake it guards: in pull request 3856 the Silent undo check failed on a branch.
+An agent guessed that main was red too, and no run showed it.
+The consultant copied that guess into four briefs unchecked.
+Three agents and a fix check then passed over a real failure, and the ready checks refused the pull request later.
+Harm it stops: a guessed base state sends a real failure past review, at a cost of about one hour and one extra review pass.
+Cost: at most one `git rev-parse`, one `git merge-base`, one worktree added and removed, and one ci-job run per failing check (`test_two_failing_checks_get_one_base_read_each`, `merge/test_lane_lint.py`).
+A run where every check passes starts none of these (`test_passes_here_runs_no_copy_of_the_base`, same file).
+The builder measured one base run of the Hook catalog check at 2.3 s, and 1.3 s with its pass cached (one sample, not pinned).
+A failing base run repeats each time, since ci-job caches passes only.
+Known gap: debt `base-read-diff-only-check` (a check that reads only the diff reads as `this change broke it` on the merge base).
 
-Consultant's pick (2026-11-24 14:33 CST, not owner-typed; the owner may reverse it): the Code check (ruff, mypy --strict, ShellCheck, tsc, astro-check, the comment check) is one of this repo's ready checks, step `Code check` of the checks job in `merge.readyChecks`. Mistake: pull request 3856, a draft, went ready with two ruff errors (a function defined twice after a merge of main; an unused import), because no ready check ran ruff. Harm: a ready draft fails in CI after a full run. A pinned tool that cannot start (pipx or npx with no route to the index) reads `could not start`, which `bin/ci-job` reads as unknown, not FAIL (`execute()` in `actions/code-check/code_check.py`). Cost: `bin/cheap-lints main` (the local fast lint run) takes about 11 to 13 s more with the tools cached (26.5 s for 14 checks before, 37.5 to 39.0 s for 15 after; a fully cached rerun 1.6 s; one machine, 15:00 CST Nov 24 2026; not pinned).
+Consultant's pick (2026-11-24 14:33 CST, not owner-typed; the owner may reverse it): the Code check (ruff, mypy --strict, ShellCheck, tsc, astro-check, the comment check) is one of this repo's ready checks, step `Code check` of the checks job in `merge.readyChecks`.
+Mistake: pull request 3856, a draft, went ready with two ruff errors (a function defined twice after a merge of main; an unused import), because no ready check ran ruff.
+Harm: a ready draft fails in CI after a full run.
+A pinned tool that cannot start (pipx or npx with no route to the index) reads `could not start`, which `bin/ci-job` reads as unknown, not FAIL (`execute()` in `actions/code-check/code_check.py`).
+Cost: `bin/cheap-lints main` (the local fast lint run) takes about 11 to 13 s more with the tools cached (26.5 s for 14 checks before, 37.5 to 39.0 s for 15 after; a fully cached rerun 1.6 s; one machine, 15:00 CST Nov 24 2026; not pinned).
 
-The retired-names scan (incident 2026-11-24, pull request 3884: the CI-only step `Glossary fixture suite` failed on the whole-repo scan after the pull request went ready). The whole-repo retired-names scan runs in the ready check `Retired names, one word per meaning` (`lint/test_retired_names.py`). The glossary fixture suite stays CI-only: it tests the checker's own code and costs about 50 to 80 s. Cost: the scan adds about 3.3 s to that ready check (test_retired_names 1.9 s on main, 5.2 s at 6af6d35e8d; one run each, not pinned). The scan exempts only the marked pattern block of its own file, `lint/test_retired_names.py`.
+The retired-names scan (incident 2026-11-24, pull request 3884: the CI-only step `Glossary fixture suite` failed on the whole-repo scan after the pull request went ready).
+The whole-repo retired-names scan runs in the ready check `Retired names, one word per meaning` (`lint/test_retired_names.py`).
+The glossary fixture suite stays CI-only: it tests the checker's own code and costs about 50 to 80 s.
+Cost: the scan adds about 3.3 s to that ready check (test_retired_names 1.9 s on main, 5.2 s at 6af6d35e8d; one run each, not pinned).
+The scan exempts only the marked pattern block of its own file, `lint/test_retired_names.py`.
 
-Why: a full local run per lane proves again what the batch run proves, and costs a lane its time. A fixture that copies a changed file is caught by the batch run, and the fixtures now copy what git tracks, so a new shared module no longer breaks them.
+Why: a full local run per lane proves again what the batch run proves, and costs a lane its time.
+A fixture that copies a changed file is caught by the batch run, and the fixtures now copy what git tracks, so a new shared module no longer breaks them.
 
 Check: `lint/test_ci_job.py` class `ScopeLint`
 
