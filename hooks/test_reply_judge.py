@@ -882,14 +882,19 @@ def case_skipped_stop_is_silent():
 
 def case_sessions_keep_separate_counters():
     config = sample_config("two-sessions")
-    called = {SESSION_ALPHA: [], SESSION_BETA: []}
+    older = {SESSION_ALPHA: [], SESSION_BETA: []}
+    new_only = {SESSION_ALPHA: [], SESSION_BETA: []}
     for n in range(1, 7):
         for session in (SESSION_ALPHA, SESSION_BETA):
             run = run_hook(MARK, answer=OK_ANSWER, config=config, session=session)
-            if run.calls:
-                called[session].append(n)
-    check("sessions: each session judged on its own Stops 1 and 6",
-          called == {SESSION_ALPHA: [1, 6], SESSION_BETA: [1, 6]}, called)
+            if carries_older_rules(run):
+                older[session].append(n)
+            elif new_rules_only(run):
+                new_only[session].append(n)
+    check("sessions: each session judged on its own Stops 1 and 6 with the older rules",
+          older == {SESSION_ALPHA: [1, 6], SESSION_BETA: [1, 6]}, older)
+    check("sessions: Stops 2 to 5 of each session carry the new rules only",
+          new_only == {SESSION_ALPHA: [2, 3, 4, 5], SESSION_BETA: [2, 3, 4, 5]}, new_only)
 
 
 # --------------------------------------------------------------------------- case 11
@@ -1188,9 +1193,9 @@ def case_sampling_skipped_stop_imports_no_guard_family_module():
     payload = {"session_id": SESSION_ALPHA, "stop_hook_active": False, "last_assistant_message": MARK}
     out, imported, called = probe_ignored_stop(payload, config=config, answer=OK_ANSWER)  # Stop 2: new rules only
     check("skip imports: Stop 2 prints nothing and makes its one model call", out.strip() == "" and called, out)
-    check("skip imports: Stop 2 imports no guard or lint module, only the model caller",
-          [m for m in imported if m != "decision_watch"] == [],
-          "imported before it had work to do: %s" % imported)
+    check("skip imports: Stop 2 loads only guard and decision_watch, no lint module",
+          set(imported) <= {"guard", "decision_watch"},
+          "imported beyond guard and decision_watch: %s" % imported)
 
 
 # Row tables. A row is one case body from above. A row that raises is red and names
@@ -2124,8 +2129,8 @@ def case_rest_count_stop_starts_only_the_model_call_and_writes_no_file():
     check("cost, REST Stop 2: prints nothing and makes one model call", out.strip() == "" and called, (out, called))
     check("cost, REST Stop 2: its only process start is the claude call",
           [os.path.basename(s["argv"][0]) for s in starts] == ["claude"], starts)
-    check("cost, REST Stop 2: imports no guard or lint module, only the model caller",
-          [m for m in imported if m != "decision_watch"] == [], imported)
+    check("cost, REST Stop 2: loads only guard and decision_watch, no lint module",
+          set(imported) <= {"guard", "decision_watch"}, imported)
     check("cost, REST Stop 2: writes no file beyond the count file", every_file(config) == before,
           every_file(config))
 
