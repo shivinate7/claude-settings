@@ -170,6 +170,10 @@ COMPREHENSION_STATEMENT_READ_ONLY = ("import os\n\nNAMES = ('CLAUDE_CODE_REMOTE'
                                      "def test_a():\n    assert True\n")
 
 
+TWO_REMOVALS = ("import os\n\nos.environ.pop('CLAUDE_CONFIG_DIR', None)\nos.environ.pop('CLAUDE_CONFIG_DIR', None)\n\n\n"
+                "def test_a():\n    assert True\n")
+
+
 def tree_of(files):
     """A fresh folder under the run folder, holding each file of `files`: a dict of a path under the folder to source. A path's
     folders are made first."""
@@ -527,6 +531,19 @@ class TestsSetConfig(unittest.TestCase):
     def test_read_only_comprehension_statement_is_clean(self):
         self.assertEqual(problems_of(COMPREHENSION_STATEMENT_READ_ONLY), [],
                          "a comprehension statement that only reads os.environ for names that include CLAUDE_CONFIG_DIR is named as a problem")
+
+    def test_loop_over_a_tuple_naming_the_config_var_gives_the_direct_message(self):
+        found = problems_of(LOOP_POP)
+        self.assertEqual(len(found), 1, "a loop pop over a tuple that names CLAUDE_CONFIG_DIR is not one problem: %r" % found)
+        self.assertIn("removes CLAUDE_CONFIG_DIR", found[0],
+                      "a loop over a tuple that names CLAUDE_CONFIG_DIR does not give the direct-removal message: %r" % found)
+        self.assertNotIn("sweep", found[0], "a loop over a tuple that names CLAUDE_CONFIG_DIR is called a sweep: %r" % found)
+
+    def test_two_removals_name_the_first_removal_line(self):
+        found = problems_of(TWO_REMOVALS)
+        self.assertEqual(len(found), 1, "two removals of CLAUDE_CONFIG_DIR with no set after are not one problem: %r" % found)
+        self.assertTrue(found[0].startswith("test_case.py:3:"),
+                        "the finding for two removals does not name the first removal's line, 3: %r" % found)
 
     def test_repo_has_no_problems_now(self):
         found = checker().problems(ROOT)
