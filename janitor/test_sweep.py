@@ -1410,11 +1410,12 @@ class StaleCwdRecordTests(unittest.TestCase):
         self.assertEqual(decision["reason"], "orphaned-listener")
 
     def test_trash_folder_stays_kept_beside_such_a_record(self):
-        """`trash_verdict` on a folder that no git checkout holds. Its dirty read is unknown, so the folder is kept as
-        unreadable whatever the record says."""
+        """`trash_verdict` on a trash-named folder that no git checkout holds. Its dirty read is unknown, so the folder is
+        kept as unreadable whatever the record says."""
         self.assert_record_stands_nowhere()
-        folder = os.path.join(self.base, "trash-leftover")
+        folder = sweep.trash_name(os.path.join(self.base, "trash-leftover"))
         os.makedirs(folder)
+        self.assertTrue(sweep.is_trash_name(os.path.basename(folder)), "scope: the folder must carry a trash name")
         delete, reason = sweep.trash_verdict(folder)
         self.assertEqual(reason, "unreadable-subject",
                          "trash_verdict opted in to a record whose folder is gone; it must keep the folder")
@@ -1548,6 +1549,38 @@ class StaleCwdRecordTests(unittest.TestCase):
         decision = self.decide_orphan(wt)
         self.assertEqual(decision["action"], "keep")
         self.assertEqual(decision["reason"], "live-session")
+
+    def test_orphaned_listener_is_reaped_beside_its_own_descendant_when_its_checkout_is_clean(self):
+        """The listener's own descendant, two levels down, has its cwd in the checkout. It does not keep the listener:
+        `_pids_but_listener` drops each pid whose parent chain reaches the listener."""
+        self.assert_record_stands_nowhere()
+        wt = self.new_worktree("listener-descendant")
+        self.assertEqual(sweep.git_reads.porcelain(wt), [], "scope: the checkout must be clean")
+        child, grandchild = 987661, 987662
+        parents = {grandchild: child, child: os.getpid()}
+        with mock.patch.object(sweep, "_parent_pid", side_effect=parents.get):
+            self.assertTrue(sweep._descends_from(grandchild, os.getpid()),
+                            "scope: the grandchild's parent chain must reach the listener")
+            decision = self.decide_orphan(wt, processes=([os.getpid(), child, grandchild], []))
+        self.assertEqual(decision["action"], "reap",
+                         "the orphan reap kept a listener for its own descendant, which is no process that keeps the checkout")
+        self.assertEqual(decision["reason"], "orphaned-listener")
+
+    def test_orphaned_listener_is_kept_for_an_unrelated_process_inside_beside_such_a_record(self):
+        """The control for the descendant case. A process inside the checkout whose parent chain runs to init, not to the
+        listener, keeps the listener, and the keep names its pid."""
+        self.assert_record_stands_nowhere()
+        wt = self.new_worktree("listener-unrelated")
+        self.assertEqual(sweep.git_reads.porcelain(wt), [], "scope: the checkout must be clean")
+        other, other_parent = 987671, 987670
+        parents = {other: other_parent, other_parent: 1}
+        with mock.patch.object(sweep, "_parent_pid", side_effect=parents.get):
+            self.assertFalse(sweep._descends_from(other, os.getpid()),
+                             "scope: the unrelated process's parent chain must not reach the listener")
+            decision = self.decide_orphan(wt, processes=([os.getpid(), other], []))
+        self.assertEqual(decision["action"], "keep")
+        self.assertIn(str(other), decision["reason"],
+                      "the orphan reap kept a checkout for an unrelated process, but the reason does not name its pid")
 
     def test_orphaned_listener_is_kept_unreadable_when_its_checkout_is_not_a_git_folder(self):
         """Case 5, not a git folder. No dirty read is possible, so the keep reason is unknown. No session record is
