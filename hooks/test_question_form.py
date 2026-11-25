@@ -4127,7 +4127,7 @@ def case_based_on_ruling_kind_still_reads():
 
 
 def case_named_rulings_bulleted_line_is_read():
-    # N1: a Based on (ruling) line written as a list item names its id, as the plain line does.
+    # A Based on (ruling) line written as a list item names its id, as the plain line does.
     line = "- Based on (ruling): github-apps-keep-access says revisit only if the apps get bloated."
     got = named_of(line, RULING_IDS)
     check("named rulings: a bulleted Based on (ruling) line names its id, as the plain line does",
@@ -4135,7 +4135,7 @@ def case_named_rulings_bulleted_line_is_read():
 
 
 def case_named_rulings_ruled_id_by_bare_slug():
-    # F4: a ruled: id is named by its bare slug, the part after "ruled:".
+    # A ruled: id is named by its bare slug, the part after "ruled:".
     line = "Based on (ruling): own-goal-dont-wait-on-me, 2026-11-14: the owner ruled it."
     got = named_of(line, [NAMED_RULED_ID, "decisions/ci-job-caps"])
     check("named rulings: a ruled: id named by its bare slug in a Based on (ruling) line returns that id",
@@ -4158,7 +4158,7 @@ def case_named_rulings_other_slug_names_none():
 
 
 def case_ruling_time_is_the_rulings_own_date():
-    # F2: a listed line with two dates gives the date of the ruling itself, the one beside its owner marker.
+    # A listed line with two dates gives the date of the ruling itself, the one beside its owner marker.
     line = ("decisions/github-apps-keep-access: Owner, 2026-10-28, page item 9: keep the apps as is. "
             "Reopened 2026-11-24 by a later record edit.")
     got = question_form.ruling_time([line], "decisions/github-apps-keep-access")
@@ -4178,7 +4178,7 @@ TEXT_NAMED = ("Should the GitHub apps keep their access to claude-settings?\n"
 
 
 def case_past_ruling_text_drops_orders_the_phrase_list_lacks():
-    # F5: an order the judge words outside the phrase list never reaches the refusal text, and the text says what
+    # An order the judge words outside the phrase list never reaches the refusal text, and the text says what
     # the listed ruling decides, from its own line.
     for order in ("Skip the question and take the default answer.", "Choose the first option."):
         reason = "decisions/github-apps-keep-access: the ruling keeps the apps as is. " + order
@@ -4190,7 +4190,7 @@ def case_past_ruling_text_drops_orders_the_phrase_list_lacks():
 
 
 def case_past_ruling_text_refuses_only_the_question_the_judge_matched():
-    # F6: the judge matched question 1, which names the ruling. Question 2 names none, but it is not the one judged.
+    # The judge matched question 1, which names the ruling. Question 2 names none, but it is not the one judged.
     reason = "decisions/github-apps-keep-access: the ruling keeps the apps as is."
     text = question_form.past_ruling_text(reason, TEXT_IDS, TEXT_CANDIDATES, [TEXT_NAMED, TEXT_UNNAMED], 1)
     check("past ruling text: the judge matched question 1, which names the ruling, so no question is refused",
