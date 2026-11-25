@@ -4584,10 +4584,17 @@ class SuiteCarry(unittest.TestCase):
                               "if: reads for that file, but the carry reads the delta with SCOPE_FILES, which skips the landed-dir rule\n%s"
                               % (rel, out))
 
-    def test_a_modified_md_under_a_landed_dir_still_carries_a_guard_step_whose_flag_is_off(self):  # control: green on the old code
+    def test_a_modified_top_level_agents_md_runs_a_guard_step_whose_flag_is_on(self):
         flag, (rc, lines, ran, out) = self.guard_flag_case({"agents/old.md": "old, edited\n"}, saved={"agents/old.md": "old\n"})
-        self.assertEqual(flag, "false", "precondition: CI's own scope read sets the guard flag for an edit to an existing agents/*.md, so the "
-                         "case probes nothing: %r" % flag)
+        self.assertEqual(flag, "true", "CI's own scope read does not set the guard flag for an edit to agents/old.md, a top-level agents file "
+                         "the guard suite reads: %r" % flag)
+        self.assertIn("check-s", ran, "check-s carried its saved pass across an edit to agents/old.md, though the guard flag its if: reads is "
+                      "on for that delta\n%s" % out)
+
+    def test_a_modified_nested_agents_md_still_carries_a_guard_step_whose_flag_is_off(self):  # control: green on the old code
+        flag, (rc, lines, ran, out) = self.guard_flag_case({"agents/nested/old.md": "old, edited\n"}, saved={"agents/nested/old.md": "old\n"})
+        self.assertEqual(flag, "false", "CI's own scope read sets the guard flag for an edit to agents/nested/old.md, a nested agents file the "
+                         "guard suite does not read: %r" % flag)
         self.assert_carried(rc, lines, ran, out)
 
     def guard_flag_case(self, files, saved=None):
