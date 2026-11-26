@@ -79,8 +79,9 @@ origin/roadmap of the repo (JSON {"blob", "at"}; triage writes it at each republ
 the local stamp an allowed publish wrote (<git common dir>/waiting-page-built). It prints nothing when either stamp equals
 main's blob sha, and the behind line when at least one stamp exists and none equals it. A missing or unreadable page-built
 stamp (no branch, no file, no parse, no 40-hex blob) leaves the local stamp alone: behind when it differs from main's blob,
-silent when equal. With no stamp at all, or a stamp with main unreadable, or a repo with no page in its extras, it prints
-nothing. It always exits 0. One python process and at most two read-only git
+silent when equal. With no stamp at all and the page's url known, it prints the freshness-unknown line
+(FRESHNESS_UNKNOWN_LINE: `waiting page <url>: freshness unknown, no page-built stamp`). With a stamp and main unreadable, or a repo
+with no page in its extras, it prints nothing. It always exits 0. One python process and at most two read-only git
 processes: `git show` of the record in the repo, and the read of main's page.html in the claude-settings clone (two repos, so
 one process cannot read both).
 
@@ -522,6 +523,9 @@ def read_published(root):
 #   at:   the republish time, ISO 8601 with the US Central offset, e.g. 2026-11-15T01:23:00-06:00. Informational: no reader reads it.
 RECORD_REF = "origin/roadmap"
 RECORD_PATH = "roadmap/data/meta/page-built.json"
+# The one home of the session line for a page with neither stamp (decision page-stale-publish: an unread state is named, never silent).
+# `%s` is the page's url. The skill text and the tests read this constant.
+FRESHNESS_UNKNOWN_LINE = "waiting page %s: freshness unknown, no page-built stamp"
 
 
 def read_record_stamp(root):
@@ -540,8 +544,8 @@ def read_record_stamp(root):
 
 
 def session_line(root, main_checkout=None):
-    """One line about the repo's page, or "". A repo with no page in its extras gives "". No stamp gives "": an unread state is
-    never reported as behind. Either stamp (the page-built stamp on origin/roadmap, the local stamp) equal to main's blob gives
+    """One line about the repo's page, or "". A repo with no page in its extras gives "". No stamp at all gives the freshness-unknown
+    line (FRESHNESS_UNKNOWN_LINE): an unread state is named, never reported as behind and never silent. Either stamp (the page-built stamp on origin/roadmap, the local stamp) equal to main's blob gives
     "". Otherwise the behind line. A missing or unreadable page-built stamp leaves the local stamp alone (decision
     page-stale-publish). With stamps but main unreadable, "" too."""
     import layout
@@ -550,7 +554,7 @@ def session_line(root, main_checkout=None):
         return ""
     stamps = [x for x in (read_record_stamp(root), read_stamp(root)) if x]
     if not stamps:
-        return ""
+        return FRESHNESS_UNKNOWN_LINE % url
     blob = main_blob(main_checkout)
     if not blob or blob in stamps:
         return ""
