@@ -1,0 +1,1 @@
+- late-merge-after-pause-reverts: A merge that reaches main only after the second read, about 5 s after the first, still reverts (NET_PAUSE at merge/merge.py:514, second read at merge/merge.py:2190). A squash or rebase merge has no second parent, so the match at merge/merge.py:2206 never holds there. Seen: 2026-11-25 x1

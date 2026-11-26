@@ -1,0 +1,1 @@
+- fg-merge-reviewed-refused: `merge --reviewed` and every other option outside the exempt list are still refused in the foreground under background work (hooks/guard_stream.py, `_fg_merge_exempt`). Seen: 2026-11-25 x1

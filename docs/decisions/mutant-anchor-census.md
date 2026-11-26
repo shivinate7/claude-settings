@@ -9,7 +9,7 @@ slug: mutant-anchor-census
 
 A mutant names an anchor: the exact text it replaces. Two tables hold mutants: `MUTATIONS` of `hooks/mutate_guard.py` (the guard table) and `MUTATIONS` of `janitor/mutate_sweep.py` (the sweep table). The census, `lint/check_mutant_anchors.py`, fails when an anchor is gone, sits more than once, or names an unknown target.
 
-- It imports both tables and keeps no copy.
+- It imports both tables and keeps no copy. The guard table is the literal rows plus each row file in `hooks/mutants/` (decision `mutants-one-file-per-rule`).
 - A guard-table "guard" or "audit" mutant is found across the guard modules by `find_anchor` in `hooks/mutate_shared.py`. No match is stale. Two or more are ambiguous.
 - Any other guard-table target is read in its own file (`TARGETS`). The anchor must occur there once.
 - A sweep row names one file in `SOURCES`. Its anchor is matched in that file by `find_anchor`. A row whose target is not in `SOURCES` is unknown.
