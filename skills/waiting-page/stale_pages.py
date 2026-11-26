@@ -524,7 +524,7 @@ def read_published(root):
 RECORD_REF = "origin/roadmap"
 RECORD_PATH = "roadmap/data/meta/page-built.json"
 # The one home of the session line for a page with neither stamp (decision page-stale-publish: an unread state is named, never silent).
-# `%s` is the page's url. The skill text and the tests read this constant.
+# `%s` is the page's url. The tests read this constant.
 FRESHNESS_UNKNOWN_LINE = "waiting page %s: freshness unknown, no page-built stamp"
 
 
