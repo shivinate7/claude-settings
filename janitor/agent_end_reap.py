@@ -695,10 +695,10 @@ def reap_worktrees(target: str, deadline: float, payload=None):
     own = os.path.normcase(os.path.realpath(target))
     queue = [e for e in entries if os.path.normcase(os.path.realpath(e["path"])) != own
              and sweep._is_agent_worktree(root, e["path"])]
-    # The budget can cut a run short, so each run resumes past the tree the last run judged last: every
+    # The budget can cut a run short, so each run resumes past the last tree the previous run judged and kept: every
     # tree gets judged within a few runs, and the order changes no tree's keep-or-remove verdict.
     queue = resume_after_cursor(queue, read_cursor(root))
-    last_kept = last_any = None  # newest tree judged that stays, and newest judged at all, for the cursor
+    last_kept = None  # newest tree judged that stays; a reaped tree is gone and cannot name the cursor
     sweep._LIVE_HEADS = {}  # one remote listing per remote for the whole stage
     stopped = stopped_agents()  # one read of the payload log for the stage
     try:
@@ -738,13 +738,12 @@ def reap_worktrees(target: str, deadline: float, payload=None):
                 else:
                     decision["buildDirs"] = reap_build_dirs(entry["path"], cwds, deadline)
             rows.append(decision)
-            last_any = _tree_key(entry["path"])
             if decision["action"] != "reap":
-                last_kept = last_any  # a reaped tree is gone: the cursor names a kept tree when the run judged one
+                last_kept = _tree_key(entry["path"])
     finally:
         sweep._LIVE_HEADS = None
-    if last_any is not None:
-        write_cursor(root, last_kept or last_any)
+    if last_kept is not None:  # a run that kept no tree leaves the old cursor: it still marks where to resume
+        write_cursor(root, last_kept)
     return rows
 
 
