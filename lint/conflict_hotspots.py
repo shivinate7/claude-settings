@@ -66,10 +66,13 @@ import datetime
 import os
 import re
 import shutil
-import subprocess
 import sys
 import tempfile
 import time
+
+HERE = os.path.dirname(os.path.realpath(__file__))
+sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
 
 # The variables that point git at a repo or an object folder: a caller's value would send each call elsewhere.
 REPO_POINTERS = ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY",
@@ -101,7 +104,7 @@ def git_env(object_dir=None, alternates=None):
 
 
 def run_git(repo, args, env=None):
-    p = subprocess.run(["git", "-C", repo] + args, env=env or git_env(), capture_output=True)
+    p = _nowindow.run(["git", "-C", repo] + args, env=env or git_env(), capture_output=True)
     return p.returncode, p.stdout, p.stderr.decode("utf-8", "replace").strip()
 
 
@@ -113,7 +116,7 @@ def read_git(repo, args):
 
 
 def check_version():
-    p = subprocess.run(["git", "--version"], env=git_env(), capture_output=True, text=True)
+    p = _nowindow.run(["git", "--version"], env=git_env(), capture_output=True, text=True)
     m = re.search(r"(\d+)\.(\d+)", p.stdout)
     if p.returncode or not m or (int(m.group(1)), int(m.group(2))) < MIN_GIT:
         raise GitTooOld("git %d.%d or newer is needed for merge-tree --write-tree; found: %s"
