@@ -766,6 +766,10 @@ jobs:
           BASE_REF: ${{ github.base_ref }}
         run: python3 lint/check_comment_narration.py --base "origin/$BASE_REF"
 
+      - name: List lines fixture suite
+        if: ${{ !cancelled() && needs.scope.outputs.records_only_skip != 'true' }}
+        run: python3 lint/test_check_list_lines.py
+
       - name: Cheap-lints fixture suite
         if: ${{ !cancelled() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_cheap_lints.py

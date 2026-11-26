@@ -210,15 +210,15 @@ def shebang_word(path):
     return re.sub(r"[\d.]+$", "", os.path.basename(words[0])) if words else None
 
 
-def language_of(path, std):
-    """The language row name for a path, or None when it is not a scanned language."""
+def language_of(path, std, names=SCANNED):
+    """The language row name for a path among `names` (the scanned languages by default), or None."""
     base = os.path.basename(path)
     ext = os.path.splitext(base)[1].lower() or (base.lower() if base.startswith(".") else "")
     rows = std["languages"]
     if ext:
-        return next((n for n in SCANNED if ext in rows.get(n, {}).get("extensions", [])), None)
+        return next((n for n in names if ext in rows.get(n, {}).get("extensions", [])), None)
     word = shebang_word(path)
-    return next((n for n in SCANNED if word and word in rows.get(n, {}).get("shebangs", [])), None)
+    return next((n for n in names if word and word in rows.get(n, {}).get("shebangs", [])), None)
 
 
 def added_lines(base, std, exclude=(), cwd=None, classify=None):
@@ -229,8 +229,9 @@ def added_lines(base, std, exclude=(), cwd=None, classify=None):
     check that reads added lines (lint/find_time_pinned.py --base) passes its own `classify` and no `std`.
 
     A path that starts with an `exclude` prefix is not scanned, on either side of the diff. A line the same
-    diff deletes, with the same text, from a scanned path is a move and not added (diff_moves). A move into an
-    untracked file has no diff, so it is no move: that file is not in the diff and stays unchecked here."""
+    diff deletes, with the same text, from a scanned path is a move and not added (diff_moves). A binary file has
+    no added lines and an untracked file has no diff, so neither is in the map; `unseen_files` names them, and a caller
+    that must not pass over a file in silence prints `unknown:` for each."""
 
     if classify is None:
         def classify(path):
@@ -263,6 +264,23 @@ def added_lines(base, std, exclude=(), cwd=None, classify=None):
                 added[path][1].add(line)
             line += 1
     return added
+
+
+def unseen_files(base, scanned, cwd=None):
+    """[(path, why)] for each path `scanned(path)` accepts that `added_lines` cannot report: a file the diff against the
+    fork of `base` holds as binary (and the head still has), and an untracked file that git does not ignore. Paths are
+    relative to `cwd`, as in `added_lines`."""
+    fork = git("merge-base", base, "HEAD", cwd=cwd).strip()
+    relative = ["--relative"] if cwd else []
+    out = []
+    for row in git("diff", "--numstat", "--no-renames", *relative, fork, cwd=cwd).splitlines():
+        added, deleted, path = row.split("\t", 2)
+        if added == "-" and deleted == "-" and scanned(path) and os.path.exists(os.path.join(cwd or ".", path)):
+            out.append((path, "a binary file, which has no lines to read"))
+    for path in git("ls-files", "--others", "--exclude-standard", cwd=cwd).splitlines():
+        if scanned(path):
+            out.append((path, "an untracked file, which the diff does not hold; `git add -N` it to have it read"))
+    return out
 
 
 def narrated_lines(path):
@@ -491,10 +509,18 @@ def sh_try_arith(src, i, spans, pending):
     or `$((` that does not close with `))` is a subshell or a command substitution that holds a subshell, as in
     `((cd /tmp; ls) | wc -l)`; the caller then reads it as code."""
     kept, saved = len(spans), list(pending)
+    arms = getattr(spans, "arms", None)
+    kept_arms = len(arms) if arms is not None else 0
+    arrays = getattr(spans, "arrays", None)
+    kept_arrays = len(arrays) if arrays is not None else 0
     try:
         return sh_arith_end(src, i, spans, pending)
     except Unread:
         del spans[kept:]
+        if arms is not None:
+            del arms[kept_arms:]
+        if arrays is not None:
+            del arrays[kept_arrays:]
         pending[:] = saved
         return None
 
@@ -580,6 +606,9 @@ def sh_code_end(src, i, spans, pending, close=None):
     and word1 before `in`, pat for the arm patterns, body for an arm's commands. A pattern's `)` ends the pattern,
     never the substitution."""
     ws, cmd, test, sub, parens, cases = True, True, False, 0, [], []
+    arms = getattr(spans, "arms", None)
+    arrays = getattr(spans, "arrays", None)
+    arr_open = []  # one [offset of the (, offsets where its elements start] per open array
 
     def starts_cmd():
         return not test and (not parens or parens[-1] == "cmd")
@@ -587,6 +616,9 @@ def sh_code_end(src, i, spans, pending, close=None):
     while i < len(src):
         c = src[i]
         st = cases[-1] if cases else None
+        if parens and parens[-1] == "array" and ws and c not in " \t\n#)" and not src.startswith("\\\n", i) \
+                and arr_open[-1][1][-1:] != [i]:
+            arr_open[-1][1].append(i)  # a word starts in an array: one element
         if st and st[0] == "word1" and ws and c not in " \t\n\\#":
             m = SH_IN_WORD.match(src, i)
             if not m:
@@ -604,6 +636,8 @@ def sh_code_end(src, i, spans, pending, close=None):
                 cases.pop()
                 i, ws, cmd = i + 4, False, False
                 continue
+            if arms is not None and st[2] is None and c not in " \t\n#" and not src.startswith("\\\n", i):
+                st[2] = (i, [])  # the arm's pattern starts here
         if test and ws and (m := SH_TEST_CLOSE.match(src, i)):
             test = False
             i, ws, cmd = m.end(), False, False
@@ -618,7 +652,7 @@ def sh_code_end(src, i, spans, pending, close=None):
         if cmd and (not st or st[0] == "body") and (m := SH_CMD_WORD.match(src, i)):
             word = m.group(0)
             if word == "case":
-                cases.append(["word0", len(parens)])
+                cases.append(["word0", len(parens), None, i])
                 i, ws, cmd = m.end(), True, False
             elif word == "esac":
                 if not st:
@@ -693,6 +727,9 @@ def sh_code_end(src, i, spans, pending, close=None):
                 kind = "cmd"
             else:
                 kind = "list"
+            if kind == "list" and arrays is not None and i > 0 and src[i - 1] == "=":
+                kind = "array"  # `NAME=(`, `NAME+=(`, `declare -a NAME=(`: a list of words; its elements are recorded
+                arr_open.append([i, []])
             parens.append(kind)
             ws, cmd = kind != "word", kind == "cmd"
             i += 1
@@ -700,9 +737,16 @@ def sh_code_end(src, i, spans, pending, close=None):
             i += 1
             base = st[1] if st else 0
             if st and st[0] == "pat" and len(parens) == base:
+                if st[2] is not None:
+                    arms.append((st[2][0], i - 1, st[2][1], st[3]))
+                    st[2] = None
                 st[0], ws, cmd = "body", True, True
             elif len(parens) > base:
-                if parens.pop() == "word":
+                kind = parens.pop()
+                if kind == "array":
+                    open_at, starts = arr_open.pop()
+                    arrays.append((open_at, i - 1, starts))
+                if kind == "word":
                     ws = cmd = False
                 else:
                     ws, cmd = True, starts_cmd()  # starts_cmd keeps `f() {` a function body
@@ -713,6 +757,8 @@ def sh_code_end(src, i, spans, pending, close=None):
             else:
                 ws = cmd = True  # a stray `)` at top level closes nothing
         else:
+            if c == "|" and st and st[0] == "pat" and st[2] is not None and len(parens) == st[1]:
+                st[2][1].append(i)  # an alternative of the arm; a | in quotes or brackets never reaches here
             redirect = c in "&|" and i > 0 and src[i - 1] in "<>"  # `>&2` and `>|` are redirections
             i += 1
             ws = c in " \t;&|<>"
@@ -727,10 +773,21 @@ def sh_code_end(src, i, spans, pending, close=None):
     return i
 
 
-def shell_comment_spans(path, src):
-    """The (start, end) offsets of each comment in `src`, the text of a shell file with newline line ends. The one scan that
-    shell_comments and lint/comment_only.py read. Raises Unread on an unclosed quote, expansion or heredoc."""
-    spans, pending = [], []
+class ShellScan(list):
+    """The comment spans of a shell file, as the list itself, and in `arms` each case arm's pattern as
+    (offset of its first character, offset of the `)` that ends it, offsets of its top-level `|`, offset of its `case`).
+    `arrays` holds each `NAME=(...)` array as (offset of its `(`, offset of its `)`, offsets where its elements start)."""
+
+    def __init__(self):
+        super().__init__()
+        self.arms = []
+        self.arrays = []
+
+
+def shell_scan(path, src):
+    """One scan of `src`, the text of a shell file with newline line ends: its ShellScan. Raises Unread on an unclosed
+    quote, expansion or heredoc."""
+    spans, pending = ShellScan(), []
     try:
         first = src.find("\n") if src.startswith("#!") else 0
         sh_code_end(src, len(src) if first < 0 else first, spans, pending)
@@ -739,6 +796,12 @@ def shell_comment_spans(path, src):
     except Unread as e:
         raise Unread("%s: cannot read: %s" % (path, e))
     return spans
+
+
+def shell_comment_spans(path, src):
+    """The (start, end) offsets of each comment in `src`, the text of a shell file with newline line ends. The one scan that
+    shell_comments and lint/comment_only.py read. Raises Unread on an unclosed quote, expansion or heredoc."""
+    return list(shell_scan(path, src))
 
 
 def shell_comments(path):

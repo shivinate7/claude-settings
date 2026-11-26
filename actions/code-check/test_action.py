@@ -106,11 +106,12 @@ def head(d):
     return subprocess.run(["git", "rev-parse", "HEAD"], cwd=d, capture_output=True, text=True).stdout.strip()
 
 
-def check(files, base_files=None, base=None, main_files=None, main=None, send_base=True, path_tools=True, unset=(), **env):
+def check(files, base_files=None, base=None, main_files=None, main=None, send_base=True, path_tools=True, unset=(), extra=(), **env):
     """Commit base_files (when given) as the base, then files on top (None deletes); run the runner.
     main_files (when given) are a commit on top of the base that the PR does not hold, passed as --main;
     the PR's files then go on the base. `base` and `main` name a ref outright; send_base=False omits --base.
-    unset names are dropped from the run env; env adds or replaces variables there. Returns (exit, output)."""
+    extra is more argv for the runner, such as a flag. unset names are dropped from the run env; env adds or
+    replaces variables there. Returns (exit, output)."""
     with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as d:
         git(d, "init", "-q", "-b", "main")
         if base_files is not None:
@@ -124,7 +125,7 @@ def check(files, base_files=None, base=None, main_files=None, main=None, send_ba
             git(d, "checkout", "-q", base)
         put(d, files)
         git(d, "add", "-A"); git(d, "commit", "-qm", "head", "--allow-empty")
-        args = [sys.executable, RUNNER, "--root", d] + (["--base", base] if base and send_base else []) + (["--main", main] if main else [])
+        args = [sys.executable, RUNNER, "--root", d] + (["--base", base] if base and send_base else []) + (["--main", main] if main else []) + list(extra)
         run_env = dict(os.environ, **env)
         for name in unset:
             run_env.pop(name, None)
@@ -133,6 +134,15 @@ def check(files, base_files=None, base=None, main_files=None, main=None, send_ba
             run_env["CODE_CHECK_TOOLS"] = "path"
         p = subprocess.run(args, capture_output=True, text=True, env=run_env)
         return p.returncode, p.stdout + p.stderr
+
+
+# The dark list-lines switch (--list-lines, off by default; decision source-prose-lint-ships-dark). The judgment's own cases
+# are in lint/test_check_list_lines.py; these two prove the Code check runs it only when the switch is on.
+LIST_LINES_ARM = ["item%02d" % n for n in range(1, 20)]
+LIST_LINES_BASE = '#!/bin/sh\ncase "$1" in\n  %s) echo hit ;;\n  *) echo miss ;;\nesac\n' % "|".join(LIST_LINES_ARM)
+LIST_LINES_HEAD = '#!/bin/sh\ncase "$1" in\n  %s) echo hit ;;\n  *) echo miss ;;\nesac\n' % "|".join(LIST_LINES_ARM + ["item20"])
+LIST_LINES_LINE = ("scripts/arm.sh:3: list-lines: 20 items on one line, and this change adds one. Rule: claude-settings "
+                   "decision lists-one-line-per-item. Fix: python3 ~/.claude/lint/check_list_lines.py --fix scripts/arm.sh")
 
 
 class CodeCheck(unittest.TestCase):
@@ -213,22 +223,22 @@ class CodeCheck(unittest.TestCase):
         rc, out = check({".code-check.json": config(["a.py", "b.py"]), "b.py": GOOD_PY}, base_files=base)
         self.assertEqual(rc, 0, out)
 
-    def test_added_exclude_entry_is_red(self):
+    def test_added_exclude_item_is_red(self):
         base = {".code-check.json": config([], ["vendor/"]), "vendor/x.rs": "x\n"}
         rc, out = check({".code-check.json": config([], ["vendor/", "src/"]), "src/y.rs": "x\n"}, base_files=base)
         self.assertNotEqual(rc, 0, out)
         self.assertIn("exclude grew", out)
         self.assertIn("src/", out)
 
-    def test_removed_exclude_entry_is_green(self):
+    def test_removed_exclude_item_is_green(self):
         base = {".code-check.json": config([], ["vendor/", "old/"])}
         rc, out = check({".code-check.json": config([], ["vendor/"])}, base_files=base)
         self.assertEqual(rc, 0, out)
 
-    def test_empty_or_slash_exclude_entry_is_red(self):
-        for entry in ("", "/", " "):
-            rc, out = check({".code-check.json": config([], [entry]), "main.rs": "x\n"})
-            self.assertNotEqual(rc, 0, repr(entry) + out)
+    def test_empty_or_slash_exclude_item_is_red(self):
+        for item in ("", "/", " "):
+            rc, out = check({".code-check.json": config([], [item]), "main.rs": "x\n"})
+            self.assertNotEqual(rc, 0, repr(item) + out)
             self.assertIn("empty exclude", out)
 
     def test_deleted_module_may_leave_the_list(self):
@@ -248,7 +258,7 @@ class CodeCheck(unittest.TestCase):
         self.assertEqual(rc, 0, out)
 
     def test_branch_behind_main_is_green(self):
-        # main listed b.py after the fork; the branch never touched the list, so a merge keeps main's entry.
+        # main listed b.py after the fork; the branch never touched the list, so a merge keeps main's item.
         base = {".code-check.json": config(["a.py"]), "a.py": GOOD_PY, "b.py": GOOD_PY}
         rc, out = check({"c.py": GOOD_PY}, base_files=base, main_files={".code-check.json": config(["a.py", "b.py"])})
         self.assertEqual(rc, 0, out)
@@ -299,6 +309,21 @@ class CodeCheck(unittest.TestCase):
         rc, out = check({".code-check.json": config(["a.py"]), "a.py": GOOD_PY}, base="1" * 40)
         self.assertEqual(rc, 0, out)
         self.assertIn("unknown", out)
+
+    def test_list_lines_switch_off_runs_no_judgment(self):
+        """Control: with --list-lines left off (the default), the Code check judges no list, so a shell arm that the
+        change crowds gets no list-lines line. Scope first: the shell layer ran and passed the file."""
+        rc, out = check({"scripts/arm.sh": LIST_LINES_HEAD},
+                        base_files={".code-check.json": config([]), "scripts/arm.sh": LIST_LINES_BASE})
+        self.assertIn("code-check: shell lint: shellcheck pass", out, "the Code check did not reach the shell file: " + out)
+        self.assertNotIn("list-lines", out, "the switch-off run judged a list: " + out)
+
+    def test_list_lines_switch_on_refuses_crowded_shell_arm(self):
+        """With --list-lines, the Code check prints the list-lines failure line for a shell arm the change crowds."""
+        rc, out = check({"scripts/arm.sh": LIST_LINES_HEAD},
+                        base_files={".code-check.json": config([]), "scripts/arm.sh": LIST_LINES_BASE}, extra=("--list-lines",))
+        self.assertIn(LIST_LINES_LINE, out, "the Code check run with --list-lines does not refuse the crowded shell arm: " + out)
+        self.assertNotEqual(rc, 0, out)
 
     def test_pins_flag_prints_install_specs_from_the_standard(self):
         std = json.load(open(STANDARD, encoding="utf-8"))
