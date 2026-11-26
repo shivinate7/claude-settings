@@ -731,4 +731,4 @@ await test('R3-4 looksSecret on the sanitized line is true (the scan may run aft
 const r1Failed = r1.filter(r => r.startsWith('FAIL')).length
 console.log(r1.join('\n'))
 console.log(`plain-diff pins (review 1 and 2): ${r1.length - r1Failed} pass, ${r1Failed} fail of ${r1.length}`)
-if (r1Failed) process.exitCode = 1
+if (r1Failed || r1.length === 0) process.exitCode = 1

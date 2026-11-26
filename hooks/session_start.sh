@@ -51,30 +51,55 @@ tier_line() {
 
 command -v git >/dev/null 2>&1 || { tier_line; exit 0; }
 
-# bounded_git <dir> <outfile> <git args...>: runs git in <dir>, stdout to <outfile>, killed after
-# CLAUDE_SETTINGS_FETCH_TIMEOUT seconds (default 2). Returns git's status, or a kill's (above 1)
-# when the bound hit. The one home for every bounded git call below.
-bounded_git() {
+# bounded_run <dir> <outfile> <errfile> <command and args...>: runs the command in <dir>, stdout to <outfile>, stderr to
+# <errfile>, killed after CLAUDE_SETTINGS_FETCH_TIMEOUT seconds (default 2). When the bound hits, the watchdog kills the
+# command and every descendant of it, found by pid from one `ps -A -o pid= -o ppid=` read, so a hung child cannot hold
+# session start or outlive it. That works in every sh without job control: `set -m` prints to stderr under dash with no
+# tty, and dash's `kill` rejects `--` for a group kill. Where ps has no such columns (Git Bash), only the command's own
+# pid is killed. Returns the command's status, or a kill's (above 128) when the bound hit. The ps start happens only on
+# a timeout. The one home for every bounded call below.
+bounded_run() {
   fetch_timeout="${CLAUDE_SETTINGS_FETCH_TIMEOUT:-2}"
   git_dir_arg="$1"
   git_out_arg="$2"
-  shift 2
-  ( cd "$git_dir_arg" 2>/dev/null && git "$@" >"$git_out_arg" 2>/dev/null ) &
+  git_err_arg="$3"
+  shift 3
+  ( cd "$git_dir_arg" 2>/dev/null && "$@" >"$git_out_arg" 2>"$git_err_arg" ) &
   fetch_pid=$!
-  # The watchdog's TERM handler kills its own sleep, so a git call that returns first leaves no sleep behind for
+  # The watchdog's TERM handler kills its own sleep, so a call that returns first leaves no sleep behind for
   # the full bound. (jobs -p is empty inside a dash subshell, so the pid is kept in a variable.)
   ( wd_sleep=""
     trap 'kill "$wd_sleep" >/dev/null 2>&1; exit 0' TERM
     sleep "$fetch_timeout" &
     wd_sleep=$!
     wait "$wd_sleep"
-    kill "$fetch_pid" >/dev/null 2>&1 ) >/dev/null 2>&1 &
+    wd_ps=$(ps -A -o pid= -o ppid= 2>/dev/null)
+    wd_tree="$fetch_pid"
+    wd_grew=1
+    while [ "$wd_grew" = 1 ]; do
+      wd_grew=0
+      while read -r wd_p wd_pp; do
+        case " $wd_tree " in *" $wd_p "*) continue ;; esac
+        case " $wd_tree " in *" $wd_pp "*) wd_tree="$wd_tree $wd_p"; wd_grew=1 ;; esac
+      done <<WD_PS
+$wd_ps
+WD_PS
+    done
+    kill $wd_tree >/dev/null 2>&1 ) >/dev/null 2>&1 &
   killer_pid=$!
   wait "$fetch_pid" 2>/dev/null
   fetch_rc=$?
   kill "$killer_pid" >/dev/null 2>&1
   wait "$killer_pid" 2>/dev/null
   return "$fetch_rc"
+}
+
+# bounded_git <dir> <outfile> <git args...>: bounded_run for git.
+bounded_git() {
+  git_dir_arg="$1"
+  git_out_arg="$2"
+  shift 2
+  bounded_run "$git_dir_arg" "$git_out_arg" /dev/null git "$@"
 }
 
 # bounded_fetch <dir>: one quiet, bounded `git fetch` in <dir> that names refs and never prunes or fetches all of
@@ -186,6 +211,52 @@ n=$(cd "$cwd" 2>/dev/null && git status --porcelain 2>/dev/null | wc -l | tr -d 
 
 printf 'checkout %s on %s, %s dirty files\n' "$toplevel" "$branch" "$n"
 tier_line
+
+# main_ref_line: one line when the main-ref hook copy is missing or behind main, taken from the installer's own --check
+# (githooks/main-ref/install.sh). It installs nothing and sets no core.hooksPath. Only an installer that carries the
+# marker text is run: an older one has no --check, and its install mode would write files. The match is the pre-commit
+# hook's (its twin: MAIN_REF_MARKER in githooks/pre-commit/pre-commit): the text as a substring of the file. Exit 0
+# (healthy) prints nothing. Any other exit prints one line: the installer's stderr folded to one line, or, when it said
+# nothing, a line that names the exit. The run is bounded by CLAUDE_SETTINGS_FETCH_TIMEOUT and its children die with
+# it. The list part of the text is capped at 400 characters; the Remedy line is never cut. Cost: once per SessionStart event.
+# Process starts on the healthy path: grep (the marker test), mktemp, the installer's sh (its own git reads, counted in the
+# installer's cost line), the watchdog's sleep, and rm (the temp file). Only when the installer prints list text before the
+# Remedy line: one more start, cut. Only on a timeout: one more start, ps (the watchdog's process-tree read). One temp file
+# for the installer's stderr, removed at once; no network.
+main_ref_installer="$toplevel/githooks/main-ref/install.sh"
+if [ -f "$main_ref_installer" ] && grep -qF 'main-ref-check: 1' "$main_ref_installer" 2>/dev/null; then
+  mr_err=$(mktemp 2>/dev/null)
+  bounded_run "$toplevel" /dev/null "${mr_err:-/dev/null}" sh githooks/main-ref/install.sh --check
+  mr_rc=$?
+  if [ "$mr_rc" -ne 0 ]; then
+    mr_text=""
+    mr_body=""
+    mr_fix=""
+    if [ -n "$mr_err" ]; then
+      while IFS= read -r mr_line || [ -n "$mr_line" ]; do
+        mr_lead="${mr_line#"${mr_line%%[![:space:]]*}"}"
+        case "$mr_lead" in
+          Remedy:*) mr_lead="${mr_lead#Remedy:}"; mr_fix="${mr_fix:+$mr_fix }Remedy: ${mr_lead#"${mr_lead%%[![:space:]]*}"}" ;;
+          *) mr_body="${mr_body:+$mr_body }$mr_line" ;;
+        esac
+      done <"$mr_err"
+      # Only the list part is capped, so the Remedy prints whole.
+      [ -n "$mr_body" ] && mr_body=$(printf '%s' "$mr_body" | cut -c1-400)
+      mr_body="${mr_body%"${mr_body##*[![:space:]]}"}"
+      mr_text="${mr_body:+$mr_body }$mr_fix"
+      mr_text="${mr_text%"${mr_text##*[![:space:]]}"}"
+    fi
+    if [ -z "$mr_text" ]; then
+      if [ "$mr_rc" -gt 128 ]; then
+        mr_text="main-ref check: unknown: the check did not finish within ${CLAUDE_SETTINGS_FETCH_TIMEOUT:-2} s (exit $mr_rc)."
+      else
+        mr_text="main-ref check: unknown: the check exited $mr_rc."
+      fi
+    fi
+    printf '%s\n' "$mr_text"
+  fi
+  [ -n "$mr_err" ] && rm -f "$mr_err"
+fi
 
 # roster_lines: the standing sessions of this repo with their ids, so a session never types an id by hand (decision
 # brief-ids-in-roster). The rows are the Standing sessions section of CLAUDE.md on the local origin/roadmap ref, read
@@ -567,7 +638,8 @@ fi
 # page-built stamp roadmap/data/meta/page-built.json on origin/roadmap, and the local one an allowed publish wrote
 # (<git common dir>/waiting-page-built). skills/waiting-page/stale_pages.py --session-line compares them with origin/main
 # of the claude-settings clone ($d): nothing when either equals main's blob, the behind line when one exists and none
-# does, nothing when neither exists or main is unreadable. The grep is only a cheap filter on the extras file that
+# does, the freshness-unknown line when neither exists (an unread state is named, never silent), nothing when a stamp exists and
+# main is unreadable. The grep is only a cheap filter on the extras file that
 # lint/layout.json names; layout.waiting_page, inside the python start, decides. Cost: in a repo with a page, one
 # python start and at most two read-only git processes; in any other repo, one grep. No fetch, no file written, no timer.
 wp_extras="$toplevel/.claude/layout-extras.json"

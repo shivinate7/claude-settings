@@ -1,0 +1,1 @@
+- past-ruling-stem-misses-plurals: `_stem` misses some plurals. `statuses` stems to `statuse`, not `status`. `indices` stems to `indice`, not `index`. `analyses` stems to `analyse`, not `analysis`. A record with only the plural form does not share that word with its singular question. Seen: 2026-11-25 x1
