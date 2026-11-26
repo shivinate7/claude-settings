@@ -4,8 +4,10 @@
     python3 lint/test_check_prompt_rule_ids.py
 
 The lint reads hooks/*.py with ast and collects the rule ids that prompt text names. It fails on
-each id with no `<!-- rule:<id> -->` anchor in a RULE_FILES file (lint/rule_audit.py), and its
-message names the file, the line and the id. The reader API these cases call:
+each id with no home: a `<!-- rule:<id> -->` anchor in a RULE_FILES file (lint/rule_audit.py), a guard
+rule name in hooks/guard*.py, or a decision record slug. Its message names the file, the line and the
+id. A row of PROMPT_CONSTANTS whose file or constant is gone is reported too, never read as nothing.
+The reader API these cases call:
 
     prompt_ids(root) -> [(path, line, id), ...]   each id a prompt names, as read; path is "hooks/<file>.py"
     problems(root)   -> [message, ...]            one message per unanchored id
@@ -118,6 +120,43 @@ def reported_once(test, root, src, needle, path="hooks/reply_judge.py"):
     test.assertEqual(len(problems), 1, "the lint does not report %s: %r" % (needle, problems))
     test.assertTrue(names_place(problems[0], path, at), problems[0])
     test.assertIn(needle, problems[0])
+
+
+def table_hooks(ids=(), omit_const=None, omit_file=None):
+    """hooks/ sources that give every row of the lint's PROMPT_CONSTANTS table its file and its constants.
+    The table is read from the lint at run time, never copied here. A prose constant is one neutral string;
+    the `ids` constant (JUDGED_RULES) holds `ids`. omit_const is a (file, constant) pair left out of its file;
+    omit_file is a file left out whole."""
+    hooks = {}
+    for name, consts in lint().PROMPT_CONSTANTS.items():
+        if name == omit_file:
+            continue
+        body = ""
+        for const, kind in consts.items():
+            if (name, const) == omit_const:
+                continue
+            if kind == "ids":
+                body += "%s = (\n%s)\n" % (const, "".join('    "%s",\n' % i for i in ids))
+            else:
+                body += '%s = "Judge the reply."\n' % const
+        hooks[name] = body
+    return hooks
+
+
+def module_level_names(path):
+    """The names a module binds at top level, read with ast: this file's own reading of a real source file."""
+    with open(path, encoding="utf-8") as f:
+        tree = ast.parse(f.read())
+    names = set()
+    for node in tree.body:
+        if isinstance(node, ast.Assign):
+            targets = node.targets
+        elif isinstance(node, ast.AnnAssign):
+            targets = [node.target]
+        else:
+            continue
+        names |= {t.id for t in targets if isinstance(t, ast.Name)}
+    return names
 
 
 class AnchoredIdTests(unittest.TestCase):
@@ -375,6 +414,60 @@ class SizeTests(unittest.TestCase):
         root = make_tree(hooks={"reply_judge.py": judged(*names)}, claude_md=claude)
         self.assertEqual(len(lint().prompt_ids(root)), 200)
         self.assertEqual(lint().problems(root), [])
+
+
+class TableRowTests(unittest.TestCase):
+    """A row of PROMPT_CONSTANTS names a file and its constants. A row whose file or constant is gone is
+    reported: a reader that sees less must not print ok."""
+
+    def test_row_whose_constant_is_gone_from_its_file_is_reported(self):
+        root = make_tree(hooks=table_hooks(omit_const=("call_judge.py", "SPAWN_PROMPT")))
+        problems = lint().problems(root)
+        self.assertEqual(len(problems), 1, "the lint does not report SPAWN_PROMPT gone from call_judge.py: %r" % problems)
+        self.assertIn("call_judge.py", problems[0])
+        self.assertIn("SPAWN_PROMPT", problems[0])
+
+    def test_row_whose_file_is_missing_is_reported(self):
+        root = make_tree(hooks=table_hooks(omit_file="sendmessage_state.py"))
+        problems = lint().problems(root)
+        self.assertEqual(len(problems), 1, "the lint does not report the missing sendmessage_state.py: %r" % problems)
+        self.assertIn("sendmessage_state.py", problems[0])
+
+    def test_every_row_of_the_real_table_resolves_on_the_real_tree(self):
+        table = lint().PROMPT_CONSTANTS
+        self.assertTrue(table, "scope: the table has no rows")
+        for name, consts in table.items():
+            path = os.path.join(ROOT, "hooks", name)
+            self.assertTrue(os.path.isfile(path), "the table names hooks/%s, which is not a file" % name)
+            defined = module_level_names(path)
+            for const in consts:
+                self.assertIn(const, defined, "hooks/%s does not define %s, a row of the table" % (name, const))
+        self.assertEqual(lint().problems(ROOT), [])
+
+
+class HomeTests(unittest.TestCase):
+    """An id a prompt names has a home: a guard rule name (d) or a decision record slug (e). With neither, it is
+    reported (f). Each home is built behaviour, so (d) and (e) must each go red when that home is dropped."""
+
+    def test_id_declared_only_as_a_guard_rule_name_is_not_reported(self):
+        hooks = table_hooks(ids=("output-ghost-guard",))
+        hooks["guard.py"] = 'def check(tool):\n    return refuse(tool, "blocked", "output-ghost-guard")\n'
+        root = make_tree(hooks=hooks)
+        # Scope: the reader reads the id, so "not reported" is a judgement and not a pass over an empty read.
+        self.assertIn(("hooks/reply_judge.py", line_of(hooks["reply_judge.py"], "output-ghost-guard"), "output-ghost-guard"),
+                      lint().prompt_ids(root))
+        self.assertEqual(lint().problems(root), [])
+
+    def test_id_declared_only_as_a_decision_record_is_not_reported(self):
+        hooks = table_hooks(ids=("output-ghost-slug",))
+        root = make_tree(hooks=hooks, extra={os.path.join("docs", "decisions", "output-ghost-slug.md"): "# Decision\n"})
+        self.assertIn(("hooks/reply_judge.py", line_of(hooks["reply_judge.py"], "output-ghost-slug"), "output-ghost-slug"),
+                      lint().prompt_ids(root))
+        self.assertEqual(lint().problems(root), [])
+
+    def test_id_with_neither_a_guard_rule_name_nor_a_decision_record_is_reported(self):
+        hooks = table_hooks(ids=("output-ghost-none",))
+        reported_once(self, make_tree(hooks=hooks), hooks["reply_judge.py"], "output-ghost-none")
 
 
 class RealTreeTests(unittest.TestCase):
