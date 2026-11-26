@@ -218,9 +218,11 @@ tier_line
 # hook's (its twin: MAIN_REF_MARKER in githooks/pre-commit/pre-commit): the text as a substring of the file. Exit 0
 # (healthy) prints nothing. Any other exit prints one line: the installer's stderr folded to one line, or, when it said
 # nothing, a line that names the exit. The run is bounded by CLAUDE_SETTINGS_FETCH_TIMEOUT and its children die with
-# it. The list part of the text is capped at 400 characters; the Remedy line is never cut. Cost: once per SessionStart event,
-# starts mktemp, the installer's sh with its own git reads, the watchdog's sleep, and cut when the check printed list text
-# (ps too, only on a timeout); one temp file for its stderr, removed at once; no network.
+# it. The list part of the text is capped at 400 characters; the Remedy line is never cut. Cost: once per SessionStart event.
+# Process starts on the healthy path: grep (the marker test), mktemp, the installer's sh (its own git reads, counted in the
+# installer's cost line), the watchdog's sleep, and rm (the temp file). Only when the installer prints list text before the
+# Remedy line: one more start, cut. Only on a timeout: one more start, ps (the watchdog's process-tree read). One temp file
+# for the installer's stderr, removed at once; no network.
 main_ref_installer="$toplevel/githooks/main-ref/install.sh"
 if [ -f "$main_ref_installer" ] && grep -qF 'main-ref-check: 1' "$main_ref_installer" 2>/dev/null; then
   mr_err=$(mktemp 2>/dev/null)
