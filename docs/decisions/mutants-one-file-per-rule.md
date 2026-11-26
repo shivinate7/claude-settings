@@ -11,7 +11,7 @@ A new mutant row goes in `hooks/mutants/<rule-slug>.py`, one file per rule. The 
 
 - Each row file defines `ROWS`, a list of 5- or 6-field tuples in the table's row shape. The file name is a rule slug. The loader does not check that the slug names a real rule.
 - The loader reads each `*.py` directly in the folder, in sorted slug order. A subfolder adds no rows. A missing or empty folder leaves the list equal to the table.
-- The list every reader gets is the table, then each file's rows in file order. `hooks/mutate_guard.py` rebinds `MUTATIONS` to that list before any reader uses it. So the census and the single-mutant run (`MUTATE_ONLY`) see the file rows.
+- The list every reader gets is the table, then each file's rows in file order. `hooks/mutate_guard.py` fills `MUTATIONS` in place after its one literal table. So the census and the single-mutant run (`MUTATE_ONLY`) see the file rows.
 - Any of these fails the run and names the file: a file that does not load, a file with no `ROWS` list, a row of the wrong shape, or a label that repeats one in the table or in an earlier file. A repeat names both places.
 - A test-author writes a row file. The guard refuses a builder's write (`hooks/guard.py` `MUTANT_FILE_REL`, `is_mutation_test_rel`). A workflow step that runs a row file is a test run (`hooks/guard.py` `workflow_runs_test`), so a builder cannot delete it or make it ignore failure.
 
