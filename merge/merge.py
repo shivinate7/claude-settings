@@ -5160,6 +5160,17 @@ def head_check_red(state):
     others = [e for e in rest.split("; ") if e and not (e.startswith("workflow ") and e.endswith(NO_JOB_RAN))]
     return "a check is " + state if others else None
 
+CANCEL_ENTRY = re.compile(r"workflow .+: cancelled|[^;]+?: cancel(?: \S*)?")  # classify's red entry for a cancelled check row ("<name>: cancel <link>"), and judge_runs' for a cancelled run
+
+def head_check_failed(state):
+    """-> the red text of `state` when a check of the head failed, else None. As head_check_red, but a red made only of cancelled checks and runs (no fail,
+    no timeout, no other entry) is no failure: it reads like a pending one (owner, 18:23 CST Nov 25 2026, decision merge-needs-current-base). Only confirm's
+    live-head gate reads it so; classify, judge_runs and head_check_red keep a cancel red."""
+    red = head_check_red(state)
+    if red and all(CANCEL_ENTRY.fullmatch(e) for e in state[len("red: "):].split(" (ignored: ")[0].split("; ")):
+        return None
+    return red
+
 CI_SCOPE = ".github/scripts/ci-scope.sh"  # the repo's one home of which jobs read which paths; --express reads it for a prose-only diff
 RULED_STORE_PATH = "roadmap/rulings/{id}.json"  # on origin/roadmap: one file per ruling; --express reads one
 RULING_LINE = re.compile(r"^Ruling:[ \t]*(.*?)[ \t\r]*$", re.M)  # only the first such line counts, so a later valid one cannot rescue an invalid first
@@ -5970,7 +5981,7 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
             own = None  # the live head's own state, read once when this tool's commits sit on the proof
             if proof != info["head"]:
                 own = host.head_state(n, info["head"], **proof_kw(needs_proof))
-                if head_not_green(own) is None and not state.startswith("unknown (") and not head_check_red(state):  # a green run of the live head itself proves it over a pending or skipped read of the head under it (a draft's skipped rollup is no failure of this head). A proof that failed (ruling R1: a red parent refuses a clean main merge) or could not be read still refuses, as before
+                if head_not_green(own) is None and not state.startswith("unknown (") and not head_check_failed(state):  # a green run of the live head itself proves it over a pending or skipped read of the head under it (a draft's skipped rollup is no failure of this head). A proof that failed (ruling R1: a red parent refuses a clean main merge) or could not be read still refuses, as before; one red only from cancelled checks and runs is no failure and reads like a pending one
                     say(f"merge: the own run of {info['head'][:9]} is green, so it is the proof, not the checks of {proof[:9]} under it.")
                     proof, state, not_green = info["head"], own, None
                 else:
