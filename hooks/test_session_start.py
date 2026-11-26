@@ -7,6 +7,7 @@ session_start.sh` with the session payload on stdin. Stdlib only. Exit 0 on PASS
     python hooks/test_session_start.py
 """
 import hashlib
+import importlib.util
 import json
 import os
 import re
@@ -1258,7 +1259,7 @@ class SessionStartLivePinNoticeTests(SessionStartAgentWorktreeNoticeTests):
 # The waiting page behind main (rule page-stale). A repo whose extras name a waiting page prints one line when a stamp
 # exists and none equals main's page.html blob sha. The stamps are the record file on origin/roadmap and the local stamp
 # <git common dir>/waiting-page-built, which alone counts while the record file is missing or unreadable. A stamp equal
-# to main's blob, or no stamp at all, prints nothing.
+# to main's blob prints nothing. No stamp at all prints the freshness-unknown line, which names the page's url.
 # Main is origin/main of the claude-settings clone that the config's CLAUDE.md names, the
 # checkout the guard's stale_pages reads, not the session's own repo. The page text here is a stand-in: the
 # hook compares blob shas and never reads the text.
@@ -1267,6 +1268,18 @@ WAITING_PAGE_REL = "skills/waiting-page/page.html"
 WAITING_STAMP = "waiting-page-built"
 MAIN_PAGE = "<!doctype html>\n<title>Queue</title>\n"
 OLDER_PAGE = "<!doctype html>\n<title>Queue, older</title>\n"
+
+
+def freshness_unknown_line(url):
+    """The line session start prints for a page with neither stamp, from the one constant in the skill's script."""
+    path = os.path.join(HERE, "..", "skills", "waiting-page", "stale_pages.py")
+    folder = os.path.dirname(path)
+    if folder not in sys.path:
+        sys.path.insert(0, folder)  # the script imports splice from its own folder
+    spec = importlib.util.spec_from_file_location("stale_pages_for_session_start", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.FRESHNESS_UNKNOWN_LINE % url
 
 
 class SessionStartWaitingPageTests(SessionStartAgentWorktreeNoticeTests):
@@ -1321,7 +1334,14 @@ class SessionStartWaitingPageTests(SessionStartAgentWorktreeNoticeTests):
         self.stamp(self.main_sha)
         self.assertEqual(self.waiting_lines(self.run_checked()), [])
 
-    def test_no_stamp_prints_no_line(self):
+    def test_no_page_built_record_prints_freshness_unknown_line_with_the_url(self):
+        hits = self.waiting_lines(self.run_checked())
+        self.assertEqual(len(hits), 1, "expected one waiting page line, got %r" % hits)
+        self.assertEqual(hits[0], freshness_unknown_line(WAITING_URL),
+                         "the waiting page line is not the freshness-unknown line: %r" % hits[0])
+
+    def test_no_page_built_record_and_no_page_url_prints_no_page_line(self):
+        os.remove(os.path.join(self.primary, ".claude", "layout-extras.json"))
         self.assertEqual(self.waiting_lines(self.run_checked()), [])
 
     def test_main_unreadable_prints_no_line_even_with_a_stale_stamp(self):
