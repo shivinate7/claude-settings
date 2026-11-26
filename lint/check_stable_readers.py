@@ -21,6 +21,10 @@ only as a difference from the head reader's result on the same data, so the head
 """
 import argparse, contextlib, copy, importlib.util, io, json, os, subprocess, sys
 
+HERE = os.path.dirname(os.path.realpath(__file__))
+sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
+
 CODE_DIRS = ("hooks", "lint", "merge", "actions")
 CONFIG = os.path.join(".github", "stamp.json")  # glossary-ok: the file the readers read, by its real name
 KEYS = {  # the data each reader reads, named in a finding
@@ -94,7 +98,7 @@ def run_probe(code_tree, data, base_ref):
     if base_ref:
         cmd += ["--base-ref", base_ref]
     try:
-        r = subprocess.run(cmd, capture_output=True, text=True, cwd=data, timeout=PROBE_SECONDS)
+        r = _nowindow.run(cmd, capture_output=True, text=True, cwd=data, timeout=PROBE_SECONDS)
         return json.loads(r.stdout), None
     except (OSError, ValueError, subprocess.TimeoutExpired) as e:
         detail = getattr(e, "stderr", None) or ""
@@ -132,7 +136,7 @@ def catalog_finding(stable_tree, head_tree):
     """The stable copy's records generator in check mode on the head tree. -> a finding, or None."""
     cmd = [sys.executable, "-I", os.path.join(stable_tree, "lint", "hook_catalog.py"), "--records-only", "--check", "--root", head_tree]
     try:
-        r = subprocess.run(cmd, capture_output=True, text=True, cwd=head_tree, timeout=CATALOG_SECONDS)
+        r = _nowindow.run(cmd, capture_output=True, text=True, cwd=head_tree, timeout=CATALOG_SECONDS)
     except (OSError, subprocess.TimeoutExpired) as e:
         return f"hook_catalog (the records page): the stable generator could not run (unknown): {type(e).__name__}: {e}"
     if r.returncode:
