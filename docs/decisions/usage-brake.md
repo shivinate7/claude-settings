@@ -1,4 +1,4 @@
-# Usage at 90% is cautious, 93% starts wind-down, 97% is a hard stop (account scope unconfirmed)
+# Usage at 90% is cautious, 93% starts wind-down, 97% is a hard stop
 
 ## The ruling
 
@@ -32,7 +32,7 @@ The owner's words give no account scope. The retrospective's reading, for the ow
 
 The retrospective reads this against the owner's 2026-11-01 17:56 CST ruling, "There is no usage limit" (decision `session-tiers`, the session roles). It reads that ruling as being about session length. That reading is the retrospective's, not the owner's.
 
-Open question for the owner: does the no-limit ruling conflict with the brake reading?
+Open question for the owner: does the no-limit ruling conflict with the brake reading? Open as owner page item 540 (usage-brake).
 
 ## Open question 14.Q2
 
