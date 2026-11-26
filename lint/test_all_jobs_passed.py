@@ -326,9 +326,8 @@ class MacOnceByBatchRollup(unittest.TestCase):
     def test_a_macos_job_whose_if_runs_on_a_pull_request_is_flagged(self):
         # Control: an if that is true on a pull_request makes its macOS job needed, and all-jobs-passed does not name it, so the rules refuse it.
         # The line swapped is shell-macos's own if, asserted present first, so the swap cannot be a no-op.
-        jobs = all_jobs(self.text)
-        old_if = jobs["shell-macos"]["if"]
-        line = "    if: " + old_if + "\n"
+        line = job_if_line(self.text, "shell-macos")
+        self.assertIsNotNone(line, "shell-macos has no job-level if in checks.yml: this case must follow it")
         self.assertEqual(self.text.count(line), 1, "shell-macos's if line is not in checks.yml: this case must follow it")
         swapped = self.text.replace(line, "    if: ${{ github.event_name != 'push' }}\n", 1)
         self.assertTrue(needs_problems(swapped) or off_problems(swapped), "a macOS job whose if runs on a pull_request passes the rules")
@@ -344,18 +343,25 @@ class MacOnceByBatchRollup(unittest.TestCase):
 # The macOS jobs run on a schedule and a dispatch only (owner, 01:33 CST Nov 16): no job-level if lets a pull_request start one,
 # and all-jobs-passed needs none of them, so it names no scope-skips map. check.sh is the action's generic check, not this rule.
 CHECK_SH = os.path.join(HERE, "..", "actions", "all-jobs-passed", "check.sh")
-SHELL_MACOS_IF = "    if: ${{ github.event_name != 'pull_request' && github.event_name != 'push' && (needs.scope.outputs.shell_macos == 'true' || github.event_name != 'pull_request') }}\n"
-# Each defect is (label, the job whose block holds old or None for all of checks.yml, old, new). Each replaces one line, once, and the
-# wiring rule must add a problem for each.
+# Each defect is (label, the job whose block holds old or None for all of checks.yml, old or None, new). old None means that job's own
+# job-level if line, read from checks.yml by job_if_line, so no copy of a macOS job's if can drift from the workflow. Each replaces one
+# line, once, and the wiring rule must add a problem for each.
 DAILY_DEFECTS = [
     ("a macOS job added back to all-jobs-passed's needs", "all-jobs-passed", "      - checks-waiting-page\n",
      "      - checks-waiting-page\n      - shell-macos\n"),
     ("a scope-skips input naming a macOS job", "all-jobs-passed", "          needs: ${{ toJSON(needs) }}\n",
      "          needs: ${{ toJSON(needs) }}\n          scope-skips: '{\"shell-macos\":[\"shell_macos\"]}'\n"),
-    ("the old scope skip restored on shell-macos", None, SHELL_MACOS_IF,
+    ("the old scope skip restored on shell-macos", "shell-macos", None,
      "    if: ${{ github.event_name != 'push' && (needs.scope.outputs.shell_macos == 'true' || github.event_name != 'pull_request') }}\n"),
-    ("shell-macos's if runs on a pull_request", None, SHELL_MACOS_IF, "    if: ${{ github.event_name != 'push' }}\n"),
+    ("shell-macos's if runs on a pull_request", "shell-macos", None, "    if: ${{ github.event_name != 'push' }}\n"),
 ]
+
+
+def job_if_line(text, name):
+    """checks.yml's job-level if line of job `name`, spelled as the file has it (`    if: <expr>` and a newline), or None when the job has
+    no job-level if. Read from the file, so a case that names the line cannot drift from the workflow."""
+    expr = all_jobs(text).get(name, {}).get("if")
+    return None if expr is None else "    if: " + expr + "\n"
 
 
 def check_sh(needs, scope_skips_value=None):
@@ -435,8 +441,10 @@ class DailyOnlyWiring(unittest.TestCase):
             with self.subTest(defect=label):
                 scope = job_block(self.text, job) if job else self.text
                 self.assertIsNotNone(scope, f"{label}: no {job} job, so the mutation proves nothing")
-                self.assertEqual(scope.count(old), 1, f"{label}: the mutation must match exactly once, or it proves nothing")
-                mutated = self.text.replace(scope, scope.replace(old, new, 1), 1) if job else self.text.replace(old, new, 1)
+                target = old if old is not None else job_if_line(self.text, job)
+                self.assertIsNotNone(target, f"{label}: {job} has no job-level if line, so the mutation proves nothing")
+                self.assertEqual(scope.count(target), 1, f"{label}: the mutation must match exactly once, or it proves nothing")
+                mutated = self.text.replace(scope, scope.replace(target, new, 1), 1) if job else self.text.replace(target, new, 1)
                 extra = [p for p in all_problems(mutated) if p not in clean]
                 self.assertTrue(extra, f"{label}: the wiring rule passes it")
 
