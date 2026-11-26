@@ -1,0 +1,1 @@
+- mac-job-name-hides-runner: The job name `run (macos-latest)` stays the same when the Mac runs the macOS leg. Read the runner's label in the job log or the runs page to see which machine ran it. Seen: 2026-11-25 x1

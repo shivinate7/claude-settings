@@ -1,0 +1,37 @@
+# The files of hooks/ that make up the guard set, besides guard.py and guard_*.py (those are always in it).
+# One file name per line, sorted, no repeat. Blank lines and lines starting with # are ignored.
+#
+# This file is the one list. install.sh reads it, install.ps1 reads it twice (its own set loop, and inside
+# the post-merge hook it writes), and .github/scripts/ci-scope.sh reads it so an edit to a listed file
+# runs the guard jobs. lint/check_guardset_lists.py checks its form and that no other file holds a copy.
+# A lane that adds a module the guard imports adds one line here, in sorted place.
+_nowindow.py
+agent_brief.py
+answered_claims.py
+call_judge.py
+ci_wait_cap.json
+ci_wait_cap.py
+ci_wake.py
+decision_watch.py
+feedback_guard.py
+git_reads.py
+lease.py
+local_time.py
+mail.py
+merge_options.py
+override.py
+own_session.py
+precompact_handoff.py
+precompact_handoff_prompt.md
+proc_env.py
+question_form.py
+reply_judge.py
+required_check.py
+reread_check.py
+route_match.py
+route_rows.json
+ruling_home.py
+session_role.py
+shared_names.py
+stall_watch.py
+wait_common.py

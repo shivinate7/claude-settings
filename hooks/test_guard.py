@@ -213,12 +213,16 @@ FAMILIES = {
     "fg-bash-while-bg": "a foreground Bash call that can run long (a test, lint, merge, build or install, or a time limit over 60000 ms) is refused while this session's background command or agent runs; the run_in_background form, a quick read and a call with no background work pass",
     "review-log": "a PR comment whose first line is the review marker: refused when merge/merge.py parse_review refuses its body (review-log-form), and when a 40-hex sha on its Head or Fix check line does not resolve in the call's checkout (review-log-sha); the add and update comment tools, a body with no marker, and a check that cannot run pass",
     "family-hit": "a rule family module's hit(call) and shell_hit(call), in _FAMILY_MODULES order: judge calls hit after its own rules and before each tool's own tail rules, and judge_shell calls shell_hit after its own rules and before settle_ask; a Read, a Grep or a SubagentStop calls neither; a module with neither passes; an earlier refusal stands; a refusal by hit is the hook's deny; a raise in hit fails open with one guard-crash line",
+    "fixtureless": "the fixtureless set, checked fresh: each member gives the result it gives with every lazy fixture built, in a fresh process with only its named fixtures built",
     "misc": "anything outside a tagged section",
 }
 GUARD_FAMILY = os.environ.get("GUARD_FAMILY", "")
 if GUARD_FAMILY and GUARD_FAMILY not in FAMILIES:
     sys.exit("GUARD_FAMILY=%r is not a family. Want one of: %s"
              % (GUARD_FAMILY, ", ".join(sorted(FAMILIES))))
+# An opt-in family runs only when GUARD_FAMILY names it. An unfiltered run and every shard skip it, with one SKIP row
+# that gives the command which runs it, so its minutes of checks are never paid by a run that did not ask for them.
+OPT_IN = {"fixtureless": "GUARD_FAMILY=fixtureless python3 hooks/test_guard.py"}
 # Unset or exact: a deny or ask case passes only when its printed rule (the text before the reason's first ": ") is its
 # rule, and a case with no rule fails. report: the same report lines print, and no rule check fails a case.
 RULE_EXACT_MODES = ("", "report", "exact")
@@ -327,7 +331,19 @@ class _TaggedLogs(list):
 SKIP_ROWS = []
 # A log check in this set builds its own folders and reads none of the lazy fixtures, so a run that
 # selects only such checks (GUARD_FAMILY=load-brake) skips the fixture build, which takes minutes.
-FIXTURELESS_CHECKS = set()
+class _OrderedSet(dict):
+    """A set that keeps insertion order. A fresh child process names a member by its position, which is the
+    same in every process that loads the same sections."""
+
+    def add(self, item):
+        self[item] = None
+
+    def update(self, items):
+        for item in items:
+            self[item] = None
+
+
+FIXTURELESS_CHECKS = _OrderedSet()
 NO_PS = "Windows has no ps, so ownership reads unknown and this case does not run here"
 NO_STAND_IN = "a POSIX stand-in git does not reach CreateProcess, so this case does not run here"
 NO_ORPHAN = "needs a PPID-1 orphan from ps, which this host does not give"
@@ -911,7 +927,7 @@ def run_cases():
             if (not mode or (tag == "windows" and check in WINDOWS_CHECKERS)
                 or (tag == "macos" and check not in WINDOWS_CHECKERS
                     and macos_reached(LOG_FAMILY.get(label), None)))
-            and (not fam or LOG_FAMILY.get(label) == fam)]
+            and (LOG_FAMILY.get(label) == fam if fam else LOG_FAMILY.get(label) not in OPT_IN)]
     total = len(cases) + len(logs)
     if mode and not total:
         say("GUARD_TESTS=%s: no case is tagged. Nothing ran." % mode)
@@ -929,6 +945,11 @@ def run_cases():
     failed = 0
     ran = 0
     skipped = 0
+    if not fam:  # one row per opt-in family that has checks here, shard or not, so no run drops it silently
+        for name in sorted(OPT_IN):
+            if any(LOG_FAMILY.get(label) == name for label, _ in LOG_CHECKS):
+                skipped += 1
+                say("SKIP  %s  (opt-in family, not run unless named: %s)" % (name, OPT_IN[name]))
     # MUTATE_ONLY: set by hooks/mutate_shared.py's first stage, run only the named cases.
     only = os.environ.get("MUTATE_ONLY")
     for case in cases:
