@@ -590,24 +590,13 @@ Other tools, in `judge` order:
                        too (see handoff-sections). (precompact-handoff, item 15)
   handoff-shell-write
                        deny. A Bash or PowerShell call that writes a session handoff whose text the guard cannot
-                       read before the command runs: a pipe from a program, computed text, a file the command makes
-                       itself, a `perl -pi -e` or `sed -i`, or a python script whose text or path is no literal. A
-                       write it can read is judged by the three rules above: `cp`, `mv`, `rsync` or `ditto` of a
-                       readable file onto the handoff or into the handoffs folder (the copy takes the source's name),
-                       `dd if=FILE of=PATH`, `cat FILE > PATH` or `>|`, a `cat > PATH` or `tee PATH` with a heredoc,
-                       `python3 -c` with literal text; `>>` and `tee -a` add to the file on disk. The folder counts
-                       in any letter case the volume reads as the same folder, and `$CLAUDE_CONFIG_DIR` and
-                       `${CLAUDE_CONFIG_DIR:-DEFAULT}` are read from the guard's environment. A source file that any
-                       segment of the same call writes is unknown too (the disk text is not what lands), so it is refused.
-                       A read of the handoff, a copy out of it, an `rm`, a move away or a `chmod` of it, an append to the
-                       session's `.inbox.md` and a command that only names the path in a string pass. Unread forms (no text is
-                       judged): `install`, `tar` or `unzip` into the folder, `curl -o`, `sponge`, a folder-to-folder copy,
-                       a loop or `find` over the folder's files, a command substitution in the path, a relative path from
-                       inside the folder. The targets come from
-                       `_handoff_segment_writes` (the redirect, `tee` and copy readers), `shell_write_hit` and
-                       `interpreter_write_hit` (the frozen-path readers). The reason names the Write tool. An
-                       override lifts it. Cost: a substring test for a call that never says `handoffs`; for one that
-                       does, the readers' parse and a read of the source file.
+                       read before the command runs (a pipe, computed text, `perl -pi -e`, `sed -i`, a python
+                       script with no literal text or path). A write it can read (`cp`, `mv`, `rsync`, `ditto`,
+                       `dd`, `cat FILE > PATH`, `tee` or `cat >` with a heredoc, `python3 -c` with literal text)
+                       is judged by the three rules above; `>>` and `tee -a` add to the file on disk. The readers
+                       are `handoff_shell_writes` and `_handoff_segment_writes`. The reason names the Write tool.
+                       An override lifts it. Cost: a substring test for a call that never says `handoffs`; for one
+                       that does, the readers' parse and a read of the source file.
                        (precompact-handoff, "a Bash write onto the handoff is judged too")
   env-file, frozen-path, config-edit, agent-model-cap
                        the write-tool forms of the rules above. Every deny runs over all path
@@ -1688,6 +1677,25 @@ def _expand_config_dir(text):
     return HANDOFF_CONFIG_VAR.sub(read, text)
 
 
+# A Windows drive path in a shell command: quoted whole, or an unquoted run. A POSIX shell (Git Bash) drops an unquoted
+# backslash and a Python literal reads `\U` as an escape, so the path is read with forward slashes, which Windows takes too.
+HANDOFF_WIN_PATH = re.compile(r"""(?<!\w)(?:"[A-Za-z]:\\[^"\n]*"|'[A-Za-z]:\\[^'\n]*'|[A-Za-z]:\\[^\s'"`|&;<>()]*)""")
+HANDOFF_TILDE = re.compile(r"""(?<![^\s=:"'(])~(?=[/\\\s"')]|$)""")   # a `~` the shell expands: a word's first character
+
+
+def _shell_text_paths(text, windows=None):
+    """`text` with the paths a Windows shell call names read as the shell reads them. On Windows (`windows`, the host by
+    default), a word's leading `~` is the environment's HOME when it is set, as in bash, since the home that
+    `os.path.expanduser` gives there is USERPROFILE; and each drive path takes forward slashes (`HANDOFF_WIN_PATH`).
+    Another host keeps `text` as it is."""
+    if not (os.name == "nt" if windows is None else windows):
+        return text
+    home = os.environ.get("HOME")
+    if home and not re.search(r"""[\s'"`$&;|<>()]""", home):
+        text = HANDOFF_TILDE.sub(lambda _found: home, text)
+    return type(text)(HANDOFF_WIN_PATH.sub(lambda found: found.group().replace("\\", "/"), text))
+
+
 def _handoff_puts_no_content(segment):
     """True for a segment that is one `rm`, `chmod`, `touch` or `mv` and writes no handoff text (the readers found no
     destination that is a handoff): it names the handoff to delete, move away or change its mode."""
@@ -1711,11 +1719,14 @@ def handoff_shell_writes(raw, cwd, tool="Bash"):
     try:
         def is_handoff(word, where):
             return bool(session_handoff_path(word, where, True))
-        shell_hit = shell_write_hit(_expand_config_dir(_resolve_vars(raw)), cwd, is_handoff, follow_cd=True)
-        py_hit = interpreter_write_hit(raw, cwd, is_handoff)
-        kept, bodies = _split_heredocs(raw)
+
+        def read_paths(text):   # the text as the shell reads it, its variables and Windows paths settled
+            return _shell_text_paths(_expand_config_dir(_resolve_vars(_shell_text_paths(text))))
+        shell_hit = shell_write_hit(read_paths(raw), cwd, is_handoff, follow_cd=True)
+        py_hit = interpreter_write_hit(_shell_text_paths(raw), cwd, is_handoff)
+        kept, bodies = _split_heredocs(raw)   # the heredoc bodies stay as written: they are the text a write judges
         ends = []
-        segments = split_segments(_expand_config_dir(_resolve_vars("\n".join(kept))), ends)
+        segments = split_segments(read_paths("\n".join(kept)), ends)
         heredocs = _handoff_heredoc_texts(segments, bodies)
         reads, sources, excused = [], set(), False   # per segment: (where, its writes, the files they copy)
         for number, segment in enumerate(segments):
@@ -1744,7 +1755,7 @@ def handoff_shell_writes(raw, cwd, tool="Bash"):
                       copied, segment) for where, found, copied, segment in reads]
         writes = [write for _where, found, _copied, _segment in reads for write in found]
         if py_hit:
-            for kind, script, at in interpreter_scripts(raw, cwd):
+            for kind, script, at in interpreter_scripts(_shell_text_paths(raw), cwd):
                 writes += _py_handoff_writes(script, at) if kind == "py" else []
         return writes or ([("", None, False)] if (shell_hit and not excused) or py_hit else None)
     except Exception as exc:
