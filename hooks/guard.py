@@ -698,14 +698,14 @@ while True:
             AUTHOR_ROLE, BUILDER_ROLE, DESIGNER_ROLE, GIT_WORK_TREE_RE, REPLAY_MARKS, heredoc_heads, own_heredoc_bodies, POWERSHELL_CALL, READ_ONLY_TOOLS, REDIRECTION, REFUTER_ROLE, SHELL_TOOLS,
             SILENT_WRITE_REDIRECT, WRITER_ROLE, WRITE_TOOLS, _absolute, _expanded, _force_utf8_streams,
             _resolved, _run_dir, _segment_git_c_target, _split_heredocs, agent_role, basename, cap_safe,
-            clone_checkouts, command_indexes, command_root, git_calls, git_common_dir, inline_script, is_cloud, is_move_into, is_worktree, log_path_and_text,
+            command_indexes, command_root, git_calls, inline_script, is_cloud, is_worktree, log_path_and_text,
             inner_commands, nested_script, norm,
-            _segment_cd_target, _strip_heredoc_bodies_unconditionally, _RUNNER,
+            _segment_cd_target, _RUNNER,
             path_is_inside, primary_checkout, record, refuse, resolve_command,
             resolve_default_base,  # noqa: F401  re-exported: janitor/test_sweep.py calls guard.resolve_default_base
             segment_tokens, split_segments, strip_heredoc_bodies,
-            _git_subcommand_index, amp_pieces, dir_before_segment, dirs_before_segments, shell_abs, walk_quotes, segment_with_vars as _segment_with_vars,
-            _checkout_root_by_stat, layout_module as _layout_module,
+            _git_subcommand_index, amp_pieces, dir_before_segment, dirs_before_segments, shell_abs, walk_quotes,
+            layout_module as _layout_module,
             _REDIRECT_OPERATOR, ssh_remote_script, strip_redirections,
         )
         _loading = "guard_branch_worktree"
@@ -717,8 +717,8 @@ while True:
         _loading = "guard_shared_tree"
         from guard_shared_tree import (
             PUSH_DENY_REASON, STACK_DENY_REASON, TREE_DENY_REASON, TREE_WORKTREE_REFUSE_REASON,  # glossary-ok: the pinned names of existing reasons
-            checkout_conflict_resolve, clean_deletes_files, names_only_files, one_place, session_id_of, shared_tree_match,
-            SESSION_ID_RE, STASH_READ_ACTIONS, in_any_session_scratchpad, stash_action, stash_takes_the_stack, subject_state, under_session_scratchpad,
+            checkout_conflict_resolve, names_only_files, one_place, session_id_of, shared_tree_match,
+            in_any_session_scratchpad, stash_takes_the_stack, subject_state, under_session_scratchpad,
             scratchpad_clear_writer, scratchpad_folder_writer, scratchpad_record_writer, scratchpad_writer_of,
             SCRATCHPAD_GLOB_MAGIC, expand_shell_braces,
         )
@@ -749,7 +749,7 @@ while True:
         from guard_review_log import review_log_hit
         _loading = "guard_frozen"
         from guard_frozen import (
-            FROZEN_REASON, MUTATING_COMMAND, PROTECTED_MUTATING_COMMAND, _holds_frozen, _resolve_vars, _shell_write_hit, interpreter_may_write,
+            FROZEN_REASON, PROTECTED_MUTATING_COMMAND, _holds_frozen, _resolve_vars, _shell_write_hit,
             interpreter_write_hit, is_frozen, is_project_config, project_config_shell_hit, shell_write_hit,
             is_protected, protected_reason, protected_shell_hit,
             PROJECT_FROZEN_FILES,  # noqa: F401  re-export: test_shared_names and test_wrappers read guard.PROJECT_FROZEN_FILES

@@ -63,7 +63,7 @@ from guard_core import (
     POWERSHELL_CALL, SHELL_TOOLS, WRITE_TOOLS, _checkout_root_by_stat, _expanded, _resolved, _segment_cd_target,
     _segment_git_c_target, _strip_heredoc_bodies_unconditionally, _unexpanded, basename, clone_checkouts,
     dir_before_segment, drive_form_cwd, git_calls, git_common_dir, is_move_into, path_is_inside, primary_checkout,
-    record, resolve_command, segment_tokens, segment_with_vars as _segment_with_vars, shell_abs, split_segments,
+    resolve_command, segment_tokens, segment_with_vars as _segment_with_vars, shell_abs, split_segments,
     strip_heredoc_bodies, write_targets,
 )
 from guard_frozen import MUTATING_COMMAND, _shell_write_hit, interpreter_may_write, interpreter_write_hit
