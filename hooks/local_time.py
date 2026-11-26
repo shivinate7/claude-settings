@@ -139,10 +139,7 @@ def override_line(result):
         return "Model override: %s ended." % result[2]
     if kind in ("opus", "model"):
         roles = " and ".join(result[2]) if isinstance(result[2], list) else result[2]  # one role, or a list of 2 or more
-        held = result[4] if len(result) > 4 else None  # a plain ask holds a model; a keyword grant does not
-        if held is None:
-            who = "%s spawns" % roles if roles else "spawns"
-            return "Opus override: the model-cap refusal is lifted for Opus %s until %s." % (who, central_hhmm(until))
+        held = result[4]
         ends = ("the next report or %s, whichever comes first" if result[3] else "%s") % central_hhmm(until)
         who = "%s agents" % roles if roles else "every agent"
         return ("Model override: %s run on %s until %s. Each reply until then carries the line `Model %s is on for "
@@ -366,29 +363,22 @@ def page_note(raw):
 
 
 def grant_override(raw, at):
-    """Owner prompt `override`, `override <reason>`, `override <n>[m|h]`, `override off` or the Opus word
-    (`opus <n>[m|h]`, `opus <role> <n>[m|h]`, `opus off`; decision owner-override): grants or ends
-    the session's override and prints one line. A prompt no keyword form grants goes to
-    override.grant_opus_ask, the plain Opus ask (`send opus judges`): one model call, only for an owner prompt
-    that carries the word `opus`, none otherwise. An ask that names no role also reads the owner's earlier typed
-    prompts for the roles they name: one more model call, only after a yes and only when such a prompt exists; no
-    role named means every role (decision owner-override). A prompt neither grants goes last to
-    override.grant_override_ask, the plain override ask (`yes override that`): one model call, only for an owner
-    prompt that holds the whole word `override` outside code spans and passes its gates, none otherwise. It also gives
-    the result of a first-word `override` prompt that grant() deferred because its rest holds a length. Between the two
-    sits override.grant_model_ask, the plain model ask (`use sonnet for the audit`): one model call, only for an owner
-    prompt that names a model other than opus. His end words (`no sonnet`, `sonnet off`) end a held model in grant()
-    with no call. At most one judge call per prompt. Those calls are why the settings.json row has "timeout": 30. Any
-    failure is one stderr line, no override."""
+    """Owner prompt `override`, `override <reason>`, `override <n>[m|h]` or `override off` (decision owner-override): grants
+    or ends the session's override and prints one line. His end words (`no sonnet`, `opus off`) end a held model in grant()
+    with no call. A prompt no keyword form grants goes to override.grant_model_ask, the plain model ask (`use opus for the
+    reviewers`, `opus builders 2h`, `use sonnet for the audit`): one model call, only for an owner prompt that names a
+    model. A yes for Opus or Fable that names no role also reads the owner's earlier typed prompts for the roles they name:
+    one more model call, only after a yes and only when such a prompt exists; no role named means every role (decision
+    owner-override). A prompt neither grants goes last to override.grant_override_ask, the plain override ask (`yes
+    override that`): one model call, only for an owner prompt that holds the whole word `override` outside code spans and
+    passes its gates, none otherwise. It also gives the result of a first-word `override` prompt that grant() deferred
+    because its rest holds a length. At most one judge call per prompt, bar that scope read. Those calls are why the
+    settings.json row has "timeout": 30. Any failure is one stderr line, no override."""
     try:
         hook = json.loads(raw.decode("utf-8"))
         import override
         result = override.grant(hook.get("session_id"), hook.get("prompt"), at,
                                 transcript=hook.get("transcript_path"), source=hook.get("source"))
-        if result is None:
-            result = override.grant_opus_ask(hook.get("session_id"), hook.get("prompt"), at,
-                                             transcript=hook.get("transcript_path"),
-                                             source=hook.get("source"))
         if result is None:
             result = override.grant_model_ask(hook.get("session_id"), hook.get("prompt"), at,
                                               transcript=hook.get("transcript_path"),

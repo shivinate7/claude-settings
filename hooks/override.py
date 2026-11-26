@@ -22,11 +22,12 @@ writes, so a session cannot grant itself an override. It is valid only while now
   prompt to be the owner's own present request to override a refusal (grant_override_ask, call_judge.override_ask). Cost:
   one model call, only for an owner prompt that holds the whole word `override` outside backtick code spans and
   passes the gates below; none for any other prompt. The call fails closed. The rules:
-    - The gates are the Opus ask's, one helper (_owner_ask): payload `source`, a notice start, pasted and notice blocks
+    - The gates are the model ask's, one helper (_owner_ask): payload `source`, a notice start, pasted and notice blocks
       cut, a fired-task block, a promptSource `system` record, a cloud session's seed prompt.
     - No judge call and no new grant for: no whole word `override` outside code spans (a pasted refusal line from
       offer() holds it only inside them), a NEGATIONS word or `off` within NEGATION_SPAN words of it, a `?`, two
-      lengths, a decimal or compound length, or the whole word `opus` (the Opus route owns it).
+      lengths, a decimal or compound length, or the whole word `opus` (the model ask owns it, and it takes no prompt that holds
+      `override`).
     - One length sets the time: `15m`, `15 minutes`, or a bare number right after a first word `override` (minutes).
       None: a one-act override. A judge yes for a first-word `override` with a reason and no length stays main's
       one-act override.
@@ -34,56 +35,53 @@ writes, so a session cannot grant itself an override. It is valid only while now
       length. grant_override_ask then answers every outcome but a judge yes with grant()'s own result (a reason form:
       a one-act override, with the reason logged; `override 15m please`: nothing). A judge no or error never widens a
       one-act override to a timed one.
-An Opus override is the file <config dir>/state/override/opus/<session_id>.json, {"kind": "opus",
-"until": ISO-8601 UTC, "role": null, one role, or a sorted list of 2 or more roles}. It lives beside the override, so the two never
-replace each other. It lifts only the Opus spawn refusal of guard rule agent-model-cap, never that
-rule's settings-write ask, and it reaches agents.
-  `opus 2h`, `opus 15m`: every Opus spawn until the end. The unit is required: `opus 4` may name a
-         model. `opus builders 2h` (or `builder`): only spawns of that role, from OPUS_ROLES.
-  `opus off` ends it. The same whole-prompt rule holds: any other text after `opus` grants nothing.
-  A plain ask (`send opus judges`, `use opus reviewers for 30m`) writes the same file when a model judges the
-  prompt to be the owner's own present request (grant_opus_ask, call_judge.opus_ask). Cost: one model call for an
-  owner prompt that carries the whole word `opus` and takes the plain path, plus one scope call (call_judge.opus_scope)
-  only when that call says yes, the ask names no role and the transcript tail holds an earlier owner prompt; none
-  for any other prompt. The yes/no call fails closed: an error or an odd answer grants nothing. The plain path's rules:
-    - Strip every MACHINE_TAGS or NOTICE_FRAMES block anywhere, and a pasted block, first. An unclosed block, and a
-      `[SYSTEM NOTIFICATION` line, run to the end.
-    - In a cloud session (env CLAUDE_CODE_REMOTE_SESSION_ID set), a prompt with no earlier owner turn in the
-      transcript is a seed prompt: no judge call.
-    - A first word `opus` keeps the keyword path only when the rest starts with `off`, a length, or a role then a
-      length. Any other first `opus` is a plain ask.
-    - `claude` is never a role word here. The keyword form `opus claude 2h` keeps it.
-    - The roles the ask names are granted, two or more as a list, only when a plain list joins them (PLAIN_LIST:
-      commas, and, or, &, plus); any other words between two roles: no grant. A role word with a NEGATIONS word (not,
-      no, don't, never, except, without, or an exclusion word such as skip or instead) within three words before or
-      after it: no grant (`builders, no problem` grants nothing too).
-    - An ask that names no role takes its roles from the owner's earlier typed prompts (decision owner-override:
-      scope from context, fall back to every role), before the ask only. _context_prompts reads them from
+A held model is the file <config dir>/state/override/opus/<session_id>.json, {"kind": "opus", "until": ISO-8601 UTC,
+"role": null, one role, or a sorted list of 2 or more roles, "model": a family of MODEL_FAMILIES, "at", "said"} and, for an
+ask with no length of its own, "end": "report". It lives beside the override, so the two never replace each other, and it
+reaches agents. The folder and the kind keep the name `opus` from when the file held Opus alone. A file with no `model`
+(a keyword grant left on disk from before that route was retired) holds Opus until its time, and `opus off` ends it.
+One rule lifts a spawn above its role's model (decision agent-model-cap): the owner's own typed words name that model
+for the work, or he types `override`. There is no keyword form: `opus 2h`, `opus builders 2h` and `fable 1h` are plain
+words, judged as `use opus for the reviewers` is. A held model lifts only a spawn on its own model: a held sonnet lifts
+no Opus spawn, and a held Fable lifts a Fable spawn only. An Opus hold lifts the Opus spawn refusal of guard rule
+agent-model-cap, never that rule's settings-write ask.
+A plain ask (`use opus for the reviewers`, `opus builders 2h`, `run it on haiku`) writes the file when a model judges
+the prompt to be the owner's own present choice of one model for the agents (grant_model_ask, call_judge.model_ask).
+Cost: a prompt that names no model makes no call and reads no file. One that names a model costs one tail read, one Haiku
+call and one file write or delete, plus one scope call (call_judge.opus_scope) only when the call says yes for Opus or
+Fable, the ask names no role and the transcript tail holds an earlier owner prompt. The call fails closed: an error or an
+odd answer writes nothing. The rules of the words:
+    - The gates are the override ask's, one helper (_owner_ask), and the reply quotes are cut too (_strip_quotes): payload
+      `source`, a notice start, pasted and notice blocks, a fired-task block, a promptSource `system` record, a cloud
+      session's seed prompt (no earlier owner turn), and a local seed turn (_seed_turn). No call for a prompt that holds
+      the whole word `override` outside code spans: the override ask judges it.
+    - A model whose every mention is negated (model_mentions: `Do not use opus`) is no choice: nothing is written,
+      whatever the judge says. The judge's answer must name a model the words name.
+    - The roles the ask names are held, two or more as a list, only when a plain list joins them (PLAIN_LIST: commas,
+      and, or, &, plus); any other words between two roles: no hold. A role word with a NEGATIONS word (not, no, don't,
+      never, except, without, or an exclusion word such as skip or instead) within three words before or after it: no hold.
+      A role word is MODEL_ROLES: its name, its plural, or `explorer(s)`.
+    - An ask for Opus or Fable that names no role takes its roles from the owner's earlier typed prompts (decision
+      owner-override: scope from context, fall back to every role), before the ask only. _context_prompts reads them from
       the one tail read (_tail_prompts), through the one owner-turn test (_owner_text), each through _strip_blocks,
-      less a cloud session's seed brief (_seed_record, the seed check's one home),
-      and scope_judge says which roles they name. Context only narrows the grant: the yes/no call sees the ask alone,
-      and it never turns a no into a grant. No earlier prompt, or a scope read that fails, errs or names no role in
-      ASK_ROLES: every role for the length, and it never asks. The every-role file is written before the scope read
-      and narrowed after it, so a process killed in the read (the hook's timeout) leaves every role, with no
-      `opus-grant` line.
-    - Two or more lengths, a decimal (`1.5h`) or a compound (`1h30m`): no grant. One length sets the time: `<n>m`, `<n>h`, or spelled: hour(s), hr(s),
-      min(s), minute(s). None: DEFAULT_ASK_LENGTH.
-A held model (decision agent-model-cap, the owner's model name) is the same file with more keys: `model` (a family of
-MODEL_FAMILIES; a file with none holds Opus), `at`, `said` and, for an ask with no length of its own, `end` "report". A
-plain Opus ask writes it, and so does the model ask (grant_model_ask, call_judge.model_ask): a model word other than
-opus in an owner prompt, judged once. A hold with `end` "report" ends at the session's next report or at `until`
-(DEFAULT_ASK_LENGTH after it was set), whichever comes first; the one reader, model_override, tells that from the
-transcript, and the guard and the turn-end model line both call it. It lifts a spawn only on its own model, so a held
-sonnet lifts no Opus ceiling, and a held Fable lifts a Fable spawn only (a keyword `opus 2h` lifts Opus spawns only). A
-held model ends on a judge yes for another model (the file is replaced), on a judge error or timeout (the file is
-deleted), on his end words `no <model>` and `<model> off` (no judge call), and on a judge no when the turn negates it
-("Do not use haiku"; the guard also reads that turn, so a call before the hook deletes the file sees no hold). A judge no
-that negates another model keeps it. Cost: a prompt that names no model makes no call and reads no file; one that names a model other than opus
-costs one tail read, one Haiku call and one file write or delete.
-A step grant also lifts that ask, and nothing else: the owner's grant that triage writes on the lane's
-roadmap step (decision agent-model-cap). take() reads it only on an Opus spawn refusal that no Opus override
-lifted, from the local ref origin/roadmap in the call's cwd, never fetched: one git grep for the lane id,
-one git show per hit. The lane id is session_<x> for env CLAUDE_CODE_REMOTE_SESSION_ID=cse_<x>, else the
+      less a cloud session's seed brief (_seed_record), and scope_judge says which roles they name. Context only narrows
+      the hold: the yes/no call sees the ask alone, and it never turns a no into a hold. No earlier prompt, or a scope
+      read that fails, errs or names no role in ASK_ROLES: every role for the length, and it never asks. The every-role
+      file is written before the scope read and narrowed after it, so a process killed in the read (the hook's timeout)
+      leaves every role, with no `opus-grant` line.
+    - Two or more lengths, a decimal (`1.5h`) or a compound (`1h30m`): no hold. One length sets the time: `<n>m`, `<n>h`,
+      or spelled: hour(s), hr(s), min(s), minute(s). None: the hold ends at the session's next report, or after
+      DEFAULT_ASK_LENGTH, whichever comes first (the one reader, model_override, tells that from the transcript, and the
+      guard and the turn-end model line both call it).
+A held model ends on a judge yes for another model (the file is replaced), on a judge error or timeout (the file is
+deleted), on his end words `no <model>` and `<model> off` as the whole prompt (no judge call), on a turn that negates it
+with no un-negated mention of it (a judge no deletes the file; the guard reads that turn too, so a call before the hook
+deletes it sees no hold), at the next report for an ask with no length, and at its `until`. A judge no that does not
+negate it keeps it. An old model-less file ends on `opus off` and its `until` only.
+A step grant also lifts that spawn, and nothing else: the owner's grant that triage writes on the lane's
+roadmap step (decision agent-model-cap). It lifts the model its `words` field names, Opus or Fable. take() reads it only
+on a spawn refusal that no held model lifted, from the local ref origin/roadmap in the call's cwd, never fetched: one git
+grep for the lane id, one git show per hit. The lane id is session_<x> for env CLAUDE_CODE_REMOTE_SESSION_ID=cse_<x>, else the
 payload's session id. Exactly one step must bind the lane, with status not done and a grant whose role
 is null or the spawn's role. A record that names the lane and cannot be read logs STEP_UNREAD.
 A file that is missing, unreadable or corrupt is no override. take() never raises into the guard: an
@@ -124,14 +122,12 @@ PROMPT = re.compile(
     r"\s*override(?:(?=\s|$)\s*(?::|[,.!;\-\u2013\u2014](?=\s|$))?|:|[,.!;\-\u2013\u2014](?=\s|$))\s*(.*)",
     re.I | re.S)
 WORD = re.compile(r"(?:(off)|(\d+)([mh])?)", re.I)  # `off` or a length, as the whole rest
-OPUS_PROMPT = re.compile(r"\s*opus(?=\s|$)(.*)", re.I | re.S)  # the Opus word, then the rest
-OPUS_LENGTH = re.compile(r"(\d+)([mh])", re.I)  # an Opus override needs its unit
-# The plain ask (grant_opus_ask): the whole word, the blocks that are not the owner's words, a word that may name a
+# The plain ask (grant_model_ask): the whole word, the blocks that are not the owner's words, a word that may name a
 # role, and a length (bounded by non-word characters, so `12 mhz` is none).
 OPUS_WORD = re.compile(r"\bopus\b", re.I)
 _FAMILIES = "|".join(MODEL_FAMILIES) or "(?!)"  # an empty list (a stale helper) matches nothing
 MODEL_WORD = re.compile(r"(?<![A-Za-z])(%s)(?![A-Za-z])" % _FAMILIES, re.I)  # also inside claude-sonnet-5-5
-# His end words for a held model, as the whole prompt: `no sonnet`, `sonnet off`. `opus off` also has its keyword form.
+# His end words for a held model, as the whole prompt: `no sonnet`, `sonnet off`, `opus off`.
 END_WORD = re.compile(r"(?:no\s+(%s)|(%s)\s+off)\s*[.!]?" % (_FAMILIES, _FAMILIES), re.I)
 # A reply Claude wrote that he pasted back: the marker comment of a numbered reply and each line that starts with `>`.
 REPLY_QUOTES = re.compile(r"<!--\s*reply\b[^>]*-->|^[ \t]*>.*$", re.I | re.M)
@@ -171,14 +167,13 @@ BARE_NUMBER = re.compile(r"(\d+)(?![\w.,-])")
 FIRED_TASK = re.compile(r"<system-reminder>\s*This task fired at ")  # a fired scheduled task's block
 COMMAND_RECORDS = ("<local-command-caveat>", "<command-name>", "<command-message>", "<local-command-stdout>")
 SEED_READ_MAX = 1 << 20  # bytes of the transcript the seed check reads, from the top
-KEYWORD_REST = re.compile(r"\s*off(?![\w-])", re.I)
 DEFAULT_ASK_LENGTH = ("2", "h")
 HOLD_END_REPORT = "report"  # a hold's `end` value: it ends at the session's next report
 SCOPE_CONTEXT_PROMPTS, SCOPE_CONTEXT_CHARS = 10, 2000  # the newest earlier prompts the scope read sees, and the cut of each
-OPUS_RULE = "agent-model-cap"  # the one rule an Opus override lifts, and only its spawn refusal
+OPUS_RULE = "agent-model-cap"  # the one rule a held model lifts, and only its spawn refusal
 # The roles an Opus spawn can ask for: the agents/ roles and the built-in ones, less Plan, which runs Opus by standing
-# grant (OPUS_STANDING_ROLES in hooks/guard.py). Explore is not in it either: an Explore on Opus with no Audit: marker is
-# refused, and `opus 2h` or `override` lifts it. No scoped `opus explore` form exists (decision agent-model-cap).
+# grant (OPUS_STANDING_ROLES in hooks/guard.py). Explore is not in it: an Explore on Opus with no Audit: marker is
+# refused, and a model ask for explorers (MODEL_ROLES) or `override` lifts it (decision agent-model-cap).
 OPUS_ROLES = ("builder", "reviewer", "test-author", "record-writer", "claude-code-guide",
               "general-purpose", "claude")
 # The roles a plain ask or its scope read can name: OPUS_ROLES less `claude`, which in prose addresses the assistant.
@@ -186,6 +181,7 @@ ASK_ROLES = tuple(role for role in OPUS_ROLES if role != "claude")
 # The roles a model ask can name: ASK_ROLES and Explore, which has no Opus form of its own (an Explore on Opus is the
 # audit marker's business). A word names a role by its own name, its plural, or `explorer(s)`.
 MODEL_ROLES = ASK_ROLES + ("Explore",)
+ABOVE_SONNET = tuple(family for family in MODEL_FAMILIES if family not in ("haiku", "sonnet"))  # the models that need the owner's word
 MODEL_ROLE_WORDS = {word: role for role in MODEL_ROLES for word in (role.lower(), role.lower() + "s")}
 MODEL_ROLE_WORDS.update({"explorer": "Explore", "explorers": "Explore"})
 FLOOR_RULE, ROLE_RULE = "agent-model-floor", "agent-role-model"
@@ -211,15 +207,14 @@ NO_OVERRIDE = "No override lifts this refusal."
 
 
 def offer(rule, spawn_role=None, agent_id=None, spawn_model=None):
-    """The line an owner types to lift a refusal of this rule, for the call that was refused. For the Opus ceiling's refusal
-    of a spawn on another model (Fable), `opus 2h` lifts nothing, so the line names the owner's own word and `override`."""
-    if rule == OPUS_RULE and spawn_role is not None and _family(spawn_model or "opus") != "opus":
-        return ("To allow this %s spawn, say %s in your own words for this spawn, or type `override` for this one act."
-                % (_family(spawn_model).capitalize(), _family(spawn_model).capitalize()))
+    """The line an owner types to lift a refusal of this rule, for the call that was refused. For the model ceiling's
+    refusal of a spawn above its role's model, the line names no keyword and no model: the owner's own words name the
+    model for this work, or `override` lifts it. `spawn_model` is accepted so a caller may pass it; the line is the same
+    for every model."""
     if rule == OPUS_RULE and spawn_role is not None:
-        role = opus_role(str(spawn_role))
-        by_role = " or `opus %ss 2h` for this role" % role if role else ""
-        return "To allow this Opus spawn, type `opus 2h` for every Opus spawn%s, or `override` for this one act." % by_role
+        return ("The owner lifts this by naming the model for this work in his own words, or by typing %s."
+                % ("`override 15m` (a one-act `override` does not reach an agent's call)" if agent_id
+                   else "`override` for this one act"))
     if agent_id:
         return ("To allow this act, type `override 15m`. A one-act `override` does not reach an agent's call.")
     return ("To allow this act, type `override` for this one act, or `override 15m` for every refused act "
@@ -274,44 +269,25 @@ def opus_role(word):
     return None
 
 
-def _grant_opus(session_id, rest, at):
-    """`opus <n>[m|h]`, `opus <role> <n>[m|h]` or `opus off` as the whole prompt. Returns ("opus",
-    until, role) for a new override, ("opus-off", None) when one was removed, else None."""
-    path = _path(session_id, "opus")
-    words = rest.split()
-    if path is None or not words or (rest[:1] and not rest[:1].isspace()):
-        return None
-    if [w.lower() for w in words] == ["off"]:
-        return _end_hold(session_id, path, "opus")  # a held sonnet is no Opus hold: `opus off` leaves it
-    role = opus_role(words[0]) if len(words) == 2 else None
-    length = OPUS_LENGTH.fullmatch(words[-1])
-    if not length or len(words) > 2 or (len(words) == 2 and role is None):
-        return None  # ambiguous: grants nothing
-    return _write_opus(session_id, path, at, length.groups(), role)
-
-
-def _write_opus(session_id, path, at, length, role, said=None, log=True, model=None, end=None):
-    """Write the Opus pass file for `length` = (number, unit) from `at` and log it: the one home of the file's
-    shape, for the keyword grant and the plain asks. `role` is None, one role, or a sorted list of 2 or more roles.
-    `said` is the owner's words, for the log; `log` False writes the file and no log line. A keyword grant passes no
-    `model`: its file is the three keys it always had, and the guard reads it as Opus. A plain ask passes the model it
-    holds (a judged yes), and the file also keeps `at`, `said` and, for an ask with no length of its own, `end`
-    "report": the hold then ends at the session's next report, or at `until`, whichever comes first. Returns ("opus",
-    until, role) for a keyword grant; for a plain ask ("opus" or "model", until, role, end, model)."""
+def _write_opus(session_id, path, at, length, role, said, model, end=None, log=True):
+    """Write the held model's pass file for `length` = (number, unit) from `at` and log it: the one home of the file's shape,
+    for grant_model_ask. `role` is None, one role, or a sorted list of 2 or more roles. `said` is the owner's words, for
+    the file and the log; `log` False writes the file and no log line. The file keeps `model`, `at`, `said` and, for an ask
+    with no length of its own, `end` "report": the hold then ends at the session's next report, or at `until`, whichever
+    comes first. Returns ("opus" or "model", until, role, end, model)."""
     number, unit = length
     until = _length_end(at, number, unit)
     ends = until.astimezone(timezone.utc).isoformat()
-    body = {"kind": "opus", "until": ends, "role": role}
-    if model is not None:
-        body.update(model=model, at=at.astimezone(timezone.utc).isoformat(), said=" ".join((said or "").split()))
-        if end:
-            body["end"] = end
+    body = {"kind": "opus", "until": ends, "role": role, "model": model, "at": at.astimezone(timezone.utc).isoformat(),
+            "said": " ".join((said or "").split())}
+    if end:
+        body["end"] = end
     _write(path, body)
-    result = ("opus", until, role) if model is None else ("opus" if model == "opus" else "model", until, role, end, model)
+    result = ("opus" if model == "opus" else "model", until, role, end, model)
     if not log:
         return result
     detail = "%s until %s" % (", ".join(role) if isinstance(role, list) else role or "every role", ends)
-    if model not in (None, "opus"):
+    if model != "opus":
         detail = "model %s, %s" % (model, detail)
     if end:
         detail += " (or the next report)"
@@ -334,7 +310,7 @@ def model_mentions(text, family):
     n't; a pair of MODEL_NEGATION_PAIRS negates only when it stands just before the mention. So "Not sonnet but haiku",
     "Instead use haiku" and "Skip the checks and run it on haiku" name haiku, and "don't use haiku" negates it. The one
     reader of that reach: guard.owner_names_model (a turn that negates any mention names nothing) and the end of a held
-    model (_turn_negates_hold, grant_model_ask)."""
+    model (_negates: _turn_negates_hold, grant_model_ask)."""
     mention = re.compile(r"(?<![A-Za-z])%s(?![A-Za-z])" % re.escape(family), re.I)
     named = negated = False
     for clause in MODEL_CLAUSE_BREAK.split(_strip_blocks(text or "")):
@@ -349,6 +325,13 @@ def model_mentions(text, family):
                 hit = words[i] in MODEL_NEGATIONS or words[i].endswith(("n't", "n\u2019t"))
             named, negated = named or not hit, negated or hit
     return named, negated
+
+
+def _negates(text, family):
+    """True when `text` mentions the model `family` and every mention is negated (model_mentions): no un-negated mention
+    is left to name it. "Do not use opus" negates it; "Don't use opus for the audit, use opus for the builders" does not."""
+    named, negated = model_mentions(text, family)
+    return negated and not named
 
 
 def _strip_quotes(text):
@@ -368,17 +351,9 @@ def _family(model):
     return next((word for word in reversed(MODEL_FAMILIES) if word in value), None)
 
 
-def _keyword_rest(rest):
-    """True when the text after a first word `opus` is a keyword form: `off`, a length, or a role then a length."""
-    words = rest.split()
-    if KEYWORD_REST.match(rest) or (words and OPUS_LENGTH.match(words[0])):
-        return True
-    return len(words) > 1 and opus_role(words[0]) is not None and OPUS_LENGTH.match(words[1]) is not None
-
-
 def _ask_lengths(text, bare=None):
     """The lengths in a plain ask `text` as (number, unit letter) pairs, plus `bare` (a pair) when given, or None when
-    they are unclear: two or more, a decimal or a compound length. The one length check of both plain asks."""
+    they are unclear: two or more, a decimal or a compound length. The one length check of the plain asks."""
     found = [(m.group(1), (m.group(2) or m.group(3))[0]) for m in ASK_LENGTH.finditer(text)]
     if bare:
         found.append(bare)
@@ -389,7 +364,7 @@ def _ask_lengths(text, bare=None):
 
 def _near_negation(names, at, negations):
     """True when a word of `negations` stands within NEGATION_SPAN words before or after the word at names[at]. The one
-    negation check of both plain asks."""
+    negation check of the plain asks."""
     near = names[max(0, at - NEGATION_SPAN):at] + names[at + 1:at + 1 + NEGATION_SPAN]
     return bool(negations & {w.lower() for w in near})
 
@@ -399,11 +374,11 @@ def model_role(word):
     return MODEL_ROLE_WORDS.get(word.lower())
 
 
-def _ask_scope(text, resolve=opus_role, allowed=ASK_ROLES):
+def _ask_scope(text, resolve=model_role, allowed=MODEL_ROLES):
     """(length, roles) a plain ask names, or None when the words are unclear: two lengths, a decimal or compound
     length, a role with a negation within NEGATION_SPAN words before or after it, or two role words joined by
     anything but a plain list (PLAIN_LIST). `roles` is the sorted list of the roles it names, empty when it names
-    none. A role word is `resolve`d and must be in `allowed`: the Opus ask reads OPUS_ROLES, the model ask MODEL_ROLES."""
+    none. A role word is `resolve`d and must be in `allowed`: the model ask reads MODEL_ROLES."""
     lengths = _ask_lengths(text)
     if lengths is None:
         return None
@@ -600,7 +575,7 @@ def _scoped_roles(scope_judge, text, context):
 
 
 def _owner_ask(prompt, source, transcript, wanted, strip_quotes=False):
-    """The gates of the plain asks (grant_opus_ask, grant_override_ask), the one home. Returns (text, found, seed) for a
+    """The gates of the plain asks (grant_model_ask, grant_override_ask), the one home. Returns (text, found, seed) for a
     prompt that may go to a judge, else None. `text` is the prompt less its pasted and notice blocks. `found` is the
     tail read (_tail_prompts). `seed` is a cloud session's seed record offset, else None. `wanted(text)` is the route's
     own test of the words, run before the transcript is read. None for: a non-string, a `source` outside
@@ -626,67 +601,10 @@ def _owner_ask(prompt, source, transcript, wanted, strip_quotes=False):
     return text, found, seed
 
 
-def grant_opus_ask(session_id, prompt, at, judge=None, transcript=None, source=None, scope_judge=None):
-    """The owner's plain Opus ask (`send opus judges`): an Opus override written when the model says the prompt is the
-    owner's own present request to run Opus agents (decision owner-override). `judge` is call_judge.opus_ask and
-    `scope_judge` is call_judge.opus_scope unless a caller passes another. Returns ("opus", until, role) for a new
-    override, else None. The module docstring holds the rules of the words and of the scope. `source`, the payload's
-    field, must be in OPUS_ASK_SOURCES; any other value, an unknown one too, grants nothing.
-    Cost: one tail read (_tail_prompts) when the prompt carries the whole word `opus`; the judge sees the stripped
-    ask alone. The judge is not called for a non-string, a fired-task block in the prompt, an id that cannot name a
-    file, a machine-tag start, a keyword form, text with no whole word `opus` left after _strip_blocks, or a cloud
-    session's seed prompt (no owner turn in the transcript at path `transcript`), or a prompt whose own record, last in
-    the transcript, has promptSource "system". The scope read is called once, only after a yes, for an ask that names
-    no role and has an earlier owner prompt in the tail. The every-role file is written before that call and a valid
-    answer rewrites it narrowed (same end), so a kill during the call (the prompt hook's timeout) leaves every role
-    with no `opus-grant` line.
-    The one `opus-grant` line logs the final scope; an interrupt or exit in the call logs the every-role line. The guard.log line `opus-grant` holds the words that were
-    judged."""
-    path = _path(session_id, "opus")
-    if path is None or not isinstance(prompt, str):
-        return None
-    first = OPUS_PROMPT.match(prompt)
-    if PROMPT.match(prompt) or (first and _keyword_rest(first.group(1))):
-        return None
-    gated = _owner_ask(prompt, source, transcript, _opus_wanted, strip_quotes=True)
-    if gated is None:
-        return None
-    text, found, seed = gated
-    if judge is None:
-        from call_judge import opus_ask as judge
-    if judge(text) is not True:
-        return None
-    scope = _ask_scope(text)
-    if scope is None:
-        return None
-    length, roles = scope
-    said = " ".join(text.split())
-    end = None if _ask_lengths(text) else HOLD_END_REPORT  # a length he states is his; with none, the report ends it
-    context = [] if roles else _context_prompts(found, prompt, seed)
-    if context:
-        # No scope means every role, so that file goes down first: the prompt hook's timeout can kill the process in the
-        # scope read, and a kill must leave the every-role file. A valid answer then narrows it.
-        _write_opus(session_id, path, at, length, None, said, log=False, model="opus", end=end)
-        if scope_judge is None:
-            from call_judge import opus_scope as scope_judge
-        try:
-            roles = _scoped_roles(scope_judge, text, context)
-        except BaseException:  # an interrupt or an exit during the read: log the every-role grant that stands
-            _write_opus(session_id, path, at, length, None, said, model="opus", end=end)
-            raise
-    return _write_opus(session_id, path, at, length, _file_role(roles), said, model="opus", end=end)
-
-
-def _opus_wanted(text):
-    """True when the plain Opus ask may go to its judge on its words alone: the whole word `opus` and no other model
-    word. A prompt that names another model goes to the model ask (grant_model_ask), so a prompt reaches one judge."""
-    return OPUS_WORD.search(text) is not None and _names_models(text) <= {"opus"}
-
-
 def _model_wanted(text):
-    """True when the model ask may go to its judge on its words alone: a whole model word other than opus (opus alone is the
-    Opus ask's), and no whole word `override` outside code spans (the override ask judges that prompt)."""
-    return bool(_names_models(text) - {"opus"}) and OVERRIDE_WORD.search(_outside_code(text)) is None
+    """True when the model ask may go to its judge on its words alone: a whole model word, Opus and Fable included, and no
+    whole word `override` outside code spans (the override ask judges that prompt, except one that names Opus)."""
+    return bool(_names_models(text)) and OVERRIDE_WORD.search(_outside_code(text)) is None
 
 
 def _end_hold(session_id, path, family=None, why=""):
@@ -713,33 +631,36 @@ def _grant_end_word(session_id, prompt):
     return _end_hold(session_id, path, (said.group(1) or said.group(2)).lower()) if said else None
 
 
-def grant_model_ask(session_id, prompt, at, judge=None, transcript=None, source=None):
-    """The owner's plain model ask (`use sonnet for the audit`, `run it on haiku`): the model he chose, held in the session's
-    pass file, when a model says the prompt is his own present choice of one model (decision agent-model-cap, the owner's
-    model name). `judge` is call_judge.model_ask unless a caller passes another: it returns the model family, False for a
-    plain no, None for an error, a timeout or an odd answer. Returns ("model" or "opus", until, role, end, model) for a hold
-    written, ("model-off", None, model) when an error ended a held model, else None.
-    The words: a whole model word other than opus, outside pasted blocks, notices and reply quotes, from an owner prompt
-    that passes the gates of _owner_ask and is no seed brief (_seed_turn, local or cloud), with no whole word `override`
-    outside code spans. A prompt that names only opus is
-    the Opus ask's; one prompt reaches one judge. The roles named, the length and the end are the Opus ask's reading
-    (_ask_scope; MODEL_ROLES for a model other than opus): a length he states is the hold's `until`; with none it ends at
-    the next report or after DEFAULT_ASK_LENGTH.
+def grant_model_ask(session_id, prompt, at, judge=None, transcript=None, source=None, scope_judge=None):
+    """The owner's plain model ask (`use opus for the reviewers`, `opus builders 2h`, `run it on haiku`): the model he chose,
+    held in the session's pass file, when a model says the prompt is his own present choice of one model (decision
+    agent-model-cap, the owner's model name). `judge` is call_judge.model_ask unless a caller passes another: it returns the
+    model family, False for a plain no, None for an error, a timeout or an odd answer. `scope_judge` is call_judge.opus_scope
+    unless a caller passes another. Returns ("model" or "opus", until, role, end, model) for a hold written,
+    ("opus-off" or "model-off", ...) when a judge no or an error ended a held model, else None.
+    The words: a whole model word, outside pasted blocks, notices and reply quotes, from an owner prompt that passes the
+    gates of _owner_ask and is no seed brief (_seed_turn, local or cloud), with no whole word `override` outside code spans.
+    One prompt reaches one judge. The roles named and the length are _ask_scope's reading (MODEL_ROLES): a length he states
+    is the hold's `until`; with none it ends at the next report or after DEFAULT_ASK_LENGTH. A prompt whose every mention of
+    the judged model is negated writes nothing, whatever the judge says (model_mentions); a question mark refuses nothing.
     A held model ends on a judge yes for another model (the file is replaced), a judge error (the file is deleted:
     his words could not be read, so no model he named earlier stays on), his end words (_grant_end_word), or a judge no
-    when this turn negates the held model ("Do not use haiku": model_mentions; a later model word ends the earlier one).
-    A judge no that negates another model, or names the held one with no negation, keeps it, and so does a held Opus (it
-    ends on `opus off`). A judge that answers a model the words do not name is an odd answer, so an error.
-    Cost: for a prompt that names no model other than opus, nothing: the word test runs before any file read. For one
-    that does, one tail read, one judge call (call_judge.model_ask, a Haiku call of at most OPUS_ASK_TIMEOUT s) and one
-    file write or delete. No scope read."""
+    when this turn negates the held model with no un-negated mention of it ("Do not use haiku": model_mentions; a later
+    model word ends the earlier one). A judge no that negates another model, or names the held one un-negated, keeps it.
+    A judge that answers a model the words do not name is an odd answer, so an error.
+    A yes for Opus or Fable that names no role reads the owner's earlier typed prompts for the roles they name
+    (_context_prompts, `scope_judge`), once, only when such a prompt exists: the every-role file goes down first and a valid
+    answer narrows it, so a kill in the read (the prompt hook's timeout) leaves every role with no `opus-grant` line.
+    Cost: for a prompt that names no model, nothing: the word test runs before any file read. For one that does, one tail
+    read, one judge call (call_judge.model_ask, a Haiku call of at most OPUS_ASK_TIMEOUT s), one file write or delete, and
+    that one scope call."""
     path = _path(session_id, "opus")
     if path is None or not isinstance(prompt, str):
         return None
     gated = _owner_ask(prompt, source, transcript, _model_wanted, strip_quotes=True)
     if gated is None:
         return None
-    text, found = gated[0], gated[1]
+    text, found, seed = gated
     if _seed_turn(found, prompt):
         return None  # a seed brief is the session that started this one speaking, never the owner's choice of a model
     try:
@@ -749,18 +670,31 @@ def grant_model_ask(session_id, prompt, at, judge=None, transcript=None, source=
     except Exception as exc:
         print("override: model ask clears the held model: %s" % " ".join(str(exc).split()), file=sys.stderr)
         family = None
-    if family is False:
-        hold = _read_hold(path)  # a judge no keeps the held model, unless this turn negates it
-        negated = isinstance(hold, dict) and hold["judged"] and hold["model"] != "opus" and model_mentions(text, hold["model"])[1]
-        return _end_hold(session_id, path, hold["model"], "the owner's turn negates it") if negated else None
-    if family not in _names_models(text):  # an error, an odd answer, or a model the words do not name
+    if family is not False and family not in _names_models(text):  # an error, an odd answer, or a model the words do not name
         return _end_hold(session_id, path, why="the judge could not read the owner's words")
-    scope = _ask_scope(text) if family == "opus" else _ask_scope(text, model_role, MODEL_ROLES)
+    if family is False or not model_mentions(text, family)[0]:
+        hold = _read_hold(path)  # a no, or a yes the words negate, keeps the held model unless this turn negates it
+        ends = isinstance(hold, dict) and hold["judged"] and _negates(text, hold["model"])
+        return _end_hold(session_id, path, hold["model"], "the owner's turn negates it") if ends else None
+    scope = _ask_scope(text)
     if scope is None:
         return None
     length, roles = scope
-    end = None if _ask_lengths(text) else HOLD_END_REPORT
-    return _write_opus(session_id, path, at, length, _file_role(roles), text, model=family, end=end)
+    said = " ".join(text.split())
+    end = None if _ask_lengths(text) else HOLD_END_REPORT  # a length he states is his; with none, the report ends it
+    context = [] if roles or family not in ABOVE_SONNET else _context_prompts(found, prompt, seed)
+    if context:
+        # No scope means every role, so that file goes down first: the prompt hook's timeout can kill the process in the
+        # scope read, and a kill must leave the every-role file. A valid answer then narrows it.
+        _write_opus(session_id, path, at, length, None, said, family, end, log=False)
+        if scope_judge is None:
+            from call_judge import opus_scope as scope_judge
+        try:
+            roles = _scoped_roles(scope_judge, text, context)
+        except BaseException:  # an interrupt or an exit during the read: log the every-role hold that stands
+            _write_opus(session_id, path, at, length, None, said, family, end)
+            raise
+    return _write_opus(session_id, path, at, length, _file_role(roles), said, family, end)
 
 
 # One prose line that is the whole keyword form (an override line inside a prose message counts):
@@ -806,13 +740,9 @@ def grant(session_id, prompt, at, defer=True, transcript=None, source=None):
 
 def _grant_first_word(session_id, prompt, at, defer=True):
     """Write, replace or remove the session's override for one owner prompt. Returns (kind, until) for a
-    new override, ("off", None) when `override off` removed one, the _grant_opus result for the Opus word,
-    else None: the prompt is not a word. With `defer`, a first word `override` whose rest is no whole keyword form and
-    holds a length returns None too, so the plain ask (grant_override_ask) judges it; grant_override_ask calls again
+    new override, ("off", None) when `override off` removed one, else None: the prompt is not a word. With `defer`, a
+    first word `override` whose rest is no whole keyword form and holds a length returns None too, so the plain ask (grant_override_ask) judges it; grant_override_ask calls again
     with `defer` False for main's result."""
-    opus = OPUS_PROMPT.match(prompt) if isinstance(prompt, str) else None
-    if opus:
-        return _grant_opus(session_id, opus.group(1), at)
     said = PROMPT.match(prompt) if isinstance(prompt, str) else None
     path = _path(session_id)
     if not said or path is None:
@@ -973,9 +903,9 @@ def _lower_roles(role):
 def _read_hold(path):
     """The session's pass file at `path` as a dict {model, until, role, end, at, said, judged}, None when it is absent,
     OPUS_UNREAD when it cannot be read or has the wrong shape. `model` is the family it holds, Opus when the file has none
-    (a keyword grant writes none); `judged` is true only when the file names its model, as a judged plain ask writes it.
-    `role` is None, one role or a list, lower case; the roles of an Opus file must be OPUS_ROLES, those of another
-    model's file any names (MODEL_ROLES: Explore too). `end` is None or HOLD_END_REPORT; `at` is None when the file has
+    (an old keyword grant wrote none); `judged` is true only when the file names its model, as a judged plain ask writes it.
+    `role` is None, one role or a list, lower case; the roles of an Opus file must be OPUS_ROLES or Explore, those of
+    another model's file any names (MODEL_ROLES: Explore too). `end` is None or HOLD_END_REPORT; `at` is None when the file has
     none or none that reads."""
     try:
         with open(path, "rb") as handle:
@@ -985,7 +915,7 @@ def _read_hold(path):
         roles = role if isinstance(role, list) else [role]  # null, one role, or a list of roles
         if (data["kind"] != "opus" or until.tzinfo is None or (isinstance(role, list) and not role)
                 or (model != "opus" and model not in MODEL_FAMILIES) or data.get("end") not in (None, HOLD_END_REPORT)
-                or any(r is not None and (not isinstance(r, str) or (model == "opus" and opus_role(r) != r))
+                or any(r is not None and (not isinstance(r, str) or (model == "opus" and opus_role(r) != r and r != "Explore"))
                        for r in roles)):
             return OPUS_UNREAD
     except FileNotFoundError:
@@ -1050,19 +980,20 @@ def _report_since(at, transcript, records=None, report_ok=None):
 
 
 def _turn_negates_hold(hold, transcript=None, records=None):
-    """True when `hold` is a judged hold of a model other than Opus and the owner's latest typed turn (the transcript at path
-    `transcript`, or the parsed `records`) negates a mention of that model (model_mentions): "Do not use haiku" after a held
-    haiku. A later model word ends the earlier one, and the prompt hook ends the hold on a judge no or an error
-    (grant_model_ask); this read ends it for a call that comes before the hook has deleted the file, or when the hook did not
-    run. An Opus hold, and the keyword file (`opus 2h`, no `model` key), end only on `opus off` and their own length, as on
-    main. Cost, on demand: one backward read to the owner's last turn."""
-    if not hold["judged"] or hold["model"] == "opus":
+    """True when `hold` is a judged hold and the owner's latest typed turn (the transcript at path `transcript`, or the
+    parsed `records`) negates its model with no un-negated mention of it (_negates): "Do not use haiku" after a held haiku,
+    or "don't use opus for the audit" after a held Opus; "don't use haiku, use opus" keeps a held Opus. A later model word
+    ends the earlier one, and the prompt hook ends the hold on a judge no or an error (grant_model_ask); this read ends it
+    for a call that comes before the hook has deleted the file, or when the hook did not run. A model-less file (a keyword
+    grant left on disk) ends only on `opus off` and its own length. Cost, on demand: one backward read to the owner's last
+    turn."""
+    if not hold["judged"]:
         return False
     if records is not None:
         text = next((t for t in (_owner_text(rec) for rec in reversed(records)) if t is not None), None)
     else:
         text = latest_owner_text(transcript)
-    return model_mentions(text, hold["model"])[1]
+    return _negates(text, hold["model"])
 
 
 def model_override(session_id, transcript=None, records=None, report_ok=None, at=None):
@@ -1086,7 +1017,7 @@ def model_override(session_id, transcript=None, records=None, report_ok=None, at
 def _take_opus(session_id, spawn_role, at, transcript=None, model=None):
     """OPUS_LIFTED when the session's pass file covers a spawn of spawn_role on `model` now, OPUS_UNREAD when the file
     exists but cannot be read, else None. A held model lifts only a spawn on that model (`model` None is an Opus spawn,
-    the Opus ceiling's own call): a held sonnet lifts no Opus ceiling, a keyword Opus file (`opus 2h`) lifts no Fable
+    the Opus ceiling's own call): a held sonnet lifts no Opus ceiling, a model-less file (Opus) lifts no Fable
     spawn, and a held Fable lifts a Fable spawn only. A hold that ends at the report is not read as live after a report in
     the transcript at path `transcript`, and a judged hold the owner's latest typed turn negates is not live (_turn_negates_hold)."""
     path = _path(session_id, "opus")
@@ -1141,16 +1072,23 @@ def _grant_role(grant):
     return role
 
 
-def _take_step(session_id, spawn_role, cwd):
-    """STEP_LIFTED when the one step bound to this lane grants an Opus spawn of spawn_role, STEP_UNREAD
-    when a record that names the lane cannot be read or has the wrong shape, else None. Sets _step_read
-    to the step the decision names."""
+def _grant_family(grant):
+    """The model a well-formed grant lifts: the one model its `words` name, Opus when they name none (a grant written
+    before the owner's words named a model), else None for words that name two or more, which lift nothing."""
+    named = _names_models(grant["words"])
+    return "opus" if not named else next(iter(named)) if len(named) == 1 else None
+
+
+def _take_step(session_id, spawn_role, cwd, family="opus"):
+    """STEP_LIFTED when the one step bound to this lane grants a spawn of spawn_role on the model `family`, STEP_UNREAD
+    when a record that names the lane cannot be read or has the wrong shape, else None. A grant lifts the model its words
+    name (_grant_family), Opus or Fable alike. Sets _step_read to the step the decision names."""
     global _step_read
     _step_read = None
     lane = _lane_id(session_id)
     if lane is None or not isinstance(cwd, str) or not cwd:
         return None
-    import git_reads  # lazy: only an Opus spawn refusal that no Opus override lifted needs it
+    import git_reads  # lazy: only a spawn refusal that no held model lifted needs it
     hits = git_reads._git(cwd, "grep", "-l", "-F", "-e", lane, STEP_REF, "--", STEP_DIR)
     if hits is None or hits.returncode != 0:
         return None  # no ref, no repository, no hit or a git error: no lift
@@ -1171,7 +1109,7 @@ def _take_step(session_id, spawn_role, cwd):
             grants = step.get("grants", [])
             if not isinstance(grants, list) or not isinstance(step.get("status"), str):
                 raise ValueError("record shape")
-            roles = [_grant_role(grant) for grant in grants]
+            roles = [(_grant_role(grant), _grant_family(grant)) for grant in grants]
         except (ValueError, KeyError, TypeError, AttributeError):
             return STEP_UNREAD
         bound.append((str(step.get("id") or _step_read), step["status"], roles))
@@ -1180,7 +1118,7 @@ def _take_step(session_id, spawn_role, cwd):
         return None  # no step or two steps bind the lane: no lift
     step_id, status, roles = bound[0]
     role = str(spawn_role).lower()
-    if status == "done" or not any(r is None or r == role for r in roles):
+    if status == "done" or not any((r is None or r == role) and held == family for r, held in roles):
         return None
     _step_read = step_id
     return STEP_LIFTED
@@ -1196,7 +1134,7 @@ def take(session_id, agent_id, at, rule=None, spawn_role=None, cwd=None, transcr
     exists but cannot be read, else None. Of calls racing for one one-act override, only the one that
     creates its claim marker wins. For the Opus ceiling refusal (rule OPUS_RULE with a spawn_role: a spawn on Opus or
     on Fable) the pass file is read first, on the spawn's own model (_take_opus), then the step grant (STEP_LIFTED or
-    STEP_UNREAD) for a spawn on Opus only, so a lift either one covers spends no one-act override. `cwd` is the call's directory, where the step grant is read.
+    STEP_UNREAD) on the spawn's own model (_take_step), so a lift either one covers spends no one-act override. `cwd` is the call's directory, where the step grant is read.
     For the model floor and the role row (HOLD_ONLY_RULES) it reads the pass file for a spawn on `model`, but those
     refusals pass no spawn model, so the file never matches and a held model lifts neither (the floor reads the owner's
     word, `owner_names_model`; the row reads the hold, `role_hold_verdict`, both in the guard). `transcript` is the
@@ -1207,9 +1145,10 @@ def take(session_id, agent_id, at, rule=None, spawn_role=None, cwd=None, transcr
     if opus == OPUS_LIFTED:
         return opus
     step = None
-    if rule == OPUS_RULE and spawn_role is not None and _family(model or "opus") == "opus":  # a step grant is an Opus grant
+    family = _family(model or "opus")
+    if rule == OPUS_RULE and spawn_role is not None and family in ABOVE_SONNET:  # a step grant lifts the model its words name
         try:  # an error in the step read is no lift, and it never stops the override read below
-            step = _take_step(session_id, spawn_role, cwd)
+            step = _take_step(session_id, spawn_role, cwd, family)
         except Exception:
             step = None
         if step == STEP_LIFTED:

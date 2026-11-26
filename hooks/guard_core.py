@@ -2414,7 +2414,7 @@ def refuse(tool: str, decision: str, rule: str, reason: str, matched: str, spawn
     try:  # the line the owner types to lift this refusal, or the words that none does; last in the reason
         import override
         line = override.NO_OVERRIDE if vetoed else override.offer(rule, spawn_role, _override_who[1])
-        if spawn_model and not vetoed:  # the line for the model the spawn sets: `opus 2h` lifts no Fable spawn
+        if spawn_model and not vetoed:  # the spawn's own model goes to offer(); its line is the same for every model
             line = override.offer(rule, spawn_role, _override_who[1], spawn_model)
         reason = reason.rstrip() + " " + line
     except Exception:
