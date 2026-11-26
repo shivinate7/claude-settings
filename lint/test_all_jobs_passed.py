@@ -304,10 +304,15 @@ class DraftRunSkipsEveryJob(unittest.TestCase):
     def test_a_draft_run_skips_every_job_and_the_rule_file_accepts_it(self):
         # Named failure: a job starts on a draft run, so the run has a result the rollup would read; or the rule file refuses the file.
         results = draft_run_results(self.text, draft=True)
+        self.assertEqual(sorted(results), sorted(all_jobs(self.text)), "scope: the draft read names a job set other than checks.yml's")
         started = sorted(name for name, result in results.items() if result != "skipped")
         self.assertEqual(started, [], f"a job starts on a draft run, so the run has a job result: {started}")
         self.assertEqual(results.get(ALL_JOBS_PASSED_JOB), "skipped", "all-jobs-passed runs on a draft run, and reads its skipped needs as red")
         self.assertEqual(all_problems(self.text), [], "the rule file refuses checks.yml, whose draft run skips every job")
+
+    def test_the_same_model_on_a_ready_run_reads_the_rollup_as_success(self):
+        # Control, green on the old file: a ready run gives the rollup a success, so the draft skip comes from the draft, not the model.
+        self.assertEqual(draft_run_results(self.text, draft=False)[ALL_JOBS_PASSED_JOB], "success")
 
 
 class DeltaClausesOnTheRealWorkflow(unittest.TestCase):
