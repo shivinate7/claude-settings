@@ -489,14 +489,19 @@ STAMPUNKNOWN = os.path.join(ROOT, "pin_unknown_repo")  # its merge config pins r
 STAMPPROTECT = os.path.join(ROOT, "pin_protect_repo")  # its merge config pins requiredChecks "protection", the default's own string
 
 
-def _merge_config_path():
-    """The merge config path, merge.DEFAULT_CONFIG, read with the ast from merge/merge.py: the guard cases never import the merge tool."""
+def _merge_constant(name):
+    """The string constant `name` of merge/merge.py, read with the ast: the guard cases never import the merge tool."""
     with open(os.path.join(os.path.dirname(HERE), "merge", "merge.py"), encoding="utf-8") as f:
         tree = ast.parse(f.read())
     for node in tree.body:
-        if isinstance(node, ast.Assign) and any(getattr(t, "id", None) == "DEFAULT_CONFIG" for t in node.targets):
+        if isinstance(node, ast.Assign) and any(getattr(t, "id", None) == name for t in node.targets):
             return node.value.value
-    raise AssertionError("merge/merge.py has no DEFAULT_CONFIG")
+    raise AssertionError("merge/merge.py has no %s" % name)
+
+
+def _merge_config_path():
+    """The merge config path, merge.DEFAULT_CONFIG (see _merge_constant)."""
+    return _merge_constant("DEFAULT_CONFIG")
 
 
 def _build_stamp_repos():
