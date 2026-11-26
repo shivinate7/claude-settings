@@ -2681,6 +2681,149 @@ def case_record_plural_pair_counts_as_a_shared_word():
           "decisions/rq-ceiling is left out: 'cap' is 3 letters, so it is never a shared word and never pairs with 'caps'")
 
 
+# ------------------------------------------------------------------ records: rare words, no fixed count, the cut said
+#
+# A record's score counts its shared words, a rare word for more than a common one. Equal scores go to the newer ruling.
+# The block holds as many sharing records as CANDIDATES_CAP allows, with no fixed count. When the cap leaves a sharing
+# record out, the text the judge reads says how many. Each case reads the bound from question_form, and reads the block
+# the judge is sent (candidates_block), never a copied number.
+GOVERNING_TEXT = "Owner ruling: batch runner keeps its lane as recorded."  # shares only the rare words batch and runner
+COMMON_TEXT = "Owner ruling: merge a pull request into main once checks pass."  # shares merge, pull, request and main
+RARE_QUESTION = "should the batch runner merge a reviewed pull request onto a red main"
+BIG_RECORDS = 120  # with records of about 820 characters, more than CANDIDATES_CAP holds
+
+
+def _padded(text, n_chars):
+    """`text`, padded with plain words that share no word with the questions of this block, to n_chars characters."""
+    while len(text) < n_chars:
+        text += " " + RECORD_FILLER
+    return text[:n_chars].rstrip()
+
+
+def _shown_ids(block):
+    """The record ids (`decisions/<slug>`, `debts/<slug>`) of the candidate lines in a block the judge reads."""
+    return {line.split(": ", 1)[0] for line in block.split("\n") if line.startswith(("decisions/", "debts/"))}
+
+
+def case_record_rare_word_outranks_common_words():
+    import question_form  # the one form check (hooks/question_form.py)
+    fn = getattr(question_form, "past_rulings", None)
+    check("record rare: question_form.past_rulings exists", callable(fn), "missing function")
+    if not callable(fn):
+        return
+    records = {"rq-common-%03d" % i: _padded(COMMON_TEXT, 820) for i in range(BIG_RECORDS)}
+    records["rq-zz-governing"] = _padded(GOVERNING_TEXT, 820)  # two rare words: fewer shared words than a common record
+    repo = tcj.make_repo("record-rare-words", decisions=records)
+    candidates, unknown = _past_candidates(fn, repo, RARE_QUESTION)
+    shown = _shown_ids(question_form.candidates_block(candidates, unknown, None))
+    common = {"decisions/rq-common-%03d" % i for i in range(BIG_RECORDS)}
+    check("record rare (scope): the cap leaves some sharing record out, so the order decides which ones",
+          not common <= shown, "%d of %d sharing records shown" % (len(common & shown), len(common)))
+    check("record rare: the record that shares the rare words batch and runner is in the block",
+          "decisions/rq-zz-governing" in shown,
+          "decisions/rq-zz-governing is left out, behind records that share only the common words merge, pull, request, main")
+
+
+def case_record_equal_scores_go_to_the_newer_ruling():
+    import question_form  # the one form check (hooks/question_form.py)
+    fn = getattr(question_form, "past_rulings", None)
+    check("record recency: question_form.past_rulings exists", callable(fn), "missing function")
+    if not callable(fn):
+        return
+    records = {"rq-a-%03d" % i: _padded("Owner ruling, 2026-11-02 09:00 CST: merge it.", 820) for i in range(BIG_RECORDS)}
+    records["rq-a-000"] = _padded("Owner ruling, 2026-10-01 09:00 CST: merge it.", 820)  # the oldest, first by name
+    records["rq-zz-newest"] = _padded("Owner ruling, 2026-11-25 09:00 CST: merge it.", 820)  # the newest, last by name
+    repo = tcj.make_repo("record-recency", decisions=records)
+    candidates, unknown = _past_candidates(fn, repo, "Merge now?")
+    shown = _shown_ids(question_form.candidates_block(candidates, unknown, None))
+    check("record recency (scope): the cap leaves some sharing record out, so the order decides which ones",
+          len(shown) < len(records), "%d of %d records shown" % (len(shown), len(records)))
+    check("record recency: the newest ruling is in the block, though it sorts last by name and shares one word",
+          "decisions/rq-zz-newest" in shown,
+          "decisions/rq-zz-newest is left out: equal scores go by name, not by the newer ruling")
+    check("record recency: the oldest ruling is left out first, though it sorts first by name",
+          "decisions/rq-a-000" not in shown,
+          "decisions/rq-a-000 is in the block while newer records with the same score are left out")
+
+
+def case_record_no_fixed_count_sends_every_small_sharing_record():
+    import question_form  # the one form check (hooks/question_form.py)
+    fn = getattr(question_form, "past_rulings", None)
+    check("record count: question_form.past_rulings exists", callable(fn), "missing function")
+    if not callable(fn):
+        return
+    small = {"decisions/rq-small-%03d" % i for i in range(60)}
+    repo = tcj.make_repo("record-no-fixed-count", decisions={
+        "rq-small-%03d" % i: "Owner ruling: merge item %03d, kept as recorded." % i for i in range(60)})
+    candidates, unknown = _past_candidates(fn, repo, "Merge now?")
+    check("record count (scope): sixty small records share the word merge and are candidates",
+          bool(small & set(_record_ids(candidates))), str(_record_ids(candidates))[:200])
+    block = question_form.candidates_block(candidates, unknown, None)
+    check("record count: every small record that shares the word merge is in the block, with no fixed count",
+          small <= _shown_ids(block),
+          "%d of 60 small records that share the word merge are left out of the block" % len(small - _shown_ids(block)))
+    check("record count: question_form defines no fixed RECORD_TOP",
+          getattr(question_form, "RECORD_TOP", None) is None,
+          "question_form still defines RECORD_TOP, a fixed count of sharing records")
+    cap = getattr(question_form, "CANDIDATES_CAP", None)
+    check("record count control: the block stays within CANDIDATES_CAP characters",
+          isinstance(cap, int) and len(block) <= cap, "the block is %d characters" % len(block))
+
+
+def case_record_cut_is_said_in_the_block_the_judge_reads():
+    import question_form  # the one form check (hooks/question_form.py)
+    fn = getattr(question_form, "past_rulings", None)
+    check("record cut: question_form.past_rulings exists", callable(fn), "missing function")
+    if not callable(fn):
+        return
+    cut = {"decisions/rq-cut-%03d" % i for i in range(BIG_RECORDS)}
+    repo = tcj.make_repo("record-cut-said", decisions={
+        "rq-cut-%03d" % i: _padded("Owner ruling: merge item %03d." % i, 820) for i in range(BIG_RECORDS)})
+    candidates, unknown = _past_candidates(fn, repo, "Merge now?")
+    block = question_form.candidates_block(candidates, unknown, None)
+    left = len(cut - _shown_ids(block))
+    check("record cut (scope): the cap leaves some sharing records out of the block", left > 0, "%d left out" % left)
+    tail = block.split("Not searched:", 1)[1] if "Not searched:" in block else ""
+    check("record cut: the text the judge reads says how many sharing records were left out",
+          left > 0 and re.search(r"(?<!\d)%d(?!\d)" % left, tail) is not None,
+          "the block leaves %d sharing records out, and its Not searched text does not say so: %r" % (left, tail[:200]))
+    none = tcj.make_repo("record-cut-none", decisions={"rq-one": "Owner ruling: merge it."})
+    candidates, unknown = _past_candidates(fn, none, "Merge now?")
+    block = question_form.candidates_block(candidates, unknown, None)
+    check("record cut control: with no sharing record left out, the Not searched text names no count",
+          ("Not searched: %s." % ", ".join(unknown)) in block, block[-300:])
+
+
+THREE_QUESTION = "Should the red cap stay, and for how long?"
+THREE_RED_TEXT = "A red line is kept as recorded."  # shares only the 3-letter word red
+THREE_CAP_TEXT = "Owner: cap holds until stopgap ends."  # shares only the 3-letter word cap
+THREE_SCOPE_TEXT = "Owner: a long stay is kept."  # shares the 4-letter words long and stay, so the scope is read
+THREE_CONTROL_TEXT = "The team and the tool work for free."  # shares only the 3-letter words the, and, for
+
+
+def case_record_three_letter_words_count_and_common_ones_do_not():
+    import question_form  # the one form check (hooks/question_form.py)
+    fn = getattr(question_form, "past_rulings", None)
+    check("record three letters: question_form.past_rulings exists", callable(fn), "missing function")
+    if not callable(fn):
+        return
+    repo = tcj.make_repo("record-three-letters", decisions={
+        "rq-red": THREE_RED_TEXT, "rq-cap": THREE_CAP_TEXT, "rq-scope": THREE_SCOPE_TEXT,
+        "rq-control": THREE_CONTROL_TEXT})
+    candidates, _unknown = _past_candidates(fn, repo, THREE_QUESTION)
+    ids = _record_ids(candidates)
+    check("record three letters (scope): the record that shares 4-letter words is a candidate",
+          "decisions/rq-scope" in ids, str(ids)[:200])
+    if "decisions/rq-scope" not in ids:
+        return
+    check("record three letters: a record whose only shared word is the 3-letter word red is a candidate",
+          "decisions/rq-red" in ids, "decisions/rq-red is left out: the 3-letter word red does not count")
+    check("record three letters: a record whose only shared word is the 3-letter word cap is a candidate",
+          "decisions/rq-cap" in ids, "decisions/rq-cap is left out: the 3-letter word cap does not count")
+    check("record three letters control: a record whose only shared words are the, and, for stays out",
+          "decisions/rq-control" not in ids, "decisions/rq-control is in the block on the common words the, and, for")
+
+
 # A ruling's optional `scope` (lint/test_ruled_store.py): {"visibility": "private"} governs a private repo only. The
 # repo's visibility is its extras key `visibility`, which lint/layout.py reads (make_repo(visibility=...) writes it). Each
 # case reads that visibility back through layout.caution, and asserts it, before it judges the candidates.
@@ -4566,6 +4709,10 @@ def main():
                  case_record_top_ranks_by_shared_words, case_record_named_kept_and_zero_words_left_out,
                  case_record_total_cap_drops_the_lowest_scored_lines, case_record_words_under_the_cap_are_all_sent,
                  case_record_slug_word_counts_for_the_question, case_record_plural_pair_counts_as_a_shared_word,
+                 case_record_rare_word_outranks_common_words, case_record_equal_scores_go_to_the_newer_ruling,
+                 case_record_no_fixed_count_sends_every_small_sharing_record,
+                 case_record_cut_is_said_in_the_block_the_judge_reads,
+                 case_record_three_letter_words_count_and_common_ones_do_not,
                  case_ruled_store_scope_omits_a_private_ruling_in_a_public_repo,
                  case_ruled_store_scope_keeps_a_private_ruling_in_a_private_repo,
                  case_ruled_store_scope_private_only_lists_no_ruling_in_a_public_repo,
