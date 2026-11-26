@@ -27,6 +27,10 @@ import shutil
 import subprocess
 import sys
 
+HERE = os.path.dirname(os.path.realpath(__file__))
+sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
+
 PIN_FILE = ".tool-versions"
 RUN_TIMEOUT = 30  # a version command that takes longer is hung, so its tool reads as unknown
 # A release (`3.15.0`) and an optional pre-release (`rc1`, `a2`, `dev1`, `.dev1`); the pre-release ends at a word edge,
@@ -111,8 +115,8 @@ def run_version_command(command):
     if program is None:
         return None
     try:
-        proc = subprocess.run([program] + words[1:], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-                              stderr=subprocess.STDOUT, text=True, errors="replace", timeout=RUN_TIMEOUT)
+        proc = _nowindow.run([program] + words[1:], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                             stderr=subprocess.STDOUT, text=True, errors="replace", timeout=RUN_TIMEOUT)
     except (OSError, ValueError, subprocess.TimeoutExpired):
         return None
     return proc.stdout if proc.returncode == 0 else None
