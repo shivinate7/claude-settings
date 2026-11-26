@@ -1337,12 +1337,12 @@ PATH_EXTENSION = re.compile(r"\.[A-Za-z0-9]{1,6}$")
 REDIRECTION = re.compile(
     r"&>>?\s*\S+"       # &>file, &>>file
     r"|<\s*\S+"         # <file
-    r"|\d?>>?\s*\S+"    # >file, >>file, 2>file, 2>>file, 2>&1, >&2, 1>&2
+    r"|\d?(?:>\||>>?)\s*\S+"    # >file, >>file, >|file (override noclobber), 2>file, 2>>file, 2>&1, >&2, 1>&2
 )
 
 
-# The operator of a redirection, read at a word's start or after one: `&>`, `<`, `>`, `>>`, `2>`, with the space before its target.
-_REDIRECT_OPERATOR = re.compile(r"&>>?\s*|<\s*|\d?>>?\s*")
+# The operator of a redirection, read at a word's start or after one: `&>`, `<`, `>`, `>>`, `>|`, `2>`, with the space before its target.
+_REDIRECT_OPERATOR = re.compile(r"&>>?\s*|<\s*|\d?(?:>\||>>?)\s*")
 
 
 def strip_redirections(segment: str) -> str:
