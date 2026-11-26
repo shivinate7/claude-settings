@@ -611,7 +611,7 @@ jobs:
         run: python3 lint/test_repo_colour.py
 
       - name: Guard move proof fixture suite
-        if: ${{ !cancelled() && (needs.scope.outputs.code == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
+        if: ${{ !cancelled() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_guard_move_proof.py
 
       - name: Retired repo fixture suite

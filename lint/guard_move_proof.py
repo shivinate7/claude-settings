@@ -73,6 +73,8 @@ import tarfile
 import tempfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+sys.path.insert(0, os.path.join(ROOT, "hooks"))
+import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
 IMPORTTIME_RUNS = 5
 IMPORTTIME_MAX_RATIO = 1.10
 FAMILY = "_FAMILY_MODULES"  # guard.py's tuple of family module names, in import order
@@ -88,7 +90,7 @@ class Unreadable(Exception):
 
 
 def git_bytes(root, *args):
-    done = subprocess.run(["git", "-C", root] + list(args), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    done = _nowindow.run(["git", "-C", root] + list(args), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     if done.returncode != 0:
         raise Unreadable("git %s: %s" % (" ".join(args), done.stderr.decode("utf-8", "replace").strip()))
     return done.stdout
@@ -550,7 +552,7 @@ class HeadNames:
 
 def extract_hooks(root, ref, dest):
     """Writes the regular files of `git archive REF hooks` under `dest`, with no tar process."""
-    proc = subprocess.Popen(["git", "-C", root, "archive", ref, "hooks"], stdout=subprocess.PIPE,
+    proc = _nowindow.Popen(["git", "-C", root, "archive", ref, "hooks"], stdout=subprocess.PIPE,
                             stderr=subprocess.PIPE)
     try:
         with tarfile.open(fileobj=proc.stdout, mode="r|") as archive:
@@ -574,7 +576,7 @@ def extract_hooks(root, ref, dest):
 def import_microseconds(hooks_dir, scratch):
     """Cumulative microseconds of `import guard`, from one -X importtime run; None when it cannot be read."""
     env = dict(os.environ, PYTHONPYCACHEPREFIX=os.path.join(scratch, "pycache"), CLAUDE_CONFIG_DIR=scratch)
-    done = subprocess.run([sys.executable, "-X", "importtime", "-c", "import guard"], cwd=hooks_dir, env=env,
+    done = _nowindow.run([sys.executable, "-X", "importtime", "-c", "import guard"], cwd=hooks_dir, env=env,
                           stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     if done.returncode != 0:
         return None
