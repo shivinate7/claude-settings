@@ -2477,6 +2477,39 @@ def agent_role(payload) -> str:
     return role if role in (BUILDER_ROLE, AUTHOR_ROLE, WRITER_ROLE, DESIGNER_ROLE) else ""
 
 
+class FamilyCall:
+    """The one argument of a family module's `hit(call)` and `shell_hit(call)`. Always set: payload (the hook's
+    input), tool, tool_input, cwd, session_id, role (agent_role of the payload) and transcript. A shell call also
+    sets raw (the command as typed), stripped (raw with its heredoc bodies removed) and cmd (`norm(stripped)`, the
+    same value judge_shell computes); a non-shell call has no such attributes. A hit refuses with `refuse` and
+    returns to pass."""
+
+    def __init__(self, payload, tool, tool_input, cwd, session_id, role, transcript, raw=None, stripped=None, cmd=None):
+        self.payload = payload
+        self.tool = tool
+        self.tool_input = tool_input
+        self.cwd = cwd
+        self.session_id = session_id
+        self.role = role
+        self.transcript = transcript
+        if raw is not None:
+            self.raw = raw
+            self.stripped = stripped
+            self.cmd = cmd
+
+
+def run_family_hits(names, attr, payload, tool, tool_input, cwd, session_id, role, transcript,
+                    raw=None, stripped=None, cmd=None) -> None:
+    """Build one FamilyCall from the arguments, then call `attr` (`hit` or `shell_hit`) on each module in `names` that
+    defines it, in the order given. Each module is looked up in sys.modules at call time. A refusal exits inside the
+    function; a raise is main()'s fail-open path."""
+    call = FamilyCall(payload, tool, tool_input, cwd, session_id, role, transcript, raw, stripped, cmd)
+    for name in names:
+        function = getattr(sys.modules.get(name), attr, None)
+        if function is not None:
+            function(call)
+
+
 # ------------------------------------------------------------------ helpers several families share
 # A null-device target, on either stream, in the three shells this guard reads a command from:
 # POSIX (`/dev/null`), Windows cmd (`NUL`), and PowerShell (`$null`). `2>&1` duplicates one stream
