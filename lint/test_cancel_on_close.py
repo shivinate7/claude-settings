@@ -9,7 +9,9 @@ ScriptGhCalls and ScriptMain prove every list call is a GET, main cancels nothin
 main counts the runs it skips for naming only another PR, main reads the PR before it cancels, main excludes the run
 named by GITHUB_RUN_ID, and main cancels nothing when GITHUB_RUN_ID is not numeric. ParserControl and ScannerTraps test
 the readers in this file on text that exists on main, so a red WorkflowShape case points at the workflow, not at the
-reader.
+reader. ScriptMain also proves an open ready PR cancels nothing, and an open draft PR cancels no lane-touched-tests run
+and no run on another PR's head, and reports unknown when its run list cannot be read. WorkflowShape proves the workflow
+fires on converted_to_draft as well as closed.
 
 Run with:  python3 lint/test_cancel_on_close.py -v
 """
@@ -233,9 +235,13 @@ class WorkflowShape(unittest.TestCase):
         self.assertNotIn("pull_request_target", triggers(self.text()) or {},
                          "the workflow triggers on pull_request_target")
 
-    def test_pull_request_is_triggered_on_closed_only(self):
-        self.assertEqual((triggers(self.text()) or {}).get("pull_request"), ["closed"],
-                         "the pull_request types are not [closed] only")
+    def test_pull_request_is_triggered_on_closed_and_converted_to_draft(self):
+        self.assertEqual((triggers(self.text()) or {}).get("pull_request"), ["closed", "converted_to_draft"],
+                         "the pull_request types are not [closed, converted_to_draft]")
+
+    def test_pull_request_still_fires_on_closed(self):
+        self.assertIn("closed", (triggers(self.text()) or {}).get("pull_request") or [],
+                      "the pull_request types no longer include closed")
 
     def test_top_level_permissions_are_contents_read(self):
         perms = mapping_at(self.text().split("\n"), "permissions", 0)
@@ -365,6 +371,11 @@ def pr_dict(number=PR, state="closed", ref=HEAD_REF, sha=HEAD_SHA, head_repo=REP
             "base": {"ref": DEFAULT, "repo": {"full_name": REPO_FULL, "default_branch": DEFAULT}}}
 
 
+def pr_with_draft(draft, state="open"):
+    """pr_dict with the draft flag GET repos/R/pulls/N carries."""
+    return dict(pr_dict(state=state), draft=draft)
+
+
 def open_pr(number=OTHER_PR, ref=HEAD_REF, head_repo=REPO_FULL):
     """An entry of GET repos/R/pulls?state=open&head=OWNER:BRANCH. A null head_repo is a deleted fork, as the API gives it."""
     repo = None if head_repo is None else {"full_name": head_repo}
@@ -442,11 +453,13 @@ class FakeGh:
     endpoint no case names returns rc 1, so a broken fixture reads as a failure. It does not enforce GET: a POST list
     would then cancel nothing, and a case would fail for a cause other than its own."""
 
-    def __init__(self, runs=(), states=("closed",), pr=None, open_prs=(), pr_read_fails=False, open_read_fails=False):
+    def __init__(self, runs=(), states=("closed",), pr=None, open_prs=(), pr_read_fails=False, open_read_fails=False,
+                 runs_read_fails=False):
         self.runs, self.states = list(runs), list(states)
         self.pr = pr_dict() if pr is None else pr
         self.open_prs = list(open_prs)
         self.pr_read_fails, self.open_read_fails = pr_read_fails, open_read_fails
+        self.runs_read_fails = runs_read_fails
         self.reads, self.calls = 0, []
 
     def __call__(self, argv, *args, **kwargs):
@@ -465,6 +478,8 @@ class FakeGh:
         if path == REPO_ROUTE:
             return served(argv, {"default_branch": DEFAULT}, jq)
         if path == RUNS_ROUTE:
+            if self.runs_read_fails:
+                return done(argv, 1, "", "fake gh: the run list failed")
             status = params.get("status")
             return served(argv, {"workflow_runs": [run for run in self.runs if status is None or run.get("status") == status]}, jq)
         if path and CANCEL_RE.fullmatch(path):
@@ -726,13 +741,14 @@ class ScriptMain(ScriptCase):
     reports the runs it skips for naming only another PR."""
 
     def run_main(self, runs, states=("closed",), github_run_id=None, open_prs=(), pr=None, pr_read_fails=False,
-                 open_read_fails=False):
+                 open_read_fails=False, runs_read_fails=False):
         # The env is set per case, so a GITHUB_RUN_ID from the CI runner never reaches a case that does not name one.
         mod = self.module()
-        fake = FakeGh(runs, states, pr=pr, open_prs=open_prs, pr_read_fails=pr_read_fails, open_read_fails=open_read_fails)
-        err = io.StringIO()
+        fake = FakeGh(runs, states, pr=pr, open_prs=open_prs, pr_read_fails=pr_read_fails, open_read_fails=open_read_fails,
+                      runs_read_fails=runs_read_fails)
+        err, out = io.StringIO(), io.StringIO()
         with mock.patch.dict(os.environ), mock.patch.object(mod.subprocess, "run", fake), \
-                contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
+                contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
             os.environ.pop("GITHUB_RUN_ID", None)
             if github_run_id is not None:
                 os.environ["GITHUB_RUN_ID"] = github_run_id
@@ -740,6 +756,7 @@ class ScriptMain(ScriptCase):
                 rc = mod.main(["cancel_closed_pr_runs.py", str(PR), REPO_FULL])
             except Exception as e:
                 self.fail(f"main raised {type(e).__name__}: {e}")
+        self.out = out.getvalue()
         return err.getvalue(), fake, rc
 
     def test_prints_the_count_of_runs_skipped_for_naming_another_pr(self):
@@ -858,6 +875,31 @@ class ScriptMain(ScriptCase):
         params = split_argv(calls[0])[1]
         self.assertEqual(params.get("state"), "open", "the open PR list does not ask for state=open")
         self.assertEqual(params.get("head"), f"{OWNER}:{HEAD_REF}", "the open PR list does not ask for head=OWNER:BRANCH")
+
+    def test_an_open_ready_pr_cancels_nothing(self):
+        err, fake, _ = self.run_main([run_of(id=101, pull_requests=[{"number": PR}])], states=("open",),
+                                     pr=pr_with_draft(False))
+        self.assertEqual(cancelled_ids(fake.calls), [], "main cancelled run 101 on an open ready PR")
+
+    def test_a_closed_draft_pr_still_cancels_its_run(self):
+        err, fake, _ = self.run_main([run_of(id=101)], states=("closed",), pr=pr_with_draft(True, state="closed"))
+        self.assertEqual(cancelled_ids(fake.calls), [101], "a closed draft PR's run with an empty PR list was not cancelled")
+
+    def test_a_draft_pr_does_not_cancel_a_lane_touched_tests_run(self):
+        err, fake, _ = self.run_main([run_of(id=103, name="lane-touched-tests", pull_requests=[{"number": PR}])],
+                                     states=("open",), pr=pr_with_draft(True))
+        self.assertNotIn(103, cancelled_ids(fake.calls), "a lane-touched-tests run on an open draft PR was cancelled")
+
+    def test_a_draft_pr_does_not_cancel_a_run_on_another_prs_head(self):
+        err, fake, _ = self.run_main([run_of(id=104, head_branch="other", pull_requests=[{"number": OTHER_PR}])],
+                                     states=("open",), pr=pr_with_draft(True))
+        self.assertNotIn(104, cancelled_ids(fake.calls), "a run on another PR's head was cancelled for an open draft PR")
+
+    def test_a_draft_pr_reports_unknown_when_the_run_list_cannot_be_read(self):
+        err, fake, _ = self.run_main([run_of(id=101, pull_requests=[{"number": PR}])], states=("open",),
+                                     pr=pr_with_draft(True), runs_read_fails=True)
+        self.assertEqual(cancelled_ids(fake.calls), [], "main cancelled a run although the run list could not be read")
+        self.assertIn("unknown", err + self.out, "main printed no 'unknown' for a run list it could not read")
 
 
 class ParserControl(unittest.TestCase):
