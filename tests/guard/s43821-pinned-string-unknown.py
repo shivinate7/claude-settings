@@ -1,4 +1,4 @@
-# section 43820
+# section 43821
 FAMILY = "pinned-string-unknown"
 #
 # `pinned-string-unknown`. A stamp's merge.requiredChecks string that the loaded merge tool does not pin (its PINNED_STRINGS
