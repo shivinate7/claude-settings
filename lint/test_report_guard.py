@@ -3690,6 +3690,17 @@ class QuestionReachesPageTests(SameTurnWriter, unittest.TestCase):
                                 repo=repo)
                 self.assert_blocked(out, "Pick guard", "the page writer is not known to this session")
 
+    def test_qm_layout_writer_green_na_key_passes_with_no_send(self):
+        # Catches: the page writer set to N/A (owner ruling 2026-11-25 20:32 CST, "page writer should be N/A atm") read
+        # as a writer, so a question with no send is refused as "the page writer is session N/A", a session that does
+        # not exist. N/A names no writer, so the question owes no send to one. The absent and null keys stay pinned above.
+        for index, value in enumerate(("none", "None", "N/A", "n/a")):
+            with self.subTest(key=value):
+                repo = self.make_repo("na_key_%d" % index, writer=value)
+                self.assertEqual(self.extras_key(repo), value, "scope: the repo's extras file does not hold the key as set")
+                out = self.stop([human("decide"), assistant_text(self.reply(self.PICK))], repo=repo)
+                self.assertIsNone(out, "a question with no send was blocked under the N/A page writer key %r: %s" % (value, out))
+
     def test_qm_layout_writer_transcript_read_wins_over_the_key(self):
         # Catches: the layout key taking the place of a meta/page read that names another writer.
         keyed = self.make_repo("keyed_key", writer=self.OLDER_WRITER)
