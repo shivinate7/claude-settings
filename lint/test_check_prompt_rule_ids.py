@@ -401,6 +401,23 @@ class RealTreeTests(unittest.TestCase):
         named = [m for m in lint().problems(ROOT) if re.search(r"(?<![\w-])measure-before-priority(?![\w-])", m)]
         self.assertEqual(named, [])
 
+    def test_real_tree_names_no_guard_or_lint_id_without_an_anchor(self):
+        """The prompts name two rule ids that no anchor holds: agent-role-model (hooks/call_judge.py) and
+        rulings-declare-kind (hooks/prose_judge.py). Each is a rule name that a guard or a lint emits, so an
+        id in an id position passes when it is one. The homes, read at write time:
+          agent-role-model: a string literal, the rule argument of refuse() in hooks/guard.py (the spawn
+            refusal). No named constant holds it.
+          rulings-declare-kind: no emitter. lint/check_ruling_kind.py prints messages with no rule name. The
+            name is the slug of a decision record, indexed in docs/records.md. No constant holds it.
+        No single home constant exists for either name, so this is the only case written for them: a fixture
+        case would invent a home. The scope line checks that the reader still reads both ids.
+        """
+        read = {rid for _, _, rid in lint().prompt_ids(ROOT)}
+        self.assertTrue({"agent-role-model", "rulings-declare-kind"} <= read,
+                        "scope: the reader does not read both names on the real tree: %s" % sorted(read))
+        self.assertEqual(lint().problems(ROOT), [],
+                         "the real tree has prompt ids with no anchor: a guard or lint rule name is not accepted")
+
 
 if __name__ == "__main__":
     unittest.main()
