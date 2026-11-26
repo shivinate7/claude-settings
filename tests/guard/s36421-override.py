@@ -54,7 +54,16 @@ OV_GRANT_CHILD = (
     "except ImportError as e:\n"
     "    print('import failed: %s' % e, file=sys.stderr)\n"
     "    sys.exit(3)\n"
-    "override.grant(sys.argv[2], sys.argv[3], datetime.fromisoformat(sys.argv[4]))\n"
+    "import re\n"
+    "import call_judge\n"
+    "def judge(text):\n"  # the model judge stood in: a yes names the one model word the owner typed, no model word a no
+    "    found = re.search(r'\\b(opus|fable|sonnet|haiku)\\b', text, re.I)\n"
+    "    return found.group(1).lower() if found else False\n"
+    "call_judge.model_ask = judge\n"
+    "call_judge.override_ask = lambda text: False\n"
+    "at = datetime.fromisoformat(sys.argv[4])\n"
+    "if override.grant(sys.argv[2], sys.argv[3], at) is None:\n"  # the hook's order: the keyword grant, then the model ask
+    "    override.grant_model_ask(sys.argv[2], sys.argv[3], at)\n"
 )
 
 
@@ -242,13 +251,13 @@ def ov_home(name):
 
 
 def ov_offer_check(kind):
-    """A liftable refusal ends with the override line: the main session names `override` and `override 15m`,
-    an agent's call names `override 15m`, and the Opus spawn refusal names `opus 2h`."""
+    """A liftable refusal ends with the override line: the main session names `override` and `override 15m`, an
+    agent's call names `override 15m`, and the Opus spawn refusal names `override` and no keyword form (one rule)."""
     def check():
         config, session = ov_config("offer-" + kind), "ov-offer-" + kind
         if kind == "opus":
             got, reason = ov_call("Agent", dict(OV_OPUS_SPAWN), NOGIT, config, session, 0)
-            want, rule, words = "deny", "agent-model-cap", ("opus 2h",)
+            want, rule, words = "deny", "agent-model-cap", ("override",)
             expected = ov_home("offer")
             expected = expected(rule, spawn_role="general-purpose") if expected else None
         else:
@@ -262,6 +271,8 @@ def ov_offer_check(kind):
         for word in words:
             if word not in reason:
                 return False, "the refusal does not name %r: %s" % (word, reason[-120:])
+        if kind == "opus" and "opus 2h" in reason:
+            return False, "the Opus refusal names the keyword opus 2h, which the one rule retired: %s" % reason[-120:]
         if kind == "main" and reason.count("override") < 2:
             return False, "the main session's refusal names one override word, want `override` and `override 15m`"
         if not expected:
@@ -513,37 +524,6 @@ def op_role_check():
     return True, "the role override lifted only its own role, plural or singular"
 
 
-# Each prompt is ambiguous or not the word, so it grants nothing: the spawn is still refused.
-OP_NOT_THE_WORD = (
-    "opus 2",                 # a bare number may name a model, so the unit is required
-    "opus 4.5",
-    "opus 2h please",
-    "opus builders",
-    "opus bogus 2h",
-    "opus builders reviewers 2h",
-    "opus off 2h",
-    "opus plan 2h",           # Plan already runs Opus by standing grant
-    "use opus 2h",
-    "opus2h",
-    "opuses 2h",
-    "hi\nopus 2h",
-    "opus 2h\nand the rest",
-)
-
-
-def op_not_the_word_check():
-    config, rule = ov_config("opus-not-word"), "agent-model-cap"
-    for n, prompt in enumerate(OP_NOT_THE_WORD):
-        session = "op-not-word-%d" % n
-        note = ov_type(config, session, prompt)
-        problem = ov_want(*op_spawn(config, session, 60), "deny", rule)
-        if problem:
-            return False, "after %r: %s; %s" % (prompt, problem, note or "typed")
-        if os.path.exists(op_pass_path(config, session)):
-            return False, "%r wrote an Opus override file" % prompt
-    return True, "%d prompts granted nothing" % len(OP_NOT_THE_WORD)
-
-
 def op_scope_check():
     """An Opus override covers only the session that typed it."""
     config, rule = ov_config("opus-scope"), "agent-model-cap"
@@ -659,7 +639,6 @@ for _label, _check in (
     ("opus override: `opus 2h` lets an Opus spawn through, an agent's too, until it ends", op_timed_check),
     ("opus override: `opus 15m` lasts fifteen minutes and `opus off` ends it", op_minutes_check),
     ("opus override: `opus builders 2h` lifts only builder spawns", op_role_check),
-    ("opus override: an ambiguous prompt grants nothing", op_not_the_word_check),
     ("opus override: it covers only the session that typed it", op_scope_check),
     ("opus override: every other refusal and ask stands under it", op_lifts_nothing_else_check),
     ("opus override: an unreadable or misshapen override file is no override", op_corrupt_check),
