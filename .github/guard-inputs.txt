@@ -20,6 +20,7 @@ skills/impeccable/SKILL.md
 bin/lane-start
 bin/sim-lease
 bin/sim-test
+bin/verdict
 actions/ci-alarm/events.json
 actions/ci-alarm/clear_rule.py
 .github/stamp.json
