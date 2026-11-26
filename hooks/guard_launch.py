@@ -28,7 +28,8 @@ import os
 import sys
 
 # The installer stamps guard.py and every guard_*.py it copies, this launcher too, and logs each landing with the id
-# the file carries. The launcher judges nothing and guard.py does not read this id; the line only keeps its landing's log line whole.
+# the file carries. The launcher judges nothing. main() removes the stamped name before it runs guard.py in this
+# module's globals, because guard.py reads its own INSTALL_ID from those globals and must not see this file's.
 # INSTALL_ID = "uninstalled"
 
 
@@ -109,6 +110,7 @@ def main():
             code = compile(handle.read(), path, "exec")
     scope = sys.modules["__main__"].__dict__
     scope["__file__"] = path
+    scope.pop("INSTALL_ID", None)
     exec(code, scope)
 
 
