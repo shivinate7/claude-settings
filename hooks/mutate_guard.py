@@ -3109,7 +3109,7 @@ MUTATIONS = [
     ("owner-model-word: the role hold reads an unjudged Opus file as a ceiling, so a sonnet role spawn is refused",
      'if (not hold.get("judged") or not hold_covers_role(hold, role)',
      'if (not hold_covers_role(hold, role)',
-     "guard", "owner-model-word: an Opus file with no judged model does not count as a role-row hold"),
+     "guard", "owner-model-word: a model-less Opus file (a keyword-era file) refuses a test-author on sonnet under agent-role-model, as on main"),
     # THE VETO AND THE TAKE (decision owner-override). never_lifted names the acts an override may not lift, and
     # override.take reads the one-act override. A mutant that lifts a never-lifted act, or reads no override, must go red.
     ("never-lifted: a shell kill of pid 1 is liftable, so an override reaches it",
