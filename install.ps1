@@ -257,11 +257,12 @@ if git rev-parse -q --verify ORIG_HEAD >/dev/null 2>&1 \
 fi
 # put SRC DEST: build the file at "DEST.cs-new" in DEST's folder, then rename it over DEST, so DEST
 # is never absent or half-written (a guard hook reads it at any moment). A .py that carries an
-# guard.py or guard_*.py gets this run's id on its whole placeholder line, the same stamp install.ps1
+# guard.py, guard_*.py or the launcher launch_guard.py gets this run's id on its whole placeholder line, the same stamp install.ps1
 # writes. A rename a reader blocks is retried for about 2.5 s; if it still fails, DEST stays as it
 # was, the failure is printed and logged, and the hook exits 1 at the end.
 id="`$(date +%Y%m%d%H%M%S)`$`$"
 ph='$StampPlaceholder'
+launcher='$LauncherName'
 cr="`$(printf '\r')"
 failed=0
 # One install at a time, and a start and an end line in the log: the same lock file install.ps1 and
@@ -286,7 +287,7 @@ trap 'rc=`$?; logline "end exit=`$rc"; rm -f "`$lock"' EXIT
 put() {
   t="`$2.cs-new"
   case "`$1" in
-    */guard.py|*/guard_*.py) sed "s/^`$ph\(`$cr\{0,1\}\)\`$/INSTALL_ID = \"`$id\"\1/" "`$1" > "`$t" ;;
+    */guard.py|*/guard_*.py|*/"`$launcher") sed "s/^`$ph\(`$cr\{0,1\}\)\`$/INSTALL_ID = \"`$id\"\1/" "`$1" > "`$t" ;;
     *) cp "`$1" "`$t" ;;
   esac && {
     for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25; do
@@ -500,14 +501,17 @@ public static class ClaudeSettingsMove {
     }
 }
 
-# One id per run. In guard.py and guard_*.py only, the whole line $StampPlaceholder becomes
+# One id per run. In guard.py, guard_*.py and the launcher only, the whole line $StampPlaceholder becomes
 # `INSTALL_ID = "<id>"` at copy time, so hooks/guard.py can tell a half-installed set from a whole one.
 # The repo copy holds the placeholder. No other line is touched: a prose line that starts the same
 # way stays as it is. The post-merge hook above builds its sed from $StampPlaceholder; install.sh
 # holds the same literal, because sh cannot share this code.
 $StampPlaceholder = '# INSTALL_ID = "uninstalled"'
 $StampLineRe = '(?m)^' + [regex]::Escape($StampPlaceholder) + '(?=\r?$)'
-function Test-StampTarget([string]$Name) { return ($Name -ceq 'guard.py' -or $Name -clike 'guard_*.py') }
+function Test-GuardFile([string]$Name) { return ($Name -ceq 'guard.py' -or $Name -clike 'guard_*.py') }
+# The launcher settings.json runs in place of guard.py: no guard module, yet stamped. install.sh holds the same name (LAUNCHER_NAME).
+$LauncherName = 'launch_guard.py'
+function Test-IdLanding([string]$Name) { return ((Test-GuardFile $Name) -or $Name -ceq $LauncherName) }
 function Set-InstallId([string]$Path) {
     $text = [IO.File]::ReadAllText($Path)
     $new  = [regex]::Replace($text, $StampLineRe, "INSTALL_ID = `"$InstallId`"")
@@ -528,7 +532,7 @@ function Install-File([string]$Src, [string]$Dest) {
     try {
         Remove-Leftover $new
         try { New-Link $new $Src; $how = 'linked' }
-        catch { $how = 'copied'; Copy-Item -LiteralPath $Src -Destination $new -Force; if (Test-StampTarget (Split-Path $Dest -Leaf)) { Set-InstallId $new } }
+        catch { $how = 'copied'; Copy-Item -LiteralPath $Src -Destination $new -Force; if (Test-IdLanding (Split-Path $Dest -Leaf)) { Set-InstallId $new } }
         Move-OverFile $new $Dest
         return $how
     } catch {
@@ -783,7 +787,7 @@ function Get-GuardSetEntries([string]$ManifestPath) {
         Where-Object { $_ -ne '' }
 }
 function Install-GuardSet([string]$SrcDir, [string]$DestDir) {
-    $names = @(Get-ChildItem -LiteralPath $SrcDir -File -ErrorAction SilentlyContinue | Where-Object { Test-StampTarget $_.Name })
+    $names = @(Get-ChildItem -LiteralPath $SrcDir -File -ErrorAction SilentlyContinue | Where-Object { Test-GuardFile $_.Name })
     if ($names.Count -eq 0 -or (Test-LinksWork $names[0].FullName)) { return }
     # Each file hooks/guard-set.txt names is in the set too, beside the guard files: the one list, which install.sh and the post-merge hook read too.
     # A manifest with no entry fails the stage when a guard.py is in the source; a source with no manifest stages the guard files alone.
@@ -886,7 +890,7 @@ foreach ($sub in (Get-LandedDirs $RepoDir)) {
     # Guard set: guard.py goes first, the landing that switches; see the comment above Install-GuardSet.
     if ($GuardSetMode -and $sub -eq 'hooks') { $srcFiles = @($srcFiles | Sort-Object @{ Expression = { $_.Name -cne 'guard.py' } }, Name) }
     foreach ($src in $srcFiles) {
-        if ($GuardStageFailed -and $sub -eq 'hooks' -and (Test-StampTarget $src.Name)) { continue }
+        if ($GuardStageFailed -and $sub -eq 'hooks' -and (Test-GuardFile $src.Name)) { continue }
         # A file git does not list (retired, or ignored) is not landed.
         if (-not (Test-Shipped "$sub/$($src.Name)")) { continue }
         $dest = Join-Path $destDir $src.Name
@@ -959,7 +963,7 @@ if (-not (Get-Command python3 -ErrorAction SilentlyContinue) -and -not (Get-Comm
 }
 
 # Retries each file Install-File could not replace and each skill folder Install-Dir could not replace,
-# with a longer back-off (2, 4, 8 s), then re-reads the stamp of every copied guard.py and guard_*.py:
+# with a longer back-off (2, 4, 8 s), then re-reads the stamp of every copied guard.py, guard_*.py and the launcher:
 # a copy that does not carry this run's id is a half install, so it is retried the same way. A file
 # or skill folder that still fails is named here and the run exits non-zero at its end. For a file
 # the guard then fails closed and its text names this installer as the remedy.
@@ -971,7 +975,7 @@ function Resolve-Failures {
     $hooksSrc  = Join-Path $RepoDir 'hooks'
     $stampRe   = '(?m)^INSTALL_ID = "([^"]*)"'
     foreach ($delay in 2, 4, 8, 0) {
-        foreach ($f in @(Get-ChildItem -Path $hooksSrc -Filter 'guard*.py' -File -ErrorAction SilentlyContinue | Where-Object { Test-StampTarget $_.Name })) {
+        foreach ($f in @(Get-ChildItem -Path $hooksSrc -Filter '*.py' -File -ErrorAction SilentlyContinue | Where-Object { Test-IdLanding $_.Name })) {
             if ($GuardStageFailed) { break }
             $d = Join-Path $hooksDest $f.Name
             $i = Get-Item -LiteralPath $d -Force -ErrorAction SilentlyContinue

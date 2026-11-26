@@ -427,7 +427,7 @@ def merge_tool_missing_case():
     env["CLAUDE_CONFIG_DIR"] = os.path.join(folder, "cfg")
     env["PATH"] = GHMAIN + os.pathsep + PY_PATH
     result = subprocess.run(
-        [sys.executable, copy],
+        guard_start(copy),
         input=json.dumps({"tool_name": "Bash", "tool_input": {"command": "gh pr merge 12"},
                           "cwd": NOGIT}),
         capture_output=True, text=True, env=env, timeout=60)
@@ -435,7 +435,7 @@ def merge_tool_missing_case():
         return False, "expected a deny that names the unloadable tool, got %r" % result.stdout[:120]
     # The same copy cannot read the record folders either. The cite rule stands down, and the log says so.
     result = subprocess.run(
-        [sys.executable, copy],
+        guard_start(copy),
         input=json.dumps({"tool_name": "Bash", "cwd": NOGIT, "tool_input": {
             "command": VCS + ' commit -m "cites decisions/one-shared-record-stamp.md"'}}),
         capture_output=True, text=True, env=env, timeout=60)
@@ -474,7 +474,7 @@ def merge_import_exits_case():
     env["CLAUDE_CONFIG_DIR"] = os.path.join(folder, "cfg")
     env["PATH"] = GHPEND + os.pathsep + PY_PATH
     result = subprocess.run(
-        [sys.executable, os.path.join(hooks, "guard.py")],
+        guard_start(os.path.join(hooks, "guard.py")),
         input=json.dumps({"tool_name": "Bash", "tool_input": {"command": "gh pr merge 12"},
                           "cwd": NOGIT}),
         capture_output=True, text=True, env=env, timeout=60)
@@ -628,7 +628,7 @@ def log_env_case():
     env.pop("CLAUDE_CODE_REMOTE", None)
     env["CLAUDE_CONFIG_DIR"] = folder
     result = subprocess.run(
-        [sys.executable, GUARD],
+        guard_start(GUARD),
         input=json.dumps({"tool_name": "Write",
                           "tool_input": {"file_path": "C:/repo/" + ENV},
                           "cwd": "C:/repo"}),

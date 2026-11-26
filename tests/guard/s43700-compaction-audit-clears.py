@@ -67,7 +67,7 @@ def ca_call(folder, cfg, tool, tool_input, where=None):
     keeps the default, a folder that is not a git tree, with the guard process in the folder the suite runs from."""
     payload = {"tool_name": tool, "tool_input": tool_input, "cwd": where or NOGIT, "session_id": CA_SID,
                "transcript_path": CA_TRANSCRIPT}
-    return subprocess.run([sys.executable, os.path.join(folder, "hooks", "guard.py")], input=json.dumps(payload),
+    return subprocess.run(guard_start(os.path.join(folder, "hooks", "guard.py")), input=json.dumps(payload),
                           capture_output=True, text=True, env=ca_env(cfg), timeout=120, cwd=where)
 
 

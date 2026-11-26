@@ -15,11 +15,23 @@ lint/test_find_copies.py.
 This file also holds the runner's own proofs of its crash scan and its registration hygiene (classes CrashScan and
 RegistrationHygiene). Each runs the runner on a section set of its own, so no suite case is in them.
 
+The GuardLoader classes pin how a guard start is loaded. Every guard start runs through hooks/launch_guard.py beside
+the guard, as settings.json does (test_guard.py guard_start). GuardLoaderCount counts the compiles of the guard and of
+each of its modules in those starts: one from a cold cache, none from a warm one, also under PYTHONDONTWRITEBYTECODE=1.
+GuardLoaderCache pins that a stale, corrupt, truncated, empty or other-version cache is rebuilt with the uncached
+verdicts. GuardLoaderLocation pins where the cache lives and that a read-only or missing cache folder changes no
+verdict. GuardLauncher pins that the settings.json guard command names the launcher, and that without the launcher
+the same command falls back to the guard with the same verdict. Each runs test_guard.py as a child on one existing
+family of the real suite (LOADER_FAMILY), so a case costs one child run and no clock is read.
+
     python3 hooks/test_guard_beat.py
 """
 import ast
+import concurrent.futures
 import contextlib
+import importlib.util
 import io
+import json
 import math
 import os
 import shutil
@@ -34,12 +46,13 @@ from collections import namedtuple
 from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+REPO = os.path.dirname(HERE)
 sys.path.insert(0, os.path.join(HERE, "..", "lint"))
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (the one home, lint/_test_temp.py)
 sys.path.insert(0, HERE)
+import mutate_shared  # noqa: E402  module_files and guard_tree: the one home of the guard's module list and copy
 import stall_watch  # noqa: E402  the watcher, and its exit code on a stall (STALL_EXIT)
 import guard_merge  # noqa: E402  merge_module: the merge tool's own FAIL-line parser, read by merge.failing_line
-import mutate_shared  # noqa: E402  guard_tree: a copy of the guard with its siblings, for a planted crash
 
 RUN_FOLDER = _test_temp.run_folder()
 CONFIG_DIR = os.path.join(RUN_FOLDER, "config")
@@ -449,6 +462,500 @@ class WatchedBeatOff(unittest.TestCase):
         self.assertEqual(self.watched.watch_rc, stall_watch.STALL_EXIT,
                          "the watcher exited %r with the beat off, not a stall" % self.watched.watch_rc)
         self.assertIn("STALL", self.watched.watch_out, "the watcher exited with no STALL report")
+
+
+# ---- the guard loader cases (GuardLoaderCount, GuardLoaderCache, GuardLoaderLocation, GuardLauncher) ----
+# The child runs one existing family of the real suite: its allow and deny cases carry the expected verdicts, which
+# main gives uncached, so a family that passes under the loader gives the uncached verdicts. The family is small and
+# holds both kinds. A section folder of its own cannot run: the sections depend on one another (LOG_CHECKS_EXTRA).
+LOADER_FAMILY = "sendmessage-session-id"
+GUARD = os.path.join(HERE, "guard.py")
+LAUNCHER = os.path.join(HERE, "launch_guard.py")
+SETTINGS = os.path.join(REPO, "settings.json")
+CACHE_ENV = ("PYTHONDONTWRITEBYTECODE", "PYTHONPYCACHEPREFIX", "PYTHONPATH")  # set or stripped per case, never inherited
+# A sitecustomize that logs one line per compile() call: the compiled file, and the argv of the process that compiled
+# it. The audit hook reads no clock. It is the count the loader cases read; a compile is what a cached start skips.
+PROBE_SITE = """import os, sys
+LOG = os.environ.get("LOADER_PROBE_LOG", "")
+BUSY = [False]
+
+
+def hook(event, args):
+    if not LOG or BUSY[0] or event != "compile":
+        return
+    BUSY[0] = True
+    try:
+        fd = os.open(LOG, os.O_WRONLY | os.O_APPEND | os.O_CREAT)
+        os.write(fd, ("%s\\t%s\\n" % (args[1], sys.argv[0] if sys.argv else "-c")).encode())
+        os.close(fd)
+    finally:
+        BUSY[0] = False
+
+
+sys.addaudithook(hook)
+"""
+
+
+def base_env():
+    """The caller's environment, minus the knobs of an outer run and the cache knobs each case sets itself."""
+    return {k: v for k, v in os.environ.items() if k not in INHERITED + CACHE_ENV}
+
+
+def probe_folder(root):
+    """A folder with the probe sitecustomize in it, for PYTHONPATH. Returns the folder."""
+    folder = os.path.join(root, "probe")
+    os.makedirs(folder)
+    with open(os.path.join(folder, "sitecustomize.py"), "w", encoding="utf-8") as handle:
+        handle.write(PROBE_SITE)
+    return folder
+
+
+def loader_env(cache=None, probe=None, log=None, dont_write=False):
+    """The environment of one child run of test_guard.py on LOADER_FAMILY. `cache` sets PYTHONPYCACHEPREFIX; None
+    leaves the cache at the guard's own __pycache__ beside it. `probe` and `log` turn on the compile probe.
+    `dont_write` sets PYTHONDONTWRITEBYTECODE=1, the host's setting in this session."""
+    env = base_env()
+    env["CLAUDE_CONFIG_DIR"] = CONFIG_DIR
+    env["GUARD_FAMILY"] = LOADER_FAMILY
+    if cache is not None:
+        env["PYTHONPYCACHEPREFIX"] = cache
+    if probe is not None:
+        env["PYTHONPATH"] = probe
+        env["LOADER_PROBE_LOG"] = log
+    if dont_write:
+        env["PYTHONDONTWRITEBYTECODE"] = "1"
+    return env
+
+
+def loader_run(env):
+    """Run test_guard.py as a child with `env`, on LOADER_FAMILY. Returns a Run."""
+    with tempfile.TemporaryFile(dir=RUN_FOLDER) as out, tempfile.TemporaryFile(dir=RUN_FOLDER) as err:
+        done = subprocess.run(SUITE_CMD, stdout=out, stderr=err, env=env, timeout=TIMEOUT)
+        out.seek(0)
+        err.seek(0)
+        return Run(done.returncode, out.read().decode("utf-8", "replace"), err.read().decode("utf-8", "replace"))
+
+
+LOADER_WORKERS = min(10, os.cpu_count() or 2)  # child runs at once: each thread only waits on its own child process
+
+
+def run_all(envs):
+    """loader_run on each env, LOADER_WORKERS at a time. -> the Runs, in the order given. Each child gets a config folder
+    of its own, so no two children share a guard log. The caller builds every cache root before the call."""
+    jobs = []
+    for env in envs:
+        env = dict(env)
+        env["CLAUDE_CONFIG_DIR"] = tempfile.mkdtemp(dir=RUN_FOLDER)
+        jobs.append(env)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=LOADER_WORKERS) as pool:
+        return list(pool.map(loader_run, jobs))
+
+
+def cache_file(prefix, source=GUARD):
+    """The path Python writes `source`'s bytecode to, with `prefix` as the cache root (None: beside the source)."""
+    saved = sys.pycache_prefix
+    sys.pycache_prefix = prefix
+    try:
+        return importlib.util.cache_from_source(source)
+    finally:
+        sys.pycache_prefix = saved
+
+
+def read_bytes_or_none(path):
+    if not os.path.isfile(path):
+        return None
+    with open(path, "rb") as handle:
+        return handle.read()
+
+
+def write_bytes(path, data):
+    with open(path, "wb") as handle:
+        handle.write(data)
+
+
+def compiles_of(log, target):
+    """How many compiles of `target` the probe logged, outside test_guard.py's own process (its argv ends in test_guard.py)."""
+    if not os.path.exists(log):
+        return 0
+    want = os.path.realpath(target)
+    with open(log, encoding="utf-8") as handle:
+        rows = [line.rstrip("\n").split("\t") for line in handle if line.strip()]
+    return sum(1 for row in rows
+               if len(row) == 2 and os.path.realpath(row[0]) == want and not row[1].endswith("test_guard.py"))
+
+
+def guard_modules():
+    """The realpaths of the guard and of each module it may import: mutate_shared.module_files, the one home of that
+    list. The launcher is left out: Python compiles a script's own source on every start, cached or not, and the
+    launcher is that script. What the loader caches is the guard and its modules."""
+    return {os.path.realpath(path) for path in mutate_shared.module_files(HERE)} - {os.path.realpath(LAUNCHER)}
+
+
+def guard_compiles(log):
+    """{realpath: compiles} of the guard and its modules that the probe logged in the guard starts. The runner's own
+    process (its argv ends in test_guard.py) is left out: it imports the guard's names, which is no start, and it keeps
+    its cache root of its own (test_guard.py)."""
+    counts = {}
+    if not os.path.exists(log):
+        return counts
+    modules = guard_modules()
+    with open(log, encoding="utf-8") as handle:
+        for line in handle:
+            row = line.rstrip("\n").split("\t")
+            if len(row) != 2 or row[1].endswith("test_guard.py"):
+                continue
+            path = os.path.realpath(row[0])
+            if path in modules:
+                counts[path] = counts.get(path, 0) + 1
+    return counts
+
+
+def loader_clean(test, run, what):
+    """Fail the test unless the child passed every case of the family. The FAIL lines name the case whose verdict moved,
+    and a crashed run shows the tail of its stderr, so the failure names the input."""
+    if run.rc != 0 or SUMMARY not in run.out:
+        wrong = [line for line in run.out.splitlines() if line.startswith(("FAIL", "test_guard FAIL"))]
+        detail = "; ".join(wrong[:3]) or run.err.strip()[-300:] or "no output"
+        test.fail("%s: the guard did not give the uncached verdict on every case of %s (rc %s): %s"
+                  % (what, LOADER_FAMILY, run.rc, detail))
+
+
+def stale(data):
+    """The guard's source changed after this cache was written: the mtime the cache records no longer matches the file."""
+    return data[:8] + bytes([data[8] ^ 1]) + data[9:]
+
+
+def corrupt(data):
+    """The header is right and the marshal body is not: every byte past the 16-byte header is flipped."""
+    return data[:16] + bytes(byte ^ 0x5A for byte in data[16:])
+
+
+def other_version(data):
+    """A magic number no CPython writes: the cache is not this interpreter's."""
+    return b"\x00\x00\x00\x00" + data[4:]
+
+
+def truncated(data):
+    """The first half of the cache: the marshal body stops short."""
+    return data[:len(data) // 2]
+
+
+def empty(data):
+    """A cache file of no bytes, as a write cut off before its first byte leaves it."""
+    return b""
+
+
+TAMPERS = (  # (name, the change, what the case calls the cache)
+    ("stale", stale, "a stale cache, its recorded source mtime no longer matching"),
+    ("corrupt", corrupt, "a corrupt cache, its header right and its body flipped"),
+    ("truncated", truncated, "a truncated cache, its body cut short"),
+    ("empty", empty, "an empty cache file"),
+    ("other-version", other_version, "a cache written by another version, its magic number wrong"),
+)
+
+
+class GuardLoaderCount(unittest.TestCase):
+    """A guard start, through the launcher, compiles the guard and each of its modules once from a cold cache, and
+    compiles none of them from a warm one. Under PYTHONDONTWRITEBYTECODE=1 the same holds: the launcher writes its
+    cache there as well."""
+
+    @classmethod
+    def setUpClass(cls):
+        # Cold then warm on one cache root, and cold then warm again under the host's setting on another. Each run writes
+        # its own probe log, so the counts do not mix.
+        cls.root = tempfile.mkdtemp(dir=RUN_FOLDER)
+        cls.cache = os.path.join(cls.root, "pyc")
+        host_cache = os.path.join(cls.root, "host-pyc")
+        probe = probe_folder(cls.root)
+        names = ("cold", "warm", "host-cold", "host-warm")
+        cls.logs = {name: os.path.join(cls.root, name + ".log") for name in names}
+        # The host's own setting: this session's shell sets PYTHONDONTWRITEBYTECODE=1, and the guard starts inherit it.
+        # A warm run reads the cache its cold run wrote, so the cold runs go first, side by side, then the warm runs.
+        first = run_all([loader_env(cache=cls.cache, probe=probe, log=cls.logs["cold"]),
+                         loader_env(cache=host_cache, probe=probe, log=cls.logs["host-cold"], dont_write=True)])
+        second = run_all([loader_env(cache=cls.cache, probe=probe, log=cls.logs["warm"]),
+                          loader_env(cache=host_cache, probe=probe, log=cls.logs["host-warm"], dont_write=True)])
+        cls.runs = {"cold": first[0], "host-cold": first[1], "warm": second[0], "host-warm": second[1]}
+
+    def assert_cold(self, name, what):
+        counts = guard_compiles(self.logs[name])
+        guard = os.path.realpath(GUARD)
+        self.assertEqual(counts.get(guard), 1,
+                         "%s: guard.py was compiled %r times in the guard starts, want 1: a cached start compiles "
+                         "it once; counts %r" % (what, counts.get(guard), {os.path.basename(p): n for p, n in counts.items()}))
+        twice = sorted(os.path.basename(path) for path, n in counts.items() if n != 1)
+        self.assertFalse(twice, "%s: %s compiled more than once in the guard starts" % (what, ", ".join(twice)))
+
+    def assert_warm(self, name, what):
+        counts = guard_compiles(self.logs[name])
+        self.assertFalse(counts, "%s: the guard starts compiled %r, want nothing: a cached start compiles nothing"
+                         % (what, {os.path.basename(p): n for p, n in counts.items()}))
+
+    def test_cold_start_compiles_the_guard_and_each_module_once(self):
+        loader_clean(self, self.runs["cold"], "the cold-cache run")
+        self.assert_cold("cold", "a cold-cache run of %s" % LOADER_FAMILY)
+
+    def test_warm_start_compiles_nothing(self):
+        loader_clean(self, self.runs["warm"], "the warm-cache run")
+        self.assert_warm("warm", "a warm-cache run of %s" % LOADER_FAMILY)
+
+    def test_host_env_cold_start_compiles_the_guard_and_each_module_once(self):
+        loader_clean(self, self.runs["host-cold"], "the cold-cache run under PYTHONDONTWRITEBYTECODE=1")
+        self.assert_cold("host-cold", "a cold-cache run under PYTHONDONTWRITEBYTECODE=1")
+
+    def test_host_env_warm_start_compiles_nothing(self):
+        loader_clean(self, self.runs["host-warm"], "the warm-cache run under PYTHONDONTWRITEBYTECODE=1")
+        self.assert_warm("host-warm", "a warm-cache run under PYTHONDONTWRITEBYTECODE=1")
+
+    def test_probe_counts_one_compile_per_script_start_and_one_per_module_cache_fill(self):
+        # The instrument's own control: a script compiles on every start, a cached import compiles once. Green on
+        # main, because the probe, not the guard, is what it checks.
+        root = tempfile.mkdtemp(dir=RUN_FOLDER)
+        stand = os.path.join(root, "stand")
+        os.makedirs(stand)
+        module = os.path.join(stand, "standin_mod.py")
+        script = os.path.join(stand, "standin_script.py")
+        for path in (module, script):
+            with open(path, "w", encoding="utf-8") as handle:
+                handle.write("VALUE = 1\n")
+        log = os.path.join(root, "control.log")
+        env = base_env()
+        env["PYTHONPYCACHEPREFIX"] = os.path.join(root, "pyc")
+        env["PYTHONPATH"] = probe_folder(root)
+        env["LOADER_PROBE_LOG"] = log
+        importer = [sys.executable, "-c", "import sys; sys.path.insert(0, %r); import standin_mod" % stand]
+        starter = [sys.executable, script]
+        for command in (importer, importer, starter, starter):
+            subprocess.run(command, env=env, capture_output=True, timeout=60, check=True)
+        self.assertEqual(compiles_of(log, module), 1,
+                         "a cached import of standin_mod.py should compile it once in two starts")
+        self.assertEqual(compiles_of(log, script), 2,
+                         "a script should compile on each of its two starts")
+
+
+class GuardLoaderCache(unittest.TestCase):
+    """A stale, corrupt, truncated, empty or other-version cache is rebuilt by the guard start: the run gives the uncached
+    verdicts, and the cache holds the warm bytes again. Each case runs under the host's setting too."""
+
+    @classmethod
+    def setUpClass(cls):
+        # One warm run writes the guard's cache under a cache root of this class's own: the bytes every rebuilt cache must
+        # equal. Each tampered case gets a cache root of its own holding the tampered warm bytes, so no case reads another
+        # case's file, and the cases run side by side.
+        cls.root = tempfile.mkdtemp(dir=RUN_FOLDER)
+        cls.cache = os.path.join(cls.root, "pyc")
+        cls.path = cache_file(cls.cache)
+        cls.warm = loader_run(loader_env(cache=cls.cache))
+        cls.warm_bytes = read_bytes_or_none(cls.path)
+        cls.cases = {}
+        if cls.warm_bytes is None:
+            return
+        keys, paths, envs = [], [], []
+        for name, tamper, what in TAMPERS:
+            for dont_write in (False, True):
+                cache = os.path.join(cls.root, "%s-%s" % (name, "host" if dont_write else "plain"))
+                path = cache_file(cache)
+                os.makedirs(os.path.dirname(path))
+                write_bytes(path, tamper(cls.warm_bytes))
+                keys.append((name, dont_write, what + (" under PYTHONDONTWRITEBYTECODE=1" if dont_write else "")))
+                paths.append(path)
+                envs.append(loader_env(cache=cache, dont_write=dont_write))
+        for (name, dont_write, label), path, run in zip(keys, paths, run_all(envs)):
+            cls.cases[(name, dont_write)] = (run, read_bytes_or_none(path), label)
+
+    def assert_rebuilt(self, name):
+        if self.warm_bytes is None:
+            self.fail("no guard cache was written at %s by a guard call, so there is no cache to tamper with (%s)"
+                      % (self.path, name))
+        for dont_write in (False, True):
+            run, after, label = self.cases[(name, dont_write)]
+            with self.subTest(host_env=dont_write):
+                loader_clean(self, run, label)
+                self.assertEqual(after, self.warm_bytes,
+                                 "%s: the cache was not rebuilt to the bytes a warm start writes" % label)
+
+    def test_stale_cache_gives_the_uncached_verdicts(self):
+        self.assert_rebuilt("stale")
+
+    def test_corrupt_cache_gives_the_uncached_verdicts(self):
+        self.assert_rebuilt("corrupt")
+
+    def test_truncated_cache_gives_the_uncached_verdicts(self):
+        self.assert_rebuilt("truncated")
+
+    def test_empty_cache_gives_the_uncached_verdicts(self):
+        self.assert_rebuilt("empty")
+
+    def test_other_version_cache_gives_the_uncached_verdicts(self):
+        self.assert_rebuilt("other-version")
+
+    def test_same_size_edit_in_one_second_gives_the_uncached_verdict(self):
+        # A same-size edit of guard.py, its mtime pinned back to the cached one. A cache trusted by mtime and size
+        # judges with the edited code; the launcher must rebuild it from the hash of the source it reads, and give
+        # the verdict a plain start gives. No sleep: the mtime is set to the cached one's exact value.
+        root = tempfile.mkdtemp(dir=RUN_FOLDER)
+        config = os.path.join(root, "config")
+        hooks = os.path.join(config, "hooks")
+        mutate_shared.guard_tree(hooks)
+        guard_copy = os.path.join(hooks, "guard.py")
+        launcher = os.path.join(hooks, "launch_guard.py")
+        cache = cache_file(None, guard_copy)   # beside the copy: base_env strips PYTHONPYCACHEPREFIX for every child
+        nogit = os.path.join(root, "nogit")   # a folder that is no git tree, so the payload reads no repo
+        os.makedirs(nogit)
+        payload = json.dumps({"tool_name": "Bash", "tool_input": {"command": "cat .env"}, "cwd": nogit,
+                              "session_id": "s-same-size-edit"})
+        with open(guard_copy, "rb") as handle:
+            true_source = handle.read()
+        # The same eleven bytes: the env-file check in judge_shell never fires in the variant.
+        old, new = b"if refusal:", b"if 0 and 1:"
+        self.assertEqual(len(old), len(new), "the variant must be the same size as the source")
+        self.assertEqual(true_source.count(old), 1, "the variant's anchor is not in guard.py exactly once")
+        variant = true_source.replace(old, new, 1)
+
+        # Warm the cache on the variant, and keep the variant's mtime: the cache records it.
+        write_bytes(guard_copy, variant)
+        cached_mtime = os.stat(guard_copy)
+        warm = verdict_with_rule(*guard_call([sys.executable, launcher], payload, config))
+        self.assertIsNotNone(read_bytes_or_none(cache), "no guard cache at %s after the warm start on the variant" % cache)
+        self.assertNotEqual(warm[1], "deny", "the variant still denies cat .env (%r), so a stale cache would not show"
+                            % (warm,))
+
+        # Restore the true source, then pin its mtime to the cached one's: same size, same mtime as the stale cache.
+        write_bytes(guard_copy, true_source)
+        os.utime(guard_copy, ns=(cached_mtime.st_atime_ns, cached_mtime.st_mtime_ns))
+        plain = verdict_with_rule(*guard_call([sys.executable, guard_copy], payload, config))
+        self.assertEqual(plain[1:], ("deny", "env-file"), "a plain start gave %r for cat .env, want deny by env-file"
+                         % (plain,))
+
+        launched = verdict_with_rule(*guard_call([sys.executable, launcher], payload, config))
+        self.assertEqual(launched, plain, "the launcher gave %r for cat .env after a same-size edit, a plain start %r: "
+                         "the stale cache judged with the edited code" % (launched, plain))
+        # By count of the stored hash: the stale cache was not used, so it now holds the hash of the restored source.
+        expected_head = importlib.util.MAGIC_NUMBER + b"\x03\x00\x00\x00" + importlib.util.source_hash(true_source)
+        head = (read_bytes_or_none(cache) or b"")[:16]
+        self.assertEqual(head, expected_head, "the cache at %s does not hold the hash of the restored source: the "
+                         "launcher did not rewrite the stale cache" % cache)
+
+
+GUARD_PAYLOADS = (("rm -rf /", "deny"), ("echo hi", "allow"))  # a refused delete, and a call the guard lets through silently
+
+
+def guard_call(argv, payload, config):
+    """One guard start: argv, with the payload on stdin and CLAUDE_CONFIG_DIR at `config`. -> (rc, stdout)."""
+    env = base_env()
+    env["CLAUDE_CONFIG_DIR"] = config
+    env["CLAUDE_GUARD_ROOT_PID"] = str(os.getpid())   # the suite stands in for `claude`, as test_guard.py does
+    done = subprocess.run(argv, input=payload, capture_output=True, text=True, env=env, timeout=TIMEOUT)
+    return done.returncode, done.stdout
+
+
+def verdict_of(rc, out):
+    """The verdict of one guard start: its return code and the permission it prints, or "allow" when it prints nothing."""
+    if not out.strip():
+        return rc, "allow"
+    try:
+        return rc, json.loads(out)["hookSpecificOutput"]["permissionDecision"]
+    except (ValueError, KeyError, TypeError):
+        return rc, "unreadable: " + out[:120]
+
+
+def verdict_with_rule(rc, out):
+    """The verdict of one guard start as (rc, decision, rule). The rule is the word before the colon of the printed
+    reason, or "" when the start printed none."""
+    rc, decision = verdict_of(rc, out)
+    try:
+        rule = json.loads(out)["hookSpecificOutput"]["permissionDecisionReason"].split(":", 1)[0]
+    except (ValueError, KeyError, TypeError):
+        rule = ""
+    return rc, decision, rule
+
+
+class GuardLauncher(unittest.TestCase):
+    """The settings.json guard command starts hooks/launch_guard.py. Without the launcher beside the guard, the same
+    command falls back to guard.py. Each start gives the verdict a plain start gives."""
+
+    def guard_commands(self):
+        with open(SETTINGS, encoding="utf-8") as handle:
+            settings = json.load(handle)
+        commands = []
+        for groups in settings.get("hooks", {}).values():
+            for group in groups:
+                for hook in group.get("hooks", []):
+                    if "hooks/guard.py" in hook.get("command", ""):
+                        commands.append(hook["command"])
+        return commands
+
+    def test_the_settings_guard_commands_name_the_launcher(self):
+        commands = self.guard_commands()
+        self.assertTrue(commands, "settings.json holds no guard hook command, so the launcher check reads nothing")
+        for command in commands:
+            self.assertIn("launch_guard.py", command,
+                          "a settings.json guard command starts guard.py without the launcher: %r" % command[:160])
+
+    def test_without_the_launcher_the_command_falls_back_to_the_guard(self):
+        root = tempfile.mkdtemp(dir=RUN_FOLDER)
+        with_launcher = os.path.join(root, "with")
+        without = os.path.join(root, "without")
+        nogit = os.path.join(root, "nogit")   # a folder that is no git tree, so the payload reads no repo
+        os.makedirs(nogit)
+        for config in (with_launcher, without):
+            mutate_shared.guard_tree(os.path.join(config, "hooks"))
+        launcher = os.path.join(without, "hooks", "launch_guard.py")
+        if os.path.isfile(launcher):   # main has no launcher to remove, and the same check then holds as its control
+            os.remove(launcher)
+        plain = [sys.executable, os.path.join(without, "hooks", "guard.py")]
+        for command in self.guard_commands():
+            for call, want in GUARD_PAYLOADS:
+                payload = json.dumps({"tool_name": "Bash", "tool_input": {"command": call}, "cwd": nogit,
+                                      "session_id": "s-launcher-fallback"})
+                with self.subTest(call=call, command=command[:48]):
+                    start = verdict_of(*guard_call(plain, payload, without))
+                    launched = verdict_of(*guard_call(["sh", "-c", command], payload, with_launcher))
+                    fallback = verdict_of(*guard_call(["sh", "-c", command], payload, without))
+                    self.assertEqual(start[1], want, "a plain start gave %r for %r, want %r" % (start, call, want))
+                    self.assertEqual(launched, start, "the command through the launcher gave %r, a plain start %r"
+                                     % (launched, start))
+                    self.assertEqual(fallback, start, "the command without the launcher gave %r, a plain start %r: "
+                                     "it does not fall back to guard.py" % (fallback, start))
+
+
+class GuardLoaderLocation(unittest.TestCase):
+    """The guard's cache lives beside the guard, and a read-only or missing cache folder changes no verdict."""
+
+    @classmethod
+    def setUpClass(cls):
+        # The three runs need no cache of one another, so they run side by side. The default run starts with no cache
+        # beside the guard: removing it makes the run show whether a start writes it.
+        root = tempfile.mkdtemp(dir=RUN_FOLDER)
+        cls.default_path = cache_file(None)   # the default: hooks/__pycache__/guard.<tag>.pyc
+        if os.path.isfile(cls.default_path):
+            os.remove(cls.default_path)
+        readonly = os.path.join(root, "readonly")
+        os.makedirs(readonly)
+        os.chmod(readonly, 0o555)
+        blocker = os.path.join(root, "not-a-folder")
+        write_bytes(blocker, b"")   # a file where the cache folder would sit: the folder cannot be made
+        try:
+            cls.default, cls.read_only, cls.missing = run_all([
+                loader_env(),
+                loader_env(cache=readonly),
+                loader_env(cache=os.path.join(blocker, "pyc")),
+            ])
+        finally:
+            os.chmod(readonly, 0o755)
+        cls.default_written = os.path.isfile(cls.default_path)
+
+    def test_guard_cache_is_written_beside_the_guard(self):
+        loader_clean(self, self.default, "the default-location run")
+        self.assertTrue(self.default_written,
+                        "no guard cache at %s after a guard call: the guard's source is compiled on every call"
+                        % self.default_path)
+
+    def test_read_only_cache_folder_changes_no_verdict(self):
+        loader_clean(self, self.read_only, "a read-only cache folder")
+
+    def test_missing_cache_folder_changes_no_verdict(self):
+        loader_clean(self, self.missing, "a missing cache folder")
 
 
 # --- The runner's crash scan (decide, tests/guard/s27664-owner-judge.py) and registration hygiene (add, hooks/test_guard.py).

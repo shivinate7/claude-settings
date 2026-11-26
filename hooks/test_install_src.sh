@@ -3801,7 +3801,7 @@ make_guard_clone() {
 #   - a stage copy into installs/<id>.tmp/hooks/guard.d/ (cp), logged "staged <name>" once it lands;
 #   - the landing of a guard file over hooks/guard*.py (mv, the per-file install of the older copy mode),
 #     logged "landed <epoch seconds> <build>", with "install.sh: landed id=<id>" to SWAP_INSTALL_LOG when
-#     the file is stamped (guard.py, guard_*.py); and the switch of .cs-current (mv), logged the same way
+#     the file is stamped (guard.py, guard_*.py, launch_guard.py); and the switch of .cs-current (mv), logged the same way
 #     with the id of the generation it names.
 # Before the second such write of one install whose SWAP_PAUSE is set, guard_pause logs "paused", sleeps
 # SWAP_PAUSE seconds and logs "resumed". Before put_file's or the switch's rename (its source ends in
@@ -3832,10 +3832,10 @@ case "\$dest" in
 esac
 "$real_mv" "\$@" || exit \$?
 case "\$dest" in
-  */hooks/guard*.py)
+  */hooks/guard*.py|*/hooks/launch_guard.py)
     printf 'landed %s %s\n' "\$(date +%s)" "\$(sed -n 's/^# build //p' "\$dest" | head -n1)" >> "\$SWAP_EVENTS"
     case "\$(basename "\$dest")" in
-      guard.py|guard_*.py)
+      guard.py|guard_*.py|launch_guard.py)
         if [ -n "\${SWAP_INSTALL_LOG:-}" ]; then
           printf '%s install.sh: landed id=%s\n' "\$(date +%Y-%m-%dT%H:%M:%S%z | sed 's/\(..\)\$/:\1/')" "\$(sed -n 's/^INSTALL_ID = "\([^"]*\)".*/\1/p' "\$dest" | head -n1)" >> "\$SWAP_INSTALL_LOG"
         fi ;;

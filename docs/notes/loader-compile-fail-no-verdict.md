@@ -1,0 +1,1 @@
+- loader-compile-fail-no-verdict: A launcher that fails to compile exits 1 and prints no verdict. Seen: 2026-11-25 x1

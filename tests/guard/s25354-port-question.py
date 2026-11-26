@@ -279,7 +279,7 @@ def port_get_logs_nothing_case():
     env.pop("CLAUDE_CODE_REMOTE", None)
     env["CLAUDE_CONFIG_DIR"] = LOGDIR
     run = subprocess.run(
-        [sys.executable, GUARD],
+        guard_start(GUARD),
         input=json.dumps({"tool_name": "ArtifactData", "cwd": PQ_REPO,
                           "tool_input": {"action": "get", "url": PQ_URL, "collection": "items",
                                          "doc_id": "suspense-cards"}}),

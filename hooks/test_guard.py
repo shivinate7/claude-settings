@@ -50,6 +50,7 @@ Two literals are assembled from parts, so that this file cannot trip the guard i
 """
 
 import ast  # noqa: F401  the section files use it
+import atexit
 import contextlib  # noqa: F401  the section files use it
 import hashlib  # noqa: F401  the section files use it
 import io  # noqa: F401  the section files use it
@@ -77,9 +78,27 @@ REPO = os.path.dirname(HERE)
 # one mutation. A mutation test then needs no copy of this file, so the cases cannot drift from the
 # cases that pass.
 GUARD = os.environ.get("GUARD_UNDER_TEST") or os.path.join(HERE, "guard.py")
+
+
+def guard_start(guard=None):
+    """The argv that starts a guard the way settings.json does: hooks/launch_guard.py beside it when that file is
+    there, else the guard itself. Every case that starts a guard calls this, so the suite and the live hook cannot
+    drift (test_guard_beat.py pins the command string to the launcher)."""
+    guard = guard or GUARD
+    launcher = os.path.join(os.path.dirname(guard), "launch_guard.py")
+    return [sys.executable, launcher if os.path.isfile(launcher) else guard]
+
+
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, "..", "lint"))
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
+import _test_temp  # noqa: E402  test-temp-standard: this runner's own run folder (lint/_test_temp.py)
+# The runner's imports of the guard and its modules take a cache root of this run's own. The loader cases of
+# hooks/test_guard_beat.py count the guard starts' compiles in the cache root they name, so the runner must neither
+# write that cache nor read it: a corrupt cache there would stop this import before any case.
+RUNNER_RUN = _test_temp.run_folder()
+sys.pycache_prefix = os.path.join(RUNNER_RUN, "pyc")
+atexit.register(shutil.rmtree, RUNNER_RUN, True)
 from precompact_handoff import PREMISE_KINDS  # noqa: E402,F401  the one home of the premise kinds
 import precompact_handoff as ph  # noqa: E402,F401  the one home of the handoff and flag paths
 import local_time  # noqa: E402,F401  the one home of the inbox paths

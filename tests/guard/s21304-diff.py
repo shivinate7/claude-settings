@@ -273,7 +273,7 @@ def role_log_case():
     for extra, want in stops:
         body = {"hook_event_name": "SubagentStop", "agent_id": "bld1", "agent_type": "builder"}
         body.update(extra)
-        got = subprocess.run([sys.executable, GUARD], input=json.dumps(body), capture_output=True,
+        got = subprocess.run(guard_start(GUARD), input=json.dumps(body), capture_output=True,
                              text=True, env=env, timeout=60)
         if got.stdout.strip():
             problems.append("%s: expected a silent allow, got %r" % (want, got.stdout[:60]))
@@ -304,7 +304,7 @@ def _diff_log_run(folder, repo, agent_type, agent_id, commit=True):
                    "agent_type": agent_type})
     out = ""
     for body in bodies:
-        got = subprocess.run([sys.executable, GUARD], input=json.dumps(body), capture_output=True,
+        got = subprocess.run(guard_start(GUARD), input=json.dumps(body), capture_output=True,
                              text=True, env=env, timeout=120)
         out += got.stdout.strip()
     text = open(path, encoding="utf-8").read() if os.path.exists(path) else ""

@@ -3,9 +3,11 @@ FAMILY = "fail-closed"
 
 
 def _guard_siblings(folder):
-    """The guard_* modules in `folder`, by name: every guard_*.py, so a new module cannot be missed.
+    """The guard_* modules in `folder`, by name: every guard_*.py, so a new module cannot be missed. The launcher is
+    launch_guard.py, outside that pattern: it starts guard.py from its bytecode cache and judges no call.
     Test files start with test_, so they are never listed. _guard_copy copies these and every other module in the folder."""
-    return sorted(e[:-3] for e in os.listdir(folder) if e.startswith("guard_") and e.endswith(".py"))
+    return sorted(e[:-3] for e in os.listdir(folder)
+                  if e.startswith("guard_") and e.endswith(".py"))
 
 
 # The modules the write-family move adds (decision guard-split-by-family). This section is their one home: the
@@ -57,7 +59,7 @@ def _run_copy(folder, command, name, pythonpath=None):
     """One Bash call through the copy's guard.py, with a config folder of its own. The script's own folder
     is on the path, so the sibling imports resolve there."""
     payload = json.dumps({"tool_name": "Bash", "tool_input": {"command": command}, "cwd": NOGIT})
-    return subprocess.run([sys.executable, os.path.join(folder, "guard.py")], input=payload,
+    return subprocess.run(guard_start(os.path.join(folder, "guard.py")), input=payload,
                           capture_output=True, text=True, env=_copy_env(name, pythonpath), timeout=120)
 
 

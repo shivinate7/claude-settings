@@ -111,7 +111,7 @@ def pd_run(name, body):
     env.pop("CLAUDE_CODE_REMOTE", None)
     env.pop("CLAUDE_CODE_SESSION_ID", None)
     env.pop("CLAUDE_CODE_REMOTE_SESSION_ID", None)
-    got = subprocess.run([sys.executable, GUARD], input=json.dumps(body), capture_output=True, text=True,
+    got = subprocess.run(guard_start(GUARD), input=json.dumps(body), capture_output=True, text=True,
                          env=env, timeout=120)
     if got.returncode != 0:
         return "error", "exit %d: %s" % (got.returncode, got.stderr.strip()[:200]), []
