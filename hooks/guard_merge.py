@@ -261,6 +261,7 @@ UNKNOWN_PIN_CAUSE = " is not a string the loaded merge tool pins"  # UnknownPin.
 MERGE_CHECK_UNKNOWN_PIN_REASON = (
     "Rule (Git): this head is not settled: %s. A merge waits for every check and workflow run on "
     "the head, required or not, and a read that could not run counts as not settled. "
+    "A string the merge tool cannot read is refused as unknown (decision stable-branch, the guard section). "
     "Remedy: the merge tool the guard loaded does not know this string yet, so the merge tool refuses it too. "
     "Wait for the installed merge tool to move to a version that pins it, or land the reader for the string first, then retry."
 )
