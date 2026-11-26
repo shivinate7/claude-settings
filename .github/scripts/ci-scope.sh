@@ -57,14 +57,25 @@ else
 fi
 if [ -n "$files" ]; then
   W=checks_windows M=checks_windows_merge R=checks_windows_rest Z=checks_windows_sweep X=checks_macos S=shell_macos P=pointer_windows
+  # The guard set's files come from hooks/guard-set.txt, one name per line (the one list: install.sh and install.ps1 read it too). An
+  # unreadable or empty list turns everything on, as landed-dirs.txt does below.
+  gset=$(tr -d '\r' < hooks/guard-set.txt 2>/dev/null | sed 's/#.*//; s/[[:space:]]//g' | grep -v '^$')
+  [ -n "$gset" ] || on="$on $ALL "
   while IFS= read -r f; do
-    case "$f" in
+    # gk is the path the first case reads: a file the list names reads as hooks/guard.py, so it takes the guard arm's flags.
+    gk=$f
+    while IFS= read -r g; do
+      # shellcheck disable=SC2254  # the list's names are the case patterns
+      case "$f" in hooks/$g) gk=hooks/guard.py; break ;; esac
+    done <<< "$gset"
+    case "$gk" in
       # Fail safe: this script, green-head.sh (its line is GREEN_HEAD), the workflow, and git settings that change every checkout.
       .github/scripts/ci-scope.sh|.github/scripts/green-head.sh|.github/workflows/checks.yml|.gitattributes) on="$on $ALL " ;;
-      # Guard and its installers' inputs: test_guard, the janitor suites and config_watch run guard.py.
+      # Guard and its installers' inputs: test_guard, the janitor suites and config_watch run guard.py. The guard set's other files
+      # are read as hooks/guard.py (gk, from hooks/guard-set.txt, the one list); an edit to that list sets the same flags.
       # guard_<family>.py modules are guard.py; guard_test_* is not (it falls to hooks/* below).
       hooks/guard_test_*) on="$on $R $Z $X code guard " ;;
-      hooks/guard.py|hooks/guard_*.py|hooks/shared_names.py|hooks/git_reads.py|hooks/question_form.py|hooks/own_session.py|hooks/precompact_handoff.py|hooks/merge_options.py|hooks/override.py|hooks/_nowindow.py|hooks/proc_env.py|hooks/reread_check.py|hooks/call_judge.py|hooks/decision_watch.py|hooks/feedback_guard.py|hooks/local_time.py|hooks/ruling_home.py|hooks/route_match.py|hooks/reply_judge.py|hooks/stall_watch.py|hooks/agent_brief.py|hooks/mail.py|hooks/ci_wait_cap.py|hooks/ci_wake.py|hooks/required_check.py|hooks/session_role.py|hooks/answered_claims.py|hooks/git_bash.py|hooks/stale_install.py|hooks/ci_wait_cap.json|hooks/route_rows.json|hooks/precompact_handoff_prompt.md|hooks/wait_common.py|hooks/mutate_shared.py) on="$on $W $R $Z $X code guard sweep " ;;
+      hooks/guard.py|hooks/guard_*.py|hooks/guard-set.txt|hooks/mutate_shared.py) on="$on $W $R $Z $X code guard sweep " ;;
       # settings.json: the same jobs, plus merge/test_merge.py (CloudAllow reads it).
       settings.json) on="$on $M $W $R $Z $X code guard sweep " ;;
       landed-dirs.txt) on="$on $W $R $Z $X $S code guard " ;;

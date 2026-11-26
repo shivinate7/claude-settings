@@ -1,0 +1,1 @@
+- drop-worktree-return-unread: no production caller reads the return value of `drop_worktree`; only a test does. Seen: 2026-11-25 x1

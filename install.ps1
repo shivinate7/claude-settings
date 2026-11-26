@@ -303,7 +303,8 @@ put() {
   return 1
 }
 # land_guard_set SRC DEST: the guard files, as one set (owner ruling 2026-10-15, install-set). Step 1
-# writes every guard file, stamped with this run's id, and shared_names.py, git_reads.py, question_form.py, own_session.py, precompact_handoff.py, merge_options.py, override.py, _nowindow.py, proc_env.py, reread_check.py, call_judge.py, decision_watch.py, feedback_guard.py, local_time.py, ruling_home.py, route_match.py, reply_judge.py, stall_watch.py, agent_brief.py, mail.py, ci_wait_cap.py, ci_wake.py, required_check.py, session_role.py, ci_wait_cap.json, route_rows.json precompact_handoff_prompt.md and wait_common.py, which the guard imports or reads beside itself, and the tools a launcher in bin runs (lease.py),
+# writes every guard file (guard.py and guard_*.py), stamped with this run's id, and each file hooks/guard-set.txt names
+# (the one list of the guard set; install.ps1 and install.sh read it too)
 # into DEST/guard.d/<id>/, where no guard reads it
 # yet. Step 2 replaces DEST/guard.py, the one landing that switches: a stamped guard.py loads
 # guard.d/<its id>/. Step 3 lands the flat guard_*.py. The folder of the set before this one stays;
@@ -311,10 +312,22 @@ put() {
 land_guard_set() {
   gdir="`$2/guard.d/`$id"
   prev=`$(sed -n 's/^INSTALL_ID = "\([^"]*\)".*/\1/p' "`$2/guard.py" 2>/dev/null | head -n1)
+  gnames=
+  if [ -f "`$1/guard-set.txt" ]; then
+    gnames=`$(tr -d '\r' < "`$1/guard-set.txt" | sed 's/#.*//; s/^[[:space:]]*//; s/[[:space:]]*`$//' | grep -v '^`$')
+    if [ -z "`$gnames" ] && [ -f "`$1/guard.py" ]; then
+      echo "claude-settings: hooks/guard-set.txt names no file; the guard set is left as it was" >&2
+      failed=1; return 1
+    fi
+  fi
   mkdir -p "`$gdir" || { failed=1; return 1; }
-  for gf in "`$1"/guard.py "`$1"/guard_*.py "`$1"/shared_names.py "`$1"/git_reads.py "`$1"/question_form.py "`$1"/own_session.py "`$1"/precompact_handoff.py "`$1"/merge_options.py "`$1"/override.py "`$1"/_nowindow.py "`$1"/proc_env.py "`$1"/reread_check.py "`$1"/call_judge.py "`$1"/decision_watch.py "`$1"/feedback_guard.py "`$1"/local_time.py "`$1"/ruling_home.py "`$1"/route_match.py "`$1"/reply_judge.py "`$1"/stall_watch.py "`$1"/agent_brief.py "`$1"/mail.py "`$1"/ci_wait_cap.py "`$1"/ci_wake.py "`$1"/required_check.py "`$1"/session_role.py "`$1"/lease.py "`$1"/answered_claims.py "`$1"/git_bash.py "`$1"/stale_install.py "`$1"/ci_wait_cap.json "`$1"/route_rows.json "`$1"/precompact_handoff_prompt.md "`$1"/wait_common.py; do
+  for gf in "`$1"/guard.py "`$1"/guard_*.py; do
     [ -f "`$gf" ] || continue
     put "`$gf" "`$gdir/`$(basename "`$gf")" || { rm -rf "`$gdir"; return 1; }
+  done
+  for gn in `$gnames; do
+    [ -f "`$1/`$gn" ] || continue
+    put "`$1/`$gn" "`$gdir/`$gn" || { rm -rf "`$gdir"; return 1; }
   done
   [ -f "`$1/guard.py" ] && { put "`$1/guard.py" "`$2/guard.py" || { rm -rf "`$gdir"; return 1; }; }
   for gf in "`$1"/guard_*.py; do [ -f "`$gf" ] && put "`$gf" "`$2/`$(basename "`$gf")"; done
@@ -762,11 +775,29 @@ function Test-LinksWork([string]$AnySrc) {
     try { Remove-Leftover $probe; New-Link $probe $AnySrc; Remove-Leftover $probe; return $true }
     catch { try { Remove-Leftover $probe } catch { }; return $false }
 }
+# The entries of hooks/guard-set.txt: one file name per line, `#` comments and blank lines dropped. Get-Content takes LF and
+# CRLF line ends alike on Windows PowerShell 5.1, the form Get-LandedDirs reads landed-dirs.txt in.
+function Get-GuardSetEntries([string]$ManifestPath) {
+    Get-Content -LiteralPath $ManifestPath |
+        ForEach-Object { ($_ -replace '#.*', '').Trim() } |
+        Where-Object { $_ -ne '' }
+}
 function Install-GuardSet([string]$SrcDir, [string]$DestDir) {
     $names = @(Get-ChildItem -LiteralPath $SrcDir -File -ErrorAction SilentlyContinue | Where-Object { Test-StampTarget $_.Name })
     if ($names.Count -eq 0 -or (Test-LinksWork $names[0].FullName)) { return }
-    # shared_names.py, git_reads.py, question_form.py, own_session.py, precompact_handoff.py, merge_options.py, override.py, _nowindow.py, proc_env.py, reread_check.py, call_judge.py, decision_watch.py, feedback_guard.py, local_time.py, ruling_home.py, route_match.py, reply_judge.py, stall_watch.py, agent_brief.py, mail.py, ci_wait_cap.py, ci_wake.py, required_check.py, session_role.py, ci_wait_cap.json, route_rows.json precompact_handoff_prompt.md and wait_common.py, which the guard imports or reads beside itself, and the tools a launcher in bin runs (lease.py), ride in the set unstamped (no stamp target).
-    foreach ($shared in 'shared_names.py', 'git_reads.py', 'question_form.py', 'own_session.py', 'precompact_handoff.py', 'merge_options.py', 'override.py', '_nowindow.py', 'proc_env.py', 'reread_check.py', 'call_judge.py', 'decision_watch.py', 'feedback_guard.py', 'local_time.py', 'ruling_home.py', 'route_match.py', 'reply_judge.py', 'stall_watch.py', 'agent_brief.py', 'mail.py', 'ci_wait_cap.py', 'ci_wake.py', 'required_check.py', 'session_role.py', 'lease.py', 'answered_claims.py', 'git_bash.py', 'stale_install.py', 'ci_wait_cap.json', 'route_rows.json', 'precompact_handoff_prompt.md', 'wait_common.py') {
+    # Each file hooks/guard-set.txt names is in the set too, beside the guard files: the one list, which install.sh and the post-merge hook read too.
+    # A manifest with no entry fails the stage when a guard.py is in the source; a source with no manifest stages the guard files alone.
+    $manifest = Join-Path $SrcDir 'guard-set.txt'
+    $entries = @()
+    if (Test-Path -LiteralPath $manifest) {
+        $entries = @(Get-GuardSetEntries $manifest)
+        if ($entries.Count -eq 0 -and (Test-Path -LiteralPath (Join-Path $SrcDir 'guard.py'))) {
+            Log "hooks\guard-set.txt names no file, so the guard set would be empty; the guard files stay as they were"
+            $script:GuardStageFailed = $true
+            return
+        }
+    }
+    foreach ($shared in $entries) {
         $names += @(Get-ChildItem -LiteralPath $SrcDir -File -Filter $shared -ErrorAction SilentlyContinue)
     }
     $script:GuardSetMode = $true
