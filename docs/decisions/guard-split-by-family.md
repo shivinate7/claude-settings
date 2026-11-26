@@ -18,7 +18,7 @@ The lane reads the rulings this way; the owner's words are quoted above.
 
 - A new rule goes in its family's module, `hooks/guard_<family>.py`. A rule with no family gets a new module and a `FAMILIES` row.
 - `hooks/guard.py` is the dispatcher: the loader, `judge`, `judge_shell`, `never_lifted`, `main`, and one index line per rule. It takes no new rule body.
-- A family module may define `hit(call)` and `shell_hit(call)`. The dispatcher calls each one that exists, in `_FAMILY_MODULES` order: `hit` for every judged call, `shell_hit` for every shell command. A hit refuses with `guard_core.refuse` and a literal rule id, or returns. So a new rule in a family edits that family's file only.
+- A family module may define `hit(call)` and `shell_hit(call)`. The dispatcher calls each one that exists, in `_FAMILY_MODULES` order: `hit` for every judged call, `shell_hit` once for every shell call. `hit` runs before each tool's own tail rules, so a shell call's `hit` runs before `judge_shell`. A hit refuses with `guard_core.refuse` and a literal rule id, or returns. So a new rule in a family edits that family's file only.
 - No size budget and no growth check guards this. The practice does.
 - Two rules that refuse the same act are merged into one. The lane reports each pair to the owner before it merges them.
 

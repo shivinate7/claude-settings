@@ -30,6 +30,6 @@ A model-call hook is not an exception. Each one is a child inside its own hook b
 Decision `guard-split-by-family` (one module per guard rule family) is the standing rule.
 
 - A new rule goes in its family's module, `hooks/guard_<family>.py`, never in `hooks/guard.py`. `hooks/guard.py` is the dispatcher only.
-- The rule runs from the module's `hit(call)` (every judged call) or `shell_hit(call)` (every shell command). It refuses with `guard_core.refuse` and a literal rule id, or returns. The dispatcher calls both, so the rule edits no line of `hooks/guard.py`.
+- The rule runs from the module's `hit(call)` (every judged call) or `shell_hit(call)` (once for every shell call). It refuses with `guard_core.refuse` and a literal rule id, or returns. The dispatcher calls both, so the rule edits no line of `hooks/guard.py`.
 - A rule with no family gets a new `hooks/guard_<family>.py`, a `FAMILIES` row in `hooks/test_guard.py` and a `GUARD_MODULE_FAMILIES` row in `hooks/mutate_guard.py`.
 - Before you add a rule, search the guard modules for one that already refuses the act. Extend that rule; do not add a second.
