@@ -21,7 +21,7 @@ from guard_core import (
     ASSIGNMENT, CMD_EXE_NAMES, ENV_PATTERN_COMMANDS, PLAYWRIGHT_PS_SHELLS,
     POWERSHELL_CALL, PowerShellScript, SILENT_WRITE_REDIRECT, _pwsh_script, _skip_assignments_and_keywords,
     _split_heredocs, _strip_heredoc_bodies_unconditionally, backgrounding_amp, basename, inline_script,
-    resolve_command, segment_tokens, split_segments,
+    inner_commands, resolve_command, segment_tokens, split_segments,
 )
 from guard_env import substitution_commands
 import own_session  # the one home of the agent transcript folder
@@ -92,6 +92,26 @@ def kill_hit(tokens) -> str:
             and any(arg.split("@")[0] == "kill-port" for arg in rest)):
         return word + " kill-port"
     return ""
+
+
+def nested_kill_texts(texts):
+    """The command texts that the commands of `texts` run through a wrapper, at any depth, and the substitutions in
+    each: `sh -c BODY`, `bash -lc`, `env`, `timeout 5 bash -c`, `xargs sh -c`, `red-run SHA -- CMD`, `su -c`,
+    `find -exec`. Parsed as shell by `inner_commands`, the one reader of wrappers, so a kill word that is only data to
+    another program (an echo, a grep pattern, a Python string, a commit message) is never a text here. Texts that run
+    on another machine or in a container (`ssh`, `docker exec`) are left out: they kill no process of this one.
+    Each text in the result is new: none is in `texts`."""
+    found = list(texts)
+    for text in found:   # the list grows while it is read, so a text inside a text is read too
+        handed = []
+        for segment in split_segments(text):
+            tokens = segment_tokens(segment) if segment.strip() else None
+            handed.extend(inner_commands(tokens, local=True) if tokens else ())
+        for inner in handed:
+            for new in (inner, *substitution_commands(inner, inner)):
+                if new not in found:
+                    found.append(new)
+    return found[len(texts):]
 
 
 KILL_PID_RE = re.compile(r"^-?[0-9]+$")
