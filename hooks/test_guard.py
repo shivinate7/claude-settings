@@ -13,9 +13,9 @@ GUARD_FAMILY=<name> runs only one family of cases (FAMILIES, at the top of this 
 name, or a filter that matches no case, fails the run. GUARD_TIMING=1 prints what each fixture
 block cost.
 
-GUARD_HOLDER_RECORD=<path> names the file the run writes the pid of each holder the kill cases start to, once
-the run has stopped them (test_guard_beat.py reads it). The holders are stopped on a normal return, sys.exit, an
-uncaught exception, KeyboardInterrupt and SIGTERM (which exits 143). SIGKILL, os._exit and any other fatal signal
+GUARD_HOLDER_RECORD=<path> names the file the run writes the pid of each holder the kill cases start to, as its
+reap starts and before it signals any holder (test_guard_beat.py reads it). The holders are stopped on a normal
+return, sys.exit, an uncaught exception, KeyboardInterrupt and SIGTERM (which exits 143). SIGKILL, os._exit and any other fatal signal
 run no code, so they leave the holders running. A holder that cannot be stopped is named on stderr.
 
 Rule matching is exact. A deny or ask case passes only when the rule its reason prints (the text before the reason's
@@ -657,8 +657,8 @@ HOLDERS_STOPPED = []  # one entry once the reap has run, so the atexit call afte
 
 def note_holder(pid):
     """Record a holder the kill cases start, with its start time now."""
+    HOLDER_STARTS[pid] = holder_start(pid)  # read first: a pid is recorded only once its start time is known
     ORPHAN_PIDS.append(pid)
-    HOLDER_STARTS[pid] = holder_start(pid)
 
 
 def holder_start(pid):
@@ -696,7 +696,8 @@ def stop_holders():
         return
     HOLDERS_STOPPED.append(True)
     try:
-        signal.signal(signal.SIGTERM, signal.SIG_IGN)  # a second TERM must not cut this reap short
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)  # a second TERM or INT must not cut this reap short
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
     except (OSError, ValueError):
         pass
     try:
