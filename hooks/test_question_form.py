@@ -2465,14 +2465,15 @@ def case_ruled_store_ranks_by_shared_words_before_recency():
 
 
 # Decision and debt records join the candidates only when they share a word with the question, scored by the same
-# helper the ruled store uses (_words). The top RECORD_TOP by score go in; a record the question names always does;
+# helper the ruled store uses (_words). The best-scored go in first; a record the question names always does;
 # and the whole block holds at most CANDIDATES_CAP characters, the lowest-scored lines going first and no line cut.
-# Each case reads the constants from question_form, never a copied number.
+# When the cap leaves a record out, the Not searched text says how many. Each case reads the constants from
+# question_form, never a copied number.
 RECORD_QUESTION_WORDS = ["zephyr", "quartz", "lantern", "mosaic", "tundra", "lane", "gets", "reviewer"]
 RECORD_QUESTION = "Which zephyr quartz lantern mosaic tundra lane gets the reviewer?"
 RECORD_FILLER = "stays pinned as recorded"  # plain words that share no word with the question
 RECORD_ZERO = "Stays as recorded, with nothing in common."  # shares no word with the question
-RECORD_MANY = 150  # more records with one shared word than RECORD_TOP holds (the builder sets 40)
+RECORD_MANY = 150  # more records with one shared word than fit under CANDIDATES_CAP at 820 characters each (see _padded)
 
 
 def _record_ids(candidates):
@@ -2500,23 +2501,30 @@ def case_record_top_ranks_by_shared_words():
     check("record top: question_form.past_rulings exists", callable(fn), "missing function")
     if not callable(fn):
         return
-    records = {"rq-%04d" % i: "%s %s" % (RECORD_QUESTION_WORDS[0], RECORD_FILLER) for i in range(RECORD_MANY)}
-    records["rq-zz-five"] = " ".join(RECORD_QUESTION_WORDS[:5]) + " " + RECORD_FILLER  # most words, name sorts last
+    # Records of 820 characters: the fixture is over CANDIDATES_CAP, so the cap, not a count, leaves some out.
+    records = {"rq-%04d" % i: _padded(RECORD_QUESTION_WORDS[0], 820) for i in range(RECORD_MANY)}
+    records["rq-zz-five"] = _padded(" ".join(RECORD_QUESTION_WORDS[:5]), 820)  # most words, name sorts last
     repo = tcj.make_repo("record-top", decisions=records)
-    candidates, _unknown = _past_candidates(fn, repo, RECORD_QUESTION)
+    candidates, unknown = _past_candidates(fn, repo, RECORD_QUESTION)
     ids = _record_ids(candidates)
     check("record top: the fixture's records are candidates (scope)", bool(ids), str(candidates)[:200])
     if not ids:
         return
-    top = getattr(question_form, "RECORD_TOP", None)
+    cap = getattr(question_form, "CANDIDATES_CAP", None)
+    block = question_form.candidates_block(candidates, unknown, None)
+    shown = _shown_ids(block)
+    left = len(records) - len(shown)
+    check("record top (scope): the cap leaves some sharing records out, so the order decides which ones",
+          left > 0, "%d of %d records shown" % (len(shown), len(records)))
     check("record top: the record that shares the most words is in the block, though its name sorts last",
-          "decisions/rq-zz-five" in ids, "left out of %d record lines" % len(ids))
-    check("record top: the fixture holds more records than RECORD_TOP", not isinstance(top, int) or RECORD_MANY > top,
-          "RECORD_TOP is %r, RECORD_MANY is %d" % (top, RECORD_MANY))
-    shown = "RECORD_TOP is %d" % top if isinstance(top, int) else "RECORD_TOP is not defined, so no record is capped"
-    check("record top: the block holds at most RECORD_TOP record lines",
-          isinstance(top, int) and len(ids) <= top,
-          "the block holds %d record lines of %d records that share a word; %s" % (len(ids), len(records), shown))
+          "decisions/rq-zz-five" in shown, "left out of the block of %d characters" % len(block))
+    check("record top: the block holds at most CANDIDATES_CAP characters",
+          isinstance(cap, int) and len(block) <= cap,
+          "the block is %d characters; CANDIDATES_CAP is %r" % (len(block), cap))
+    tail = block.split("Not searched:", 1)[1] if "Not searched:" in block else ""
+    check("record top: when records are left out, the Not searched text says how many",
+          left > 0 and re.search(r"(?<!\d)%d(?!\d)" % left, tail) is not None,
+          "%d records are left out of the block, and its Not searched text does not say so: %r" % (left, tail[:200]))
 
 
 def case_record_named_kept_and_zero_words_left_out():
