@@ -1293,7 +1293,7 @@ def _push_hit(segment, stripped, cwd, args, is_test_rel=None, virtual=None):
     remote is no base), and when it hits, a second less the pushed remote's refs (`_red_run_found`, with `_pushed_remote`:
     one `git config` more for a remote named by a URL or a path). A hit that holds a landed commit also runs one `git fetch
     --prune` of the remote and a third read, then one `git rev-parse` of the
-    source (the tip an amend reaches) and, unless that fetch ran, one `git merge-base --is-ancestor`, plus one shallow
+    source (the tip an amend reaches) and one `git merge-base --is-ancestor` (before that fetch, so a ref the fetch moves is no rewrite), plus one shallow
     probe when that says no: a destination tracking ref the source no longer holds is a branch rewritten since its push."""
     virtual = virtual or {"tip": None, "pending": [], "unreadable": False}
     for where, source, _dest, tracking, remote, memo in _push_refs(segment, stripped, cwd, args):
