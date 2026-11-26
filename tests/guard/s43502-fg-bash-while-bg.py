@@ -179,8 +179,6 @@ def fg_allow(name, command, transcript, silent=False, **fields):
 # foreground allow cases below leave it out.
 FG_LONG = (
     ("verdict", "verdict python3 hooks/test_guard.py"),
-    ("merge --lane-lint", CHECK_TIMEOUT_LINT),
-    ("merge N --confirm", "merge 3270 --confirm"),
     ("pytest", "pytest hooks/test_stall_watch.py"),
     ("npm test", "npm test"),
     ("npm run build", "npm run build"),
@@ -209,6 +207,20 @@ FG_LONG_ROSTER = (
 FG_LONG_ALL = FG_LONG + FG_LONG_ROSTER
 FG_LONG_LIMIT = {"merge --lane-lint": {"timeout": CHECK_TIMEOUT_MS}}
 FG_LONG_FOREGROUND_ALLOWED = tuple(item for item in FG_LONG_ALL if item[0] not in FG_LONG_LIMIT)
+# THE MERGE TOOL. Its own commands are not long for this rule (decision fg-bash-while-bg): the app moves a foreground
+# command to the background after 120 s, so a held turn is bounded. The merge tool's own reader decides which segment
+# runs the merge tool, so a git merge or a word inside a string is not one. No limit is set here: check-timeout judges
+# a lane lint only when its call sets a limit, and a foreground lane lint with a limit stays refused.
+FG_MERGE_TOOL = (
+    ("merge N --ready", "merge 12 --ready"),
+    ("merge N --confirm", "merge 3270 --confirm"),
+    ("merge N --confirm --head", "merge 12 --confirm --head " + LT_HEAD),
+    ("merge N preview", "merge 12"),
+    ("merge --lane-lint", CHECK_TIMEOUT_LINT),
+    ("env-prefixed merge N --ready", "env -u AI_AGENT -u CLAUDECODE ~/.claude/bin/merge 12 --ready"),
+    ("env-prefixed merge N --confirm --head",
+     "env -u AI_AGENT -u CLAUDECODE ~/.claude/bin/merge 12 --confirm --head " + LT_HEAD),
+)
 FG_QUICK = (
     ("git status", "git status"),
     ("cat", "cat notes.txt"),
@@ -241,9 +253,34 @@ fg_refuse("fg-bash-while-bg: a foreground cat with the 600000 ms foreground maxi
         "cat notes.txt", fg_path("bg-running"), timeout=600000)
 
 # ALLOW: the same long forms with run_in_background true while a background command runs.
-for fg_label, fg_command in FG_LONG_ALL:
+for fg_label, fg_command in FG_LONG_ALL + FG_MERGE_TOOL:
     fg_allow("fg-bash-while-bg: a %s with run_in_background true is allowed while a background command runs" % fg_label,
              fg_command, fg_path("bg-running"), run_in_background=True, **FG_LONG_LIMIT.get(fg_label, {}))
+
+# ALLOW: a merge tool command in the foreground, with background work and with none. The merge tool's own commands are
+# exempt, so none of them is refused here. A background agent is no exception.
+for fg_label, fg_command in FG_MERGE_TOOL:
+    fg_allow("fg-bash-while-bg: a foreground %s is allowed while a background command runs" % fg_label,
+             fg_command, fg_path("bg-running"))
+    fg_allow("fg-bash-while-bg: a foreground %s is allowed with no background work" % fg_label,
+             fg_command, fg_path("idle"))
+fg_allow("fg-bash-while-bg: a foreground merge N --ready is allowed while a background agent runs",
+         "merge 12 --ready", fg_path("agent-running"))
+
+# CONTROLS. A merge tool run is exempt as a whole call: a long part of the same call still refuses. A word that only
+# names merge, a git merge or text in a string or heredoc, is no merge tool run, and it stays judged as its own command.
+fg_refuse("fg-bash-while-bg: a foreground merge N --confirm chained with a test run is refused while a background command runs",
+          "merge 12 --confirm && python3 hooks/test_guard.py", fg_path("bg-running"))
+fg_refuse("fg-bash-while-bg: a foreground test run is refused while a background command runs",
+          "python3 hooks/test_guard.py", fg_path("bg-running"))
+fg_refuse("fg-bash-while-bg: a foreground lint run is refused while a background command runs",
+          "flake8 hooks", fg_path("bg-running"))
+fg_refuse("fg-bash-while-bg: a foreground npm test after merge text in an echo string is refused while a background command runs",
+          'echo "merge 12 --confirm" && npm test', fg_path("bg-running"))
+fg_refuse("fg-bash-while-bg: a foreground npm test after merge text in a heredoc is refused while a background command runs",
+          "cat <<'EOF'\nmerge 12 --confirm\nEOF\nnpm test", fg_path("bg-running"))
+fg_allow("fg-bash-while-bg: a foreground git merge is allowed while a background command runs, since git merge is quick",
+         "git merge origin/main", fg_path("bg-running"))
 
 # ALLOW: a long form in the foreground with no background work: an idle session, and work that has ended.
 for fg_label, fg_command in FG_LONG_FOREGROUND_ALLOWED:
