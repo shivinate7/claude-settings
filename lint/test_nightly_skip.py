@@ -40,6 +40,7 @@ import uuid
 from unittest import mock
 
 import _test_temp  # noqa: E402  test-temp-standard: every temp path comes from this run's folder
+from test_windows_split import NIGHTLY_SKIP_JOB, all_jobs, draft_guard_only  # noqa: E402  the one home of the skip job's name, the checks.yml reader and the draft guard alone
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SKIP = os.path.join(ROOT, ".github", "scripts", "nightly-skip.py")
@@ -506,14 +507,14 @@ class NightlySkipJobWiring(unittest.TestCase):
     """The skip job is an ancestor of every job through scope. A job-level `if` skips it on a pull request or a push,
     and a skipped ancestor skips every job behind scope, so all-jobs-passed fails on every PR run."""
 
-    def test_skip_job_has_no_job_level_if(self):
+    def test_skip_job_has_no_job_level_if_or_the_draft_guard_alone(self):
+        # Named failure: a job-level if on the skip job that is more than the draft guard, so it skips a ready pull request, a push or a
+        # schedule, and a skipped ancestor skips scope's descendants.
         text = open(os.path.join(ROOT, WORKFLOW), encoding="utf-8").read()
-        start = text.index("\n  nightly-skip:\n")
-        end = text.index("\n  # ", start + 1)
-        job_text = text[start:end]
-        header = job_text.split("    steps:", 1)[0]
-        self.assertNotIn("\n    if:", header,
-                         "nightly-skip must run on every event: a skipped job it leaves behind skips scope's descendants")
+        self.assertIn(NIGHTLY_SKIP_JOB, all_jobs(text), "scope: checks.yml has no nightly-skip job to check")
+        job_if = all_jobs(text)[NIGHTLY_SKIP_JOB]["if"]
+        self.assertTrue(job_if is None or draft_guard_only(job_if),
+                        "nightly-skip must run on every event but a draft pull request: its job-level if is %r" % job_if)
 
 
 class NightlySkipReadErrors(unittest.TestCase):
