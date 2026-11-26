@@ -142,8 +142,14 @@ Shell tools (Bash, PowerShell), in judge_shell order:
   destructive-delete   deny. A recursive delete, forced or not, at a root, a home, a glob, `.`,
                        the working folder (`$(pwd)` too) or a folder above it, in either shell.
                        (rm-path-wrapper)
-  force-push           deny or ask. A lease with --force-if-includes passes. --force or a `+`
-                       refspec refuses. A push that reaches the default branch asks.
+  force-push           deny. A lease with --force-if-includes passes. --force or a `+` refspec refuses.
+                       A forced push that reaches the default branch, or whose target git cannot read,
+                       is held to the end and refuses. A non-forced push whose destination is literally
+                       main or master, to a network remote, is held and refuses the same way: `main`
+                       alone, and `main` with a lane-named branch. Its reason names the default branch
+                       and the lane-branch remedy and carries no lease retry. An agent-named destination
+                       in the same push is push-agent-branch's, which refuses. A remote the shell has not
+                       expanded counts as a network remote. The remote's HEAD is not read. A dry run passes.
                        (stale-safe-force-push)
   push-all-main        deny. A non-forced `--all`, `--branches` or glob refspec (`refs/heads/*:refs/heads/*`)
                        to a network remote that may update main or master there: local main or master
@@ -155,14 +161,6 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        `--all` and `--branches`; for a glob, the branches its source side matches, under
                        any target name), whether or not main would update. Its remedy is a push of
                        named branches. A dry run and a local path pass.
-  push-main            ask. A non-forced push whose destination is literally main or master, to a
-                       network remote: `main` alone, and `main` with a lane-named branch. An
-                       agent-named destination in the same push is push-agent-branch's, which refuses.
-                       A remote the shell has not expanded counts as one. The remote's HEAD is not
-                       read. A dry run passes.
-  push-stray-branch    allow. An implied push (bare, `HEAD`, `@`) that writes a name other than the
-                       branch's upstream is harmless and reversible, so it passes. Another rule may still
-                       refuse the push (main, an agent branch name, a ready pull request's branch).
   push-agent-branch    deny. A non-forced push whose destination branch name is an agent-worktree name
                        (agent-<hex>, claude/agent-<hex>, worktree-agent-<hex>, 8+ hex), with or without
                        -u. No upstream is needed. It holds when `main` comes first in the same push
@@ -339,7 +337,7 @@ Shell tools (Bash, PowerShell), in judge_shell order:
   octopus-push         deny. A `git push` whose range (the pushed ref, else HEAD, less every ref of the pushed
                        remote, else origin) adds a merge commit of more than two parents; a merge that a
                        ref of the pushed remote already holds passes. A dry run and a destination named main or master are
-                       left out; push-main asks about the latter. A remote named by a URL or a path
+                       left out; force-push refuses the latter. A remote named by a URL or a path
                        counts every remote's refs. A range that shows an octopus is read again after one `git
                        fetch` of the remote, so a lagging tracking ref cannot hide a merge the remote holds; a
                        failed fetch keeps the refusal and says so. Cost: one `git rev-list` per pushed ref, one
@@ -5452,6 +5450,7 @@ def opus_without_grant(tool_input) -> bool:
 # names the command by its kind, never its text. Only the first ask command is held: it is the one that
 # printed before.
 PENDING_ASK = []   # [(rule, reason, matched, command, verdict)], at most one
+FORCED_PUSH_LABEL = "forced push"   # the command label of a held forced push; a held push to main carries another
 ASK_ALONE_REASON = ("this shell call chains a command that needs the owner's answer (%s) with "
                     "other commands. Run that command alone, in its own call, or drop it. "
                     "(decision ask-commands-run-alone, a command that asks the owner runs alone)")
@@ -5952,18 +5951,18 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
             verdict = push_verdict(args, where, overrides)
             if verdict == "ask":   # push_verdict's word for a forced push that may reach the default branch: denied
                 ask_command("force-push", PUSH_ASK_REASON if uses_merge_tool(where) else PUSH_ASK_BRANCH_REASON,
-                            "git push " + " ".join(args), "forced push", "deny")
+                            "git push " + " ".join(args), FORCED_PUSH_LABEL, "deny")
             elif verdict:
                 refuse(tool, verdict, "force-push", PUSH_REASON, "git push " + " ".join(args))
             elif not read_verb("push", args):
                 # A non-forced push of every branch that may update main or master, or sends a local agent-named
                 # branch (rule push-all-main, refuses), one
-                # that writes main or master by name (rule push-main, refuses), or an agent-worktree
+                # that writes main or master by name (rule force-push, refuses), or an agent-worktree
                 # branch name (rule push-agent-branch, refuses). An implied destination off the branch's
                 # upstream (rule push-stray-branch) is allowed. A dry run writes nothing.
                 kind = push_ask_hit(args, where, overrides)
                 if kind == "main":
-                    ask_command("push-main", PUSH_MAIN_REASON if uses_merge_tool(where) else PUSH_MAIN_BRANCH_REASON,
+                    ask_command("force-push", PUSH_MAIN_REASON if uses_merge_tool(where) else PUSH_MAIN_BRANCH_REASON,
                                 "git push " + " ".join(args),
                                 "push to the default branch", "deny")
                 elif kind == "all":
@@ -6082,9 +6081,11 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     if kind in ("red-run", "red-run-commit"):
         red_reason, red_shown = red_run_reason(matched, kind == "red-run-commit")
         refuse(tool, "deny", "red-run", red_reason, red_shown)
-    elif matched and kind == "cd" and PENDING_ASK and PENDING_ASK[0][0] == "force-push":
+    elif matched and kind == "cd" and PENDING_ASK and PENDING_ASK[0][3] == "force-push, " + FORCED_PUSH_LABEL:
         # A forced push after a failed cd is already held (its folder is unknown), and settle_ask names the push. Let
         # settle_ask report that, so a forced push is named first (it also denies when chained: rule ask-alone).
+        # Rule force-push also holds a plain push to main, so the held command label tells the two apart: only the
+        # forced push is named first; a held push to main leaves conflict-markers to refuse.
         pass
     elif matched:
         markers_reason = (CONFLICT_MARKERS_CHAIN_REASON if kind == "chain" else

@@ -6,15 +6,17 @@ SHA = "0123456789abcdef0123456789abcdef01234567"
 REMEDY = "retry with --force-with-lease --force-if-includes"
 
 
-def push_case(name, tail, expected, cwd=PUSHFEAT, tool="Bash", rule=None, silent=False, lacks=(), word=VCS):
+def push_case(name, tail, expected, cwd=PUSHFEAT, tool="Bash", rule=None, silent=False, lacks=(), word=VCS,
+              says=()):
     """One `git push` case. An ask names `rule` when one is given (rulings 206 a and 207 a), else
     force-push. `silent` marks an allow that must print nothing. `word` is the command word the call
-    names: the plain `git`, or a form of it that the shell reads as git."""
+    names: the plain `git`, or a form of it that the shell reads as git. `says` holds fragments the
+    printed reason must also carry, so a case can pin which reason a refusal prints."""
     # `refuse-main` is a refusal of a push that may reach the default branch (decision `guard-remedy-not-to-owner`). It is a deny whose reason carries no lease retry: a retry would force main again.
     verdict = "deny" if expected == "refuse-main" else expected
     sh("push: " + name, word + " push " + tail, verdict,
        rule or ("force-push" if verdict != "allow" else None), cwd=cwd, tool=tool,
-       carries=REMEDY if expected == "deny" else (),
+       carries=((REMEDY,) if expected == "deny" else ()) + tuple(says),
        silent=silent, lacks=tuple(lacks) + ((REMEDY,) if expected == "refuse-main" else ()))
 
 
@@ -119,6 +121,13 @@ push_case("a delete refspec at the default branch denies", "origin :main", "refu
 push_case("a delete refspec at a full default ref denies", "origin :refs/heads/main", "refuse-main")
 push_case("deleting with --delete at the default branch denies", "--delete origin main", "refuse-main")
 push_case("deleting with -d at the default branch denies", "-d origin main", "refuse-main")
+# A delete is not a push: `-d` reads as the delete flag, so the reason is the delete's own ("may overwrite the
+# history of the default branch"), not the plain push's ("writes the default branch").
+push_case("deleting with -d at the default branch names the delete reason", "-d origin main", "refuse-main",
+          says=("may overwrite the history of the default branch",))
+# The long flag `--delete` is the same delete, so it prints the same reason.
+push_case("deleting with --delete at the default branch names the delete reason", "--delete origin main",
+          "refuse-main", says=("may overwrite the history of the default branch",))
 # A dangling origin/HEAD does not hide the default branch (owner's read order 2026-10-16). The three
 # forms below reach main and ask, exactly as they do where origin/HEAD resolves.
 push_case("a dangling origin/HEAD, a forced push to main denies",
@@ -974,8 +983,8 @@ def agent_refusal_opens_with_rule_case():
     return True, "a deny whose reason opens with %r" % want
 
 
-# A side effect pin: under push.autoSetupRemote, a bare push from main with no upstream writes main, so push-main denies.
-sh("push: main with no upstream, a bare push under autoSetupRemote denies push-main",
+# A side effect pin: under push.autoSetupRemote, a bare push from main with no upstream writes main, so force-push denies.
+sh("push: main with no upstream, a bare push under autoSetupRemote denies force-push",
    VCS + " -c push.autoSetupRemote=true push", "deny", PUSH_MAIN_RULE, cwd=PUSHMAIN)
 
 # SILENT, rule push-agent-branch. Each is an allow that prints nothing. The lane and feature branch controls
@@ -1045,7 +1054,7 @@ sh("push: main, a bare push under push.default current on main denies",
 sh("push: main, a bare push under push.default upstream from a branch tracking main denies",
    VCS + " push", "deny", PUSH_MAIN_RULE, cwd=PUSHUP)
 
-# DENY, rule push-main, judged on the remote the push names. A network remote still denies: an scp-form origin, a
+# DENY, rule force-push, judged on the remote the push names. A network remote still denies: an scp-form origin, a
 # network URL named on the command line, and a `-C` into a repo whose origin is a network URL. The https
 # origin rows above (PUSHFEAT) and the bare push resolving to main on PUSHUP are the other controls.
 push_case("main, an scp-form origin denies", "origin main", "refuse-main", cwd=PUSHSSH, rule=PUSH_MAIN_RULE)
@@ -1054,7 +1063,7 @@ push_case("main, a network URL named as the remote denies, from a repo with no r
 sh("main, git -C into a repo with a network origin denies, from a repo with no remote",
    VCS + " -C " + slash(PUSHFEAT) + " push origin main", "deny", PUSH_MAIN_RULE, cwd=PUSHNOREMOTE)
 
-# SILENT, rule push-main. The remote the push names is a local path (absolute, relative or file://), or the
+# SILENT, rule force-push. The remote the push names is a local path (absolute, relative or file://), or the
 # repo has no remote of that name, so no network remote is written. Each is an allow that prints nothing.
 push_case("main, an origin that is a local path, a push of main is silent", "origin main", "allow",
           cwd=PUSHLOCAL, silent=True)
@@ -1072,7 +1081,7 @@ push_case("main, no remote in the repo is silent", "origin main", "allow", cwd=P
 sh("main, git -C into a repo with no remote is silent, from a repo with a network origin",
    VCS + " -C " + slash(PUSHNOREMOTE) + " push origin main", "allow", cwd=PUSHFEAT, silent=True)
 
-# DENY, rules push-stray-branch and push-main, and DENY, rule push-agent-branch, on a local-path origin. A main
+# DENY, rules push-stray-branch and force-push, and DENY, rule push-agent-branch, on a local-path origin. A main
 # refspec there is silent, and the refspec after it still decides. The controls decide with no main refspec ahead:
 # HEAD on PUSHLOCALSTRAY (its branch tracks origin/other) is stray, and the agent name on PUSHLOCAL is refused.
 push_case("local origin, main then HEAD on a branch tracking another name allows stray", "origin main HEAD", "allow",
@@ -1085,12 +1094,12 @@ push_case("local origin, HEAD on a branch tracking another name allows stray (co
 
 agent_refused("push: local origin, the agent name alone asks the agent rule (control)",
               VCS + " push origin claude/agent-deadbeef01", cwd=PUSHLOCAL)
-# On a network origin, a main refspec before an agent name is refused by the agent rule, not asked as push-main.
-# One click on the push-main ask would otherwise carry the agent branch to origin as well. The agent name is in the
-# push, so the refusal holds from any checkout. A main refspec before a lane name still denies push-main, and so does
+# On a network origin, a main refspec before an agent name is refused by the agent rule, not by force-push.
+# The force-push refusal would otherwise name main while the push also carries the agent branch to origin. The agent
+# name is in the push, so the agent refusal holds from any checkout. A main refspec before a lane name still denies force-push, and so does
 # `origin main HEAD`.
-push_case("network origin, main then HEAD denies push-main", "origin main HEAD", "refuse-main", rule=PUSH_MAIN_RULE)
-push_case("network origin, main then a lane name denies push-main", "origin main HEAD:lane-x", "refuse-main",
+push_case("network origin, main then HEAD denies force-push", "origin main HEAD", "refuse-main", rule=PUSH_MAIN_RULE)
+push_case("network origin, main then a lane name denies force-push", "origin main HEAD:lane-x", "refuse-main",
           rule=PUSH_MAIN_RULE)
 sh("push: network origin, main then the agent name asks the agent rule",
    VCS + " push origin main claude/agent-deadbeef01", "deny", PUSH_AGENT_RULE,
@@ -1101,24 +1110,24 @@ sh("push: network origin, main then HEAD:agent-<hex> asks the agent rule",
 # A combined push from an agent checkout: --all sends main and the agent's own branch, so the agent rule refuses it.
 agent_refused("push: agent checkout, --all with main asks the agent rule", VCS + " push --all origin", cwd=PUSHAGENT)
 # A `git -c remote.origin.url=` override names the remote's URL for the read, so the local origin is a network one.
-sh("main, a local origin made a network remote by git -c remote.origin.url denies push-main",
+sh("main, a local origin made a network remote by git -c remote.origin.url denies force-push",
    VCS + " -c remote.origin.url=https://example.invalid/r.git push origin main", "deny", PUSH_MAIN_RULE,
    cwd=PUSHLOCAL)
 
-# DENY, rule push-main, on a remote the shell has not expanded. The token holds `$`, a backtick or `$(`. It names no
+# DENY, rule force-push, on a remote the shell has not expanded. The token holds `$`, a backtick or `$(`. It names no
 # remote in the repo, yet the shell may expand it to a network remote, so the push denies. PUSHFEAT's origin is https,
 # so only the token decides the ask here.
-push_case("main, a double-quoted shell variable as the remote denies push-main", '"$REMOTE" main', "refuse-main",
+push_case("main, a double-quoted shell variable as the remote denies force-push", '"$REMOTE" main', "refuse-main",
           rule=PUSH_MAIN_RULE)
-push_case("main, an unquoted shell variable as the remote denies push-main", "$REMOTE HEAD:main", "refuse-main",
+push_case("main, an unquoted shell variable as the remote denies force-push", "$REMOTE HEAD:main", "refuse-main",
           rule=PUSH_MAIN_RULE)
-push_case("main, a backtick as the remote denies push-main", "`printf origin` main", "refuse-main", rule=PUSH_MAIN_RULE)
-push_case("main, a command substitution as the remote denies push-main", "$(printf origin) main", "refuse-main",
+push_case("main, a backtick as the remote denies force-push", "`printf origin` main", "refuse-main", rule=PUSH_MAIN_RULE)
+push_case("main, a command substitution as the remote denies force-push", "$(printf origin) main", "refuse-main",
           rule=PUSH_MAIN_RULE)
-sh("main, a bare push with a shell variable as the remote denies push-main under push.default current",
+sh("main, a bare push with a shell variable as the remote denies force-push under push.default current",
    VCS + ' -c push.default=current push "$REMOTE"', "deny", PUSH_MAIN_RULE, cwd=PUSHMAIN)
 
-# SILENT, rule push-main, the controls of that ask. A shell-variable remote on a feature destination writes no main.
+# SILENT, rule force-push, the controls of that ask. A shell-variable remote on a feature destination writes no main.
 # A `$` in the source of a push to main stays in the refspec: the remote is the local origin, so the push is silent.
 push_case("a shell variable as the remote, HEAD to a feature name, is silent", '"$REMOTE" HEAD:feat-x', "allow",
           silent=True)
@@ -1129,11 +1138,11 @@ push_case("a shell variable in the source of a push to main on a local origin is
 # (PUSHMAINUP). Each form that writes main is silent on the local path and denies on the network remote.
 sh("main tracking origin/main, local origin, a bare push under push.default simple is silent",
    VCS + " -c push.default=simple push", "allow", cwd=PUSHLOCALMAIN, silent=True)
-sh("main tracking origin/main, network origin, a bare push under push.default simple denies push-main",
+sh("main tracking origin/main, network origin, a bare push under push.default simple denies force-push",
    VCS + " -c push.default=simple push", "deny", PUSH_MAIN_RULE, cwd=PUSHMAINUP)
 push_case("main tracking origin/main, local origin, HEAD is silent", "origin HEAD", "allow", cwd=PUSHLOCALMAIN,
           silent=True)
-push_case("main tracking origin/main, network origin, HEAD denies push-main", "origin HEAD", "refuse-main", cwd=PUSHMAINUP,
+push_case("main tracking origin/main, network origin, HEAD denies force-push", "origin HEAD", "refuse-main", cwd=PUSHMAINUP,
           rule=PUSH_MAIN_RULE)
 push_case("main tracking origin/main, local origin, --all is silent", "origin --all", "allow", cwd=PUSHLOCALMAIN,
           silent=True)
@@ -1141,9 +1150,9 @@ push_case("main tracking origin/main, local origin, --all is silent", "origin --
 all_allowed("main tracking origin/main, network origin, --all is silent, local main equal", "origin --all",
             cwd=PUSHMAINUP)
 
-# DENY, rule push-main. A folder that does not exist cannot be read, and an unreadable config is unknown, which denies.
+# DENY, rule force-push. A folder that does not exist cannot be read, and an unreadable config is unknown, which denies.
 # The session's own folder is the local origin, so only the missing folder the push runs in can make it a network one.
-sh("main, cd into a folder that does not exist, then origin main, denies push-main",
+sh("main, cd into a folder that does not exist, then origin main, denies force-push",
    "cd " + slash(os.path.join(ROOT, "pushmissing")) + " && " + VCS + " push origin main", "deny", PUSH_MAIN_RULE,
    cwd=PUSHLOCALMAIN)
 
@@ -1382,7 +1391,7 @@ sh("push: text, a heredoc body naming a push to main, is silent",
 sh("push: text, a multi-line quoted string naming a push to main, is silent",
    'echo "one line\n' + VCS + ' push origin main"', "allow", cwd=PUSHFEAT, silent=True)
 # A comment opener inside a string does not hide the real push after it, and a lone quote in a message
-# does not either (building-scanner-respects-strings). The push to main is refused by its own rule, push-main,
+# does not either (building-scanner-respects-strings). The push to main is refused by its own rule, force-push,
 # and no run-alone ask is chained with it (decision guard-remedy-not-to-owner).
 sh("push: a comment opener inside a string does not hide a push to main that follows it",
    'echo "#" && ' + VCS + " push origin main", "deny", PUSH_MAIN_RULE, cwd=PUSHMAIN,
