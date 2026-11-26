@@ -35,6 +35,9 @@ import subprocess
 import sys
 
 HERE = os.path.dirname(os.path.realpath(__file__))
+sys.path.insert(0, os.path.join(os.path.dirname(HERE), "hooks"))
+import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
+
 DEFAULT_FILE = os.path.join(os.path.dirname(HERE), "docs", "children.txt")
 SELF = "shivinate7/claude-settings"
 # A segment never starts with a dash and is never only dots: `..` would climb a path, a leading dash reads as an option.
@@ -101,7 +104,7 @@ def gh_fetch(path):
     A failed read raises with gh's last error line at the end: it carries `(HTTP <status>)` for an HTTP failure."""
     env = {k: v for k, v in os.environ.items() if k not in ("AI_AGENT", "CLAUDECODE")}
     try:
-        done = subprocess.run(["gh", "api", path], capture_output=True, text=True, env=env, timeout=60)
+        done = _nowindow.run(["gh", "api", path], capture_output=True, text=True, env=env, timeout=60)
     except (OSError, subprocess.TimeoutExpired) as e:
         raise RuntimeError("gh api %s: %s" % (path, type(e).__name__))
     if done.returncode != 0:
