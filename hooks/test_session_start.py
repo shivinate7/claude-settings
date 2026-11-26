@@ -3330,11 +3330,27 @@ class SessionStartMainRefTests(SessionStartAgentWorktreeNoticeTests):
         self.assertIn(hook, extra[0], "the line does not name the missing hook %r: %r" % (hook, extra[0]))
         self.assertEqual(self.last_stderr, "", "the hook wrote to stderr: %r" % self.last_stderr)
 
+    def assert_shim_is_live(self, folder, log):
+        """Before a case counts starts, the shim must log one call the hook's own way. A probe script runs with sh_argv and
+        `folder` first on PATH, as the hook runs, and calls `sh` by name. A shim that is dead, or that sh does not reach, fails
+        here with that cause, not as a zero count. The probe's logged line is then removed, so the case counts from zero."""
+        probe = os.path.join(folder, "probe.sh")
+        with open(probe, "w", encoding="utf-8", newline="\n") as handle:
+            handle.write("sh -c 'exit 0' main-ref/install.sh\n")
+        _argv, env, _payload, where = self.hook_launch(path_dir=folder)
+        answer = subprocess.run(sh_argv(folder, probe), capture_output=True, text=True, env=env, cwd=where, timeout=60)
+        self.assertEqual(self.installer_starts(log), 1,
+                         "the shim did not log a probe's call to sh, the way the hook runs it: exit %d, stderr %r"
+                         % (answer.returncode, answer.stderr.strip()))
+        self.assertEqual(answer.returncode, 0, "the probe run exited %d: %r" % (answer.returncode, answer.stderr.strip()))
+        os.remove(log)
+
     def assert_installer_is_not_run(self, label, installer):
         """Session start, in a repo that ships `installer`, starts no installer and writes no file."""
         where = self.make_repo(label)
         self.ship(where, installer=installer)
         folder, log = self.sh_shim(label)
+        self.assert_shim_is_live(folder, log)
         watched = (self.config, self.primary, where)
         before = self.files_under(*watched)
         code, _ = self.session(where, path_dir=folder)
@@ -3394,6 +3410,7 @@ class SessionStartMainRefTests(SessionStartAgentWorktreeNoticeTests):
                 if state == "armed":
                     self.arm(where)
                 folder, log = self.sh_shim(state)
+                self.assert_shim_is_live(folder, log)
                 watched = (self.config, self.primary, where)
                 self.settle_index(where)
                 before = self.snapshot(*watched)
