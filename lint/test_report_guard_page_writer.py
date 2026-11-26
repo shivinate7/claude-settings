@@ -98,9 +98,9 @@ class PageWriterTests(trg.SameTurnWriter, unittest.TestCase):
         return refusal
 
     def test_rw_key_is_none_for_this_repo(self):
-        # Catches: this repo's layout-extras.json naming a page-writer session, which has gone stale. A question sent
-        # to it comes back undelivered, and the Stop check blocks on that. The owner ruled the page writer N/A
-        # (2026-11-25 20:32 CST, "page writer should be N/A atm"), so the key names no writer.
+        # Catches: this repo's layout-extras.json naming a page-writer session that no longer exists. A question sent
+        # to it comes back undelivered, and the Stop check blocks on that. The owner ruled the page writer N/A, so the
+        # key names no writer.
         writer = layout.page_writer_key(self.real_root())
         self.assertIsNone(writer, "this repo's layout-extras.json names a page writer, but the page writer is N/A: %r" % writer)
 

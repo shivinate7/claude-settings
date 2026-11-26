@@ -1340,8 +1340,8 @@ class PageWriterKey(Tree):
                 self.assertEqual(self.layout.page_writer_key(self.tree), sid)
 
     def test_na_strings_are_none(self):
-        # Catches: the page writer set to N/A (owner ruling 2026-11-25 20:32 CST, "page writer should be N/A atm") read
-        # as a session id, so the Stop check names a session "none" that does not exist.
+        # Catches: the page writer set to N/A read as a session id, so the Stop check names a session "none" that
+        # does not exist.
         for na in ("none", "None", "N/A", "n/a"):
             with self.subTest(na=na):
                 self.put(EXTRAS, json.dumps({"kinds": {}, "page-writer": na}))
