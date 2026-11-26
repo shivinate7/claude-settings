@@ -451,6 +451,20 @@ class ModuleOrder(Proof):
         text = tree(guard="def build():\n    return {}\n\nTABLE = build()\n")
         self.assertPass(text, text, lines=["0 moved module"])
 
+    def test_a_class_body_reading_a_def_below_it_fails(self):
+        """A class body runs when its statement does, so its read of `build` needs `build` bound above the class."""
+        self.assertFail(tree(guard="def build():\n    return {}\n\nclass C:\n    T = build()\n"),
+                        tree(guard="class C:\n    T = build()\n\ndef build():\n    return {}\n"),
+                        lines=["`build` is read at import time at guard.py:1"])
+
+    def test_a_generator_expression_reading_a_def_below_it_fails(self):
+        """A generator expression runs when its statement does, so its read of `build` needs `build` bound above it.
+        A list comprehension is inlined into its statement's table on Python 3.12 and later, so only a generator
+        expression has its own scope for the import-time check to walk."""
+        self.assertFail(tree(guard="def build():\n    return 1\n\nROWS = list(build() for _ in range(3))\n"),
+                        tree(guard="ROWS = list(build() for _ in range(3))\n\ndef build():\n    return 1\n"),
+                        lines=["`build` is read at import time at guard.py:1"])
+
     def test_a_def_body_reading_a_def_below_it_is_not_order_checked(self):
         self.assertPass(tree(guard="def build():\n    return {}\n\ndef show():\n    return build()\n"),
                         tree(guard="def show():\n    return build()\n\ndef build():\n    return {}\n"),
@@ -464,6 +478,14 @@ class GlobalDeclaration(Proof):
                         tree(guard="STATE = 0\n",
                              guard_x="from guard import STATE\n\ndef bump():\n    global STATE\n    STATE = 1\n"),
                         lines=["bump", "STATE"])
+
+    def test_a_moved_unit_whose_global_target_moved_with_it_passes(self):
+        """STATE and bump move to guard_x.py together. bump's `global STATE` binds the one assignment of STATE, and no
+        other module defines it."""
+        self.assertPass(tree(guard="STATE = 0\n\ndef bump():\n    global STATE\n    STATE = 1\n"),
+                        tree(guard='"""Guard module."""\n',
+                             guard_x="STATE = 0\n\ndef bump():\n    global STATE\n    STATE = 1\n"),
+                        lines=["2 moved module"])
 
     def test_a_moved_unit_without_global_passes(self):
         self.assertPass(tree(guard="STATE = 0\n\ndef peek():\n    return STATE\n"),
@@ -482,6 +504,47 @@ class ImportedName(Proof):
         self.assertPass(tree(guard="def gate():\n    return 1\n"),
                         tree(guard="from guard_x import gate\n", guard_x="def gate():\n    return 1\n"),
                         lines=["1 moved module"])
+
+    def test_an_import_from_a_guard_module_missing_at_head_fails(self):
+        """Runs the CLI: a missing module must end as a FAIL verdict on stdout, never as a traceback."""
+        root = make_repo(tree(guard="def a():\n    return 1\n"),
+                         tree(guard="from guard_missing import thing\n\ndef a():\n    return 1\n"))
+        done = subprocess.run([sys.executable, SCRIPT, "HEAD~1", "HEAD", "--root", root],
+                              capture_output=True, text=True)
+        self.assertEqual(done.returncode, 1, done.stdout + done.stderr)
+        self.assertTrue(done.stdout.startswith("FAIL "), done.stdout + done.stderr)
+        self.assertIn("imports from guard_missing, which is not a guard module at head", done.stdout)
+
+    GETATTR = 'def __getattr__(name):\n    raise AttributeError(name)\n'
+
+    def test_a_typo_imported_through_a_getattr_module_fails_when_only_the_importer_defines_it(self):
+        """guard_stream.py has a module `__getattr__`, so it may serve any name at run time. Only guard_y, the importer,
+        defines `typo_name`. The importer's own def does not make guard_stream provide it."""
+        self.assertFail(tree(guard_stream=self.GETATTR, guard_y="def typo_name():\n    return 1\n"),
+                        tree(guard_stream=self.GETATTR,
+                             guard_y="from guard_stream import typo_name\n\ndef typo_name():\n    return 1\n"),
+                        lines=["imports `typo_name` from guard_stream"])
+
+    def test_a_real_name_defined_in_another_guard_module_and_reached_through_getattr_passes(self):
+        text = tree(guard_stream=self.GETATTR, guard_core="def real():\n    return 1\n",
+                    guard_y="from guard_stream import real\n\ndef gate():\n    return real()\n")
+        self.assertPass(text, text, lines=["0 moved module"])
+
+
+class MainBlock(Proof):
+    """An `if __name__ == "__main__":` block runs only when its module is the script. The proof reads it as absent: an
+    import in it is not checked, and a name bound only in it does not resolve."""
+
+    def test_an_import_of_a_missing_name_inside_a_main_block_passes(self):
+        text = tree(guard_x="def gate():\n    return 1\n",
+                    guard_y='def a():\n    return 1\n\nif __name__ == "__main__":\n    from guard_x import nope\n')
+        self.assertPass(text, text, lines=["0 moved module"])
+
+    def test_a_moved_unit_reading_a_name_bound_only_in_a_main_block_fails(self):
+        self.assertFail(tree(guard="K = 1\n\ndef a():\n    return K\n"),
+                        tree(guard="K = 1\n",
+                             guard_x='if __name__ == "__main__":\n    K = 1\n\ndef a():\n    return K\n'),
+                        lines=["unresolved name `K` in def a", "guard_x.py"])
 
 
 class FamilyTuple(Proof):
@@ -502,6 +565,12 @@ class FamilyTuple(Proof):
                                           'def a():\n    return 1\n',
                                     guard_y='"""Guard module."""\n')}
         self.assertPass(self.BASE, head, "--changed", "_FAMILY_MODULES")
+
+    def test_an_added_family_entry_with_no_guard_module_at_head_fails(self):
+        head = {**self.BASE, **tree(guard='_FAMILY_MODULES = ("guard_core", "guard_x", "guard_z")\n\n'
+                                          'def a():\n    return 1\n')}
+        self.assertFail(self.BASE, head, "--changed", "_FAMILY_MODULES",
+                        lines=["added entry `guard_z` is not a guard module new at head"])
 
 
 class NewGuardModule(Proof):
