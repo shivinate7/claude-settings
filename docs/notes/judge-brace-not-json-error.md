@@ -1,0 +1,1 @@
+- judge-brace-not-json-error: a judge reply with a brace pair that is not valid JSON gets `REPLY_RESULT_ERROR` + "'s JSON verdict did not parse" from `parse_verdict` (hooks/decision_watch.py), not `REPLY_UNREADABLE_ERROR`, which only a reply with no brace pair gets. No judge words reach either. Seen: 2026-11-25 x1

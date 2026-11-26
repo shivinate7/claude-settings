@@ -5837,6 +5837,22 @@ class PastRulingRelay(SameTurnWriter, unittest.TestCase):
         out, _ = self.stop(self.decided, RELAY, answer=bogus)
         self.assertIn("Unvetted guard", self.reason(out), out)
 
+    # The relay's reply is not JSON, so the Unvetted refusal takes its why from code, never from the reply's words
+    # (debt judge-dash-order-passes, path 1). The stub's answer is tcj.JUDGE_REPLY, and no model runs.
+    def test_unreadable_reply_refusal_says_the_reply_could_not_be_read(self):
+        out, _ = self.stop(self.decided, RELAY, answer=tcj.JUDGE_REPLY, to_writer=True)
+        self.assertIn(tcj.UNREADABLE_WHY, self.reason(out), out)
+
+    def test_unreadable_reply_refusal_holds_none_of_the_judge_order_words(self):
+        out, _ = self.stop(self.decided, RELAY, answer=tcj.JUDGE_REPLY, to_writer=True)
+        self.assertIn("Unvetted guard", self.reason(out), out)
+        self.assertEqual(tcj.order_words_in(self.reason(out)), [], out)
+
+    def test_unreadable_reply_still_refuses_as_unvetted(self):
+        out, _ = self.stop(self.decided, RELAY, answer=tcj.JUDGE_REPLY, to_writer=True)
+        self.assertIn("Unvetted guard", self.reason(out), out)
+        self.assertEqual(len(self.model_calls()), 1)
+
     # Two git starts: the one this claim already counted, and the ruled store's ls-tree (one start when the roadmap ref is absent).
     def test_a_relayed_question_costs_two_git_processes_and_one_model_call(self):
         self.stop(self.ci, RELAY, answer=tcj.ALLOW)

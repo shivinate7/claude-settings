@@ -1187,20 +1187,19 @@ def case_token_t5_failure_error_omits_token():
           "token found in error string")
 
 
-# T5, prose. A reply with no JSON reads as an error that keeps its first 120 characters. The token starts at character 110, so
-# its first 10 characters fall inside that cut. The reply must pass the same scrub as stderr before the cut, so no part of the
-# token reaches the error, and the scrub marker stands where the token was.
-def case_token_t5_prose_reply_error_is_scrubbed():
+# T5, prose. A reply with no JSON gives the code-written REPLY_UNREADABLE_ERROR as its whole error. The token sits at character
+# 110 of the reply, and none of the reply reaches the error, so no part of the token can leak through it.
+def case_token_t5_prose_reply_error_is_the_constant():
     reply = "x" * 110 + FAKE_TOKEN + " prose with no verdict object"
     with scratch_config("t5-prose") as cfg:
         _token_file(cfg, FAKE_TOKEN + "\n")
         verdict, error = _invoke_with(_envelope(reply))
     check("token_t5(prose): no-JSON reply gives no verdict", verdict is None and bool(error), "verdict=%s" % (verdict,))
+    check("token_t5(prose): error is the code-written unreadable-reply constant", error == dw.REPLY_UNREADABLE_ERROR,
+          "error is not the constant: %r" % (error,))
     check("token_t5(prose): error omits the token", FAKE_TOKEN not in (error or ""), "token found in error string")
     check("token_t5(prose): error omits the token's first 8 characters", FAKE_TOKEN[:8] not in (error or ""),
           "part of the token found in error string")
-    check("token_t5(prose): error keeps the scrub marker where the token was", "[token]" in (error or ""),
-          "no [token] marker in error string")
 
 
 # Token file encodings, as Windows PowerShell 5.1 writes them. The reader must return the bare
@@ -1387,16 +1386,18 @@ def case_parse_verdict_is_the_one_home():
                   got == want, (got, want))
 
 
-def case_parse_verdict_no_json_error_names_the_reply_head():
-    # A reply with no JSON reads as an error that keeps the first 120 characters of the reply, so the report's UNKNOWN line
-    # says what came back. Nothing past the first 120 characters is kept.
+def case_parse_verdict_no_json_error_is_the_constant():
+    # A reply with no JSON gives REPLY_UNREADABLE_ERROR and no part of the reply. A judge's words stay out of an error a
+    # session reads, so the report's UNKNOWN line carries the code's sentence and nothing the judge wrote.
     reply = ("This is prose and not the verdict object the judge asked for. The first one hundred and twenty characters of it "
              "reach the report, and this tail must not. TAIL-MARK-7731")
     v, e = dw.parse_verdict(reply)
-    check("parse_verdict no JSON: gives no verdict and an error", v is None and bool(e), (v, e))
-    check("parse_verdict no JSON: the error names the first 120 characters of the reply",
-          isinstance(e, str) and reply[:120] in e, e)
-    check("parse_verdict no JSON: the error holds nothing past the first 120 characters",
+    check("parse_verdict no JSON: gives no verdict", v is None, v)
+    check("parse_verdict no JSON: the error is the code-written unreadable-reply constant",
+          e == dw.REPLY_UNREADABLE_ERROR, e)
+    check("parse_verdict no JSON: the error holds none of the reply's leading words",
+          isinstance(e, str) and reply[:20] not in e, e)
+    check("parse_verdict no JSON: the error holds none of the reply's tail",
           isinstance(e, str) and "TAIL-MARK-7731" not in e, e)
 
 
@@ -2114,7 +2115,7 @@ def main():
     case_token_t3_parent_env_not_passed_through()
     case_token_t4_no_usable_token_file_is_no_token()
     case_token_t5_failure_error_omits_token()
-    case_token_t5_prose_reply_error_is_scrubbed()
+    case_token_t5_prose_reply_error_is_the_constant()
     case_token_encodings_read_as_the_bare_token()
     case_token_t10_undecodable_file_is_an_error()
     case_main_ordinary_turn()
@@ -2131,7 +2132,7 @@ def main():
         case_parse_verdict_default_shape,
         case_parse_verdict_honours_a_custom_shape,
         case_parse_verdict_is_the_one_home,
-        case_parse_verdict_no_json_error_names_the_reply_head,
+        case_parse_verdict_no_json_error_is_the_constant,
         case_invoke_model_custom_shape_end_to_end,
         case_argv_bad_combinations_fall_back_to_invoke_model,
         case_bad_flag_runs_the_default_model_call,

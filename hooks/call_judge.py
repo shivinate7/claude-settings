@@ -374,15 +374,40 @@ def unvetted(payload, tool, args, rule, why, units):
 
 
 FORM_ITEM_REASON = re.compile(r"\W*(?:item\s*)?[1-7]\b", re.I)
+# An opener marks item 8 only as "8." "8:" "8)" or "Item 8"; a bare leading 8 may be a count ("8 options is too many").
+PAST_ITEM_REASON = re.compile(r"\W*(?:item\s*8\b|8[.:)](?!\d))", re.I)
+ITEM_MARK_STRING = re.compile(r"[1-8]")
+
+
+def item_mark(verdict):
+    """The item number 1 to 8 the verdict's own `item` field names, or None. A whole number counts as an int, a float
+    with no fraction (8.0) and a one-digit string ("8") too; a boolean marks nothing. Both refusal checks read it here."""
+    item = verdict.get("item")
+    if isinstance(item, bool):
+        return None
+    if isinstance(item, str) and ITEM_MARK_STRING.fullmatch(item.strip()):
+        item = int(item.strip())
+    elif isinstance(item, float) and item % 1 == 0:
+        item = int(item)
+    return item if isinstance(item, int) and 1 <= item <= 8 else None
 
 
 def form_refusal(verdict, reason) -> bool:
     """Whether the judge's refusal is of a form item (1 to 7), not the past-ruling item. The verdict's own `item` field
-    decides when it is a whole number from 1 to 8; without one, the reason's opener does (FORM_ITEM_REASON)."""
-    item = verdict.get("item")
-    if isinstance(item, int) and not isinstance(item, bool) and 1 <= item <= 8:
+    decides when it names an item (item_mark); without one, the reason's opener does (FORM_ITEM_REASON)."""
+    item = item_mark(verdict)
+    if item is not None:
         return item <= 7
     return bool(FORM_ITEM_REASON.match(reason))
+
+
+def past_ruling_item(verdict, reason) -> bool:
+    """Whether the judge's refusal is of the past-ruling item (8). The verdict's own `item` field decides when it names
+    an item (item_mark); without one, the reason's opener does (PAST_ITEM_REASON)."""
+    item = item_mark(verdict)
+    if item is not None:
+        return item == 8
+    return bool(PAST_ITEM_REASON.match(reason))
 
 
 def past_ruling_context(payload, units):
@@ -468,6 +493,8 @@ def main():
                                                     "\n".join(texts))
             if not reason:
                 return 0
+        if units and not past and past_ruling_item(verdict, reason):
+            reason = question_form.NO_RULING_NAMED_TEXT  # an item-8 answer that names no listed ruling: none of its words go in
         return refuse(payload, tool, args, question_form.PAST_RULING_RULE if past else rule, reason)
     return 0
 

@@ -665,7 +665,8 @@ VERDICT_SHAPE = {"verdict": ("ALLOW", "FLAG")}
 MODEL_TIMEOUT_ERROR = "model subprocess timed out"  # the error text of a timeout: callers that tell a timeout from another failure compare to this
 REPLY_OUTPUT_ERROR = "model output"  # the start of each error for a reply that is not the claude envelope
 REPLY_RESULT_ERROR = "model result"  # the start of each error for a result text that is not the verdict asked for
-REPLY_ERROR_PREFIXES = (REPLY_OUTPUT_ERROR, REPLY_RESULT_ERROR)  # every reply-parse error starts with one of these; callers that tell an unreadable reply from a failed call test for them
+REPLY_UNREADABLE_ERROR = "the judge's reply could not be read"  # the whole error for a reply with no JSON in it; written by code, none of the reply is in it
+REPLY_ERROR_PREFIXES = (REPLY_OUTPUT_ERROR, REPLY_RESULT_ERROR, REPLY_UNREADABLE_ERROR)  # every reply-parse error starts with one of these; callers that tell an unreadable reply from a failed call test for them
 
 
 class EachOf(tuple):
@@ -737,16 +738,16 @@ def invoke_model(prompt, model=MODEL, timeout=MODEL_TIMEOUT, shape=VERDICT_SHAPE
     text = envelope.get("result") if isinstance(envelope, dict) else None
     if not isinstance(text, str):
         return None, REPLY_OUTPUT_ERROR + " carried no result text"
-    return parse_verdict(text, shape, scrub)
+    return parse_verdict(text, shape)
 
 
-def parse_verdict(text, shape=VERDICT_SHAPE, scrub=None):
+def parse_verdict(text, shape=VERDICT_SHAPE):
     """Return (verdict_dict, error) from the model's reply text. The one home of this parse:
-    `invoke_model` and the `--model-text` entry below both call it. `scrub`, when given, cleans the reply
-    text of the no-JSON error before its 120-character cut, as invoke_model does for stderr."""
+    `invoke_model` and the `--model-text` entry below both call it. No error holds any of the reply's words: a
+    judge's words are data, and a refusal's text is written by code."""
     match = re.search(r"\{.*\}", text, re.DOTALL)
     if not match:
-        return None, REPLY_RESULT_ERROR + " carried no JSON verdict: " + (scrub(text) if scrub else text)[:120]
+        return None, REPLY_UNREADABLE_ERROR
     try:
         verdict = json.loads(match.group(0))
     except Exception:

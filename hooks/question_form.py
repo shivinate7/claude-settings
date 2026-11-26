@@ -2709,6 +2709,10 @@ def _listed_units(listed, count):
 _BASED_RULING_MENTION = re.compile(r"^[ \t>*_`+-]*(?:\d{1,9}[.)])?[ \t*_`]*based on[^\n]{0,6}ruling", re.I | re.M)
 BASED_LINE_HINT = ('A Based on (ruling) line is read only when it sits on its own line under its question, starting '
                    '"Based on (ruling):".')
+# The refusal for an item-8 answer that names no listed ruling. Code-written: none of the judge's words go in it.
+NO_RULING_NAMED_TEXT = ("A past ruling may cover this question, but the check named none of the listed rulings. Read the listed "
+                        "rulings: if one decides this question, add a `Based on (ruling): <id>` line that names it and send the "
+                        "question again. If none does, send the question again as it is.")
 
 
 def _based_line_unattached(units, context) -> bool:

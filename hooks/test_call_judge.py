@@ -2236,6 +2236,161 @@ class CostTests(unittest.TestCase):
                         "the two reads, back to back, end before the row's hook timeout")
 
 
+# ------------------------------------------------------------------ the judge's words never reach a refusal (debt judge-dash-order-passes)
+#
+# Two paths carried the judge's own words into a refusal. A reply that is not JSON put its first 120 characters into the
+# Unvetted refusal. An item-8 answer that named no listed ruling went into the refusal as written. Each refusal keeps its
+# rule, and its text is written by code. The stub answers, so no model runs. ORDER_WORDS are the judge's words that no
+# code-written sentence uses: a refusal that holds one of them carries the judge's own words.
+JUDGE_REPLY = "Take a pick and drop the question."
+ORDER_WORDS = ("take", "pick", "drop")
+# Path 1, the reply could not be read: the why that the Unvetted refusal gives, on the chat path and on the Stop path.
+UNREADABLE_WHY = "the judge's reply could not be read"
+# Path 2, item 8 named no listed ruling: the code-written text that stands in for the judge's reason.
+NO_ID_SENTENCE = ("A past ruling may cover this question, but the check named none of the listed rulings. Read the listed "
+                  "rulings: if one decides this question, add a `Based on (ruling): <id>` line that names it and send the "
+                  "question again. If none does, send the question again as it is.")
+
+
+def order_words_in(text):
+    """The order words of JUDGE_REPLY that `text` holds as whole words. An empty list when it holds none."""
+    words = set(re.findall(r"[a-z]+", text.lower()))
+    return [w for w in ORDER_WORDS if w in words]
+
+
+NO_ITEM = object()  # a verdict with no `item` key
+COUNT_REASON = "8 options is too many for one question."  # opens with the digit 8 as a count, not an item mark
+DOT_OPENER = "8. A past ruling may cover this."
+ITEM_OPENER = "Item 8: a past ruling may cover this."
+
+
+def item_eight_refusal(reason, item=8):
+    verdict = {"ok": False, "reason": reason} if item is NO_ITEM else {"ok": False, "item": item, "reason": reason}
+    return json.dumps(verdict)
+
+
+def item_eight_run(reason, item=8):
+    """The run of the item-8 box, the box that names no listed ruling, with the stub judge refusing `reason` as `item`."""
+    box = good_box(goal=APPS_GOAL, problem=APPS_PROBLEM, based=APPS_BASED, options=APPS_OPTIONS)
+    return run_hook(question_input(box=box, cwd=DECISIONS_REPO), answer=item_eight_refusal(reason, item))
+
+
+def item_eight_scope(r):
+    """The scope of an item-8 case: one model call, and a refusal denied under question-judge, not the Unvetted path."""
+    return (len(r.calls) == 1 and (r.deny() or {}).get("permissionDecision") == "deny"
+            and r.reason().startswith("question-judge: ") and "could not run" not in r.reason())
+
+
+def case_unreadable_reply_refusal_holds_no_judge_words():
+    box = good_box(goal=APPS_GOAL, problem=APPS_PROBLEM, based=APPS_BASED, options=APPS_OPTIONS)
+    r = run_hook(question_input(box=box, cwd=DECISIONS_REPO), answer=JUDGE_REPLY)
+    check("unreadable reply: the refusal is denied under the call's rule, question-judge, after one model call",
+          (r.deny() or {}).get("permissionDecision") == "deny" and r.reason().startswith("question-judge: ")
+          and len(r.calls) == 1, detail(r))
+    check("unreadable reply: the refusal says in code-written words that the judge's reply could not be read",
+          UNREADABLE_WHY in r.reason(), detail(r))
+    check("unreadable reply: the refusal holds none of the judge's order words",
+          order_words_in(r.reason()) == [], detail(r))
+
+
+def case_item_eight_without_a_listed_id_holds_no_judge_words():
+    box = good_box(goal=APPS_GOAL, problem=APPS_PROBLEM, based=APPS_BASED, options=APPS_OPTIONS)
+    r = run_hook(question_input(box=box, cwd=DECISIONS_REPO), answer=item_eight_refusal(JUDGE_REPLY))
+    check("item 8 without an id: the refusal is denied under the call's rule, question-judge",
+          (r.deny() or {}).get("permissionDecision") == "deny" and r.reason().startswith("question-judge: "), detail(r))
+    check("item 8 without an id: the refusal says a past ruling may cover the question but none was named, and what to do next",
+          NO_ID_SENTENCE in r.reason(), detail(r))
+    check("item 8 without an id: the refusal holds none of the judge's order words",
+          order_words_in(r.reason()) == [], detail(r))
+
+
+def case_item_eight_string_mark_without_a_listed_id_holds_no_judge_words():
+    # The judge marks item 8 as the string "8". The mark still names item 8, so the refusal is the code-written sentence.
+    import question_form  # the one form check (hooks/question_form.py)
+    r = item_eight_run(JUDGE_REPLY, item="8")
+    check("item \"8\" string: one model call, and the refusal is denied under question-judge, not the Unvetted path",
+          item_eight_scope(r), detail(r))
+    check("item \"8\" string: the refusal holds the constant NO_RULING_NAMED_TEXT, not the judge's reason",
+          question_form.NO_RULING_NAMED_TEXT in r.reason(), detail(r))
+    check("item \"8\" string: the refusal holds none of the judge's order words", order_words_in(r.reason()) == [], detail(r))
+
+
+def case_item_string_two_keeps_the_judge_reason():
+    # Control: the same reason marked with the string "2" is no item 8 mark, so the judge's reason stays.
+    import question_form  # the one form check (hooks/question_form.py)
+    r = item_eight_run(JUDGE_REPLY, item="2")
+    check("item \"2\" string: one model call, and the refusal is denied under question-judge, not the Unvetted path",
+          item_eight_scope(r), detail(r))
+    check("item \"2\" string: the refusal keeps the judge's reason", JUDGE_REPLY in r.reason(), detail(r))
+    check("item \"2\" string: the refusal does not hold the constant NO_RULING_NAMED_TEXT",
+          question_form.NO_RULING_NAMED_TEXT not in r.reason(), detail(r))
+
+
+def case_item_eight_count_opener_without_an_item_keeps_the_judge_reason():
+    # No `item` field, and the reason opens with the digit 8 as a count. A count marks no item, so the reason stays.
+    import question_form  # the one form check (hooks/question_form.py)
+    r = item_eight_run(COUNT_REASON, item=NO_ITEM)
+    check("count opener: one model call, and the refusal is denied under question-judge, not the Unvetted path",
+          item_eight_scope(r), detail(r))
+    check("count opener: the refusal keeps the judge's reason", COUNT_REASON in r.reason(), detail(r))
+    check("count opener: the refusal does not hold the constant NO_RULING_NAMED_TEXT",
+          question_form.NO_RULING_NAMED_TEXT not in r.reason(), detail(r))
+
+
+def case_item_eight_marked_openers_without_an_item_give_the_constant():
+    # Control: a reason that opens with an item 8 mark, with no `item` field and no listed id, is the code-written sentence.
+    import question_form  # the one form check (hooks/question_form.py)
+    for label, reason in (("8. opener", DOT_OPENER), ("Item 8: opener", ITEM_OPENER)):
+        r = item_eight_run(reason, item=NO_ITEM)
+        check("%s control: one model call, and the refusal is denied under question-judge, not the Unvetted path" % label,
+              item_eight_scope(r), detail(r))
+        check("%s control: the refusal holds the constant NO_RULING_NAMED_TEXT" % label,
+              question_form.NO_RULING_NAMED_TEXT in r.reason(), detail(r))
+
+
+def case_item_eight_float_without_a_listed_id_holds_no_judge_words():
+    # The judge marks item 8 as the float 8.0. That is the whole number 8, so the refusal is the code-written sentence.
+    import question_form  # the one form check (hooks/question_form.py)
+    r = item_eight_run(JUDGE_REPLY, item=8.0)
+    check("item 8.0: one model call, and the refusal is denied under question-judge, not the Unvetted path",
+          item_eight_scope(r), detail(r))
+    check("item 8.0: the refusal holds the constant NO_RULING_NAMED_TEXT, not the judge's reason",
+          question_form.NO_RULING_NAMED_TEXT in r.reason(), detail(r))
+    check("item 8.0: the refusal holds none of the judge's order words", order_words_in(r.reason()) == [], detail(r))
+
+
+def case_item_float_two_keeps_the_judge_reason():
+    # Control: the float 2.0 is no item 8 mark, so the judge's reason stays.
+    import question_form  # the one form check (hooks/question_form.py)
+    r = item_eight_run(JUDGE_REPLY, item=2.0)
+    check("item 2.0: one model call, and the refusal is denied under question-judge, not the Unvetted path",
+          item_eight_scope(r), detail(r))
+    check("item 2.0: the refusal keeps the judge's reason", JUDGE_REPLY in r.reason(), detail(r))
+    check("item 2.0: the refusal does not hold the constant NO_RULING_NAMED_TEXT",
+          question_form.NO_RULING_NAMED_TEXT not in r.reason(), detail(r))
+
+
+def case_item_true_is_no_mark_keeps_the_judge_reason():
+    # `true` is a boolean, not a number, so it marks no item. The reason has no item 8 opener, so it stays.
+    import question_form  # the one form check (hooks/question_form.py)
+    r = item_eight_run(JUDGE_REPLY, item=True)
+    check("item true: one model call, and the refusal is denied under question-judge, not the Unvetted path",
+          item_eight_scope(r), detail(r))
+    check("item true: the refusal keeps the judge's reason", JUDGE_REPLY in r.reason(), detail(r))
+    check("item true: the refusal does not hold the constant NO_RULING_NAMED_TEXT",
+          question_form.NO_RULING_NAMED_TEXT not in r.reason(), detail(r))
+
+
+def case_item_true_leaves_the_opener_to_decide():
+    # `true` marks no item, so the reason's own opener decides: "8." opens this one, so it gets the code-written sentence.
+    import question_form  # the one form check (hooks/question_form.py)
+    r = item_eight_run(DOT_OPENER, item=True)
+    check("item true with an 8. opener: one model call, and the refusal is denied under question-judge, not the Unvetted path",
+          item_eight_scope(r), detail(r))
+    check("item true with an 8. opener: the refusal holds the constant NO_RULING_NAMED_TEXT",
+          question_form.NO_RULING_NAMED_TEXT in r.reason(), detail(r))
+
+
 def main():
     for case in (case_agent_refusal, case_spawn_prompt_bars_a_lane_waiting_page_write, case_agent_override, case_explore_row_is_vetoed,
                  case_explore_remedy_names_marker, case_agent_fallback_names_marker, case_question,
@@ -2286,7 +2441,16 @@ def main():
                  case_unknown_names_the_claude_settings_records, case_cite_of_a_shown_record_is_not_bogus,
                  case_page_task_gets_item_8_and_is_refused, case_mid_reason_unlisted_id_is_a_plain_refusal,
                  case_page_relative_file_path_reaches_the_review, case_page_relative_file_path_passing_item_passes,
-                 case_page_absolute_file_path_is_judged):
+                 case_page_absolute_file_path_is_judged, case_unreadable_reply_refusal_holds_no_judge_words,
+                 case_item_eight_without_a_listed_id_holds_no_judge_words,
+                 case_item_eight_string_mark_without_a_listed_id_holds_no_judge_words,
+                 case_item_string_two_keeps_the_judge_reason,
+                 case_item_eight_count_opener_without_an_item_keeps_the_judge_reason,
+                 case_item_eight_marked_openers_without_an_item_give_the_constant,
+                 case_item_eight_float_without_a_listed_id_holds_no_judge_words,
+                 case_item_float_two_keeps_the_judge_reason,
+                 case_item_true_is_no_mark_keeps_the_judge_reason,
+                 case_item_true_leaves_the_opener_to_decide):
         try:
             case()
         except Exception as exc:
