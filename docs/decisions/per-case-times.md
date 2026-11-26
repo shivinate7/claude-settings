@@ -26,17 +26,21 @@ A suite total hides a slow case, and so does a slowest-25 list. A case that shou
 - Two copies of the home on `PYTHONPATH` do not recurse.
 - Guard runner (`hooks/test_guard.py`): one row per case and per log check. `suite` is `hooks/test_guard.py`, `group` is the case's family, and a log check's `case` starts with `log: `. `fixture_s` is the time of lazy fixture blocks, taken out of `s`.
 - Children: an armed process drops `CASE_TIMES` when `unittest.result` loads, so a child it starts after that writes no rows. Mutation runs drop it too, since their runner imports no unittest (`hooks/mutate_shared.py`, `run_suite_file`).
+- CI steps: the `checks` job of `.github/workflows/checks.yml` runs `lint/test_case_times.py` and `lint/test_case_times_report.py`, as the steps "Case timing helper suite" and "Case timing report suite". Their runs read no timing: no CI job sets `CASE_TIMES=1` yet.
 - Reader: `lint/case_times_report.py [--dir FOLDER]`, default `RUNNER_TEMP/case-times`. It prints `read: <path>` for each job file it reads, and `missing: <job>` for each job named in env `CASE_TIMES_JOBS` with no file. It merges every job file and groups rows by suite and group. Skipped rows stay out of every group. A case's time is `s` plus `fixture_s`. A case is flagged at 10 times its group's median of that time, and at least 1.0 s, in groups of 5 or more. A missing, empty or bad folder prints `unknown`. It exits 0 after any read and gates nothing.
 - Known false flag: a module-level fixture that a unittest file builds lazily in its first case lands on that case, which can be flagged.
 
 ## What it costs
 
-Cost (rule `outcomes-mechanize-rules`): the recording runs only in armed Python processes, and the reader runs only when called.
+Cost (rule `outcomes-mechanize-rules`): the recording runs only in armed Python processes, and the reader runs only when called. Unarmed runs pay the smaller costs listed below.
 
-- Process starts: none. The import finder watches one more module name, `unittest.async_case`. That adds no start and no file.
+- Process starts: none from the recording. The import finder watches one more module name, `unittest.async_case`. That adds no start and no file. The two CI steps (see What is built) start one Python process each, in CI only.
 - Files written: one per armed job. Each armed process that has rows appends to it once, at exit.
-- How often: only in an armed run. An unarmed Python start costs one import and writes no file.
+- How often: only in an armed run. An unarmed Python start with `testing/case_times` on `PYTHONPATH` runs one import, then `_chain` in `testing/case_times/sitecustomize.py`. That walks `sys.path`: one `isfile` check (a stat) per entry, and `_is_home` on each hit. It writes no file.
+- Unarmed guard runner: `run_cases` in `hooks/test_guard.py` reads the clock twice per case and twice per log check, and calls `_record_case`. That call returns at once when unarmed. `_timed` adds to `_FIXTURE_S` on every lazy fixture block, armed or not.
+- CI time: the two CI steps run one after the other in the `checks` job, on every run that is not records-only. Measured once, on this Mac: 10.2 s for the helper suite and 4.4 s for the report suite. CI time unmeasured.
 - Reader: on demand. It writes no file.
+- Not pinned by a test: the unarmed clock reads, the `_chain` stat walk, and the CI step time.
 
 Check: `lint/test_case_times.py`: `Cost.test_no_child_and_one_file`, `Cost.test_unarmed_child_one_import_no_file`, `Unarmed.test_no_env_writes_no_file`, `Unarmed.test_no_unittest_import_writes_no_file`, `Children.test_suite_child_writes_no_row`, `Children.test_mutation_child_writes_no_row`, `Records.test_one_row_per_case_with_outcome`, `GuardRows.test_one_row_per_case_fixture_netted`, `Chain.test_next_sitecustomize_still_runs`. `lint/test_case_times_report.py`: `Flags.test_ten_times_median_over_floor_flagged`, `Flags.test_under_floor_not_flagged`, `Flags.test_small_group_not_judged`, `Flags.test_bad_file_unknown_exit_zero`.
 
@@ -54,9 +58,8 @@ Picks by the consultant. The owner may reverse any of them.
 
 ## Not built
 
-- The CI workflow hunk. It sets `CASE_TIMES=1`, `RUNNER_TEMP` and `PYTHONPATH` for the jobs, and uploads the job files. It waits on the open PRs that hold the workflow. Until it lands, no CI job sets `CASE_TIMES=1`.
+- CI arming. A job sets `CASE_TIMES=1`, `RUNNER_TEMP` and `PYTHONPATH`, and uploads its job files. It waits on the open PRs that hold the workflow. Until it lands, no CI job sets `CASE_TIMES=1`.
 - The 14-day retention. It is a workflow setting, not yet set.
-- The two lint test files run in CI only when a draft PR touches them (`.github/workflows/lane-touched-tests.yml`).
 
 ## Limits
 
@@ -69,7 +72,7 @@ Picks by the consultant. The owner may reverse any of them.
 
 - Armed against unarmed time: one sample. 1.19 s armed, 0.69 s unarmed, on a 6-case suite. Noise is not ruled out.
 
-State: decided. Built: the recording, the reader and their tests. Not built: the CI arming.
+State: decided. Built: the recording, the reader, their tests, and the two CI steps. Not built: the CI arming.
 
 Kind: process
 Home: testing/case_times/case_times.py
