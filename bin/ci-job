@@ -909,10 +909,74 @@ def tool_key():
         return TOOL_KEYS["key"]
 
 
+PYTHON_DIR = "ci_job.python_dir"  # the key of `values` that holds the folder whose python3 is the job's pinned interpreter (pinned_python)
+SETUP_PYTHON = re.compile(r"(?:\S*/)?actions/setup-python(?:@\S*)?")  # the action whose python-version: pins a job's Python
+PIN_VERSION = re.compile(r"""['"]?(\d+\.\d+)(?:\.[\w*]+)?['"]?""")  # a python-version: that names a release: major.minor in group 1
+PYTHON_NOTED = set()  # each mismatch line this run printed, so a second pass over another job of the workflow prints none twice
+LOCAL_PYTHON = {}  # "version": major.minor.micro of this machine's python3, read once per run
+
+
 def child_env(env, base, values):
-    """The whole environment a step runs with: this process's, less what a runner step lacks, then the step's own. The one home: the key reads it as the step does."""
-    return {**{k: v for k, v in os.environ.items() if k not in RUNNER_UNSET | {"GITHUB_BASE_REF", PIN_NOTE_ENV, HEAD_SHA_ENV}},
-            **({"GITHUB_BASE_REF": values["github.base_ref"]} if base else {}), **env}
+    """The whole environment a step runs with: this process's, less what a runner step lacks, then the step's own, then PATH led by the job's pinned
+    interpreter folder when there is one. The one home: the key reads it as the step does."""
+    out = {**{k: v for k, v in os.environ.items() if k not in RUNNER_UNSET | {"GITHUB_BASE_REF", PIN_NOTE_ENV, HEAD_SHA_ENV}},
+           **({"GITHUB_BASE_REF": values["github.base_ref"]} if base else {}), **env}
+    if values.get(PYTHON_DIR):
+        out["PATH"] = values[PYTHON_DIR] + os.pathsep + out.get("PATH", "")
+    return out
+
+
+def job_python_pin(block):
+    """The major.minor Python the job's setup-python step pins with python-version:, or None when it pins none (no such step, no python-version:, or an
+    expression or a value this reads no release from). The first such step of the job."""
+    for st in step_blocks(block):
+        if SETUP_PYTHON.fullmatch(uses(st)):
+            m = PIN_VERSION.fullmatch(step_with(st).get("python-version", "").split(" #")[0].strip())
+            if m:
+                return m.group(1)
+    return None
+
+
+def local_python_version():
+    """The version of the python3 on PATH as `3.15.0`, or None when there is none or its answer is unreadable. One run of it per ci-job run."""
+    if "version" not in LOCAL_PYTHON:
+        LOCAL_PYTHON["version"] = None
+        found = shutil.which("python3")
+        if found:
+            try:
+                done = _nowindow.run([found, "--version"], capture_output=True, text=True, timeout=30, stdin=subprocess.DEVNULL)
+                m = re.search(r"(\d+\.\d+(?:\.\d+)?)", done.stdout + done.stderr)
+                LOCAL_PYTHON["version"] = m.group(1) if m else None
+            except (OSError, subprocess.SubprocessError):
+                pass
+    return LOCAL_PYTHON["version"]
+
+
+def pinned_python(pin, dry):
+    """(the folder whose python3 is python<pin>, or None; a line that names the mismatch, or None). With python<pin> on PATH the folder holds a
+    python3 link to it, so a step that runs `python3` runs the pin; the folder's name holds a hash of the target, so the rerun cache keys on which
+    interpreter it is. With none on PATH, and a python3 at another version, the line names both and nothing else changes. dry: no link is made."""
+    if not pin or os.name == "nt":
+        return None, None
+    target = shutil.which("python" + pin)
+    if target:
+        folder = os.path.join(os.path.dirname(cache_folder()), "ci-job-python", "%s-%s" % (pin, hashlib.sha256(os.path.realpath(target).encode()).hexdigest()[:12]))
+        if dry:
+            return folder, None
+        try:
+            os.makedirs(folder, exist_ok=True)
+            link = os.path.join(folder, "python3")
+            if os.path.realpath(link) != os.path.realpath(target):
+                tmp = "%s.%d" % (link, os.getpid())
+                os.symlink(target, tmp)
+                os.replace(tmp, link)
+        except OSError:
+            return None, None  # no link: the steps run under python3, as with no pin
+        return folder, None
+    local = local_python_version()
+    if local is None or local.split(".")[:2] == pin.split("."):
+        return None, None
+    return None, "interpreter: this job pins Python %s and python%s is not on PATH, so its Python steps run under python3 %s; a bug that shows only on %s can pass here" % (pin, pin, local, pin)
 
 
 def hang_default(detail):
@@ -1589,6 +1653,14 @@ def main(argv, sibling=False, ran_suites=None):
               "github.event.pull_request.head.sha": os.environ.get(HEAD_SHA_ENV, "").strip() or git("rev-parse", "HEAD", cwd=top) or "",
               **({"github.event.pull_request.base.sha": base_sha} if base_sha else {}),  # a base that does not resolve leaves the expression unread
               "github.token": ""}  # no runner token here (RUNNER_UNSET): a step that maps it into GH_TOKEN reads gh's own login
+    if not sibling:
+        PYTHON_NOTED.clear()
+        LOCAL_PYTHON.clear()
+    if lint:  # the job's Python steps run under the Python its workflow pins when this machine has it; else one line says they do not
+        values[PYTHON_DIR], mismatch = pinned_python(job_python_pin(block), dry)
+        if mismatch and mismatch not in PYTHON_NOTED:
+            PYTHON_NOTED.add(mismatch)
+            print(mismatch)
     log = os.environ.get("VERDICT_LOG")
     if not log and not dry:
         prune_own_logs(tempfile.gettempdir())
