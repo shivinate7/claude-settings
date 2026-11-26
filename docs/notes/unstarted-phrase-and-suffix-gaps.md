@@ -1,0 +1,1 @@
+- unstarted-phrase-and-suffix-gaps: the measured-conflict phrase is a closed list, so "merge-tree shows conflicts in <file>" is refused; and the source-suffix list lacks scss, rst and others, so "needs PR #3916's code: `page.scss`" passes as a symbol (decision `guard-remedy-not-to-owner`, the Unstarted guard). Seen: 2026-11-25 x1

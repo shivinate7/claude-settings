@@ -63,6 +63,8 @@ class Repo:
         self.root = tempfile.mkdtemp(prefix="probes-", dir=RUN_FOLDER)
         test.addCleanup(shutil.rmtree, self.root, True)
         subprocess.run(["git", "init", "-q", self.root], check=True)
+        # No background gc or maintenance: a commit here can start one, and its lock file then shows in a case's listing.
+        self.git("config", "gc.auto", "0").git("config", "maintenance.auto", "false")
         if origin:
             bare = tempfile.mkdtemp(prefix="origin-", dir=RUN_FOLDER)
             test.addCleanup(shutil.rmtree, bare, True)
@@ -110,6 +112,22 @@ class Repo:
     def run(self, group):
         code, out, _ = self.probe(group)
         return code, out
+
+    def config(self, key):
+        """The value of `key` in this repo's own config (not a global one), "" when it is unset."""
+        done = subprocess.run(["git", "-C", self.root, "config", "--local", "--get", key], capture_output=True, text=True)
+        return done.stdout.strip()
+
+
+class FixtureRepo(unittest.TestCase):
+    """Every fixture repo turns off background gc and maintenance. A commit can start them, and their lock file then shows
+    in a case's listing of the repo: the load-caused false red of AlignedHead."""
+
+    def test_a_fixture_repo_turns_off_auto_gc_and_auto_maintenance(self):
+        repo = Repo(self)
+        self.assertEqual(repo.config("gc.auto"), "0", "the fixture repo's gc.auto is not 0: a commit can start a background gc")
+        self.assertEqual(repo.config("maintenance.auto"), "false",
+                         "the fixture repo's maintenance.auto is not false: a commit can start background maintenance")
 
 
 class Layout(unittest.TestCase):
