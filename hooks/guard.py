@@ -3802,6 +3802,13 @@ def floor_hit(tool: str, tool_input) -> str:
     return floor_spawn(tool, tool_input)[0]
 
 
+def floor_call(tool: str, tool_input) -> tuple:
+    """(model, role) the floor judges for a call. The model comes from floor_hit, the one seam that names a call's floor
+    model, so a patch on it reaches every judge; the role is read only once a model fires."""
+    model = floor_hit(tool, tool_input)
+    return (model, floor_spawn(tool, tool_input)[1]) if model else ("", "")
+
+
 # The owner's own word for a model (ruling: "if i say haiku it should work, there shouldnt be any
 # guards on a FLOOR"). A spawn the floor would refuse passes when the owner's last typed turn names that model. The word
 # lifts the floor only: the Opus ceiling (agent-model-cap) never reads it (consultant pick, same time). It covers a lane
@@ -8102,7 +8109,7 @@ def never_lifted(payload, tool: str, tool_input: dict, cwd: str) -> bool:
     check."""
     POWERSHELL_CALL[0] = tool == "PowerShell"
     # role_model_check's above-row refusal is liftable (item 127 pick a); only its no-model refusal is never lifted.
-    floor_model, floor_role = floor_spawn(tool, tool_input)  # the owner's own word for that model leaves the floor out of this list (step 9)
+    floor_model, floor_role = floor_call(tool, tool_input)  # the owner's own word for that model leaves the floor out of this list (step 9)
     if ((floor_model and not owner_names_model(payload, floor_model, floor_role)) or step_up_hit(tool, tool_input)
             or role_model_check(tool, tool_input)[1].startswith(ROLE_NO_MODEL_MATCH)
             or worktree_home_hit(payload, tool, tool_input, cwd)):
@@ -8367,7 +8374,7 @@ def judge(payload) -> None:
     # 9. The agent model floor. A spawn that names a Haiku model is refused. The reason names no
     # model; the log holds what the call asked for. A lane start's floor is judged with the lane-start rules (8a).
     # The owner's last turn naming the model lifts it (owner_names_model); the transcript is read only when the floor fires.
-    floor_model, floor_role = floor_spawn(tool, tool_input)
+    floor_model, floor_role = floor_call(tool, tool_input)
     if floor_model and not owner_names_model(payload, floor_model, floor_role):
         refuse(tool, "deny", "agent-model-floor", MODEL_FLOOR_REASON, floor_model)
 
