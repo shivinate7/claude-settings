@@ -157,8 +157,12 @@
 # such step and prints `PASS (cached)` for it. Never saved: an install step, or a step
 # that failed, read unknown or skipped. A saved file that cannot be read is a miss. A pass ages from its save time: a hit does not refresh it, and
 # it misses 7 days after the save. Cost: per step that may be cached, one set of git processes (a temp index, add, write-tree, rev-parse); per run, one
-# read of those trees; per pass, one file of under 1 KB in $XDG_CACHE_HOME (else ~/.cache) /claude-settings/ci-job-pass. A save prunes files saved
-# over 7 days ago, and the store holds at most 300 files. No timer, no lasting process. CI_JOB_NO_CACHE=1 turns the cache off.
+# read of those trees; per pass, one file in $XDG_CACHE_HOME (else ~/.cache) /claude-settings/ci-job-pass. Its size is pinned for one small sample only,
+# a pass that fits in 512 bytes; measured on one Mac and not pinned: the largest of 300 saved passes was 335 bytes, a suite carry record built from this
+# repo's workflow was 438 bytes, and a carry record grows about 39 bytes per extra suite path. The first save of a process prunes files saved over 7 days ago
+# and no others, once per process: no count cap, so the store grows with the saves of 7 days. That prune lists the folder once and stats each file in it
+# (0.03 s for a store of 5000 saved passes on one Mac, one sample, not pinned); later saves of the process write their own file only. No timer, no lasting
+# process. CI_JOB_NO_CACHE=1 turns the cache off.
 import ast, concurrent.futures, hashlib, importlib.util, json, os, posixpath, re, shlex, shutil, subprocess, sys, tempfile, threading, time
 BIN = os.path.dirname(os.path.realpath(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(BIN), "hooks"))
@@ -814,7 +818,7 @@ CARRY_BLOCKERS = ("hooks/mutate_guard.py", "bin/ci-job", ".github/stamp.json")  
 CARRY_RECORDS = "docs/records.md"  # a delta of this one file carries every suite step: its pass reads no other record (ci-scope.sh's records-only skip names it too)
 CARRY_MEMO = {}  # (top, saved head, saved tree, tree) -> {picked: the delta's picked suites, None when it forbids any carry; changed: its paths; flags: its scope flags once read}; one read per run
 SCOPE_APART = {"windows_guard", "mutation_report", "records_only_skip", "skip_comment_delta"}  # ci-scope.sh outputs that an unmapped path does not set: carry_delta_read leaves them out of its read of every flag on
-CACHE_FILES, CACHE_DAYS = 300, 7
+CACHE_DAYS = 7
 VOLATILE_ENV = {"GITHUB_WORKSPACE", "VERDICT_LOG", "CI_JOB_LINT_WORKERS", "CI_JOB_NO_CACHE", "PWD", "OLDPWD", "SHLVL", "_", "COLUMNS", "LINES",
                "CLAUDE_CODE_SESSION_ID", "CLAUDE_PID", "TRACEPARENT", "CCR_SPAWN_TIMESTAMP_MS"}  # a variable that differs between runs and changes no step's result; GITHUB_WORKSPACE repeats the repo path, which the key holds once
 TOOL_TREES = ("bin", "hooks", "lint")  # the folders of this install that a step may run or import
@@ -1023,6 +1027,31 @@ def cache_read(key, name):
     return None
 
 
+CACHE_PRUNED = False  # set by the first save of this process that prunes: later saves skip the listing
+
+
+def prune_cache(folder):
+    """Remove saved passes older than CACHE_DAYS, once per process: the first save lists the folder, later saves only write their own file.
+    Age is the only prune, so a fresh pass stays whatever the store holds and a long lint's saves outlive a timeout. Each entry has its own try:
+    a file another process removed between the listing and its stat or remove skips only itself."""
+    global CACHE_PRUNED
+    if CACHE_PRUNED:
+        return
+    CACHE_PRUNED = True
+    old = time.time() - CACHE_DAYS * 86400
+    try:
+        with os.scandir(folder) as it:
+            entries = list(it)
+    except OSError:
+        return
+    for e in entries:
+        try:
+            if e.is_file(follow_symlinks=False) and e.stat(follow_symlinks=False).st_mtime < old:
+                os.remove(e.path)
+        except OSError:
+            pass
+
+
 def cache_save(key, name, first, extra=None):
     """Save a pass: one small file, written whole then renamed. Then prune the store. A failed write loses only the speed-up.
     `extra` holds more fields of the record (a suite step's carry record)."""
@@ -1033,15 +1062,7 @@ def cache_save(key, name, first, extra=None):
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             json.dump({**(extra or {}), "key": key, "name": name, "first": first}, f)
         os.replace(tmp, os.path.join(folder, key))
-        with os.scandir(folder) as it:
-            files = sorted(((e.stat(follow_symlinks=False).st_mtime, e.path) for e in it if e.is_file(follow_symlinks=False)), reverse=True)
-        old = time.time() - CACHE_DAYS * 86400
-        for i, (mtime, path) in enumerate(files):
-            if i >= CACHE_FILES or mtime < old:
-                try:
-                    os.remove(path)
-                except OSError:
-                    pass
+        prune_cache(folder)
     except OSError:
         pass
 
