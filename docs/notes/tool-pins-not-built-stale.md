@@ -1,0 +1,1 @@
+- tool-pins-not-built-stale: decision `tool-pins` lines 52 ("No CI job runs the check") and 55 ("None of that wiring exists yet") are stale once this branch merges. Its Tool pins step is in `checks`, `checks-windows` and `checks-macos`, and main has none today. The "Not built" heading then needs a rewrite in place. Seen: 2026-11-25 x1
