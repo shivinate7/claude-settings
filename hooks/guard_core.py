@@ -2738,12 +2738,17 @@ FIND_EXEC_ACTIONS = ("-exec", "-execdir", "-ok", "-okdir")
 def wrapped_commands(tokens, at: int, strict: bool = False):
     """The command texts the runner at `tokens[at]` starts, else []. Read: `docker|podman exec`,
     `kubectl exec ... --`, `find -exec ... ;`, `su -c`, `flock FILE`, `stdbuf`, `ionice`, `unbuffer`,
-    `caffeinate`, `watch`. A text keeps its quoting, so `docker exec c sh -c 'x y'` still reads as
+    `caffeinate`, `watch`, `red-run`. A text keeps its quoting, so `docker exec c sh -c 'x y'` still reads as
     `sh -c`. `watch` joins its words with spaces and hands the line to `sh -c`, so its text is that
     line.
     With `strict`, a `docker|podman exec` that has a flag before the container the tables do not list reads
     as no child: the flag may take a value, and the container is then misplaced."""
     word, rest = basename(tokens[at]), tokens[at + 1:]
+    if word == "red-run":
+        # `red-run COMMIT [--add P]... [--replace P OLD NEW]... -- CMD` (bin/red-run `parse`): the first `--` ends the
+        # head, so a --replace value is never read as the command. A call with no commit before it runs nothing.
+        cut = rest.index("--") if "--" in rest else 0
+        return [shlex.join(rest[cut + 1:])] if cut and not rest[0].startswith("-") and rest[cut + 1:] else []
     if word == "watch":
         index, _ = _wrapper_flags(word, rest, 0)
         return [" ".join(rest[index:])] if rest[index:] else []
@@ -2809,13 +2814,24 @@ def bare_words(segment: str):
     return words, {i for i, (_, b) in enumerate(spans) if b}
 
 
-def inner_commands(tokens):
+# The runners that start their command on another machine or in a container: not this machine's processes.
+REMOTE_RUNNERS = {"docker", "podman", "kubectl"}
+
+
+def inner_commands(tokens, local: bool = False):
     """Every command text one segment hands on, for a rule that judges the command word: what a
     shell, `eval` or `ssh` gets (nested_script, ssh_remote_script) and what a runner starts
-    (wrapped_commands), at each command in the segment. The one reader of these wrappers."""
+    (wrapped_commands), at each command in the segment. The one reader of these wrappers.
+    With `local`, a text that runs on another machine or in a container (`ssh`, `docker exec`,
+    `kubectl exec`) is left out: a rule about this machine's processes reads the rest."""
     found = [nested_script(tokens), ssh_remote_script(tokens)]
     for at in command_indexes(tokens):
         found.extend(wrapped_commands(tokens, at))
+    if local:
+        far = [ssh_remote_script(tokens)] + [text for at in command_indexes(tokens)
+                                             if basename(tokens[at]) in REMOTE_RUNNERS
+                                             for text in wrapped_commands(tokens, at)]
+        found = [text for text in found if text not in far]
     return [text for text in found if text]
 
 

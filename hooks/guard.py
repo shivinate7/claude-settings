@@ -790,7 +790,7 @@ while True:
             DETACHED_LAUNCH_REASON, GIT_ENV_REASON, KILL_PID_REASON, KILL_PID_UNKNOWN_REASON, KILL_REASON,
             PLAYWRIGHT_INSTALL_REASON, PLAYWRIGHT_PATH_REASON, detached_launch_hit, foreign_pid_kill, pid_tag_unreadable,
             git_env_command_hit, kill_fed_by_name, kill_fed_by_pipe, kill_hit, kills_group_pid,
-            lsof_pids_reach_kill, playwright_command_hit, playwright_install_hit,
+            lsof_pids_reach_kill, nested_kill_texts, playwright_command_hit, playwright_install_hit,
         )
         _loading = "guard_argv"
         from guard_argv import PROCESS_ARGS_REASON, process_args_hit
@@ -5641,9 +5641,16 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
 
     # 2. A machine-wide kill. Judged in COMMAND POSITION, from the segment's own tokens, never
     # by the word appearing anywhere in the text. A segment shlex cannot parse fails open:
-    # judge nothing rather than guess what it would run.
+    # judge nothing rather than guess what it would run. The command a wrapper runs is read as shell,
+    # as a text of its own (`sh -c BODY`, `red-run SHA -- CMD`: nested_kill_texts); text that is only data
+    # to another program is no command.
     call_tokens = []
-    for text in texts:
+
+    def kill_texts():   # lazy: the outer texts are judged before the nested read runs, so a raise there cannot skip them
+        yield from texts
+        yield from nested_kill_texts(texts)
+
+    for text in kill_texts():
         previous = None   # a pipe never reaches across a substitution's edge
         for segment in split_segments(text):
             if not segment.strip():

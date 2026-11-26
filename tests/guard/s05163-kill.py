@@ -395,6 +395,46 @@ if sys.platform == "darwin":
 else:
     skip_case(LIMIT_LABEL, "the Apple platform binary's hidden environment is a macOS read, so this "
                            "limit is not reached on this host")
+# THE APPLE SHAPE OF A `yes` JOB. A background Apple platform binary, re-parented to init, reads untagged
+# on macOS, so its kill is refused. This holder is direct, with no stub: the pid `&` and `echo $!` capture.
+# The python job of the cases above is allowed.
+APPLE_LABEL = ("kill: a background /bin/sleep this session started, re-parented to pid 1, is refused on macOS "
+               "(the shape of the refused yes jobs, debt kill-tag-platform-binary-blind)")
+if sys.platform == "darwin":
+    tag_case(APPLE_LABEL, "deny", env_entries=[TAG + "=" + SUB_SESSION], holder=["/bin/sleep", "300"],
+             carries="did not start")
+else:
+    skip_case(APPLE_LABEL, "the Apple platform binary's hidden environment is a macOS read, so this "
+                           "limit is not reached on this host")
+# THE JOB STILL PARENTED TO ITS SHELL, AND ITS CHILD (the walk, no environment read). A job the session
+# started under its own shell is owned while that shell lives, and so is a child of that job. The walk
+# owns both, so the Apple read gap does not reach them. FORK_SRC is a python job that forks one child.
+FORK_SRC = ("import subprocess, sys, time; "
+            "subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(300)']); time.sleep(300)")
+if os.name != "nt":   # Windows has no `ps`: ownership reads unknown, so these allow
+    SHELL_JOB = subprocess.Popen(["sh", "-c", '"$@" & wait', "sh", sys.executable, "-c", FORK_SRC],
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    JOB_PID = child_of(SHELL_JOB.pid)   # the job, parented to the session's shell
+    CHILD_PID = child_of(JOB_PID) if JOB_PID else None   # the job's own child
+    if JOB_PID is None:
+        skip_case("kill: a job this session started, still parented to its own shell, passes", NO_ORPHAN)
+    else:
+        sh("kill: a job this session started, still parented to its own shell, passes",
+           "kill %d" % JOB_PID, "allow", cwd=NOGIT)
+    if CHILD_PID is None:
+        skip_case("kill: a child of a job this session started, alive, passes", NO_ORPHAN)
+    else:
+        sh("kill: a child of a job this session started, alive, passes", "kill %d" % CHILD_PID,
+           "allow", cwd=NOGIT)
+else:
+    skip_case("kill: a job this session started, still parented to its own shell, passes", NO_PS)
+    skip_case("kill: a child of a job this session started, alive, passes", NO_PS)
+# TWELVE `&` JOBS WITH ONE `$!`. The bare-& test is skipped when `$!`
+# appears anywhere in the command (decision detached-launch-refused: "unless the command captures the pid
+# with `$!`"). `$!` names only the last job, so eleven of the twelve pids cannot be named. A pin of that
+# exemption as written; the fix waits for the owner's grant.
+sh("detached: twelve background jobs in a loop, one echo $! after them, pass (the $! exemption)",
+   "for i in $(seq 12); do yes >/dev/null 2>&1 & done; echo $!", "allow", cwd=NOGIT)
 
 sh("kill: a pid list made by pgrep", "kill $(pgrep -f node)", "deny", "machine-wide-kill",
    cwd=NOGIT)
@@ -452,6 +492,87 @@ sh("kill: taskkill by image name, no other flag", "taskkill /IM node.exe", "deny
    "machine-wide-kill", cwd=NOGIT)
 sh("kill: xargs unwraps to the real command it runs", "xargs pkill", "deny",
    "machine-wide-kill", cwd=NOGIT)
+
+# THE NESTED SHELL. The kill rule reads the shell command a wrapper runs, parsed as shell, and reads
+# no text that is only data to another program. A wrapper that runs a shell runs that shell's text as
+# a command, including a wrapper the guard does not name (the repo's red-run, after its `--`), and a
+# wrapper inside a wrapper. INCIDENT: an agent ran `pkill -f "sleep 30"` machine-wide, 18 processes
+# matched, wrapped as `red-run <sha> -- sh -c '...'`. The rule refused the bare form and never read the
+# nested one. The allow controls below hold the other side: a kill word that only carries data (an echo,
+# a grep, a Python string, a commit message) stays allowed, in a body too.
+NESTED_KILL_REFUSE = (
+    ("the incident form: red-run wraps sh -c around pkill -f",
+     """red-run abc1234 -- sh -c 'pkill -f "sleep 30"'"""),
+    ("sh -c runs pkill by pattern", "sh -c 'pkill -f node'"),
+    ("bash -c runs pkill by pattern", "bash -c 'pkill -f node'"),
+    ("sh -c runs killall", "sh -c 'killall node'"),
+    ("bash -c runs killall", "bash -c 'killall node'"),
+    ("sh -c kills a pgrep substitution", "sh -c 'kill -9 $(pgrep -f node)'"),
+    ("bash -c kills a pgrep substitution", "bash -c 'kill -9 $(pgrep -f node)'"),
+    ("env sets a variable, then sh -c runs pkill", "env FOO=1 sh -c 'pkill -f node'"),
+    ("timeout runs bash -c, which runs pkill", "timeout 30 bash -c 'pkill -f node'"),
+    ("xargs runs sh -c, which runs pkill", "xargs sh -c 'pkill -f node'"),
+    ("a wrapper inside a wrapper: red-run runs timeout, which runs sh -c",
+     "red-run abc1234 -- timeout 5 sh -c 'pkill -f node'"),
+    ("bash -lc runs pkill", "bash -lc 'pkill -f node'"),
+    ("the body in double quotes", 'sh -c "pkill -f \'sleep 30\'"'),
+    # Overreach guard for the body-as-data fix. An inner shell runs the heredoc body, so the body stays a
+    # command. The un-nested form is refused at main's merge base; this nested form is pinned to the same
+    # refusal. The merge base allows the nested form, so this row is red there and green on the branch.
+    ("a heredoc fed to an inner sh, which runs the pkill body", "sh -c 'sh <<EOF\npkill -f node\nEOF'"),
+)
+for _name, _command in NESTED_KILL_REFUSE:
+    sh("kill nested: " + _name, _command, "deny", "machine-wide-kill", cwd=NOGIT)
+# A nested kill of a pid this session did not start is judged as the bare kill is (KILL_PID_REASON).
+if os.name != "nt":   # Windows has no `ps`: ownership reads unknown, so this allows
+    sh("kill nested: sh -c kills a pid this session did not start", "sh -c 'kill %d'" % FOREIGN,
+       "deny", "machine-wide-kill", cwd=NOGIT, carries="did not start")
+else:
+    skip_case("kill nested: sh -c kills a pid this session did not start", NO_PS)
+# CONTROLS, allowed. Nesting must not turn an allowed kill into a refused one: a pid this session
+# started, and `$!`, stay allowed inside `sh -c`. A `#` opens a comment in a nested body, so the text
+# after it runs nothing. The data forms (an echo, a grep, a Python string, a commit message) carry the
+# kill word as text, never as a command.
+sh("kill nested: sh -c kills a pid this session started passes", "sh -c 'kill %d'" % OWNED.pid,
+   "allow", cwd=NOGIT)
+sh("kill nested: sh -c kills $! passes", "sh -c 'kill $!'", "allow", cwd=NOGIT)
+NESTED_KILL_ALLOW = (
+    ("python3 heredoc prints the kill text in a string", "python3 - <<'EOF'\nprint(\"pkill -f node\")\nEOF"),
+    ("python3 -c prints the kill text in a string", """python3 -c 'print("pkill -f node")'"""),
+    ("echo prints the kill text", 'echo "pkill -f node"'),
+    ("printf prints the kill text", "printf '%s\\n' 'pkill -f node'"),
+    ("grep looks for the kill text", 'grep -rn "pkill -f" hooks/'),
+    ("sh -c echoes the kill text", """sh -c 'echo "pkill -f node"'"""),
+    ("sh -c has a kill after a hash comment", "sh -c 'echo hi # pkill -f node'"),
+    ("a commit message holds the kill text", VCS + ' commit -m "docs: pkill -f node is refused"'),
+    ("a commit message holds a nested sh -c body",
+     VCS + ''' commit -m "docs: sh -c 'pkill -f node' is refused"'''),
+    # A heredoc body is data the nested shell writes or prints, so a body line that starts with pkill
+    # passes. Each row is a false alarm on the branch's pre-change tip, where the body line is read as a
+    # command, except the last row: a python3 heredoc is interpreter input, so it is green on both.
+    ("sh -c cats a heredoc whose body line is pkill, double-quoted body",
+     'sh -c "cat <<EOF\npkill -f node\nEOF"'),
+    ("bash -c writes a heredoc whose body line is pkill into a file",
+     "bash -c 'cat > notes.txt <<EOF\npkill -f node\nEOF'"),
+    ("sh -c cats a heredoc with a quoted delimiter, body line pkill",
+     "sh -c \"cat <<'EOF'\npkill -f node\nEOF\""),
+    ("bash -c writes a quoted-delimiter heredoc into a file, body line pkill",
+     "bash -c 'cat > notes.txt <<\"EOF\"\npkill -f node\nEOF'"),
+    ("sh -c cats a dash heredoc with a tab-indented body, double-quoted",
+     "sh -c \"cat <<-EOF\n\tpkill -f node\n\tEOF\""),
+    ("bash -c writes a dash heredoc with a tab-indented body into a file",
+     "bash -c 'cat > notes.txt <<-EOF\n\tpkill -f node\n\tEOF'"),
+    ("red-run wraps sh -c, which cats a heredoc whose body line is pkill",
+     "red-run abc1234 -- sh -c 'cat <<EOF\npkill -f node\nEOF'"),
+    ("bash -c commits with a -F heredoc message whose body line is pkill",
+     "bash -c '" + VCS + " commit -F - <<EOF\nKill rule: refuse the nested form\n\npkill -f node\nEOF'"),
+    ("bash -c commits with a cat heredoc message whose body line is pkill",
+     "bash -c '" + VCS + " commit -m \"$(cat <<EOF\nKill rule: refuse the nested form\n\npkill -f node\nEOF\n)\"'"),
+    ("sh -c runs python3 on a heredoc whose triple-quoted string holds a pkill line",
+     "sh -c 'python3 - <<EOF\nprint(\"\"\"\npkill -f node\n\"\"\")\nEOF'"),
+)
+for _name, _command in NESTED_KILL_ALLOW:
+    sh("kill nested: " + _name + " passes", _command, "allow", cwd=NOGIT)
 
 # THE PLAYWRIGHT BROWSER CACHE. Owner ruling: a command that sets PLAYWRIGHT_BROWSERS_PATH is
 # refused, mechanically. INCIDENT 2026-10-10: a feed-build session pointed the variable at a scratch
