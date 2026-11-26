@@ -1339,6 +1339,22 @@ class PageWriterKey(Tree):
                 self.put(EXTRAS, json.dumps({"kinds": {}, "page-writer": sid}))
                 self.assertEqual(self.layout.page_writer_key(self.tree), sid)
 
+    def test_na_strings_are_none(self):
+        # Catches: the page writer set to N/A (owner ruling 2026-11-25 20:32 CST, "page writer should be N/A atm") read
+        # as a session id, so the Stop check names a session "none" that does not exist.
+        for na in ("none", "None", "N/A", "n/a"):
+            with self.subTest(na=na):
+                self.put(EXTRAS, json.dumps({"kinds": {}, "page-writer": na}))
+                self.assertTrue(os.path.isfile(os.path.join(self.tree, *EXTRAS.split("/"))), "scope: the checkout holds the extras file")
+                self.assertIsNone(self.layout.page_writer_key(self.tree), "the page writer %r is N/A, not a session id" % na)
+
+    def test_a_session_id_with_none_in_it_still_reads(self):
+        # Catches: a substring match on "none" that drops a real session id containing those letters.
+        for sid in ("session_none1ABC", "session_013NoneXYZ"):
+            with self.subTest(sid=sid):
+                self.put(EXTRAS, json.dumps({"kinds": {}, "page-writer": sid}))
+                self.assertEqual(self.layout.page_writer_key(self.tree), sid)
+
 
 class RolledOutMark(Tree):
     """An extras file alone is not the mark: "rolled-out": true is (waiting page item 29 (a), the rolled-out mark is its own key).
