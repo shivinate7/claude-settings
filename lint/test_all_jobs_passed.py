@@ -23,7 +23,7 @@ import unittest
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from test_windows_split import CHECKS, LINUX_GUARD_JOBS, MACOS_JOBS, all_jobs, eval_with, yaml_scalar  # noqa: E402  the one home of the checks.yml path and the guard shards
-from test_windows_split import ALL_JOBS_PASSED_JOB, PUSH_OFF_SHARDS, RECORDS_ONLY_CONDITION, SUITE_FLAG, unwrap  # noqa: E402  the one home of the rollup job name, the shard list, the records-only skip and the suite flags
+from test_windows_split import ALL_JOBS_PASSED_JOB, DRAFT_GUARD, NIGHTLY_SKIP_JOB, PUSH_OFF_SHARDS, PUSH_SKIP_JOB, RECORDS_ONLY_CONDITION, SUITE_FLAG, unwrap  # noqa: E402  the one home of the rollup job name, the draft guard, the skip jobs, the shard list, the records-only skip and the suite flags
 from all_jobs_passed_rules import (ALL_JOBS_PASSED_USES, COMMENT_DELTA_CLAUSE, DELTA_CLAUSES, all_problems,  # noqa: E402  the one home of the rules
                                    child_problems, ci_done_problems, needs_of, needs_problems, off_problems, scope_if_problems,
                                    scope_skips_problems, shape_problems, split_jobs, step_with, steps_problems, steps_part)
@@ -227,8 +227,8 @@ class PushOffRollup(unittest.TestCase):
     its skip is never read there. The rule (off_problems) refused every job-level if on a needed job, which the push guard is not.
     Synthetic files: one Windows job, needed by all-jobs-passed, with the if under test."""
 
-    def rollup_text(self, job_if, name="checks-windows"):
-        lines = ["jobs:", f"  {name}:", "    runs-on: windows-latest", "    needs: scope"]
+    def rollup_text(self, job_if, name="checks-windows", runs_on="windows-latest", needs="scope"):
+        lines = ["jobs:", f"  {name}:", f"    runs-on: {runs_on}"] + ([f"    needs: {needs}"] if needs else [])
         if job_if is not None:
             lines.append(f"    if: {job_if}")
         lines += ["    steps:", "      - run: echo ok", "  all-jobs-passed:", "    runs-on: ubuntu-latest",
@@ -265,6 +265,31 @@ class PushOffRollup(unittest.TestCase):
     def test_a_needed_job_with_no_job_level_if_passes_the_rollup_rules(self):
         # Control, green on the old rules: a job with no job-level if is needed and passes.
         self.assertEqual(off_problems(self.rollup_text(None)), [])
+
+    # Cut 5 (lane draft-run-starts-no-job): each skip job takes the draft guard alone. A skip job has no needs here: scope needs both skip
+    # jobs, so a skip job that needed scope would be a cycle. Named failure on the old rules: the draft guard is a job-level if on a needed job.
+    def test_each_skip_job_with_the_draft_guard_alone_passes_the_rollup_rules(self):
+        for name in (NIGHTLY_SKIP_JOB, PUSH_SKIP_JOB):
+            with self.subTest(job=name):
+                text = self.rollup_text("${{ " + DRAFT_GUARD + " }}", name, runs_on="ubuntu-latest", needs=None)
+                self.assertEqual(off_problems(text), [], f"{name} with the draft guard alone is refused by the rollup rules")
+
+    def test_each_skip_job_with_a_pull_request_only_or_a_schedule_only_if_is_refused(self):
+        # Control, green on the old rules: a skip job whose if skips a pull request, or runs on a schedule only, is refused.
+        for name in (NIGHTLY_SKIP_JOB, PUSH_SKIP_JOB):
+            for expr in ("${{ github.event_name != 'pull_request' }}", "${{ github.event_name == 'schedule' }}"):
+                with self.subTest(job=name, if_=expr):
+                    text = self.rollup_text(expr, name, runs_on="ubuntu-latest", needs=None)
+                    self.assertTrue(off_problems(text), f"{name} with {expr} passes the rollup rules")
+
+    def test_each_skip_job_with_the_draft_guard_joined_to_a_condition_is_refused(self):
+        # Control, green on the old rules: the draft guard with OR or AND on a scope flag is refused on a skip job.
+        for name in (NIGHTLY_SKIP_JOB, PUSH_SKIP_JOB):
+            for expr in ("${{ " + DRAFT_GUARD + " || needs.scope.outputs.code == 'true' }}",
+                         "${{ (" + DRAFT_GUARD + ") && needs.scope.outputs.code == 'true' }}"):
+                with self.subTest(job=name, if_=expr):
+                    text = self.rollup_text(expr, name, runs_on="ubuntu-latest", needs=None)
+                    self.assertTrue(off_problems(text), f"{name} with {expr} passes the rollup rules")
 
 
 class DeltaClausesOnTheRealWorkflow(unittest.TestCase):
