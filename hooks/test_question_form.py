@@ -2596,6 +2596,73 @@ def case_record_words_under_the_cap_are_all_sent():
           not _record_ids(candidates) and "(none found)" in block, block[:200])
 
 
+# A record's slug is its id, so a word of the slug that the question names is a shared word, and a word of three letters
+# counts. A singular and a plural form of a word count as one word. The slug comes from test_call_judge (CAPS_SLUG) and
+# the control's text from RECORD_ZERO; each new text holds no word of its question but the one the case is about.
+SLUG_QUESTION = "Goal: decide whether the CI job may run past its limit"  # "job" is a slug word of tcj.CAPS_SLUG
+SLUG_ONLY_RULING = "Owner, 2026-10-27: a stopgap until the timed tests go. Marker stopgap-4c09."  # no word of the question
+SCOPE_LIMIT_RULING = "Owner: the limit stays as recorded."  # shares "limit" with SLUG_QUESTION, so the scope is read
+PLURAL_QUESTION = "Goal: decide whether a reviewed branch merge may land without your word"
+PLURAL_QUESTION_PLURAL = "Goal: decide whether a reviewed branch merges without your word"
+MERGES_RULING = "Owner, 2026-10-27: a pull request merges only after its checks pass. Marker plural-6a2d."
+MERGE_RULING = "Owner, 2026-10-27: a pull request merge waits for its checks. Marker singular-2b7c."
+SCOPE_BRANCH_RULING = "The reviewed branch stays as recorded."  # shares "reviewed" and "branch" with both questions
+
+
+def case_record_slug_word_counts_for_the_question():
+    import question_form  # the one form check (hooks/question_form.py)
+    fn = getattr(question_form, "past_rulings", None)
+    check("record slug: question_form.past_rulings exists", callable(fn), "missing function")
+    if not callable(fn):
+        return
+    repo = tcj.make_repo("record-slug-word", decisions={
+        tcj.CAPS_SLUG: SLUG_ONLY_RULING,
+        "rq-limit": SCOPE_LIMIT_RULING,
+        "rq-unrelated": RECORD_ZERO,
+    })
+    candidates, _unknown = _past_candidates(fn, repo, SLUG_QUESTION)
+    ids = _record_ids(candidates)
+    check("record slug (scope): the record that shares a word with the question is a candidate",
+          "decisions/rq-limit" in ids, str(ids)[:200])
+    if "decisions/rq-limit" not in ids:
+        return
+    check("record slug: a record whose slug holds the question's word 'job' is in the block, its ruling sharing no word",
+          "decisions/%s" % tcj.CAPS_SLUG in ids,
+          "decisions/%s is left out: its slug word 'job' is in the question, and a slug word is not scored" % tcj.CAPS_SLUG)
+    check("record slug control: an unrelated record with no shared word, slug word or plural pair stays out",
+          "decisions/rq-unrelated" not in ids, "decisions/rq-unrelated is in the block with no word in common")
+
+
+def case_record_plural_pair_counts_as_a_shared_word():
+    import question_form  # the one form check (hooks/question_form.py)
+    fn = getattr(question_form, "past_rulings", None)
+    check("record plural: question_form.past_rulings exists", callable(fn), "missing function")
+    if not callable(fn):
+        return
+    repo = tcj.make_repo("record-plural-pair", decisions={
+        "rq-merges": MERGES_RULING,
+        "rq-merge": MERGE_RULING,
+        "rq-branch": SCOPE_BRANCH_RULING,
+        "rq-zero": RECORD_ZERO,
+    })
+    candidates, _unknown = _past_candidates(fn, repo, PLURAL_QUESTION)
+    ids = _record_ids(candidates)
+    check("record plural (scope): the record that shares a word with the question is a candidate",
+          "decisions/rq-branch" in ids, str(ids)[:200])
+    check("record plural: a record whose text says 'merges' is in the block for a question that says 'merge'",
+          "decisions/rq-merges" in ids,
+          "decisions/rq-merges is left out: 'merge' and 'merges' are not counted as one shared word")
+    check("record plural control: a record with no word in common stays out", "decisions/rq-zero" not in ids,
+          "decisions/rq-zero is in the block with no word in common")
+    candidates, _unknown = _past_candidates(fn, repo, PLURAL_QUESTION_PLURAL)
+    ids = _record_ids(candidates)
+    check("record plural (scope, reverse): the record that shares a word with the question is a candidate",
+          "decisions/rq-branch" in ids, str(ids)[:200])
+    check("record plural (reverse): a record whose text says 'merge' is in the block for a question that says 'merges'",
+          "decisions/rq-merge" in ids,
+          "decisions/rq-merge is left out: 'merges' and 'merge' are not counted as one shared word")
+
+
 # A ruling's optional `scope` (lint/test_ruled_store.py): {"visibility": "private"} governs a private repo only. The
 # repo's visibility is its extras key `visibility`, which lint/layout.py reads (make_repo(visibility=...) writes it). Each
 # case reads that visibility back through layout.caution, and asserts it, before it judges the candidates.
@@ -4480,6 +4547,7 @@ def main():
                  case_ruled_store_ranks_by_shared_words_before_recency,
                  case_record_top_ranks_by_shared_words, case_record_named_kept_and_zero_words_left_out,
                  case_record_total_cap_drops_the_lowest_scored_lines, case_record_words_under_the_cap_are_all_sent,
+                 case_record_slug_word_counts_for_the_question, case_record_plural_pair_counts_as_a_shared_word,
                  case_ruled_store_scope_omits_a_private_ruling_in_a_public_repo,
                  case_ruled_store_scope_keeps_a_private_ruling_in_a_private_repo,
                  case_ruled_store_scope_private_only_lists_no_ruling_in_a_public_repo,
