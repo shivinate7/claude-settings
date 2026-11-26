@@ -1303,7 +1303,8 @@ class PageWriterKey(Tree):
 
     def test_null_empty_or_not_a_string_is_none(self):
         # Catches: a key holding no session id read as a writer id, so a send to any id would pass the Stop check.
-        for bad in (None, "", 5, ["session_013NEJL1nAsHBKJTpeHV1sJN"], {"id": "session_013NEJL1nAsHBKJTpeHV1sJN"}):
+        for bad in (None, "", 5, ["session_013NEJL1nAsHBKJTpeHV1sJN"], {"id": "session_013NEJL1nAsHBKJTpeHV1sJN"},
+                    "null", "NULL"):
             with self.subTest(bad=bad):
                 self.put(EXTRAS, json.dumps({"kinds": {}, "page-writer": bad}))
                 self.assertIsNone(self.layout.page_writer_key(self.tree), "a key that holds no session id has a writer")

@@ -3680,15 +3680,19 @@ class QuestionReachesPageTests(SameTurnWriter, unittest.TestCase):
                 self.assert_blocked(out, "Pick guard")
 
     def test_qm_layout_writer_red_no_usable_key_still_says_not_known(self):
-        # Catches: a missing, null, empty or non-string key read as a writer id, so a send to any id passes.
-        for label, value in (("no key", self.NO_KEY), ("null", None), ("empty", ""), ("number", 5),
-                             ("list", [self.WRITER])):
+        # Catches: a missing, null, empty or non-string key read as a writer id, so a send to any id passes, and the
+        # string "null" (any case) read as one too. A question with no send under such a key is blocked as unknown.
+        for index, (label, value) in enumerate((("no key", self.NO_KEY), ("null", None), ("empty", ""), ("number", 5),
+                                                ("list", [self.WRITER]), ("null text", "null"), ("NULL text", "NULL"))):
             with self.subTest(key=label):
-                repo = self.make_repo("key_" + label.replace(" ", "_"), writer=value)
+                repo = self.make_repo("key_%d" % index, writer=value)  # an index: names differing in case collide on macOS
                 self.assertEqual(self.extras_key(repo), value, "scope: the repo's extras file does not hold the key as set")
-                out = self.stop([human("decide"), *self.send(session_id=self.WRITER), assistant_text(self.reply(self.PICK))],
-                                repo=repo)
-                self.assert_blocked(out, "Pick guard", "the page writer is not known to this session")
+                sent = [human("decide"), *self.send(session_id=self.WRITER), assistant_text(self.reply(self.PICK))]
+                unsent = [human("decide"), assistant_text(self.reply(self.PICK))]
+                for sends, records in (("send", sent), ("no send", unsent)):
+                    with self.subTest(sends=sends):
+                        out = self.stop(records, repo=repo)
+                        self.assert_blocked(out, "Pick guard", "the page writer is not known to this session")
 
     def test_qm_layout_writer_green_na_key_passes_with_no_send(self):
         # Catches: the page writer set to N/A read as a writer, so a question with no send is refused as "the page
