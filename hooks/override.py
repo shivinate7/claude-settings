@@ -55,6 +55,10 @@ odd answer writes nothing. The rules of the words:
       `source`, a notice start, pasted and notice blocks, a fired-task block, a promptSource `system` record, a cloud
       session's seed prompt (no earlier owner turn), and a local seed turn (_seed_turn). No call for a prompt that holds
       the whole word `override` outside code spans: the override ask judges it.
+    - The override words and the model ask read what follows the app blocks at the start of the prompt (_typed: whole
+      <system-reminder> blocks that a blank line closes, or that one newline chains to the next block) as the owner's
+      typed words. A prompt that is only app blocks, an unclosed block, a fired task's block and any frame (a
+      NOTICE_FRAMES one such as <side-sessions-event> or <ci-monitor-event>, a peer or agent message) grant nothing.
     - A model whose every mention is negated (model_mentions: `Do not use opus`) is no choice: nothing is written,
       whatever the judge says. The judge's answer must name a model the words name.
     - The roles the ask names are held, two or more as a list, only when a plain list joins them (PLAIN_LIST: commas,
@@ -417,14 +421,34 @@ def _file_role(roles):
     return None if not roles else roles[0] if len(roles) == 1 else roles
 
 
-def _text_of(rec):
-    """The owner text of one transcript record (lint/_transcript.py owner_text), or None."""
+def _transcript_module():
+    """lint/_transcript.py, imported on demand: the one home of what a transcript record and an app block are."""
     from guard_core import lint_dir  # lazy: the one home of where lint/ is
     lint = lint_dir()
     if lint not in sys.path:
         sys.path.insert(0, lint)
     import _transcript
-    return _transcript.owner_text(rec, NOTICE_TAGS)
+    return _transcript
+
+
+def _text_of(rec):
+    """The owner text of one transcript record (lint/_transcript.py owner_text), or None. The text is what follows the
+    app blocks at its start (_typed), the same words _typed gives for the prompt that the record holds."""
+    return _transcript_module().owner_text(rec, NOTICE_TAGS, app_notes=FIRED_TASK)
+
+
+def _typed(prompt):
+    """The prompt less the app blocks at its start (lint/_transcript.py strip_app_notes): the desktop app puts a block, or
+    a chain of blocks one newline apart, ahead of the owner's typed words, and those words are the owner's as if no app block
+    were there. A fired task's block stays. A frame after the blocks (NOTICE_FRAMES: <side-sessions-event>, <ci-monitor-event>,
+    a peer message) is no typed word: it stays, and the callers' notice checks refuse it.
+    The prompt as given when it is no string or the helper cannot load: a plain `override 15m` still grants."""
+    if not isinstance(prompt, str):
+        return prompt
+    try:
+        return _transcript_module().strip_app_notes(prompt, FIRED_TASK)
+    except ImportError:
+        return prompt
 
 
 def _tail_prompts(transcript):
@@ -677,6 +701,7 @@ def grant_model_ask(session_id, prompt, at, judge=None, transcript=None, source=
     path = _path(session_id, "opus")
     if path is None or not isinstance(prompt, str):
         return None
+    prompt = _typed(prompt)
     gated = _owner_ask(prompt, source, transcript, _model_wanted, strip_quotes=True)
     if gated is None:
         return None
@@ -741,15 +766,16 @@ def grant(session_id, prompt, at, defer=True, transcript=None, source=None):
     counts (_keyword_line) when the first-word form of the prompt grants nothing, and only for an owner-typed prompt:
     the plain asks' gates (_owner_ask) refuse a notice, a fired task, an agent's `source`, and in a cloud session the
     seed brief, which its coordinator wrote. Only the line route reads the transcript."""
-    got = _grant_first_word(session_id, prompt, at, defer)
+    typed = _typed(prompt)
+    got = _grant_first_word(session_id, typed, at, defer)
     if got is None:
-        got = _grant_end_word(session_id, prompt)
+        got = _grant_end_word(session_id, typed)
         if got is not None:
             return got
-        line = _keyword_line(prompt)
-        if line is not None and line != (prompt.strip() if isinstance(prompt, str) else None):
+        line = _keyword_line(typed)
+        if line is not None and line != (typed.strip() if isinstance(typed, str) else None):
             try:
-                gated = _owner_ask(prompt, source, transcript, lambda text: True)
+                gated = _owner_ask(typed, source, transcript, lambda text: True)
             except Exception as exc:  # a gate that cannot run grants nothing
                 print("override: prose line grants nothing: %s" % " ".join(str(exc).split()), file=sys.stderr)
                 return None
@@ -835,6 +861,7 @@ def grant_override_ask(session_id, prompt, at, judge=None, transcript=None, sour
     path = _path(session_id)
     if path is None or not isinstance(prompt, str):
         return None
+    prompt = _typed(prompt)
     keyword = PROMPT.match(prompt) is not None
 
     def main():
@@ -1061,11 +1088,17 @@ def _take_opus(session_id, spawn_role, at, transcript=None, model=None):
     return OPUS_LIFTED
 
 
-def remote_session_id():
-    """The session record id (session_<x>) the env names as cse_<x>, or None when the env is unset or of another shape."""
-    remote = os.environ.get(LANE_ENV) or ""
+def session_id_in(env):
+    """The session record id (session_<x>) that the mapping `env` names as cse_<x>, or None when it is unset or of another shape.
+    A separate function from `remote_session_id`, which the check fuzz calls with a hook input as its one argument."""
+    remote = env.get(LANE_ENV) or ""
     rest = remote[len(LANE_ENV_PREFIX):] if remote.startswith(LANE_ENV_PREFIX) else ""
     return LANE_PREFIX + rest if rest else None
+
+
+def remote_session_id():
+    """The session record id (session_<x>) the env names as cse_<x>, or None when the env is unset or of another shape."""
+    return session_id_in(os.environ)
 
 
 def _lane_id(session_id):

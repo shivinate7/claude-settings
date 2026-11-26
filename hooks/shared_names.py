@@ -56,7 +56,10 @@ MACHINE_TAGS = ("<system-reminder>", TASK_NOTIFICATION_TAG) + _HAND_BACK_TAGS + 
     for tag in _HAND_BACK_TAGS) + _PEER_FRAME_TAGS
 # More notice frames that the plain Opus ask cuts (hooks/override.py). Kept apart from MACHINE_TAGS: the inbox skip
 # of MACHINE_TAGS is ruled one tag at a time (debt inbox-saves-other-notices), and test_shared_names pins its copy.
-NOTICE_FRAMES = tuple(tag + end for tag in ("<webhook-payload", "<wake", "<teammate-message")
+# The desktop app's own frames are here too: a <side-sessions-event> frame that follows an app block, and a bare
+# <ci-monitor-event> frame. Their words are the app's, never the owner's.
+NOTICE_FRAMES = tuple(tag + end
+                      for tag in ("<webhook-payload", "<wake", "<teammate-message", "<side-sessions-event", "<ci-monitor-event")
                       for end in "> \t\n\r") + ("[SYSTEM NOTIFICATION",)
 
 # An Explore may run Sonnet, above its Haiku row, only when its brief's first non-blank line carries this marker

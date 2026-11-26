@@ -63,6 +63,7 @@ def git(cwd, *a):
 
 GUARD_INPUTS_REL = ".github/guard-inputs.txt"  # the one list of guard inputs (ci-scope.sh's windows_guard reads it)
 REAL_GUARD_INPUTS = "real"  # run()'s guard_inputs default: the repo's own list is copied into the base when the repo has one
+GUARD_SET_REL = "hooks/guard-set.txt"  # the one list of the guard set's files (ci-scope.sh's guard arm reads it)
 
 
 # hooks/mutate_guard.py names the files the guard suite reads beside its hooks folder (GUARD_READ_FILES). The case that checks
@@ -142,7 +143,7 @@ def guard_read_files():
 
 def run(paths, event="pull_request", base="auto", existing=(), landed=None, head_ref="", green=None,
         green_sibling=False, green_head=None, contents=None, green_contents=None, facts=None, merged=None, moves=None,
-        guard_inputs=REAL_GUARD_INPUTS, scope_files=None, proven=False, modes=()):
+        guard_inputs=REAL_GUARD_INPUTS, scope_files=None, proven=False, modes=(), guard_set=None):
     """-> {name: 'true'|'false'} the script wrote. `paths` are committed on top of one base commit. `scope_files` (a list of paths), when
     given, is SCOPE_FILES: the script reads those paths in place of the diff, with the same BASE_SHA range as the other cases. `head_ref` is HEAD_REF,
     empty when not given, so no HEAD_REF of the caller's environment reaches the script. `base` is BASE_SHA: "auto" is the base
@@ -155,6 +156,8 @@ def run(paths, event="pull_request", base="auto", existing=(), landed=None, head
     `modes` (a list of paths) sets each one's executable bit in the head commit, so a mode-only change keeps the text.
     `guard_inputs` is the text of .github/guard-inputs.txt in the base: the repo's own list by default (none when the repo has
     no list yet), a text in its place, or None for no list at all (the gate's unreadable case).
+    `guard_set` is the guard-set manifest (hooks/guard-set.txt) in the base: None is the repo's own file (none when the repo has
+    none yet), a list is those entries, one per line, in its place (an empty list is an empty file), and False is no file (the unreadable case).
     `green` (a list of paths) is the pull request's earlier head, committed before the head commit, so the whole diff against
     the base holds it too. `green_sibling` puts that earlier head on a branch off the base instead: a commit HEAD does not
     descend from. GREEN_HEAD is the earlier head's sha (empty when there is none) unless `green_head` gives another value.
@@ -188,6 +191,15 @@ def run(paths, event="pull_request", base="auto", existing=(), landed=None, head
         if guard_inputs is not None:
             os.makedirs(os.path.join(d, ".github"), exist_ok=True)
             open(os.path.join(d, GUARD_INPUTS_REL), "w").write(guard_inputs)
+        # The base holds the guard-set manifest the same way.
+        real_set = os.path.join(HERE, "..", GUARD_SET_REL)
+        if guard_set is None:
+            set_text = open(real_set).read() if os.path.isfile(real_set) else None
+        else:
+            set_text = None if guard_set is False else "".join(f"{name}\n" for name in guard_set)
+        if set_text is not None:
+            os.makedirs(os.path.join(d, "hooks"), exist_ok=True)
+            open(os.path.join(d, GUARD_SET_REL), "w").write(set_text)
         for p in list(existing) + list(moves):  # in the base commit, so the head commit modifies, moves or deletes them
             os.makedirs(os.path.dirname(os.path.join(d, p)), exist_ok=True)
             open(os.path.join(d, p), "w").write("old\n")
@@ -797,6 +809,60 @@ class Scope(FlagAsserts, unittest.TestCase):
         self.assertFlags(got, want_false=["code", "shoot"])
         self.assertIn("checks_guard", got, got)
         self.assertEqual(got["checks_guard"], "false", f"checks_guard: {got}")
+
+
+# The guard arm of ci-scope.sh takes the guard set's files from hooks/guard-set.txt at run time, the one list the installers read too.
+# It holds no list of its own, so a lane that adds a module edits one file. A missing or empty manifest turns every flag on, as an
+# empty landed-dirs.txt does. Each case runs the real script in a scratch repo whose base holds the manifest the case names (run's
+# guard_set). The probe module is modified, not added: an added file under hooks/ also sets the landed-dir flags and would hide the arm.
+@unittest.skipUnless(BASH, "bash not on PATH")
+class GuardSetManifest(FlagAsserts, unittest.TestCase):
+    PROBE = "hooks/zz_manifest_probe.py"
+    ARM_FLAGS = ["checks_windows", "checks_windows_rest", "checks_macos", "code", "guard", "sweep"]  # what an edit to guard.py sets
+
+    @staticmethod
+    def arm(got):
+        """The job and suite flags the guard arm sets. `shoot` is left out: the export suite's own arm names guard.py and the
+        shared modules it imports, and it can name no module that only the manifest names."""
+        return {n: got[n] for n in ALL if n != "shoot"}
+
+    def guard_py_edit(self, guard_set):
+        """The arm's flags for an edit to hooks/guard.py in a base with this manifest. The scope of every case: the arm's own flags."""
+        want = run(["hooks/guard.py"], existing=["hooks/guard.py"], guard_set=guard_set)
+        self.assertFlags(want, want_true=self.ARM_FLAGS)
+        return self.arm(want)
+
+    def test_a_module_named_only_in_the_manifest_sets_the_flags_guard_py_sets(self):
+        want = self.guard_py_edit(["zz_manifest_probe.py"])
+        got = run([self.PROBE], existing=[self.PROBE], guard_set=["zz_manifest_probe.py"])
+        self.assertEqual(self.arm(got), want, f"{self.PROBE} is named in the manifest and sets other flags than guard.py: {got}")
+
+    def test_a_module_the_manifest_does_not_name_sets_no_guard_arm_flags(self):
+        self.guard_py_edit(["zz_manifest_probe.py"])
+        got = run(["hooks/git_reads.py"], existing=["hooks/git_reads.py"], guard_set=["zz_manifest_probe.py"])
+        self.assertFlags(got, want_false=["sweep", "checks_windows"])  # the old arm's own copy named git_reads.py
+
+    def test_a_module_the_manifest_names_sets_the_flags_guard_py_sets(self):  # control: the arm names it in the old code too
+        want = self.guard_py_edit(["git_reads.py"])
+        got = run(["hooks/git_reads.py"], existing=["hooks/git_reads.py"], guard_set=["git_reads.py"])
+        self.assertEqual(self.arm(got), want, f"hooks/git_reads.py is named in the manifest and sets other flags than guard.py: {got}")
+
+    def test_an_edit_to_the_manifest_sets_the_flags_guard_py_sets(self):
+        want = self.guard_py_edit(["git_reads.py"])
+        got = run([GUARD_SET_REL], existing=[GUARD_SET_REL], contents={GUARD_SET_REL: "git_reads.py\n"})
+        self.assertEqual(self.arm(got), want, f"an edit to {GUARD_SET_REL} sets other flags than guard.py: {got}")
+
+    def test_an_empty_manifest_turns_every_flag_on(self):
+        self.guard_py_edit(["git_reads.py"])  # scope: the same edit scopes down with a manifest that has entries
+        got = run(["hooks/git_reads.py"], existing=["hooks/git_reads.py"], guard_set=[])
+        for n in ALL:
+            self.assertEqual(got[n], "true", f"{n} is off with an empty manifest, so the fail-safe did not set it: {got}")
+
+    def test_a_missing_manifest_turns_every_flag_on(self):
+        self.guard_py_edit(["git_reads.py"])
+        got = run(["hooks/git_reads.py"], existing=["hooks/git_reads.py"], guard_set=False)
+        for n in ALL:
+            self.assertEqual(got[n], "true", f"{n} is off with no manifest, so the fail-safe did not set it: {got}")
 
 
 # guard_read_files reads GUARD_READ_FILES whole or fails. Each source is written to the run folder and read through

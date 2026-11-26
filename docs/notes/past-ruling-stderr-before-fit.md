@@ -1,0 +1,1 @@
+- past-ruling-stderr-before-fit: The `past-ruling search unknown:` stderr line prints before `_fit` runs, in `hooks/call_judge.py` and `lint/report_guard.py`. So that line never counts the lines cut for size. Only the judge's text does. Seen: 2026-11-25 x1

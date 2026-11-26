@@ -54,6 +54,7 @@ Every run appends the raw payload and the decisions to
 leave unmeasured get measured. The file keeps the last 200 lines. Always exits 0: exit 2 on SubagentStop keeps the agent running.
 """
 import contextlib
+import hashlib
 import json
 import os
 import re
@@ -75,6 +76,7 @@ AGENT_ID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 MAX_LOG_LINES = 200  # the payload log keeps the last 200 runs
 LOG_WAIT_SECONDS = 30  # one log() call waits at most this long for the lock, the read and the replace together
 LOG_RETRY_SECONDS = 0.02  # pause between two tries at the lock, the read or the replace
+CURSOR_MAX_CHARS = 4096  # the cursor file holds one path; a longer read is cut
 LOG_DONE_BY = 58  # seconds after the hook started by which the done row stops waiting; the hook's own limit is 60
 
 
@@ -84,6 +86,52 @@ class LogWaitTimeout(OSError):
 
 def log_path() -> str:
     return os.path.join(git_reads.config_dir(), "state", "agent-end-payloads.jsonl")
+
+
+def cursor_path(root: str) -> str:
+    """The one-line file, beside the payload log, that holds where the last worktree stage of repo ROOT stopped."""
+    key = hashlib.sha1(os.path.normcase(os.path.realpath(root)).encode("utf-8", "replace")).hexdigest()[:16]
+    return os.path.join(git_reads.config_dir(), "state", "agent-end-cursor-%s.txt" % key)
+
+
+def _tree_key(path: str) -> str:
+    return os.path.normcase(os.path.realpath(path))
+
+
+def read_cursor(root: str):
+    """The tree path the last stage of ROOT stopped at, or None when the file is missing or unreadable."""
+    try:
+        with open(cursor_path(root), encoding="utf-8", errors="replace") as handle:
+            return handle.read(CURSOR_MAX_CHARS).strip() or None
+    except OSError:
+        return None
+
+
+def write_cursor(root: str, last: str) -> None:
+    """Replace ROOT's cursor with the one path LAST. A failed write leaves the old cursor and raises nothing."""
+    path = cursor_path(root)
+    temp = "%s.%d.tmp" % (path, os.getpid())
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(temp, "w", encoding="utf-8") as handle:
+            handle.write(last[:CURSOR_MAX_CHARS] + "\n")
+        os.replace(temp, path)
+    except OSError:
+        try:
+            os.remove(temp)
+        except OSError:
+            pass
+
+
+def resume_after_cursor(queue: list, cursor):
+    """QUEUE (git's list order) rotated to start past the tree CURSOR names. A cursor that is None or names
+    no tree in QUEUE leaves git's order from the top."""
+    if cursor is None:
+        return queue
+    for i, entry in enumerate(queue):
+        if _tree_key(entry["path"]) == cursor:
+            return queue[i + 1:] + queue[:i + 1]
+    return queue
 
 
 @contextlib.contextmanager
@@ -647,6 +695,10 @@ def reap_worktrees(target: str, deadline: float, payload=None):
     own = os.path.normcase(os.path.realpath(target))
     queue = [e for e in entries if os.path.normcase(os.path.realpath(e["path"])) != own
              and sweep._is_agent_worktree(root, e["path"])]
+    # The budget can cut a run short, so each run resumes past the last tree the previous run judged and kept: every
+    # tree gets judged within a few runs, and the order changes no tree's keep-or-remove verdict.
+    queue = resume_after_cursor(queue, read_cursor(root))
+    last_kept = None  # newest tree judged that stays; a reaped tree is gone and cannot name the cursor
     sweep._LIVE_HEADS = {}  # one remote listing per remote for the whole stage
     stopped = stopped_agents()  # one read of the payload log for the stage
     try:
@@ -686,8 +738,12 @@ def reap_worktrees(target: str, deadline: float, payload=None):
                 else:
                     decision["buildDirs"] = reap_build_dirs(entry["path"], cwds, deadline)
             rows.append(decision)
+            if decision["action"] != "reap" or decision.get("error"):  # a failed removal leaves the tree on disk
+                last_kept = _tree_key(entry["path"])
     finally:
         sweep._LIVE_HEADS = None
+    if last_kept is not None:  # a run that kept no tree leaves the old cursor: it still marks where to resume
+        write_cursor(root, last_kept)
     return rows
 
 
