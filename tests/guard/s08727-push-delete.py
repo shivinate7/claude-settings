@@ -6,15 +6,17 @@ SHA = "0123456789abcdef0123456789abcdef01234567"
 REMEDY = "retry with --force-with-lease --force-if-includes"
 
 
-def push_case(name, tail, expected, cwd=PUSHFEAT, tool="Bash", rule=None, silent=False, lacks=(), word=VCS):
+def push_case(name, tail, expected, cwd=PUSHFEAT, tool="Bash", rule=None, silent=False, lacks=(), word=VCS,
+              says=()):
     """One `git push` case. An ask names `rule` when one is given (rulings 206 a and 207 a), else
     force-push. `silent` marks an allow that must print nothing. `word` is the command word the call
-    names: the plain `git`, or a form of it that the shell reads as git."""
+    names: the plain `git`, or a form of it that the shell reads as git. `says` holds fragments the
+    printed reason must also carry, so a case can pin which reason a refusal prints."""
     # `refuse-main` is a refusal of a push that may reach the default branch (decision `guard-remedy-not-to-owner`). It is a deny whose reason carries no lease retry: a retry would force main again.
     verdict = "deny" if expected == "refuse-main" else expected
     sh("push: " + name, word + " push " + tail, verdict,
        rule or ("force-push" if verdict != "allow" else None), cwd=cwd, tool=tool,
-       carries=REMEDY if expected == "deny" else (),
+       carries=((REMEDY,) if expected == "deny" else ()) + tuple(says),
        silent=silent, lacks=tuple(lacks) + ((REMEDY,) if expected == "refuse-main" else ()))
 
 
@@ -119,6 +121,10 @@ push_case("a delete refspec at the default branch denies", "origin :main", "refu
 push_case("a delete refspec at a full default ref denies", "origin :refs/heads/main", "refuse-main")
 push_case("deleting with --delete at the default branch denies", "--delete origin main", "refuse-main")
 push_case("deleting with -d at the default branch denies", "-d origin main", "refuse-main")
+# A delete is not a push: `-d` reads as the delete flag, so the reason is the delete's own ("may overwrite the
+# history of the default branch"), not the plain push's ("writes the default branch").
+push_case("deleting with -d at the default branch names the delete reason", "-d origin main", "refuse-main",
+          says=("may overwrite the history of the default branch",))
 # A dangling origin/HEAD does not hide the default branch (owner's read order 2026-10-16). The three
 # forms below reach main and ask, exactly as they do where origin/HEAD resolves.
 push_case("a dangling origin/HEAD, a forced push to main denies",
