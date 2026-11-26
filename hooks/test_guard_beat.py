@@ -15,15 +15,18 @@ a run which exits early stops the holders its kill cases started.
 import ast
 import math
 import os
+import re
 import shutil
 import signal
 import subprocess
 import sys
 import tempfile
 import threading
+import time
 import types
 import unittest
 from collections import namedtuple
+from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "lint"))
@@ -42,6 +45,11 @@ TINY = "0.001"  # a quiet stretch of a millisecond: every checkpoint that finds 
 OFF = "100000"  # a quiet stretch no run reaches: the beat never fires
 WATCH_QUIET = "8"  # the watcher's limit in seconds: above the ~2 s import and registration, far below 300 s
 TIMEOUT = 900  # a bound against a hang, never an assert
+CLEAN_WAIT = 10.0  # seconds for a run's holders to end once the run is down: a hang cap, never a pause
+REAL_SECTIONS = os.path.normpath(os.path.join(HERE, "..", "tests", "guard"))  # the section files the runner loads
+PY_SLEEP = [sys.executable, "-c", "import time; time.sleep(300)"]  # a holder: it ends when the test ends it
+PY_IGNORES_TERM = [sys.executable, "-c", "import signal, time; signal.signal(signal.SIGTERM, signal.SIG_IGN); "
+                                         "print('ready', flush=True); time.sleep(300)"]
 BEAT = "test_guard: still running"  # the beat line's prefix; a case line starts with PASS, FAIL or SKIP
 CASE_START = ("PASS", "FAIL", "SKIP")
 SUMMARY = "test_guard PASS:"  # the last line of a family run that passed
@@ -93,7 +101,18 @@ def run_suite(heartbeat=None, beat_file=None, merged=False):
 
 
 def kill_job(job):
-    """Kill a job this test started, and what it started, when the test ends while the job still runs."""
+    """End a job this test started, and what it started, when the test ends while the job still runs. TERM goes to the
+    job's own pid first, so a runner that handles it runs its holder reap. After CLEAN_WAIT the job's session gets
+    SIGKILL, which reaches a child that did not handle TERM."""
+    try:
+        os.kill(job.pid, signal.SIGTERM)
+    except OSError:
+        pass
+    try:
+        job.wait(timeout=CLEAN_WAIT)
+        return
+    except subprocess.TimeoutExpired:
+        pass
     try:
         os.killpg(job.pid, signal.SIGKILL)  # the job's own session (start_new_session)
     except (AttributeError, OSError):
@@ -138,6 +157,160 @@ def still_alive(pids):
     return alive
 
 
+def start_time(pid):
+    """The start time ps gives `pid` now: what a holder's record holds from the moment it starts."""
+    return subprocess.run(["ps", "-o", "lstart=", "-p", str(pid)], capture_output=True, text=True,
+                          timeout=30).stdout.strip()
+
+
+def pids_and_cwds():
+    """{pid: cwd} for each live process: /proc on Linux, lsof -Fn on macOS (lsof prints a cwd path, never arguments)."""
+    pids = [int(row) for row in subprocess.run(["ps", "-axo", "pid="], capture_output=True, text=True,
+                                              timeout=30).stdout.split() if row.isdigit()]
+    cwds = {}
+    if os.path.isdir("/proc/self/cwd"):
+        for pid in pids:
+            try:
+                cwds[pid] = os.readlink("/proc/%d/cwd" % pid)
+            except OSError:
+                pass
+        return cwds
+    done = subprocess.run(["lsof", "-a", "-d", "cwd", "-Fn", "-p", ",".join(str(pid) for pid in pids)],
+                          capture_output=True, text=True, timeout=120)
+    pid = None
+    for line in done.stdout.splitlines():
+        if line.startswith("p"):
+            pid = int(line[1:])
+        elif line.startswith("n") and pid is not None:
+            cwds[pid] = line[1:]
+    return cwds
+
+
+def run_holders(child_pid, folders):
+    """The live pids a kill child started, found without its help: each process whose working directory lies under one
+    of `folders` (the child's own cwd, which its holders inherit) or in the child's run folder (<child pid>-<32 hex>,
+    where its cases keep their fixtures). The test's own pid and the child's are left out."""
+    run = re.compile(r"(^|/)%d-[0-9a-f]{32}(/|$)" % child_pid)
+    real = [os.path.realpath(folder) for folder in folders]
+    skip = (child_pid, os.getpid())
+    found = []
+    for pid, cwd in pids_and_cwds().items():
+        if pid in skip:
+            continue
+        if run.search(cwd) or any(cwd == folder or cwd.startswith(folder + os.sep) for folder in real):
+            found.append(pid)
+    return found
+
+
+class NoOwned:
+    """Stands in for the kill section's OWNED sleep, which the reap kills and waits for."""
+
+    def kill(self):
+        pass
+
+    def wait(self, timeout=None):
+        return 0
+
+
+def reap_namespace(pids, starts, cap=5.0):
+    """hooks/test_guard.py's reap in a namespace of its own, over the holders `pids` with the start times `starts` they
+    recorded. The os, subprocess and clock are real. The signal module is a stand-in, since the reap's TERM handling
+    would otherwise change this test process. HOLDER_WAIT is `cap`, a hang cap. The names the file has are run:
+    stop_holders and holder_ended always, and the newer helpers when the file has them."""
+    fake_signal = types.SimpleNamespace(SIGTERM=signal.SIGTERM, SIG_IGN=signal.SIG_IGN, signal=lambda *args: None)
+    return Defs(["stop_holders", "holder_ended"], optional=["reap_holders", "holder_start"],
+                extra={"os": os, "subprocess": subprocess, "signal": fake_signal, "time": time,
+                       "OWNED": NoOwned(), "ORPHAN_PIDS": list(pids), "HOLDER_STARTS": dict(starts),
+                       "HOLDER_RECORD": "", "HOLDER_WAIT": cap, "HOLDERS_STOPPED": []})
+
+
+def section_folder_with_unknown_family(name):
+    """A section folder: a symlink to each real section, and one more section, numbered above them all, that sets a FAMILY
+    FAMILIES does not name and holds one case under it. The sections load and the kill section starts its holders, and
+    the run then stops at its family check. Symlinks, so no section is copied."""
+    folder = os.path.join(RUN_FOLDER, name)
+    os.makedirs(folder)
+    for entry in sorted(os.listdir(REAL_SECTIONS)):
+        if entry.endswith(".py"):
+            os.symlink(os.path.join(REAL_SECTIONS, entry), os.path.join(folder, entry))
+    with open(os.path.join(folder, "s99999-unknown-family.py"), "w", encoding="utf-8") as f:
+        f.write('# section 99999\nFAMILY = "not-a-family"\n'
+                'sh("holders: a case under a family FAMILIES does not name", "echo hi", "allow", cwd=NOGIT)\n')
+    return folder
+
+
+class KillRun:
+    """One runner child, in its own session, its own cwd and its own record file. The holders it starts inherit that cwd,
+    so finish() can find them when the runner's own reap cannot be trusted to have run."""
+
+    def __init__(self, name, family="kill", tests=None, section_dir=None, record=None):
+        self.cwd = os.path.join(RUN_FOLDER, name + "-cwd")
+        os.makedirs(self.cwd, exist_ok=True)
+        self.record = record or os.path.join(RUN_FOLDER, name + "-holders.txt")
+        self.out_path = os.path.join(RUN_FOLDER, name + "-out.txt")
+        env = suite_env()
+        env["GUARD_HOLDER_RECORD"] = self.record
+        if family:
+            env["GUARD_FAMILY"] = family
+        if tests:
+            env["GUARD_TESTS"] = tests
+        if section_dir:
+            env["GUARD_SECTION_DIR"] = section_dir
+        with open(self.out_path, "wb") as out:
+            self.child = subprocess.Popen(SUITE_CMD, stdout=out, stderr=subprocess.STDOUT, env=env, cwd=self.cwd,
+                                          start_new_session=True)
+
+    def output(self):
+        with open(self.out_path, encoding="utf-8", errors="replace") as f:
+            return f.read()
+
+    def wait_exit(self, cap):
+        """The run's exit code once it ends, or None when it is still running after `cap` seconds."""
+        try:
+            return self.child.wait(timeout=cap)
+        except subprocess.TimeoutExpired:
+            return None
+
+    def wait_for_output(self, prefixes, cap):
+        """True once the run has printed a line that starts with one of `prefixes`. False when `cap` seconds pass first,
+        or the run ends first. A hang cap, never a pause: it polls the output file."""
+        deadline = time.monotonic() + cap
+        while True:
+            if any(line.startswith(prefixes) for line in self.output().splitlines()):
+                return True
+            if time.monotonic() >= deadline or self.child.poll() is not None:
+                return False
+            time.sleep(0.05)
+
+    def holders_alive(self):
+        """The holders of this run still alive: the pids its record lists, its process group, and the processes its
+        cwd and run folder place in it. The record misses a run that died before its reap; the group misses a holder
+        that called setsid; the cwd finds both."""
+        pids = set(read_pids(self.record)) | set(group_members(self.child.pid)) | set(run_holders(self.child.pid, [self.cwd]))
+        pids.discard(self.child.pid)
+        return still_alive(sorted(pids))
+
+    def finish(self):
+        """End the run and every holder it left, and return the holders still alive once the run was down, before that
+        cleanup. A run still up is ended by kill_job, which is the timeout path. The caller asserts on the return value.
+        Whatever it returns, this leaves none running: the test ends what it finds, so a red run leaks none."""
+        if self.child.poll() is None:
+            kill_job(self.child)
+        else:
+            self.child.wait()
+        left = self.holders_alive()
+        deadline = time.monotonic() + CLEAN_WAIT
+        while left and time.monotonic() < deadline:
+            time.sleep(0.05)
+            left = self.holders_alive()
+        for pid in left:
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except OSError:
+                pass
+        return left
+
+
 def watched_run(name, heartbeat):
     """Run one family in the background under hooks/stall_watch.py, as the stall watch runs a background job.
     The job writes its output to a file the watcher does not read, and the watcher's --log is an idle file,
@@ -177,7 +350,7 @@ class Defs:
     fake print (`printed`), so a beat is measured without running the suite. A def that is missing from the
     file fails here, so a moved beat cannot pass by vanishing."""
 
-    def __init__(self, names, heartbeat=60.0, beat_file=""):
+    def __init__(self, names, heartbeat=60.0, beat_file="", extra=None, optional=()):
         with open(SUITE, encoding="utf-8") as f:
             tree = ast.parse(f.read(), SUITE)
         found = {node.name: node for node in tree.body if isinstance(node, ast.FunctionDef)}
@@ -196,7 +369,10 @@ class Defs:
             "BEAT_FILE": beat_file,
             "QUIET_SINCE": [0.0],
         }
-        module = ast.Module(body=[found[name] for name in names], type_ignores=[])
+        self.ns.update(extra or {})  # a caller's stand-ins for the names the defs use: a fake signal, or the real os
+        # `optional` names run when the file has them, so a def a later change adds does not fail an older file
+        chosen = [found[name] for name in names] + [found[name] for name in optional if name in found]
+        module = ast.Module(body=chosen, type_ignores=[])
         ast.fix_missing_locations(module)
         exec(compile(module, SUITE, "exec"), self.ns)
 
@@ -366,33 +542,180 @@ class HoldersEndWithTheRun(unittest.TestCase):
 
     @unittest.skipIf(os.name == "nt", "the holders are POSIX processes: a process group, and ps")
     def test_no_holder_of_the_run_is_alive_after_an_early_exit(self):
-        record = os.path.join(RUN_FOLDER, "holders-early-exit.txt")
-        out_path = os.path.join(RUN_FOLDER, "holders-early-exit-out.txt")
-        env = suite_env()
-        env.update(GUARD_FAMILY="kill", GUARD_TESTS=EARLY_EXIT, GUARD_HOLDER_RECORD=record)
-        with open(out_path, "wb") as out:
-            child = subprocess.Popen(SUITE_CMD, stdout=out, stderr=subprocess.STDOUT, env=env,
-                                     start_new_session=True)
-        left, recorded = [], []
-        try:
-            rc = child.wait(timeout=TIMEOUT)
-            recorded = read_pids(record)
-            left = still_alive(sorted(set(recorded) | set(group_members(child.pid))))
-        finally:
-            if child.poll() is None:
-                kill_job(child)
-            for pid in left:  # the test started these: it ends what it finds running, so a red run leaks none
-                try:
-                    os.kill(pid, signal.SIGTERM)
-                except OSError:
-                    pass
-        with open(out_path, encoding="utf-8", errors="replace") as f:
-            output = f.read()
+        run = KillRun("holders-early-exit", tests=EARLY_EXIT)
+        rc = run.wait_exit(TIMEOUT)
+        left = run.finish()
+        output = run.output()
+        recorded = read_pids(run.record)
         self.assertEqual(rc, EARLY_EXIT_RC, "the run exited %r, not the refusal's %r" % (rc, EARLY_EXIT_RC))
         self.assertIn(NOTHING_RAN, output, "the run did not stop at the refusal: it printed no %r" % NOTHING_RAN)
         self.assertEqual(left, [], "%d holder(s) of the run are alive after its early exit: pids %s"
                          % (len(left), left))
         self.assertTrue(recorded, "the run recorded no holder, so the check above proved nothing")
+
+
+@unittest.skipIf(os.name == "nt", "the sections symlink, and the holders are POSIX processes: a process group, and ps")
+class HoldersEndOnAnExit(unittest.TestCase):
+    """The kill section starts its holders at import. A run that ends at a section check, after the section started them,
+    must stop them too. This run ends at its family check (a case under a family FAMILIES does not name), which no
+    reap that runs only from main() sees."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.kill_run = KillRun("unknown-family", family=None, section_dir=section_folder_with_unknown_family("unknown-family"))
+        cls.rc = cls.kill_run.wait_exit(TIMEOUT)
+        cls.left = cls.kill_run.finish()
+        cls.output = cls.kill_run.output()
+
+    @unittest.skipIf(os.name == "nt", "the sections symlink and the holders are POSIX")
+    def test_no_holder_is_alive_after_the_run_ends(self):
+        self.assertEqual(self.left, [], "%d holder(s) of the run are alive after it ended at a section check: pids %s"
+                         % (len(self.left), self.left))
+
+    @unittest.skipIf(os.name == "nt", "the sections symlink and the holders are POSIX")
+    def test_the_run_ends_at_the_family_check(self):
+        self.assertEqual(self.rc, 1, "the run exited %r, not the family check's 1" % self.rc)
+        self.assertTrue("families not in FAMILIES" in self.output, "the run did not stop at the family check")
+
+
+@unittest.skipIf(os.name == "nt", "SIGTERM to a process group, and the holders, are POSIX")
+class HoldersEndOnTerm(unittest.TestCase):
+    """A run that is sent SIGTERM mid-run stops its holders and exits with the code for the signal (128 + 15)."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.kill_run = KillRun("sigterm-mid-run")
+        cls.reached = cls.kill_run.wait_for_output(CASE_START, cap=300)
+        cls.rc = None
+        if cls.reached:
+            os.kill(cls.kill_run.child.pid, signal.SIGTERM)  # the runner alone: its group is not signalled
+            cls.rc = cls.kill_run.wait_exit(TIMEOUT)
+        cls.left = cls.kill_run.finish()
+
+    @unittest.skipIf(os.name == "nt", "SIGTERM to a process group, and the holders, are POSIX")
+    def test_the_run_reached_a_case_before_the_signal(self):
+        self.assertTrue(self.reached, "the run printed no case line within 300 s, so it was never sent SIGTERM mid-run")
+
+    @unittest.skipIf(os.name == "nt", "SIGTERM to a process group, and the holders, are POSIX")
+    def test_no_holder_is_alive_after_sigterm(self):
+        self.assertEqual(self.left, [], "%d holder(s) of the run are alive after SIGTERM: pids %s"
+                         % (len(self.left), self.left))
+
+    @unittest.skipIf(os.name == "nt", "SIGTERM to a process group, and the holders, are POSIX")
+    def test_the_exit_code_is_the_signal_code(self):
+        self.assertEqual(self.rc, 128 + signal.SIGTERM, "the run exited %r after SIGTERM, not %d"
+                         % (self.rc, 128 + signal.SIGTERM))
+
+
+@unittest.skipIf(os.name == "nt", "the holders are POSIX processes: a process group, and ps")
+class HoldersEndWhenTheRecordCannotBeWritten(unittest.TestCase):
+    """GUARD_HOLDER_RECORD names a directory, so the reap cannot write the record. The reap reports that on stderr and
+    still stops every holder, and the run keeps its own exit code: the refusal's 2."""
+
+    @classmethod
+    def setUpClass(cls):
+        folder = os.path.join(RUN_FOLDER, "record-is-a-folder")
+        os.makedirs(folder)
+        cls.kill_run = KillRun("record-is-a-folder", tests=EARLY_EXIT, record=folder)
+        cls.rc = cls.kill_run.wait_exit(TIMEOUT)
+        cls.left = cls.kill_run.finish()
+
+    @unittest.skipIf(os.name == "nt", "the holders are POSIX processes: a process group, and ps")
+    def test_no_holder_is_alive_when_the_record_cannot_be_written(self):
+        self.assertEqual(self.left, [], "%d holder(s) of the run are alive after a failed record write: pids %s"
+                         % (len(self.left), self.left))
+
+    @unittest.skipIf(os.name == "nt", "the holders are POSIX processes: a process group, and ps")
+    def test_the_exit_code_is_the_refusal_code(self):
+        self.assertEqual(self.rc, EARLY_EXIT_RC, "the run exited %r after a failed record write, not the refusal's %r"
+                         % (self.rc, EARLY_EXIT_RC))
+
+
+@unittest.skipIf(os.name == "nt", "the holders are POSIX processes: a process group, and ps")
+class HoldersEndAtTheTimeoutPath(unittest.TestCase):
+    """A run still up when the wait for it runs out: the test's timeout path ends it. Its holders must end with it, not
+    only the group the kill reaches."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.kill_run = KillRun("timeout-path")
+        cls.reached = cls.kill_run.wait_for_output(CASE_START, cap=300)
+        cls.left = cls.kill_run.finish()  # the run is still up here: this is the timeout path
+
+    @unittest.skipIf(os.name == "nt", "the holders are POSIX processes: a process group, and ps")
+    def test_the_run_was_up_with_its_holders(self):
+        self.assertTrue(self.reached, "the run printed no case line within 300 s: nothing was running to time out")
+
+    @unittest.skipIf(os.name == "nt", "the holders are POSIX processes: a process group, and ps")
+    def test_no_holder_is_alive_after_the_timeout_path(self):
+        self.assertEqual(self.left, [], "%d holder(s) of the run are alive after the timeout path: pids %s"
+                         % (len(self.left), self.left))
+
+
+class StopHoldersChecksStartTime(unittest.TestCase):
+    """The reap signals a holder only while ps still gives the start time recorded when it started. A pid that a later
+    process took has another start time, so the reap leaves it alone. Real sleeps, in the reap's own namespace."""
+
+    @unittest.skipIf(os.name == "nt", "the reap reads start times with ps, which Windows does not have")
+    def test_a_pid_whose_start_time_does_not_match_is_not_signalled(self):
+        holder = subprocess.Popen(PY_SLEEP)
+        try:
+            reap = reap_namespace([holder.pid], {holder.pid: "Mon Jan  1 00:00:00 2001"}, cap=2.0)
+            reap.call("stop_holders")
+            self.assertIsNone(holder.poll(), "the reap signalled pid %d, whose start time is not the one recorded for it"
+                              % holder.pid)
+        finally:
+            holder.kill()
+            holder.wait()
+
+    @unittest.skipIf(os.name == "nt", "the reap reads start times with ps, which Windows does not have")
+    def test_a_pid_whose_start_time_matches_is_signalled(self):
+        holder = subprocess.Popen(PY_SLEEP)
+        try:
+            reap = reap_namespace([holder.pid], {holder.pid: start_time(holder.pid)}, cap=2.0)
+            reap.call("stop_holders")
+            self.assertIsNotNone(holder.poll(), "the reap did not signal pid %d, whose start time matches the one "
+                                 "recorded for it" % holder.pid)
+        finally:
+            holder.kill()
+            holder.wait()
+
+
+class StopHoldersNamesAHolderLeftAlive(unittest.TestCase):
+    """A holder that ignores SIGTERM outlives the reap's cap. The reap names it on stderr, so the run's output says which
+    holder is still running."""
+
+    @unittest.skipIf(os.name == "nt", "the reap reads start times with ps, which Windows does not have")
+    def test_a_holder_that_ignores_the_signal_is_named(self):
+        holder = subprocess.Popen(PY_IGNORES_TERM, stdout=subprocess.PIPE)
+        try:
+            ready = holder.stdout.readline()  # the holder has set its handler: a signal before that would end it
+            self.assertEqual(ready.strip(), b"ready", "the holder did not start: it printed %r" % ready)
+            reap = reap_namespace([holder.pid], {holder.pid: start_time(holder.pid)}, cap=0.5)
+            reap.call("stop_holders")
+            named = [line for line in reap.printed if str(holder.pid) in line]
+            self.assertTrue(named, "no line names holder pid %d, which is still alive after the reap's cap: %r"
+                            % (holder.pid, reap.printed[:3]))
+        finally:
+            holder.kill()
+            holder.wait()
+            holder.stdout.close()
+
+
+class SuiteEnvDropsTheCallersKnobs(unittest.TestCase):
+    """A family run's environment is this test's own: a value the caller set for its own run must not reach the child."""
+
+    def test_a_callers_section_folder_is_not_passed_on(self):
+        with mock.patch.dict(os.environ, {"GUARD_SECTION_DIR": "/no/such/section/folder"}):
+            env = suite_env()
+        # A boolean, not assertNotIn: its message would print the whole environment, secrets included.
+        self.assertFalse("GUARD_SECTION_DIR" in env, "the family run would read the caller's section folder, and a "
+                                                      "caller's value would give a false red")
+
+    def test_a_callers_holder_record_is_not_passed_on(self):
+        with mock.patch.dict(os.environ, {"GUARD_HOLDER_RECORD": "/no/such/record"}):
+            env = suite_env()
+        self.assertFalse("GUARD_HOLDER_RECORD" in env, "the family run would write its holders to the caller's record")
 
 
 if __name__ == "__main__":
