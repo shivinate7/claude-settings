@@ -1,0 +1,1 @@
+- past-ruling-noshare-uncounted: `_records_to_send` drops a record that shares no word with the question before `_fit` runs. The left-out count does not include these records, so the judge is not told how many were dropped. Seen: 2026-11-25 x1
