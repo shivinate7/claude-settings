@@ -218,8 +218,9 @@ tier_line
 # hook's (its twin: MAIN_REF_MARKER in githooks/pre-commit/pre-commit): the text as a substring of the file. Exit 0
 # (healthy) prints nothing. Any other exit prints one line: the installer's stderr folded to one line, or, when it said
 # nothing, a line that names the exit. The run is bounded by CLAUDE_SETTINGS_FETCH_TIMEOUT and its children die with
-# it. Cost: once per SessionStart event, one sh start and the installer's own git reads; one temp file for its stderr,
-# removed at once; no network.
+# it. The list part of the text is capped at 400 characters; the Remedy line is never cut. Cost: once per SessionStart event,
+# starts mktemp, the installer's sh with its own git reads, the watchdog's sleep, and cut when the check printed list text
+# (ps too, only on a timeout); one temp file for its stderr, removed at once; no network.
 main_ref_installer="$toplevel/githooks/main-ref/install.sh"
 if [ -f "$main_ref_installer" ] && grep -qF 'main-ref-check: 1' "$main_ref_installer" 2>/dev/null; then
   mr_err=$(mktemp 2>/dev/null)
@@ -227,7 +228,22 @@ if [ -f "$main_ref_installer" ] && grep -qF 'main-ref-check: 1' "$main_ref_insta
   mr_rc=$?
   if [ "$mr_rc" -ne 0 ]; then
     mr_text=""
-    [ -n "$mr_err" ] && mr_text=$(sed 's/^[[:space:]]*Remedy:[[:space:]]*/Remedy: /' "$mr_err" 2>/dev/null | tr '\n' ' ' | cut -c1-400 | sed 's/[[:space:]]*$//')
+    mr_body=""
+    mr_fix=""
+    if [ -n "$mr_err" ]; then
+      while IFS= read -r mr_line || [ -n "$mr_line" ]; do
+        mr_lead="${mr_line#"${mr_line%%[![:space:]]*}"}"
+        case "$mr_lead" in
+          Remedy:*) mr_lead="${mr_lead#Remedy:}"; mr_fix="${mr_fix:+$mr_fix }Remedy: ${mr_lead#"${mr_lead%%[![:space:]]*}"}" ;;
+          *) mr_body="${mr_body:+$mr_body }$mr_line" ;;
+        esac
+      done <"$mr_err"
+      # Only the list part is capped, so the Remedy prints whole.
+      [ -n "$mr_body" ] && mr_body=$(printf '%s' "$mr_body" | cut -c1-400)
+      mr_body="${mr_body%"${mr_body##*[![:space:]]}"}"
+      mr_text="${mr_body:+$mr_body }$mr_fix"
+      mr_text="${mr_text%"${mr_text##*[![:space:]]}"}"
+    fi
     if [ -z "$mr_text" ]; then
       if [ "$mr_rc" -gt 128 ]; then
         mr_text="main-ref check: unknown: the check did not finish within ${CLAUDE_SETTINGS_FETCH_TIMEOUT:-2} s (exit $mr_rc)."
