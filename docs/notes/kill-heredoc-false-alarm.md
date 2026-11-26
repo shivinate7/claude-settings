@@ -1,0 +1,1 @@
+- kill-heredoc-false-alarm: At 19:53 CST on 2026-11-25 the machine-wide-kill rule refused kill text inside a Python heredoc string in another session. 16 heredoc shapes did not reproduce it; the exact command is needed. Decision: a-kill-by-pid-needs-an-owned-pid.
