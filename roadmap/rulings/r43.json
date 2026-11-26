@@ -1,13 +1,13 @@
 {
  "id": "r43",
- "at": "2026-11-11T13:48:00-06:00",
- "ruling": "- **R43. A usage brake on accounts with a rate limit.** Owner 13:48 CST Nov 11: \"it might just be somehow local in my mac's coordinators handoffs and not on claude-settings anywhere but ya it was basically just that after usage hits 90% everything looks to gently wind down and 94% is a hard brake\". Read 13:49 CST: no record, hook or page item holds it; page item 169 cites his Nov 1 17:56 CST ruling \"no usage limit; a standing session runs until autocompact\", which is about session length. Reading, for him to correct: at 90% of an account's 5-hour or weekly limit, no new lane or agent starts and running work finishes and writes its handoff; at 94%, every session stops new work. An account with no limit never brakes. First a lane measures whether a hook can read the percentages. Home: a new decision record, usage-brake.",
- "quote": "it might just be somehow local in my mac's coordinators handoffs and not on claude-settings anywhere but ya it was basically just that after usage hits 90% everything looks to gently wind down and 94% is a hard brake; no usage limit; a standing session runs until autocompact",
- "source": "plans/restart-plan.md@restart-plan, R43",
+ "at": "2026-11-26T13:57:00-06:00",
+ "ruling": "- **R43. A usage brake: 90% cautious, 93% wind-down, 97% hard stop.** Owner 13:57 CST Nov 26, relayed by Sim Manager: \"ya make it basically 90% is cautious, 93% is the wind down beginning, 97% hard stop\"; on close items \"This should be resumed to land\"; on the new-work line \"this should be 90%\". Owner 13:47 CST Nov 26: \"so the brake was actually supposed to be like wind down occurs starting at 94%, as in like another 2-3% can be used to bring things over to. main that are close and those that are far get their stuff saved/committed and marked as a handoff part of their agenda yanno?\" (its 94% start is replaced by the 13:57 words). Rule: at 90% no new work; at 93% wind-down begins, close work lands, far work is saved, committed and put in its handoff; at 97% all agents stop. It replaces the Nov 11 13:48 CST words (90% wind-down, 94% hard brake). Open: question 14.Q2 (the brake's home: a statusline mod or hooks/guard.py) and owner page item 540 (account scope). Home: decision usage-brake (docs/decisions/usage-brake.md), PR #4017.",
+ "quote": "ya make it basically 90% is cautious, 93% is the wind down beginning, 97% hard stop",
+ "source": "owner 2026-11-26 13:47 and 13:57 CST, relayed by Sim Manager; replaces plans/restart-plan.md@restart-plan, R43 (2026-11-11 13:48 CST)",
  "status": "open",
  "supersedes": [],
  "supersedes_none": "new decision record usage-brake; replaces no main sentence",
- "title": "A usage brake on accounts with a rate limit.",
+ "title": "A usage brake: 90% cautious, 93% wind-down, 97% hard stop.",
  "step": "usage-brake",
- "audit": "read against origin/main and later entries, 2026-11-12 15:20 CST: No usage-brake record, hook or rule on main (git grep for 'usage brake' finds nothing in CLAUDE.md, docs/decisions, hooks, lint, skills). docs/decisions/session-tiers.md:28 'There is no usage limit' is about session length and stays. Step usage-brake is doing."
+ "audit": "rewritten in place 2026-11-26 14:52 CST to the owner's 13:57 CST words. No usage-brake record on origin/main 7639443c62 before PR #4017. docs/decisions/session-tiers.md 'There is no usage limit' is about session length and stays."
 }
