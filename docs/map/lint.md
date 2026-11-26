@@ -1,6 +1,6 @@
 # Lint
 
-The checks and tools under `lint/`. The pilot map covers two files here.
+The checks and tools under `lint/`. The pilot map covers three files here.
 
 ## Code files
 
@@ -11,3 +11,6 @@ The checks and tools under `lint/`. The pilot map covers two files here.
   - It starts git with no console window, through the one home. — `uses hooks/_nowindow.py:run`
 - `lint/check_cost_pins.py` — Refuses a decision record's Cost sentence that names a file when no test in that sentence holds the file's whole name. It also refuses a count in a Cost sentence that has no test, bound or mark behind it. It reads the records, each test file a Cost sentence names (once per run), and `lint/layout.json` through `lint/layout.py`, and it never fixes a record. It misses a file with an unlisted extension, a path with no extension, and a name outside backticks. It also misses a Cost paragraph that only a table row or an underlined heading would open.
   - Tested by: `lint/test_check_cost_pins.py`
+- `lint/check_prompt_rule_ids.py` — Refuses a hook prompt that names a rule id with no `<!-- rule:<id> -->` anchor in the rule files. It reads only the prompt constants in its own table, and it never fixes a prompt. It does not check that a prompt's wording matches the rule's home sentence.
+  - It takes the anchors from the rule files that `lint/rule_audit.py` lists. — `RULE_FILES`
+  - Tested by: `lint/test_check_prompt_rule_ids.py`
