@@ -3,18 +3,35 @@
 
     python3 lint/test_check_prompt_rule_ids.py
 
-The lint reads hooks/*.py with ast and collects the rule ids that the named prompt constants
-name. It fails on each id with no `<!-- rule:<id> -->` anchor in a RULE_FILES file
-(lint/rule_audit.py), and its message names the file, the line and the id. The reader API these
-cases call:
+The lint reads hooks/*.py with ast and collects the rule ids that prompt text names. It fails on
+each id with no `<!-- rule:<id> -->` anchor in a RULE_FILES file (lint/rule_audit.py), and its
+message names the file, the line and the id. The reader API these cases call:
 
     prompt_ids(root) -> [(path, line, id), ...]   each id a prompt names, as read; path is "hooks/<file>.py"
     problems(root)   -> [message, ...]            one message per unanchored id
+
+WHERE PROMPT TEXT IS. A module-level prompt constant (PROMPT_CONSTANTS, with the names it is built
+from in the same module). And the string a function returns, when the function's name has `prompt`
+in it and its file is a hooks/*.py that is not a test file (hooks/test_*.py holds fixtures). The
+returned string is read through its return expression (plain, f-string, joined pieces) and through a
+name the same function assigns and returns.
+
+WHICH IDS ARE READ. An id is read only from an id position, never from free prose. The positions:
+  P1 a rule-list line: an id that opens a string piece, or follows a newline inside one, then a
+     colon. The shape of INSTRUCTIONS in hooks/reply_judge.py: "style-cut-narration: cut narration."
+  P2 an item of an `ids` constant (JUDGED_RULES): the whole item is the id.
+  P3 a rule mention: the word "rule" in any case, an optional colon, spaces, then the id.
+     "rule x" and "Rule: x" both count.
+  P4 a backticked id: `x`.
+An id has at least two hyphenated words. Its first word may be any word: the real incident's
+measure-before-priority is in no anchor family. A hyphenated phrase in free prose (tokens-per-second,
+git-tracked-files, shared-state-file) names no id, whatever its first word.
 
 Each case builds a fixture tree in the run folder (lint/_test_temp.py). A negative case carries a
 positive control beside it, a dead id that must be flagged, so "not flagged" cannot pass on a reader
 that saw nothing. The real-tree cases read this repo.
 """
+import ast
 import importlib
 import os
 import re
@@ -92,6 +109,15 @@ def line_of(src, text):
 def names_place(message, path, line):
     """True when `message` names `path`, then `line`, with only non-digits between them."""
     return re.search(re.escape(path) + r"\D{0,12}?" + str(line) + r"(?!\d)", message) is not None
+
+
+def reported_once(test, root, src, needle, path="hooks/reply_judge.py"):
+    """Asserts the lint reports `needle` as its one problem, naming `path` and the line of `needle` in `src`."""
+    at = line_of(src, needle)
+    problems = lint().problems(root)
+    test.assertEqual(len(problems), 1, "the lint does not report %s: %r" % (needle, problems))
+    test.assertTrue(names_place(problems[0], path, at), problems[0])
+    test.assertIn(needle, problems[0])
 
 
 class AnchoredIdTests(unittest.TestCase):
@@ -232,6 +258,109 @@ class PromptScanTests(unittest.TestCase):
                          [("hooks/reply_judge.py", 2, "output-ghost-hook")])
 
 
+class IdPositionTests(unittest.TestCase):
+    """An id in an id position is read and reported, whatever its first word."""
+
+    def test_rule_list_line_with_a_non_family_first_word_is_reported(self):
+        # The real incident, in the line form INSTRUCTIONS uses: measure is in no anchor family.
+        src = ('INSTRUCTIONS = (\n'
+               '    "Judge the reply. "\n'
+               '    "measure-before-priority: a cost claim with no measure may stand. "\n'
+               ')\n')
+        root = make_tree(hooks={"reply_judge.py": src})
+        self.assertIn(("hooks/reply_judge.py", line_of(src, "measure-before-priority:"), "measure-before-priority"),
+                      lint().prompt_ids(root))
+        reported_once(self, root, src, "measure-before-priority")
+
+    def test_two_word_rule_list_line_with_a_non_family_first_word_is_reported(self):
+        src = ('INSTRUCTIONS = (\n'
+               '    "Judge the reply. "\n'
+               '    "ghost-check: a rule with no anchor. "\n'
+               ')\n')
+        reported_once(self, make_tree(hooks={"reply_judge.py": src}), src, "ghost-check")
+
+    def test_rule_mention_with_a_non_family_id_is_reported(self):
+        src = ('INSTRUCTIONS = (\n'
+               '    "Judge the reply. Rule: quill-check (message a peer only when it changes the work). "\n'
+               ')\n')
+        reported_once(self, make_tree(hooks={"reply_judge.py": src}), src, "quill-check")
+
+    def test_backticked_id_with_a_non_family_first_word_is_reported(self):
+        src = ('INSTRUCTIONS = (\n'
+               '    "Judge the reply, and flag `quill-tick` when it breaks a rule. "\n'
+               ')\n')
+        reported_once(self, make_tree(hooks={"reply_judge.py": src}), src, "quill-tick")
+
+
+class ProseIsNotReadTests(unittest.TestCase):
+    """Free prose names no id, even when its first word is an anchor family of the real tree."""
+
+    def test_phrases_in_prose_name_no_id_under_the_real_families(self):
+        # The anchors are the real tree's, so tokens, git and shared are real families in this fixture.
+        fams = {a.split("-", 1)[0] for a in rule_audit.claude_md_anchors(rule_audit.rule_text(ROOT))}
+        self.assertTrue({"tokens", "git", "shared"} <= fams, "scope: the real tree has no tokens, git or shared anchor")
+        real_claude = rule_audit.read(os.path.join(ROOT, "CLAUDE.md"))
+        real_style = rule_audit.read(os.path.join(ROOT, STYLE_PATH))
+        src = ('INSTRUCTIONS = (\n'
+               '    "Judge the reply. "\n'
+               '    "output-write-in-ste: write plainly. "\n'
+               '    "Count tokens-per-second for the run, never git-tracked-files or shared-state-file. "\n'
+               ')\n')
+        fn = ('def build_prompt(run):\n'
+              '    return "Judge the run. " + "Measure tokens-per-second, not shared-state-file. "\n')
+        root = make_tree(hooks={"reply_judge.py": src, "peer_guard.py": fn},
+                         claude_md=real_claude, extra={STYLE_PATH: real_style})
+        # Control: the anchored id in a rule-list line is read; the prose phrases are not.
+        self.assertEqual(lint().prompt_ids(root),
+                         [("hooks/reply_judge.py", line_of(src, "output-write-in-ste"), "output-write-in-ste")])
+        self.assertEqual(lint().problems(root), [])
+
+
+class FunctionPromptTests(unittest.TestCase):
+    """A prompt a function returns is read, through its return expression or a name it returns."""
+
+    def test_plain_prompt_returned_by_a_function_is_reported(self):
+        src = ('def build_prompt(to, message):\n'
+               '    return "Judge this message from one agent. Rule: output-ghost-plain (message a peer)."\n')
+        reported_once(self, make_tree(hooks={"peer_guard.py": src}), src, "output-ghost-plain",
+                      path="hooks/peer_guard.py")
+
+    def test_f_string_prompt_returned_by_a_function_is_reported(self):
+        src = ('def peer_text(to):\n'
+               '    return f"Judge the message to {to}. Rule: output-ghost-fstr (message a peer)."\n')
+        reported_once(self, make_tree(hooks={"peer_guard.py": src}), src, "output-ghost-fstr",
+                      path="hooks/peer_guard.py")
+
+    def test_implicitly_joined_prompt_returned_by_a_function_is_reported(self):
+        src = ('def judge_text():\n'
+               '    return ("Judge the message from one agent. "\n'
+               '            "Rule: output-ghost-joined (message a peer).")\n')
+        reported_once(self, make_tree(hooks={"peer_guard.py": src}), src, "output-ghost-joined",
+                      path="hooks/peer_guard.py")
+
+    def test_plus_joined_prompt_returned_by_a_function_is_reported(self):
+        src = ('def judge_text():\n'
+               '    return "Judge the message from one agent. " + "Rule: output-ghost-plus (message a peer)."\n')
+        reported_once(self, make_tree(hooks={"peer_guard.py": src}), src, "output-ghost-plus",
+                      path="hooks/peer_guard.py")
+
+    def test_prompt_built_in_a_local_name_then_returned_is_reported(self):
+        src = ('def build_prompt(message):\n'
+               '    text = "Judge the message. Rule: output-ghost-local (message a peer)."\n'
+               '    return text\n')
+        reported_once(self, make_tree(hooks={"peer_guard.py": src}), src, "output-ghost-local",
+                      path="hooks/peer_guard.py")
+
+    def test_a_test_file_function_is_not_read_but_a_hook_function_is(self):
+        # reported_once asserts exactly one problem: the hook's id. The test file's id is not reported.
+        hook = ('def build_prompt(to):\n'
+                '    return "Judge. Rule: output-ghost-hook (message a peer)."\n')
+        fixture = ('def build_prompt(to):\n'
+                   '    return "Judge. Rule: output-ghost-testfile (message a peer)."\n')
+        root = make_tree(hooks={"peer_guard.py": hook, "test_peer_guard.py": fixture})
+        reported_once(self, root, hook, "output-ghost-hook", path="hooks/peer_guard.py")
+
+
 class SizeTests(unittest.TestCase):
     """The empty state and the full-size state."""
 
@@ -255,6 +384,17 @@ class RealTreeTests(unittest.TestCase):
         # Scope: the reader sees JUDGED_RULES on the real tree, so the case below is not a pass over an empty read.
         found = {i for p, _, i in lint().prompt_ids(ROOT) if p == "hooks/reply_judge.py"}
         self.assertIn("output-start-with-point", found)
+
+    def test_real_tree_reads_the_id_named_in_build_prompt(self):
+        # Scope: build_prompt in hooks/sendmessage_state.py names the rule; the id's line must fall in that function.
+        with open(os.path.join(ROOT, "hooks", "sendmessage_state.py"), encoding="utf-8") as f:
+            tree = ast.parse(f.read())
+        defs = [n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "build_prompt"]
+        self.assertEqual(len(defs), 1, "scope: build_prompt is not a top-level function of hooks/sendmessage_state.py")
+        lines = [line for p, line, i in lint().prompt_ids(ROOT)
+                 if p == "hooks/sendmessage_state.py" and i == "parallelism-no-mid-task-talk"]
+        self.assertTrue(any(defs[0].lineno <= n <= defs[0].end_lineno for n in lines),
+                        "the reader misses parallelism-no-mid-task-talk in build_prompt (read on lines %r)" % lines)
 
     def test_real_tree_no_longer_names_measure_before_priority(self):
         # The reply judge names style-measure-before-priority, the anchored id; the dead form is named nowhere.
