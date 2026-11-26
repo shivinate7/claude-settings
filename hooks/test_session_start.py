@@ -3184,8 +3184,11 @@ class SessionStartMainRefTests(SessionStartAgentWorktreeNoticeTests):
 
     def normal(self, text, where):
         """The output with the fixture's own path named <repo>: the checkout line prints that path, and each fixture has its own.
+        Git prints forward slashes on Windows, where the fixture's paths are backslash ones, so both forms are named.
         The longer form goes first: a short /var/... path is a piece of the /private/var/... form git prints."""
-        for path in sorted({where, os.path.realpath(where)}, key=len, reverse=True):
+        paths = {where, os.path.realpath(where)}
+        paths |= {path.replace("\\", "/") for path in paths}
+        for path in sorted(paths, key=len, reverse=True):
             text = text.replace(path, "<repo>")
         return text
 
@@ -3205,14 +3208,15 @@ class SessionStartMainRefTests(SessionStartAgentWorktreeNoticeTests):
 
     def sh_shim(self, name, target=None):
         """A folder whose `sh` logs each call that names main-ref/install.sh to a log outside the fixtures, then runs `target`
-        (the real sh when none is given). Returns the folder and the log path."""
+        (the real sh when none is given). Returns the folder and the log path. Written LF, with forward-slash paths, as
+        make_git_stub writes its git stub, so sh reads it under Git for Windows."""
         folder = os.path.join(self.root, "shim-" + name)
         log = os.path.join(self.root, "sh-starts-" + name + ".log")
         os.makedirs(folder)
         script = os.path.join(folder, "sh")
-        with open(script, "w", encoding="utf-8") as handle:
+        with open(script, "w", encoding="utf-8", newline="\n") as handle:
             handle.write("#!/bin/sh\ncase \"$*\" in *main-ref/install.sh*) printf '%%s\\n' \"$*\" >> '%s' ;; esac\nexec '%s' \"$@\"\n"
-                         % (log, target or sh_exe()))
+                         % (log.replace("\\", "/"), (target or sh_exe()).replace("\\", "/")))
         os.chmod(script, 0o755)
         return folder, log
 
@@ -3222,14 +3226,14 @@ class SessionStartMainRefTests(SessionStartAgentWorktreeNoticeTests):
 
     def mktemp_shim(self, name, tmpdir):
         """A folder whose `mktemp` makes each temp file in `tmpdir` and logs the path it hands out. macOS mktemp ignores TMPDIR,
-        so the folder comes from the shim's template. Returns the folder and the log path."""
+        so the folder comes from the shim's template. Returns the folder and the log path. Written LF, with forward-slash paths."""
         folder = os.path.join(self.root, "shim-mktemp-" + name)
         log = os.path.join(self.root, "mktemp-" + name + ".log")
         os.makedirs(folder)
         script = os.path.join(folder, "mktemp")
-        with open(script, "w", encoding="utf-8") as handle:
+        with open(script, "w", encoding="utf-8", newline="\n") as handle:
             handle.write("#!/bin/sh\nout=$('%s' '%s/tmp.XXXXXXXXXX') || exit 1\nprintf '%%s\\n' \"$out\" >> '%s'\nprintf '%%s\\n' \"$out\"\n"
-                         % (shutil.which("mktemp"), tmpdir, log))
+                         % (shutil.which("mktemp").replace("\\", "/"), tmpdir.replace("\\", "/"), log.replace("\\", "/")))
         os.chmod(script, 0o755)
         return folder, log
 
