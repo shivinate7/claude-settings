@@ -22,7 +22,8 @@ The guard modules are hooks/guard.py and each hooks/guard_*.py (guard_core.py to
 3. Free names: each unit that changed module (an edited one too), each unit new at HEAD, and each unit of a module
    that lost a unit (a `try:` block counts) reads only global names its module defines, imports or gets from
    builtins. A function's own locals, parameters and enclosing names are not global; Python's `symtable` decides,
-   not a text match. A moved unit that declares `global X` fails: the declaration binds X in its new module.
+   not a text match. A moved unit that declares `global X` fails: the declaration binds X in its new module,
+   unless X is defined at head in that module and in no other (X moved there with the unit).
 4. Names and order at HEAD, in every guard module. Each `from guard_<x> import n` (or `from guard import n`) names
    a top-level name of that module at HEAD. Each name a top-level statement reads at import time (outside a def or
    lambda body: a decorator, a default, a class body, a comprehension) is bound above that statement when the
@@ -36,7 +37,8 @@ Without `--importtime` the script starts no process beyond git. Cost with it: 12
 reads, files only under a temp folder it removes.
 
 Limits, what stays unchecked:
-- The `if __name__` block is not read at all: not compared, not scanned for names, not scanned for imports.
+- The `if __name__` block is not read at all: not compared, not scanned for names, not scanned for imports, and
+  a name it binds does not count as bound.
 - Import statements are stripped before units are compared, so an edit that only changes an import passes rule 1.
   Rule 4 still checks the names it imports. A `try:` block holding an import is compared without that import.
 - A comment-only change is invisible to `ast` and passes.
@@ -161,6 +163,13 @@ def target_identifiers(targets):
 def is_main_guard(node):
     return (isinstance(node, ast.If) and isinstance(node.test, ast.Compare)
             and isinstance(node.test.left, ast.Name) and node.test.left.id == "__name__")
+
+
+def outside_main_block(tree):
+    """Every node of `tree` except those inside an `if __name__` block, which runs only as a script."""
+    for top in tree.body:
+        if not is_main_guard(top):
+            yield from ast.walk(top)
 
 
 def module_units(module, tree):
@@ -358,13 +367,14 @@ def module_names(text, label):
     tree = ast.parse(text)
     names = set()
     star = False
-    for node in ast.walk(tree):
+    for node in outside_main_block(tree):
         if isinstance(node, ast.Global):
             names.update(node.names)
         elif isinstance(node, ast.ImportFrom) and any(alias.name == "*" for alias in node.names):
             star = True
     for node in tree.body:
-        names |= bound_names(node, "%s:%d" % (label, node.lineno))
+        if not is_main_guard(node):
+            names |= bound_names(node, "%s:%d" % (label, node.lineno))
     return names, star
 
 
@@ -447,11 +457,13 @@ def check_free_names(checked, names, elsewhere):
     return problems
 
 
-def check_globals(moved):
-    """Rule 3, part two: a `global X` in a moved unit binds X in the module it moved to."""
+def check_globals(moved, elsewhere):
+    """Rule 3, part two: a `global X` in a moved unit binds X in the module it moved to. It passes when X is
+    defined at head in that module and in no other: X moved there with the unit. `elsewhere` is {name: modules
+    that define it at head}."""
     problems = []
     for unit in moved:
-        declared = global_declarations(unit.node)
+        declared = {name for name in global_declarations(unit.node) if elsewhere.get(name) != {unit.module}}
         if declared:
             problems.append("%s moved to %s and declares `global %s`: that rebinds the name in its new module" % (
                 unit.label(), unit.where(), ", ".join(sorted(declared))))
@@ -478,11 +490,12 @@ def check_new_modules(head_units, base_files, head_files):
             for name in sorted(set(head_files) - set(base_files) - ALWAYS_LOADED) if name[:-3] not in entries]
 
 
-def check_imports(head_sources, names):
-    """Rule 4, part one. `names(module)` is (names the module binds, has a star import)."""
+def check_imports(head_sources, names, elsewhere):
+    """Rule 4, part one. `names(module)` is (names the module binds, has a star import). `elsewhere` is {name:
+    modules that define it at head}; an import binding does not define a name."""
     problems = []
     for module, text in head_sources.items():
-        for node in ast.walk(ast.parse(text)):
+        for node in outside_main_block(ast.parse(text)):
             if not (isinstance(node, ast.ImportFrom) and not node.level and node.module
                     and (node.module == "guard" or node.module.startswith("guard_"))):
                 continue
@@ -497,7 +510,7 @@ def check_imports(head_sources, names):
             for alias in node.names:
                 if alias.name == "*" or alias.name in held:
                     continue
-                if "__getattr__" in held and any(alias.name in names(other)[0] for other in head_sources):
+                if "__getattr__" in held and elsewhere.get(alias.name, set()) - {module}:
                     continue
                 problems.append("%s:%d imports `%s` from %s, which defines no top-level `%s` at head" % (
                     module, node.lineno, alias.name, node.module, alias.name))
@@ -630,9 +643,9 @@ def main(argv=None):
             moved = moved_units(base_units, head_units)
             names = HeadNames(head_sources)
             problems += check_free_names(units_to_check(base_units, head_units, moved), names, definers(head_units))
-            problems += check_globals(moved)
+            problems += check_globals(moved, definers(head_units))
             problems += check_new_modules(head_units, set(base_sources), set(head_sources))
-            problems += check_imports(head_sources, names)
+            problems += check_imports(head_sources, names, definers(head_units))
             problems += check_order(head_sources)
             notes.append("%d units at base, %d moved module" % (len(base_units), len(moved)))
         if args.importtime and not (base_bad or head_bad):
