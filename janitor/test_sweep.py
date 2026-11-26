@@ -7138,8 +7138,9 @@ class AgentEndLeastRecentFirstTests(_AgentEndFixture):
 
     def test_a_run_whose_removals_failed_leaves_a_cursor_past_them(self):
         """Two clean trees whose `git worktree remove` is refused, then two dirty trees; a budget of two trees a run.
-        A refused removal leaves its tree on disk, and the stage still reads it as judged. The stage writes a cursor
-        only for a kept tree, so run 1 writes none, and run 2 starts at git's top and judges the same two trees again.
+        A refused removal leaves its tree on disk, and the stage counts that tree as kept, so the cursor moves past it.
+        Run 1 writes a cursor at its last refused tree, and run 2 starts after the refused pair and judges the two dirty
+        trees.
         The refusal is simulated: each remove of a clean tree returns git's failure, and every other git call runs for
         real."""
         self.new_repo("failed-pair")
@@ -7174,8 +7175,9 @@ class AgentEndLeastRecentFirstTests(_AgentEndFixture):
             self.assertTrue(all(os.path.isdir(p) for p in clean), "control: a refused tree was removed")
         with self.subTest(arm="run 2 judges the two dirty trees after the failed ones"):
             self.assertEqual(self.short(self.reached(second_rows, ender)), self.short(queue[2:4]),
-                             "run 2 judged %s, not the two trees after run 1: the refused removals wrote no cursor, "
-                             "so run 2 started at git's top" % self.short(self.reached(second_rows, ender)))
+                             "run 2 judged %s, not the two trees after run 1: a refused removal counts as kept, "
+                             "so the cursor should move past the refused pair and run 2 should start after it"
+                             % self.short(self.reached(second_rows, ender)))
 
     def test_order_changes_no_decision(self):
         """The same mixed set, judged in git's order and in its reverse, gives each tree the same verdict. The
