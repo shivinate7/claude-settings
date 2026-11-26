@@ -1,0 +1,1 @@
+- build-dirs-setup-system-tmp: `BuildDirReapTests.setUp` in `janitor/test_sweep.py` makes its temp root with `tempfile.mkdtemp` and no `dir`, so the root lands in the system temp dir. The module's other temp roots use its run folder, as the `reap_log_` case does with `dir=ROOT`. Seen: 2026-11-25 x1
