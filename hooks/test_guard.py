@@ -540,11 +540,29 @@ def macos_arm_problems():
     return problems
 
 
+# Where each case was registered, by its name: `file:line` of the section line that called add. A name
+# registered twice is refused at load, since MUTATE_ONLY and a mutant's required name each pick a case by its name,
+# so a twin would answer for the first.
+CASE_SITES = {}
+_THIS_FILE = os.path.abspath(__file__)
+
+
+def _registration_site():
+    """`file:line` of the section line that called add (directly, or through sh or chained_ask): the first frame outside this file."""
+    frame = sys._getframe(1)
+    while frame is not None and os.path.abspath(frame.f_code.co_filename) == _THIS_FILE:
+        frame = frame.f_back
+    return "%s:%d" % (os.path.basename(frame.f_code.co_filename), frame.f_lineno) if frame else "(unknown)"
+
+
 def add(name, expected, rule=None, raw=None, tool="Bash", cwd=None, env_path=None,
         session=None, carries=(), lacks=(), config=None, agent_id=None, no_root=False, silent=False,
         agent_type=None, event=None, stop_active=False, windows=False, transcript=None,
-        max_seconds=None, env=None, guard=None, **tool_input):
+        max_seconds=None, env=None, guard=None, crash=False, **tool_input):
     """Register one case.
+
+    `crash` declares that this case's guard run may log a `crash` row (a fail-open or fail-closed crash, see decide).
+    Any other case that logs one fails, because an allow that a crash let through is not a verdict.
 
     `guard` is the path of a copy of hooks/guard.py to run in place of this repository's, for the
     cases that need a checkout whose origin/main they control (see the page-stale section). None runs
@@ -564,8 +582,15 @@ def add(name, expected, rule=None, raw=None, tool="Bash", cwd=None, env_path=Non
     `agent_id`, when given, rides on the payload the same way the harness sends it for a
     agent's own tool call: alongside `tool_name` and `tool_input`, never inside either.
     """
+    site = _registration_site()
+    if name in CASE_SITES:
+        sys.exit("fixture setup failed: case name %r is registered at %s and again at %s; a second case under one name "
+                 "answers for the first in MUTATE_ONLY and in a mutant's required name" % (name, CASE_SITES[name], site))
+    CASE_SITES[name] = site
     CASES.append({
         "name": name,
+        "where": site,
+        "crash": bool(crash),
         "expected": expected,
         "rule": rule,
         "raw": raw,
@@ -886,6 +911,25 @@ def printed_rule(reason):
     return " ".join(head.split()) if sep else "(none)"
 
 
+def case_input(case):
+    """The input a case judges, on one line: its raw payload, else its command, else its tool input as JSON."""
+    if case["raw"] is not None:
+        text = str(case["raw"])
+    elif "command" in case["tool_input"]:
+        text = str(case["tool_input"]["command"])
+    else:
+        text = json.dumps(case["tool_input"], sort_keys=True, default=str)
+    return " ".join(text.split())[:160]
+
+
+def fail_note(note, case):
+    """The trailing note of a FAIL line: its cause, then the case's section line and its input, in one pair of
+    parentheses. merge.py's GUARD_NOTE reads that pair as the note, so the case text it reads stays the name alone."""
+    cause = note.strip()[1:-1] if note.strip() else ""
+    where = "at %s, input: %s" % (case["where"], case_input(case))
+    return "  (%s; %s)" % (cause, where) if cause else "  (%s)" % where
+
+
 RULE_EXACT_SEEN = {"rule": 0, "mismatch": 0, "mismatch_right": 0, "unset": 0}
 
 
@@ -985,6 +1029,8 @@ def run_cases():
         elif not ok:
             note = "  (%s)" % reason[:110] if reason else ""
         failed += 0 if ok else 1
+        if not ok:
+            note = fail_note(note, case)
         say("%s  %-6s(want %-6s)  [%-11s] %s%s" % (
             "PASS" if ok else "FAIL", got, case["expected"], case["tool"], case["name"], note))
     say("rule-total\t%d mismatches in %d cases with a rule, %d of them on a verdict that was right; "

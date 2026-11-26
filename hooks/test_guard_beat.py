@@ -9,6 +9,9 @@ printed. The watch classes run that family under hooks/stall_watch.py with a sho
 the beat's own defs with a fake clock, so no suite runs. The run folder and its sweep are the shared helper's
 (lint/_test_temp.py); its sweep is proved in lint/test_find_copies.py.
 
+This file also holds the runner's own proofs of its crash scan and its registration hygiene (classes CrashScan and
+RegistrationHygiene). Each runs the runner on a section set of its own, so no suite case is in them.
+
     python3 hooks/test_guard_beat.py
 """
 import ast
@@ -29,6 +32,8 @@ sys.path.insert(0, os.path.join(HERE, "..", "lint"))
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (the one home, lint/_test_temp.py)
 sys.path.insert(0, HERE)
 import stall_watch  # noqa: E402  the watcher, and its exit code on a stall (STALL_EXIT)
+import guard_merge  # noqa: E402  merge_module: the merge tool's own FAIL-line parser, read by merge.failing_line
+import mutate_shared  # noqa: E402  guard_tree: a copy of the guard with its siblings, for a planted crash
 
 RUN_FOLDER = _test_temp.run_folder()
 CONFIG_DIR = os.path.join(RUN_FOLDER, "config")
@@ -316,6 +321,180 @@ class WatchedBeatOff(unittest.TestCase):
         self.assertEqual(self.watched.watch_rc, stall_watch.STALL_EXIT,
                          "the watcher exited %r with the beat off, not a stall" % self.watched.watch_rc)
         self.assertIn("STALL", self.watched.watch_out, "the watcher exited with no STALL report")
+
+
+# --- The runner's crash scan (decide, tests/guard/s27664-owner-judge.py) and registration hygiene (add, hooks/test_guard.py).
+# Each proof runs the runner on this repository's section files plus one section of its own, with MUTATE_ONLY set to the
+# proof's prefix, so only the proof's cases run. The controls pass on the old runner; the proofs fail there: the planted
+# crash passes, a twin name runs, and a FAIL line has no section line.
+CRASH_PROOF = "crash-scan proof:"
+REG_PROOF = "registration proof:"
+EXTRA_SECTION = "s99990-hygiene.py"   # the one section file this file adds: last in order, its cases on line 2
+EXTRA_NUMBER = 99990
+REAL_SECTIONS = os.path.join(HERE, "..", "tests", "guard")
+JUDGE_CALL = "        judge(payload)\n"   # guard.py main(): the call a crash inside the guard raises from
+
+
+def section_set(name, body):
+    """This repository's section files, copied into a folder of the run folder named `name`, with one more: `body` as
+    section 99990. The runner loads the whole set, so its ROOT and fixtures are the real ones. The copy follows
+    build_with_extra in hooks/test_guard.py, which this file cannot import: that builder runs inside the runner."""
+    folder = os.path.join(RUN_FOLDER, name)
+    os.makedirs(folder, exist_ok=True)
+    for entry in os.listdir(REAL_SECTIONS):
+        if entry.endswith(".py"):
+            shutil.copyfile(os.path.join(REAL_SECTIONS, entry), os.path.join(folder, entry))
+    with open(os.path.join(folder, EXTRA_SECTION), "w", encoding="utf-8") as handle:
+        handle.write("# section %d\n%s" % (EXTRA_NUMBER, body))
+    return folder
+
+
+def suite_run(folder, only, guard=None):
+    """One run of the runner on the section set of `folder`, with MUTATE_ONLY=`only`, judged by `guard` when given, else
+    by this repository's guard. stdout goes to a file: a `sleep` the suite leaves behind holds a pipe open, and the run
+    would wait."""
+    env = {k: v for k, v in os.environ.items() if not k.startswith(("GUARD_", "MUTATE_ONLY"))}
+    env.update(GUARD_SECTION_DIR=folder, MUTATE_ONLY=only)
+    if guard:
+        env["GUARD_UNDER_TEST"] = guard
+    fd, out_path = tempfile.mkstemp(dir=RUN_FOLDER, suffix=".txt")
+    with os.fdopen(fd, "w", encoding="utf-8") as out:
+        done = subprocess.run(SUITE_CMD, stdout=out, stderr=subprocess.STDOUT, env=env, timeout=TIMEOUT)
+    with open(out_path, encoding="utf-8", errors="replace") as handle:
+        return Run(done.returncode, handle.read(), "")
+
+
+def planted_guard(folder):
+    """A copy of this repository's guard with its siblings, whose judge call raises: main() then fails open and logs a
+    `crash` row, as a real crash inside the guard does. -> the copy's guard.py."""
+    mutate_shared.guard_tree(folder)
+    path = os.path.join(folder, "guard.py")
+    with open(path, encoding="utf-8") as handle:
+        text = handle.read()
+    if text.count(JUDGE_CALL) != 1:
+        raise RuntimeError("guard.py holds %d judge calls, want 1, so no crash can be planted" % text.count(JUDGE_CALL))
+    with open(path, "w", encoding="utf-8") as handle:
+        handle.write(text.replace(JUDGE_CALL, '        raise RuntimeError("planted crash")\n'))
+    return path
+
+
+FAIL_CLOSED_CALL = "        _question_form_module()\n"   # guard.py main(): the fail-closed writer, a refusal that logs a deny row
+BROKEN_QUESTION_FORM = 'raise ImportError("this copy of the module was replaced by the case")\n'
+
+
+def planted_fail_closed_guard(folder):
+    """A copy of this repository's guard whose judge call is the fail-closed writer's own call, _question_form_module, with
+    the copy's question_form.py unimportable. The copy refuses as guard-crash (decision install-hooks-whole) and logs its
+    row as `deny`, not `crash`, which is the row decide must read too. -> the copy's guard.py."""
+    mutate_shared.guard_tree(folder)
+    path = os.path.join(folder, "guard.py")
+    with open(path, encoding="utf-8") as handle:
+        text = handle.read()
+    if text.count(JUDGE_CALL) != 1:
+        raise RuntimeError("guard.py holds %d judge calls, want 1, so no refusal can be planted" % text.count(JUDGE_CALL))
+    with open(path, "w", encoding="utf-8") as handle:
+        handle.write(text.replace(JUDGE_CALL, FAIL_CLOSED_CALL))
+    with open(os.path.join(folder, "question_form.py"), "w", encoding="utf-8") as handle:
+        handle.write(BROKEN_QUESTION_FORM)
+    return path
+
+
+def printed_lines(text, prefix, name):
+    return [line for line in text.splitlines() if line.startswith(prefix) and name in line]
+
+
+class CrashScan(unittest.TestCase):
+    """L2: an allow case fails when its guard run logged a crash row (decide), and a row of either writer counts: the
+    fail-open `crash` row and the fail-closed `deny` row under rule guard-crash. One run holds six cases: a planted crash
+    and a planted refusal (the proofs), and four controls: an intact guard, a crash row written before the run, and two
+    cases that declare their crash."""
+
+    @classmethod
+    def setUpClass(cls):
+        planted = planted_guard(os.path.join(RUN_FOLDER, "planted-guard"))
+        refusing = planted_fail_closed_guard(os.path.join(RUN_FOLDER, "refusing-guard"))
+        old_row = os.path.join(RUN_FOLDER, "old-row-config")
+        os.makedirs(old_row, exist_ok=True)
+        with open(os.path.join(old_row, "guard.log"), "w", encoding="utf-8") as handle:
+            handle.write("2026-11-25T10:00:00-06:00\t\tcrash\tguard-crash\tan earlier crash\t-\n")
+        body = "\n".join([
+            'add(%r, "allow", command="echo hi", guard=%r)' % (CRASH_PROOF + " planted", planted),
+            'add(%r, "allow", command="echo hi")' % (CRASH_PROOF + " intact"),
+            'add(%r, "allow", command="echo hi", config=%r)' % (CRASH_PROOF + " old row", old_row),
+            'add(%r, "allow", command="echo hi", guard=%r, crash=True)' % (CRASH_PROOF + " declared", planted),
+            'add(%r, "deny", rule="guard-crash", command="echo hi", guard=%r, carries=("guard-crash",))'
+            % (CRASH_PROOF + " refused as guard-crash", refusing),
+            'add(%r, "deny", rule="guard-crash", command="echo hi", guard=%r, carries=("guard-crash",), crash=True)'
+            % (CRASH_PROOF + " crash declared", refusing),
+        ]) + "\n"
+        cls.proof = suite_run(section_set("crash-scan", body), CRASH_PROOF)
+
+    def test_an_allow_under_a_crashing_guard_fails_its_case(self):
+        self.assertTrue(printed_lines(self.proof.out, "FAIL", CRASH_PROOF + " planted"),
+                        "the allow case under a crashing guard printed no FAIL line (rc %d)" % self.proof.rc)
+
+    def test_the_failing_line_says_a_crash_row_was_logged(self):
+        lines = printed_lines(self.proof.out, "FAIL", CRASH_PROOF + " planted")
+        self.assertTrue(lines, "no FAIL line for the allow case under the crashing guard")
+        self.assertIn("the guard logged a crash row", lines[0], "the FAIL line does not name the crash row: %s" % lines[0])
+
+    def test_control_an_intact_guard_passes_its_allow_case(self):
+        self.assertTrue(printed_lines(self.proof.out, "PASS", CRASH_PROOF + " intact"), "no PASS line for the intact allow case")
+
+    def test_control_a_crash_row_from_before_the_run_does_not_fail_a_case(self):
+        self.assertTrue(printed_lines(self.proof.out, "PASS", CRASH_PROOF + " old row"),
+                        "a crash row written before the run failed a later case")
+
+    def test_control_a_case_that_declares_its_crash_passes_beside_its_row(self):
+        self.assertTrue(printed_lines(self.proof.out, "PASS", CRASH_PROOF + " declared"),
+                        "the case that declares its crash failed beside its row")
+
+    def test_a_refusal_by_the_fail_closed_writer_fails_its_case(self):
+        lines = printed_lines(self.proof.out, "FAIL", CRASH_PROOF + " refused as guard-crash")
+        self.assertTrue(lines, "the case the fail-closed guard refuses printed no FAIL line (rc %d): its deny row was not read"
+                        % self.proof.rc)
+        self.assertIn("the guard logged a crash row", lines[0], "the FAIL line does not name the crash row: %s" % lines[0])
+
+    def test_control_a_refusal_that_declares_its_crash_passes_beside_its_row(self):
+        self.assertTrue(printed_lines(self.proof.out, "PASS", CRASH_PROOF + " crash declared"),
+                        "the refusal that declares its crash failed beside its row")
+
+
+class RegistrationHygiene(unittest.TestCase):
+    """L7: a second case under one name stops the run before any case, and a FAIL line names the case's section line and
+    its input. Controls: distinct names run, and the merge tool's FAIL-line parser still reads the case name alone."""
+
+    @classmethod
+    def setUpClass(cls):
+        twins = "\n".join(['add(%r, "allow", command="echo hi")' % (REG_PROOF + " twin"),
+                           'add(%r, "allow", command="echo bye")' % (REG_PROOF + " twin")]) + "\n"
+        cls.twins = suite_run(section_set("twin-names", twins), REG_PROOF)
+        body = "\n".join(['add(%r, "allow", command="echo hi")' % (REG_PROOF + " one"),
+                          'add(%r, "allow", command="echo bye")' % (REG_PROOF + " two"),
+                          'add(%r, "deny", command="echo hi")' % (REG_PROOF + " wrong input")]) + "\n"
+        cls.lines = suite_run(section_set("registration-lines", body), REG_PROOF)
+
+    def test_a_name_registered_twice_stops_the_run_before_any_case(self):
+        self.assertIn("is registered at", self.twins.out, "the run with a twin name printed no refusal (rc %d)" % self.twins.rc)
+        self.assertNotEqual(self.twins.rc, 0, "the run with a twin name exited 0")
+
+    def test_a_failing_line_names_its_section_line_and_input(self):
+        lines = printed_lines(self.lines.out, "FAIL", REG_PROOF + " wrong input")
+        self.assertTrue(lines, "no FAIL line for the case the guard allows")
+        self.assertIn("at %s:4, input: echo hi" % EXTRA_SECTION, lines[0],
+                      "the FAIL line names no section line or input: %s" % lines[0])
+
+    def test_control_distinct_names_run_and_pass(self):
+        self.assertTrue(printed_lines(self.lines.out, "PASS", REG_PROOF + " one"), "no PASS line for the first distinct name")
+        self.assertTrue(printed_lines(self.lines.out, "PASS", REG_PROOF + " two"), "no PASS line for the second distinct name")
+
+    def test_control_the_merge_tool_reads_the_case_name_of_a_fail_line(self):
+        merge = guard_merge.merge_module()
+        self.assertIsNotNone(merge, "the merge tool did not load, so its FAIL-line parser cannot be read")
+        lines = printed_lines(self.lines.out, "FAIL", REG_PROOF + " wrong input")
+        self.assertTrue(lines, "no FAIL line to parse")
+        self.assertEqual(merge.failing_line(lines[0])[1], REG_PROOF + " wrong input",
+                         "the merge tool reads a different case name from the FAIL line: %s" % lines[0])
 
 
 if __name__ == "__main__":

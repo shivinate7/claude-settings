@@ -1170,7 +1170,7 @@ STANDING_ROLE = "standing"
 
 def standing_refuse(name, command, transcript, env=ROLE_ENV, **kw):
     """A `merge --role standing` the guard refuses. The reason names its rule, never the role flag and never the tier word."""
-    sh("merge-role-proof: " + name, command, "deny", rule=ROLE_RULE, lacks=ROLE_FLAG + (STANDING_ROLE,),
+    sh("merge-role-proof: " + name + ", standing tier", command, "deny", rule=ROLE_RULE, lacks=ROLE_FLAG + (STANDING_ROLE,),
        transcript=transcript, env=env, cwd=NOGIT, **kw)
 
 
