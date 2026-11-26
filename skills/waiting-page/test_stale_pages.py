@@ -2278,6 +2278,7 @@ class ParkedStale(FolderCase):
 WOKE = "2026-11-05T13:10:00Z"
 EARLY = "2026-11-05T02:40:00Z"  # long before WOKE: the incident shape, an answer that stayed unread that long
 LATER_REPLY = "2026-11-05T03:40:00Z"  # an item reply an hour after EARLY, still before WOKE
+AFTER_WAKE = "2026-11-05T14:00:00Z"  # an hour after WOKE: a newer answer that the mode does not list yet
 UNREAD_LINE = re.compile(r"answer-unread \S+ \(|answer-needs-reply \S+ \(|lane-missing \S+ \(|unread: clean$|unknown: ")  # the mode's own line shapes
 
 
@@ -2458,6 +2459,15 @@ class UnreadStale(FolderCase):
         rc, out = self.run_unread()
         expected = [unread_line("item-%03d" % i, i, "ops", EARLY) for i in range(count) if i % 3]
         self.assertEqual((rc, output_lines(out)), (1, expected), "a full store did not list each unread answer, in order: " + out[:300])
+
+    def test_an_earlier_thread_entry_is_never_listed_even_with_no_receipt(self):
+        # A thread entry is an asks record, kept beside the answers under the item's id. The mode reads four files and never
+        # reads asks.json, so the earlier entry (before the wake, no receipt) is not listed. The newer answer is after the wake,
+        # so it is not listed either: the mode is clean.
+        self.store(items=[item_entry("same-item", "open")], answers=[pick_answer_entry("same-item", AFTER_WAKE)])
+        self.write_store({"asks": [{"id": "same-item", "data": {"item": "same-item", "at": EARLY, "text": "An earlier entry in the thread."}}]})
+        rc, out = self.run_unread(codes=(0,))
+        self.assertEqual((rc, output_lines(out)), (0, ["unread: clean"]), "the mode listed an earlier thread entry: " + out)
 
     def test_an_empty_store_is_clean(self):
         self.store()
