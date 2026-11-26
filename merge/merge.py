@@ -429,6 +429,7 @@ BUDGET_CITE = "(decision gh-api-budget, a bulk read stops below a tenth of the G
 LANE_LINT_CITE = "(decision lanes-run-no-full-ci-job, a lane hands off only a head that passes `merge --lane-lint`)"
 WORKFLOW_READ_CITE = "(decision private-repos-no-ci, the workflow files on the base set the wait, so a file the tool cannot read stops the merge)"
 HEAD_STAMP_CITE = "(decision private-repos-no-ci, a setup PR's own stamp that turns CI off is read and checked in full, so a broken one stops the merge)"
+HEAD_CONFIG_CITE = "(decision config-lands-after-its-reader, a merge config change that needs new tool code lands in a second pull request, after the stable branch holds that code)"
 # The paths a review record's `--guard no` refuses: the rule dirs, then the tool and the hooks, as folder prefixes. GUARD_FILES match a whole path.
 # It reads RULE_DIRS, never a copy.
 GUARD_PATHS = stale_cites.RULE_DIRS + ("merge/", "githooks/")
@@ -5744,7 +5745,7 @@ def draft_step(root, cfg, n, host, info, merge_main=False):
         raise Stop(f"the head of #{n} has a red check, so it stays a draft and nothing was pushed {GREEN_CITE}: {red}.")
     refused = head_config_refusal(root, info["head"], base)
     if refused:
-        raise Stop(f"{refused} #{n} stays a draft and nothing was pushed.")
+        raise Stop(f"{refused} #{n} stays a draft and nothing was pushed. {HEAD_CONFIG_CITE}")
     checks = cfg.get("merge", {}).get("readyChecks")
     if not checks:
         say(READY_NO_CHECKS_LINE)
@@ -6013,7 +6014,7 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
             tmp, wt = open_worktree(root, info, base)  # the fetch that makes the head readable below
         refused = head_config_refusal(root, info["head"], base)  # a head stamp the running tool cannot read must stop before any claim or push, as on the ready path
         if refused:
-            raise Stop(f"{refused} #{n} was not claimed or merged.")
+            raise Stop(f"{refused} #{n} was not claimed or merged. {HEAD_CONFIG_CITE}")
         lane_head = head_under_claims(wt, cfgrel, base, info["head"]) if base == cfg["defaultBranch"] else info["head"]  # the head a cited run and the relayed yes name
         extend_lock(lock, UNDO_CHECK_LOCK_SECONDS)
         record_lift(lifts, UNDO_FLAG, undo_check(wt, base_ref, unknown_ok, info.get("body", ""), lambda url: host.cited_run(url), lane_head))
