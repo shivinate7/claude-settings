@@ -2454,6 +2454,138 @@ def case_ruled_store_ranks_by_shared_words_before_recency():
           len(listed) <= RULED_CAP_MAX, "listed %d: %r" % (len(listed), listed))
 
 
+# Decision and debt records join the candidates only when they share a word with the question, scored by the same
+# helper the ruled store uses (_words). The top RECORD_TOP by score go in; a record the question names always does;
+# and the whole block holds at most CANDIDATES_CAP characters, the lowest-scored lines going first and no line cut.
+# Each case reads the constants from question_form, never a copied number.
+RECORD_QUESTION_WORDS = ["zephyr", "quartz", "lantern", "mosaic", "tundra", "lane", "gets", "reviewer"]
+RECORD_QUESTION = "Which zephyr quartz lantern mosaic tundra lane gets the reviewer?"
+RECORD_FILLER = "stays pinned as recorded"  # plain words that share no word with the question
+RECORD_ZERO = "Stays as recorded, with nothing in common."  # shares no word with the question
+RECORD_MANY = 150  # more records with one shared word than RECORD_TOP holds (the builder sets 40)
+
+
+def _record_ids(candidates):
+    """The record ids (`decisions/<slug>`, `debts/<slug>`) of the candidate lines, in past_rulings' order."""
+    return [str(c).split(": ", 1)[0] for c in candidates if str(c).startswith(("decisions/", "debts/"))]
+
+
+def _past_candidates(fn, repo, question):
+    """(candidates, unknown) from past_rulings for `question`, with the pointer patched to the fixture repo."""
+    with mock.patch(POINTER_CHECKOUT, return_value=repo):
+        return fn(question, repo)
+
+
+def _note_with(words, n_chars):
+    """A step note of n_chars characters: `Ruling (owner):`, then `words`, then filler with no word of the question."""
+    text = "Ruling (owner): " + " ".join(words)
+    while len(text) < n_chars:
+        text += " " + RECORD_FILLER
+    return text[:n_chars].rstrip()
+
+
+def case_record_top_ranks_by_shared_words():
+    import question_form  # the one form check (hooks/question_form.py)
+    fn = getattr(question_form, "past_rulings", None)
+    check("record top: question_form.past_rulings exists", callable(fn), "missing function")
+    if not callable(fn):
+        return
+    records = {"rq-%04d" % i: "%s %s" % (RECORD_QUESTION_WORDS[0], RECORD_FILLER) for i in range(RECORD_MANY)}
+    records["rq-zz-five"] = " ".join(RECORD_QUESTION_WORDS[:5]) + " " + RECORD_FILLER  # most words, name sorts last
+    repo = tcj.make_repo("record-top", decisions=records)
+    candidates, _unknown = _past_candidates(fn, repo, RECORD_QUESTION)
+    ids = _record_ids(candidates)
+    check("record top: the fixture's records are candidates (scope)", bool(ids), str(candidates)[:200])
+    if not ids:
+        return
+    top = getattr(question_form, "RECORD_TOP", None)
+    check("record top: the record that shares the most words is in the block, though its name sorts last",
+          "decisions/rq-zz-five" in ids, "left out of %d record lines" % len(ids))
+    check("record top: the fixture holds more records than RECORD_TOP", not isinstance(top, int) or RECORD_MANY > top,
+          "RECORD_TOP is %r, RECORD_MANY is %d" % (top, RECORD_MANY))
+    shown = "RECORD_TOP is %d" % top if isinstance(top, int) else "RECORD_TOP is not defined, so no record is capped"
+    check("record top: the block holds at most RECORD_TOP record lines",
+          isinstance(top, int) and len(ids) <= top,
+          "the block holds %d record lines of %d records that share a word; %s" % (len(ids), len(records), shown))
+
+
+def case_record_named_kept_and_zero_words_left_out():
+    import question_form  # the one form check (hooks/question_form.py)
+    fn = getattr(question_form, "past_rulings", None)
+    check("record named: question_form.past_rulings exists", callable(fn), "missing function")
+    if not callable(fn):
+        return
+    repo = tcj.make_repo("record-zero-words", decisions={
+        "rq-hit": "%s %s" % (RECORD_QUESTION_WORDS[0], RECORD_FILLER),
+        "rq-named": RECORD_ZERO,
+        "rq-twin": RECORD_ZERO,  # the same words as the named record, and not named
+    })
+    for form in ("`decisions/rq-named`", "`rq-named`"):
+        candidates, _unknown = _past_candidates(fn, repo, RECORD_QUESTION + " The answer touches %s." % form)
+        ids = _record_ids(candidates)
+        check("record scope (%s): the record that shares a word is a candidate" % form,
+              "decisions/rq-hit" in ids, str(ids)[:200])
+        check("record named (%s): the record the question names is kept, though it shares no word" % form,
+              "decisions/rq-named" in ids, str(ids)[:200])
+        check("record zero words (%s): a record that shares no word with the question is left out, as its twin is"
+              % form, "decisions/rq-twin" not in ids,
+              "decisions/rq-twin is in the block, though it shares no word with the question")
+
+
+def case_record_total_cap_drops_the_lowest_scored_lines():
+    import question_form  # the one form check (hooks/question_form.py)
+    fn = getattr(question_form, "past_rulings", None)
+    check("record cap: question_form.past_rulings exists", callable(fn), "missing function")
+    if not callable(fn):
+        return
+    cap = getattr(question_form, "CANDIDATES_CAP", None)
+    shown = ("CANDIDATES_CAP is %d" % cap if isinstance(cap, int)
+             else "CANDIDATES_CAP is not defined, so the block has no total cap")
+    # Eight step notes, one per count of shared words, each about a third of the cap: together the block is over it.
+    size = max(cap // 3, 120) if isinstance(cap, int) else 2000
+    notes = {"rq-step-%d" % k: _note_with(RECORD_QUESTION_WORDS[:k], size)
+             for k in range(1, len(RECORD_QUESTION_WORDS) + 1)}
+    whole = {"%s: %s" % (step_id, note) for step_id, note in notes.items()}
+    repo = tcj.make_repo("record-cap", steps=notes)
+    candidates, unknown = _past_candidates(fn, repo, RECORD_QUESTION)
+    check("record cap: the eight step notes are candidates, whole (scope)", whole <= {str(c) for c in candidates},
+          "%d candidate lines" % len(candidates))
+    block = question_form.candidates_block(candidates, unknown, None)
+    lines = block.split("\n")
+    cut = [line for line in lines if line.startswith("rq-step-") and line not in whole]
+    check("record cap: every step line in the block is whole, none cut mid-way", not cut, cut[:1])
+    check("record cap: the block holds at most CANDIDATES_CAP characters",
+          isinstance(cap, int) and len(block) <= cap, "the block is %d characters; %s" % (len(block), shown))
+    check("record cap: the line with the most shared words is in the block",
+          any(line.startswith("rq-step-8: ") for line in lines), "the block is %d characters" % len(block))
+    check("record cap: the lowest-scored line (one shared word) goes first, so it is left out",
+          not any(line.startswith("rq-step-1: ") for line in lines),
+          "the lowest-scored line is in a block of %d characters; %s" % (len(block), shown))
+
+
+def case_record_words_under_the_cap_are_all_sent():
+    import question_form  # the one form check (hooks/question_form.py)
+    fn = getattr(question_form, "past_rulings", None)
+    check("record control: question_form.past_rulings exists", callable(fn), "missing function")
+    if not callable(fn):
+        return
+    w, filler = RECORD_QUESTION_WORDS, RECORD_FILLER
+    repo = tcj.make_repo("record-under-cap", decisions={
+        "rq-one": "%s %s" % (w[0], filler),
+        "rq-two": "%s %s %s" % (w[0], w[1], filler),
+        "rq-three": "%s %s %s %s" % (w[0], w[1], w[2], filler),
+    })
+    candidates, _unknown = _past_candidates(fn, repo, RECORD_QUESTION)
+    check("record control: the three records that share words are all in the block, as they fit under any cap",
+          sorted(_record_ids(candidates)) == ["decisions/rq-one", "decisions/rq-three", "decisions/rq-two"],
+          str(_record_ids(candidates))[:200])
+    empty = tcj.make_repo("record-none", steps={"rq-none": "Ruling (owner): stays pinned as recorded."})
+    candidates, unknown = _past_candidates(fn, empty, RECORD_QUESTION)
+    block = question_form.candidates_block(candidates, unknown, None)
+    check("record control: a repo with no record folder gives no record line, and an empty block says (none found)",
+          not _record_ids(candidates) and "(none found)" in block, block[:200])
+
+
 # A ruling's optional `scope` (lint/test_ruled_store.py): {"visibility": "private"} governs a private repo only. The
 # repo's visibility is its extras key `visibility`, which lint/layout.py reads (make_repo(visibility=...) writes it). Each
 # case reads that visibility back through layout.caution, and asserts it, before it judges the candidates.
@@ -4336,6 +4468,8 @@ def main():
                  case_ruled_store_caps_matching_entries_at_eight_newest_first,
                  case_ruled_store_marks_an_unread_entry_unchecked,
                  case_ruled_store_ranks_by_shared_words_before_recency,
+                 case_record_top_ranks_by_shared_words, case_record_named_kept_and_zero_words_left_out,
+                 case_record_total_cap_drops_the_lowest_scored_lines, case_record_words_under_the_cap_are_all_sent,
                  case_ruled_store_scope_omits_a_private_ruling_in_a_public_repo,
                  case_ruled_store_scope_keeps_a_private_ruling_in_a_private_repo,
                  case_ruled_store_scope_private_only_lists_no_ruling_in_a_public_repo,
