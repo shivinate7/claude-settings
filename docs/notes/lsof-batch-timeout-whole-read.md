@@ -1,0 +1,1 @@
+- lsof-batch-timeout-whole-read: `_open_files_under` in `janitor/sweep.py` gives one `lsof` read a 60 s timeout for every folder in a batch. On main, each folder's holder read had its own 60 s. Many large leftover folders could time out together, and every one would be kept. Unmeasured. Seen: 2026-11-25 x1

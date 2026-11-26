@@ -38,9 +38,13 @@ GHPUSH_NO_ROLLUP_RED = os.path.join(RPP, "gh-no-rollup-red")    # the same rows 
 GHPUSH_ROLLUP_RED = os.path.join(RPP, "gh-rollup-red")              # feat-stale: ready; the gating run (100) holds a red job, and its rollup row fails too
 
 PPUSH_LAST = "If this refusal looks wrong for your task, comply anyway and say so in your report."
-PPUSH_CARRIES = (("cancel",), ("wait",), "gh pr ready --undo", ("red job",))   # why, the way out, the red-job exception
+PPUSH_CARRIES = (("cancel",), ("wait",), "gh pr ready --undo", ("red job",))   # a running run: why, the way out, the red-job exception
 PPUSH_READ_NAMES = ("pull request", "pr list")                                 # the stderr line names the failed read by one of these
 PPUSH_LACKS = ("git switch", "cherry-pick", "replacement PR", "--force")      # the acts a refusal must never name
+# A finished-green run: the refusal names the head to merge, and never the old advice to wait for a run that has finished.
+PPUSH_CARRIES_GREEN = (("cancel",), "merge this head", "gh pr ready --undo", ("red job",))   # why, the head to merge, the way out, the red-job exception
+PPUSH_LACKS_GREEN = PPUSH_LACKS + ("wait for the run to finish",)
+PPUSH_GREEN_FAKES = (GHPUSH_GREEN, GHPUSH_CURRENT)   # the fakes whose run is finished green (the others are running or queued)
 
 
 def _ppush_link(run, job):
@@ -91,8 +95,14 @@ lazy_fixture([RPP_WT, GHPUSH_GREEN, GHPUSH_CURRENT, GHPUSH_RUNNING, GHPUSH_EMPTY
               GHPUSH_OTHER, GHPUSH_BROKEN, GHPUSH_ROLLUP_OTHER_RED, GHPUSH_NO_ROLLUP_RED, GHPUSH_ROLLUP_RED], _build_ready_push)
 
 
-def ppush_refuse(name, command, cwd, fake, carries=PPUSH_CARRIES, lacks=PPUSH_LACKS, env_path=None):
-    """A push the rule refuses. The reason names the rule, the why and the way out, and never the acts in `lacks`."""
+def ppush_refuse(name, command, cwd, fake, carries=None, lacks=None, env_path=None):
+    """A push the rule refuses. The reason names the rule, the why and the way out, and never the acts in `lacks`. The pins
+    follow the fake's run: a finished-green run names the head to merge, a running one the wait."""
+    green = fake in PPUSH_GREEN_FAKES
+    if carries is None:
+        carries = PPUSH_CARRIES_GREEN if green else PPUSH_CARRIES
+    if lacks is None:
+        lacks = PPUSH_LACKS_GREEN if green else PPUSH_LACKS
     sh("ready-pr-push: " + name, command, "deny", PPUSH_RULE, cwd=cwd,
        env_path=env_path if env_path is not None else _rpr_env(fake), carries=carries, lacks=lacks)
 
@@ -101,6 +111,29 @@ def ppush_allow(name, command, cwd, fake, config=None, env_path=None):
     """A call the rule allows. Each allow is a control: it passes on the old code too, and holds the refusal above it honest."""
     sh("ready-pr-push: " + name, command, "allow", cwd=cwd,
        env_path=env_path if env_path is not None else _rpr_env(fake), config=config)
+
+
+# THE DRAFT ROUTE BY SESSION. A computer's refusal names the command that returns the pull request to draft, `gh pr ready --undo
+# <number>`. A cloud session is refused that command (GraphQL, HTTP 403), so its refusal names the merge tool's DRAFT_ROUTES text,
+# read from merge/merge.py with the ast (_merge_constant), never copied. DRAFT_ROUTES itself names `gh pr ready --undo` for a
+# computer, so the cloud cases refuse the numbered command, which only the computer's own remedy builds.
+PPUSH_DRAFT_ROUTES = _merge_constant("DRAFT_ROUTES")
+PPUSH_PR_NUMBER = 12  # the number every make_fake_gh stand-in answers for its pull request (section 442)
+PPUSH_NUMBERED_UNDO = "gh pr ready --undo %d" % PPUSH_PR_NUMBER
+PPUSH_CLOUD_ENV = {"CLAUDE_CODE_REMOTE": "true"}   # is_cloud reads exactly "true"
+PPUSH_COMPUTER_ENV = {"CLAUDE_CODE_REMOTE": None}  # None unsets it: a computer session, the one the harness gives by default
+
+sh("ready-pr-push: a cloud session's refusal of a finished-green ready branch names the merge tool's draft route, not the numbered command",
+   VCS + " push origin feat-stale", "deny", PPUSH_RULE, cwd=RPR_NOSEL, env_path=_rpr_env(GHPUSH_GREEN), env=PPUSH_CLOUD_ENV,
+   carries=(PPUSH_DRAFT_ROUTES, "merge this head"), lacks=PPUSH_LACKS_GREEN + (PPUSH_NUMBERED_UNDO,))
+sh("ready-pr-push: a cloud session's refusal of a running ready branch names the merge tool's draft route, not the numbered command",
+   VCS + " push origin feat-stale", "deny", PPUSH_RULE, cwd=RPR_NOSEL, env_path=_rpr_env(GHPUSH_RUNNING), env=PPUSH_CLOUD_ENV,
+   carries=(PPUSH_DRAFT_ROUTES, ("wait",)), lacks=(PPUSH_NUMBERED_UNDO,))
+# CONTROL. A computer's refusal of the same finished-green branch names the numbered command and never the draft route. Green
+# on the old code too: the old text also named the numbered command and no draft route, so it holds the line beside the cloud cases.
+sh("ready-pr-push: a computer's refusal of a finished-green ready branch names gh pr ready --undo with the number, not the draft route",
+   VCS + " push origin feat-stale", "deny", PPUSH_RULE, cwd=RPR_NOSEL, env_path=_rpr_env(GHPUSH_GREEN), env=PPUSH_COMPUTER_ENV,
+   carries=(PPUSH_NUMBERED_UNDO,), lacks=(PPUSH_DRAFT_ROUTES,) + PPUSH_LACKS)
 
 
 # REFUSED. The branch of a ready pull request, named every way a session writes the push. Each is red on the old code.
@@ -178,7 +211,7 @@ ppush_refuse("pinned-string-unknown: a bare-named push to the ready branch feat-
              VCS + " push origin feat-stale", STAMPUNKNOWN, GHPUSH_RUNNING)
 # THE CONTROLS. A draft branch is never refused, whatever the pin. STAMPPROTECT pins the known string protection, the string
 # the unknown one falls back to, so the same two pushes keep their verdicts beside the unknown string. first-proof is no
-# control here: it waits on no check (merge.waits_on_no_check), so a push under it is never refused.
+# control here: CI is live under it, so a push to its ready branch is refused as under protection (the first-proof block below).
 ppush_allow("pinned-string-unknown: a push to the draft branch feat-stale under an unknown pin string is allowed",
             VCS + " push origin feat-stale", STAMPUNKNOWN, GHPUSH_DRAFT)
 ppush_refuse("pinned-string-unknown: a known pin protection refuses the same push to the ready branch, its run running",
@@ -356,3 +389,101 @@ PPUSH_NONE_READS_LABEL = ("ready-pr-push: a push to a ready branch in a repo pin
 LOG_FAMILY[PPUSH_ROLLUP_READS_LABEL] = FAMILY
 LOG_FAMILY[PPUSH_NONE_READS_LABEL] = FAMILY
 LOG_CHECKS = LOG_CHECKS + ((PPUSH_ROLLUP_READS_LABEL, ppush_rollup_reads_case), (PPUSH_NONE_READS_LABEL, ppush_none_reads_case))
+
+
+# FIRST-PROOF PINS. Under merge.requiredChecks "first-proof" CI is live on the base (merge/merge.py FIRST_PROOF; decision
+# merge-needs-current-base). The merge tool reads that pin as waiting on no check, but a push to a ready pull request's branch
+# still cancels the running CI run, so the refusal holds under the pin. guard_merge's runs_no_ci skips the read only for the
+# pin "none", so a first-proof ready branch is judged as one under protection. Each clone is made from RPR_ORIGIN on feat-stale, with one commit
+# that writes its config: the pin read from merge/merge.py by _merge_constant, and this repo's own config bytes.
+PPUSH_FP_VALUE = _merge_constant("FIRST_PROOF")
+PPUSH_FP_CONFIG = json.dumps({"defaultBranch": "main", "kinds": [], "merge": {
+    "method": "merge", "requiredChecks": PPUSH_FP_VALUE, "deadlineMinutes": 30, "deleteBranch": True}}) + "\n"
+RPP_FP = os.path.join(RPP, "clone-first-proof")    # feat-stale, its config pinning merge.requiredChecks FIRST_PROOF
+RPP_REAL = os.path.join(RPP, "clone-real-config")  # feat-stale, its config this repo's own merge config file, byte for byte
+PPUSH_REAL_CONFIG_FILE = os.path.join(REPO, ".github", "stamp.json")  # glossary-ok: this repo's own merge config file name, read for this repo
+
+
+def _ppush_real_config():
+    """This repo's own merge config: its text, and the merge.requiredChecks it pins ("protection" when it pins none)."""
+    with open(PPUSH_REAL_CONFIG_FILE, encoding="utf-8") as handle:
+        text = handle.read()
+    return text, json.loads(text).get("merge", {}).get("requiredChecks", "protection")
+
+
+PPUSH_REAL_TEXT, PPUSH_REAL_REQUIRED = _ppush_real_config()
+
+
+def _ppush_pinned_strings():
+    """The strings merge/merge.py pins besides "protection": its PINNED_STRINGS tuple, read with the ast as _merge_constant
+    reads one string. A tuple, because merge/merge.py names no constant for the no-CI pin "none"; _merge_constant reads a
+    single string and cannot take it. A member that is a name (FIRST_PROOF) is read through _merge_constant."""
+    with open(os.path.join(os.path.dirname(HERE), "merge", "merge.py"), encoding="utf-8") as handle:
+        tree = ast.parse(handle.read())
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and any(getattr(t, "id", None) == "PINNED_STRINGS" for t in node.targets):
+            return [elt.value if isinstance(elt, ast.Constant) else _merge_constant(elt.id) for elt in node.value.elts]
+    raise AssertionError("merge/merge.py has no PINNED_STRINGS")
+
+
+PPUSH_NO_CI_PINS = [pin for pin in _ppush_pinned_strings() if pin != _merge_constant("FIRST_PROOF")]
+_rpr_need(len(PPUSH_NO_CI_PINS) == 1, "merge/merge.py PINNED_STRINGS holds no single pin besides FIRST_PROOF: %r" % (PPUSH_NO_CI_PINS,))
+PPUSH_NO_CI = PPUSH_NO_CI_PINS[0]  # the no-CI pin: the string runs_no_ci reads as "no run to cancel"
+
+
+def _ppush_pinned_clone(folder, config_text, pinned):
+    """A clone of RPR_ORIGIN on feat-stale whose one commit writes `config_text`. Scope first: the head holds the pin."""
+    _rpr_git(RPR, "clone", "-q", RPR_ORIGIN, folder)
+    _rpr_git(folder, "checkout", "-q", "feat-stale")
+    write(os.path.join(folder, ".github", "stamp.json"), config_text)  # glossary-ok: the merge config file name the guard reads
+    _rpr_git(folder, "commit", "-q", "-a", "-m", "pin requiredChecks for the ready-push cases")
+    shown = json.loads(_rpr_git(folder, "show", "HEAD:.github/stamp.json"))  # glossary-ok: the merge config file name
+    _rpr_need(shown.get("merge", {}).get("requiredChecks", "protection") == pinned,
+              "the head of %s does not pin %r" % (folder, pinned))
+
+
+def _build_ready_push_pins():
+    materialize(RPR)  # the origin and its feat-stale, which both clones are made from
+    os.makedirs(RPP, exist_ok=True)
+    _ppush_pinned_clone(RPP_FP, PPUSH_FP_CONFIG, PPUSH_FP_VALUE)
+    _ppush_pinned_clone(RPP_REAL, PPUSH_REAL_TEXT, PPUSH_REAL_REQUIRED)
+
+
+lazy_fixture([RPP_FP, RPP_REAL], _build_ready_push_pins)
+
+# REFUSED under the pin, whatever the run's state. Each is red on the old code: the read is skipped under any pinned string.
+ppush_refuse("first-proof pinned: git push origin feat-stale, the ready branch, run running", VCS + " push origin feat-stale",
+             RPP_FP, GHPUSH_RUNNING)
+ppush_refuse("first-proof pinned: git push origin feat-stale, the ready branch, run green", VCS + " push origin feat-stale",
+             RPP_FP, GHPUSH_GREEN)
+ppush_refuse("first-proof pinned: a bare git push from the ready branch's checkout, run green", VCS + " push", RPP_FP, GHPUSH_GREEN)
+# This repo's own stamp, read here: the guard refuses a push to a ready branch under every pin but "none" (runs_no_ci), so the
+# case expects a refusal for any other value, and an allow for "none". A new value in .github/stamp.json reaches the right one.
+if PPUSH_REAL_REQUIRED == PPUSH_NO_CI:
+    ppush_allow("this repo's own stamp pins requiredChecks none, a push to its ready branch with the run green",
+                VCS + " push origin feat-stale", RPP_REAL, GHPUSH_GREEN)
+else:
+    ppush_refuse("this repo's own stamp pins requiredChecks %r, a push to its ready branch with the run green" % (PPUSH_REAL_REQUIRED,),
+                 VCS + " push origin feat-stale", RPP_REAL, GHPUSH_GREEN)
+# ALLOWED under the pin. Each passes on the old code too: a draft is not ready, and a red job is the one state a push may fix.
+ppush_allow("first-proof pinned: a bare git push on a branch whose pull request is a draft", VCS + " push", RPP_FP, GHPUSH_DRAFT)
+ppush_allow("first-proof pinned: a bare git push on a ready branch whose run has a red job", VCS + " push", RPP_FP, GHPUSH_RED)
+# ALLOWED under the pin, the pushes that must still pass: a branch with no pull request, and an archive name. Each passes on the
+# old code too; they are the controls beside the refusals above, under the same pin. The failed read is the case below.
+ppush_allow("first-proof pinned: a bare git push on a branch with no pull request (the one pull request is for feat-other)",
+            VCS + " push", RPP_FP, GHPUSH_OTHER)
+ppush_allow("first-proof pinned: git push origin HEAD:archive/feat-stale, an archive name, run green",
+            VCS + " push origin HEAD:archive/feat-stale", RPP_FP, GHPUSH_GREEN)
+
+
+def ppush_warn_fp_case():
+    """Under the first-proof pin, a pull-request list read that answers text is allowed, with one stderr line that names the read.
+    Why: the pin is not what the list read judges by, so a failed read is allowed under the pin as under protection."""
+    return _ppush_warning("first-proof pinned: a bare git push when the pull request read answers text that is not JSON",
+                          VCS + " push", RPP_FP, GHPUSH_BROKEN, "read-fp-broken.stderr")
+
+
+PPUSH_WARN_FP_LABEL = ("ready-pr-push: a failed pull-request read under the first-proof pin is allowed, with one stderr line "
+                       "naming the read")
+LOG_FAMILY[PPUSH_WARN_FP_LABEL] = FAMILY
+LOG_CHECKS = LOG_CHECKS + ((PPUSH_WARN_FP_LABEL, ppush_warn_fp_case),)
