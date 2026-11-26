@@ -2019,10 +2019,11 @@ class ClaudeMdFlag(Env):
         self.assert_flagged(rc, out, "CLAUDE.md")
 
     def unreadable(self, fail):
-        """Patch merge.sh so the PR-paths read fails: `fail(args)` returns (rc, text) or raises. -> the list of args it saw."""
+        """Patch merge.sh so the PR-paths read fails: `fail(args)` returns (rc, text) or raises. -> the list of args it saw.
+        Only the `--name-only` diff with a `...` range is the PR-paths read. The head-config read is `--name-status`, so it runs for real."""
         real_sh, seen = merge.sh, []
         def stub(args, cwd=None, input=None, env=None, stdout_only=False, **kw):  # kw: other sh calls of the run pass more keywords (boot_stamp passes timeout on macOS); the real sh takes them
-            if "diff" in args and any("..." in a for a in args):
+            if "diff" in args and "--name-only" in args and any("..." in a for a in args):
                 seen.append(args)
                 return fail(args)
             return real_sh(args, cwd=cwd, input=input, env=env, stdout_only=stdout_only, **kw)
@@ -8716,6 +8717,124 @@ class ConfigFile(Env):
         put_base_config(self, json.dumps(dict(CONFIG, defaultBranch="trunk")))  # the checkout says "main"
         rc, out = self.run_merge("7")
         self.assertIn("main is not the default branch (trunk)", out)
+
+UNKNOWN_REQUIRED_CHECKS = "second-proof"  # a requiredChecks value merge.PINNED_STRINGS does not hold: the running tool refuses a stamp that sets it
+
+class HeadConfigOnConfirm(Env):
+    """`merge <pr> --confirm` on a ready pull request, with a green rollup and no lane lint: the head's .github/stamp.json is judged with the running
+    tool's parser when the diff against the base touches it (merge.head_config_refusal), as the ready path judges it. A refused head stamp stops the
+    merge before anything is claimed or merged. A head that leaves the stamp alone merges as before."""
+
+    def lane_writes_config(self, text):
+        """The lane's head gains one commit that sets .github/stamp.json to `text`. -> the head."""
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin")
+        sh(o, "git", "checkout", "-q", "-B", "feat", "origin/feat")
+        put(os.path.join(o, ".github/stamp.json"), text)
+        sh(o, "git", "add", "-A")
+        sh(o, "git", "commit", "-qm", "lane: the stamp")
+        sh(o, "git", "push", "-q", "origin", "feat")
+        return self.head("feat")
+
+    def test_a_ready_pull_request_whose_head_config_the_running_tool_refuses_is_not_merged(self):
+        self.assertNotIn(UNKNOWN_REQUIRED_CHECKS, merge.PINNED_STRINGS, "premise: the running tool takes %r, so the head stamp is one it does not refuse" % UNKNOWN_REQUIRED_CHECKS)
+        head = self.lane_writes_config(json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], requiredChecks=UNKNOWN_REQUIRED_CHECKS))) + "\n")
+        sh(self.other, "git", "fetch", "-q", "origin")
+        names = sh(self.other, "git", "diff", "--name-only", "origin/main...%s" % head).split()
+        self.assertIn(".github/stamp.json", names, "precondition: the PR's diff against origin/main does not touch the stamp, so the case probes nothing")
+        self.assertFalse(self.host.draft, "precondition: the PR is a draft, so the confirm takes the draft step, not the ready path under test")
+        self.assertEqual(self.host.state, "green", "precondition: the PR's rollup is not green, so the refusal would not be the only thing that stops the merge")
+        self.assertEqual(self.host.posted, [], "precondition: a lane lint posted a comment, so the PR had a lint of its own")
+        rc, out, err = self.run_args("7", "--confirm")
+        self.assertNotEqual(rc, 0, "the confirm of a ready PR passed a head stamp the running tool refuses: " + out + err)
+        self.assertFalse(getattr(self.host, "merged", False), "the confirm merged a ready PR whose head stamp the running tool refuses: " + out + err)
+        self.assertIn("merge.requiredChecks is not valid: '%s'" % UNKNOWN_REQUIRED_CHECKS, out + err,
+                      "the refusal does not quote the parser's reason for the head stamp: " + out + err)
+
+    def test_a_ready_pull_request_that_leaves_the_config_alone_merges(self):  # the control: passes on the old code too
+        self.assertEqual(self.host.state, "green", "precondition: the PR's rollup is not green")
+        rc, out, err = self.run_args("7", "--confirm")
+        self.assertEqual(rc, 0, "a ready PR that leaves the stamp alone was refused: " + out + err)
+        self.assertTrue(getattr(self.host, "merged", False), "a ready PR that leaves the stamp alone did not merge: " + out + err)
+
+    def head_config_read_fails(self, fail, is_read=lambda args: "diff" in args and "--name-status" in args and merge.DEFAULT_CONFIG in args):
+        """Patch merge.sh so one head-config read fails. `is_read(args)` picks that git call; by default it is the `--name-status` diff whose path is
+        the stamp (merge.head_config_refusal). `fail(args)` returns (rc, text) or raises. -> the list of args it saw. Every other git call runs for real."""
+        real_sh, seen = merge.sh, []
+        def stub(args, cwd=None, input=None, env=None, stdout_only=False, **kw):  # kw: as in ClaudeMdFlag.unreadable
+            if is_read(args):
+                seen.append(args)
+                return fail(args)
+            return real_sh(args, cwd=cwd, input=input, env=env, stdout_only=stdout_only, **kw)
+        patch = unittest.mock.patch.object(merge, "sh", stub)
+        patch.start(); self.addCleanup(patch.stop)
+        return seen
+
+    def assert_unknown_and_nothing_claimed(self, rc, out, err, claims_before):
+        """The confirm refused the head as unknown: a non-zero exit, nothing merged, no claim pushed, the merge lock free."""
+        self.assertNotEqual(rc, 0, "a head stamp that could not be read was let through: " + out + err)
+        self.assertFalse(getattr(self.host, "merged", False), "the confirm merged a head stamp that could not be read: " + out + err)
+        self.assertEqual(self.claims(), claims_before, "the confirm claimed record numbers for a head stamp that could not be read: " + out + err)
+        self.assertFalse(self.lock_ref(), "the confirm left the merge lock held after refusing an unread head stamp: " + out + err)
+        self.assertIn("could not be read", out + err, "the refusal does not say the head stamp could not be read: " + out + err)
+        self.assertIn("unknown, not clear", out + err, "the refusal does not call the head stamp unknown: " + out + err)
+
+    def test_a_failed_head_config_read_refuses_as_unknown_and_claims_nothing(self):
+        self.lane_writes_config(json.dumps(CONFIG) + "\n")  # a stamp the running tool takes: only the read is broken
+        self.assertFalse(self.host.draft, "precondition: the PR is a draft, so the confirm takes the draft step, not the ready path under test")
+        self.assertEqual(self.host.state, "green", "precondition: the PR's rollup is not green, so the refusal would not be the only thing that stops the merge")
+        seen = self.head_config_read_fails(lambda args: (128, "fatal: bad revision"))
+        claims_before = self.claims()
+        rc, out, err = self.run_args("7", "--confirm")
+        self.assertTrue(seen, "the head-config read never ran, so the stub probed nothing: " + out + err)
+        self.assert_unknown_and_nothing_claimed(rc, out, err, claims_before)
+
+    def test_a_timed_out_head_config_read_refuses_as_unknown_and_no_timeout_escapes(self):
+        self.lane_writes_config(json.dumps(CONFIG) + "\n")  # a stamp the running tool takes: only the read is broken
+        self.assertFalse(self.host.draft, "precondition: the PR is a draft, so the confirm takes the draft step, not the ready path under test")
+        self.assertEqual(self.host.state, "green", "precondition: the PR's rollup is not green, so the refusal would not be the only thing that stops the merge")
+        def slow(args):
+            raise subprocess.TimeoutExpired(args, 1)
+        seen = self.head_config_read_fails(slow)
+        claims_before = self.claims()
+        try:
+            rc, out, err = self.run_args("7", "--confirm")
+        except subprocess.TimeoutExpired as e:  # a read that times out is an unknown refusal, never an exception out of the merge tool
+            self.fail("the head-config read's TimeoutExpired escaped the confirm instead of refusing as unknown: %s" % e)
+        self.assertTrue(seen, "the head-config read never ran, so the stub probed nothing: " + out + err)
+        self.assert_unknown_and_nothing_claimed(rc, out, err, claims_before)
+
+    def test_a_timed_out_head_config_show_refuses_as_unknown_and_claims_nothing(self):
+        head = self.lane_writes_config(json.dumps(CONFIG) + "\n")  # a stamp the running tool takes: only the head's `git show` of it is broken
+        self.assertFalse(self.host.draft, "precondition: the PR is a draft, so the confirm takes the draft step, not the ready path under test")
+        self.assertEqual(self.host.state, "green", "precondition: the PR's rollup is not green, so the refusal would not be the only thing that stops the merge")
+        def slow(args):
+            raise subprocess.TimeoutExpired(args, 1)
+        def head_config_show(args):  # the read head_config_refusal makes, not the same stamp read that load_config's head_none_stamp makes first
+            return f"{head}:{merge.DEFAULT_CONFIG}" in args and any(f.function == "head_config_refusal" for f in inspect.stack()[1:])
+        seen = self.head_config_read_fails(slow, is_read=head_config_show)
+        claims_before = self.claims()
+        try:
+            rc, out, err = self.run_args("7", "--confirm")
+        except subprocess.TimeoutExpired as e:  # a read that times out is an unknown refusal, never an exception out of the merge tool
+            self.fail("the head's `git show` of the stamp timed out, and its TimeoutExpired escaped the confirm instead of refusing as unknown: %s" % e)
+        self.assertTrue(seen, "the head's `git show` of the stamp never ran, so the stub probed nothing: " + out + err)
+        self.assert_unknown_and_nothing_claimed(rc, out, err, claims_before)
+
+    def test_a_timed_out_workflow_listing_at_the_head_refuses_as_unknown_and_claims_nothing(self):
+        head = self.lane_writes_config(json.dumps(CONFIG) + "\n")  # a stamp the running tool takes: only the workflow listing parse_config reads at the head is broken
+        self.assertFalse(self.host.draft, "precondition: the PR is a draft, so the confirm takes the draft step, not the ready path under test")
+        self.assertEqual(self.host.state, "green", "precondition: the PR's rollup is not green, so the refusal would not be the only thing that stops the merge")
+        def slow(args):
+            raise subprocess.TimeoutExpired(args, 1)
+        seen = self.head_config_read_fails(slow, is_read=lambda args: "ls-tree" in args and head in args and ".github/workflows" in args)
+        claims_before = self.claims()
+        try:
+            rc, out, err = self.run_args("7", "--confirm")
+        except subprocess.TimeoutExpired as e:  # a read that times out is an unknown refusal, never an exception out of the merge tool
+            self.fail("the workflow listing at the head timed out, and its TimeoutExpired escaped the confirm instead of refusing as unknown: %s" % e)
+        self.assertTrue(seen, "the workflow listing at the head never ran, so the stub probed nothing: " + out + err)
+        self.assert_unknown_and_nothing_claimed(rc, out, err, claims_before)
 
 class ReadyChecksRun(unittest.TestCase):
     """The draft step's ready checks run through ci-job with --pinned: a child's pin names a claude-settings commit, so the

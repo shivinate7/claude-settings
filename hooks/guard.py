@@ -265,6 +265,12 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        tool in shared_names.REMOTE_OUTWARD_TOOLS: starting, messaging, tagging or archiving sessions,
                        scheduled tasks, repos and computers. The session's own call, and the read tools, pass.
                        An override lifts it.
+  agent-no-mcp-tools   deny. A call by an agent (the payload carries a non-empty agent_id) to an MCP tool that the
+                       `permissions.allow` list of settings.json does not cover: an agent cannot answer the permission
+                       prompt the call would raise, so it would wait with no one to answer. A whole-server entry
+                       (`mcp__server`), a glob entry (`mcp__server__*`) or the tool's own entry covers it. The session's own
+                       call, a covered tool and a claude-code-remote tool (judged by agent-no-remote-tools) pass. An
+                       unreadable settings.json covers nothing. An override lifts it.
   sendmessage-session-id
                        deny. A SendMessage whose `to` is a string starting `session_`: that is no agent name, and the
                        hand-off could go missing. A missing or non-string `to`, an agent name, @parent and the
@@ -3315,6 +3321,34 @@ AGENT_NO_REMOTE_REASON = (
     "that. Finish your own work and put the request in your report so that session can act on it. "
     "(decision lanes-start-as-agents, an agent is not a lane)"
 )
+AGENT_NO_MCP_REASON = (
+    "An agent cannot answer a permission prompt, and the permission allow list does not cover this MCP tool, so the "
+    "call would wait with no one to answer it. An agent may call only the MCP tools on that allow list. Do the work "
+    "with the shell and file tools, and put what you needed in your report so the session that spawned you can act "
+    "on it. (decision agent-no-remote-tools, an agent calls no session or MCP tool the allow list leaves out)"
+)
+
+
+def mcp_allow_entries():
+    """The MCP entries of `permissions.allow` in settings.json: the install root's copy first, then the config folder's.
+    An unreadable file gives (), so nothing is covered and an agent's call is refused. Cost: one file read per agent MCP call."""
+    from shared_names import install_root
+    for folder in (install_root(_HERE), guard_core.config_dir()):
+        try:
+            with open(os.path.join(folder, "settings.json"), encoding="utf-8-sig") as handle:
+                entries = json.load(handle)["permissions"]["allow"]
+        except Exception:
+            continue
+        return tuple(item for item in entries if isinstance(item, str) and item.startswith("mcp__") and "(" not in item)
+    return ()
+
+
+def mcp_allow_covers(tool: str, entries) -> bool:
+    """True when an allow entry covers the MCP tool: the tool's own name, its server's name, or a glob that ends in `*`."""
+    return any(tool == item or tool.startswith(item + "__") or (item.endswith("*") and tool.startswith(item[:-1]))
+               for item in entries)
+
+
 from shared_names import opens_fence, LANE_TAG, LANE_TITLE_EXAMPLE_OPENING, LANE_TITLE_FORM, LANE_TITLE_OPENING, grant_line_holds_words  # noqa: E402  the one home of the lane tag, the lane title form and the Grant reader, shared with guard_merge
 LANE_EFFORT_REASON = (
     "A lane starts with the effort field set to `%s` and the whole brief as its prompt. The prompt's "
@@ -7944,6 +7978,13 @@ def judge(payload) -> None:
     # agent's create_session is refused here. An override lifts it.
     if payload.get("agent_id") and tool in REMOTE_OUTWARD_TOOLS:
         refuse(tool, "deny", "agent-no-remote-tools", AGENT_NO_REMOTE_REASON, tool)
+
+    # 8c. agent-no-mcp-tools. An agent's call to an MCP tool that the allow list does not cover would raise a permission
+    # prompt that no one answers. The claude-code-remote server is judged by 8b, which refuses its outward tools first;
+    # its read tools pass here, as they did before this rule. An override lifts it.
+    if (payload.get("agent_id") and tool.startswith("mcp__") and not tool.startswith(REMOTE_SERVER + "__")
+            and not mcp_allow_covers(tool, mcp_allow_entries())):
+        refuse(tool, "deny", "agent-no-mcp-tools", AGENT_NO_MCP_REASON, tool)
 
     # 9. The agent model floor. A spawn that names a Haiku model is refused. The reason names no
     # model; the log holds what the call asked for. A lane start's floor is judged with the lane-start rules (8a).
