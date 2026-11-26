@@ -1459,8 +1459,18 @@ def _fg_tokens_hit(tokens, depth: int) -> str:
     return next((hit for seg in split_segments(script) if (hit := fg_long_segment(seg, depth + 1))), "") if script else ""
 
 
+def _fg_runs_merge_tool(segment: str) -> bool:
+    """True when the segment runs the merge tool, by guard_merge's one reader (a git merge, or merge text in a
+    string or heredoc, is not one). The merge tool bounds its own calls, so this rule leaves them alone."""
+    import guard_merge  # Lazy: only a call that can run long pays to load the merge tool reader.
+    return guard_merge.merge_tool_args(segment) is not None
+
+
 def fg_long_segment(segment: str, depth: int = 0) -> str:
-    """The matched text when one segment can run long, else ''."""
+    """The matched text when one segment can run long, else ''. A segment that runs the merge tool is exempt;
+    the other segments of the same call are still judged."""
+    if _fg_runs_merge_tool(segment):
+        return ""
     tokens = segment_tokens(segment)
     return _fg_tokens_hit(tokens, depth) if tokens else ""
 
