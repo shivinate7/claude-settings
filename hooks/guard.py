@@ -508,12 +508,7 @@ Other tools, in `judge` order:
                        `cs-build:` tag; the coordinator, triage and the batch runner are never braked on their own
                        calls. The transcript is read only at full. A cloud session skips it. An override lifts it.
                        (machine-load-brake)
-  workflow-args-shape-check
-                       deny. A Workflow call whose `args` is, or holds as an array item or object value (one
-                       level down), a placeholder: the whole value is an all-caps word with an underscore
-                       (`FACT_CLOSE_PLACEHOLDER`, `PR_NUMBER`) or a `__X__` word. A sentence that holds one, a
-                       short all-caps word, no args and empty args pass. A bare env var name as the whole value
-                       is refused too; an override lifts it for a real one. (workflow-args-shape-check)
+  workflow-args-shape-check  deny. Text: hooks/guard_workflow_args.py
   brief-checks-answered-claims-match-page
                        deny. A claude-code-remote send_message or create_session, or a SendMessage, whose text
                        (`message`, or `prompt` for create_session) has a sentence that holds an item reference (`item <n>`,
@@ -523,16 +518,7 @@ Other tools, in `judge` order:
                        it: no answers file and no lastAnswer. A sentence ending in `?`, text in a fence or inline code,
                        and a claim by an id slug alone pass. A number not in the store, an absent ref or registry, a git
                        error or a timeout passes with one stderr line. An override lifts it. (answered-claims-match-page)
-  ci-wait-cap
-                       deny. A claude-code-remote send_later whose message says it waits on CI (the whole word CI,
-                       checks, pipeline, check run, PR run(s), workflow run(s) or GitHub Actions, in any case,
-                       anywhere in the message) and whose wait is more than cap_minutes() in hooks/ci_wait_cap.py:
-                       delay_minutes (a number or a string of digits) over it, or an `at` (ISO-8601; with no offset it
-                       reads in the clock's offset) more than that many minutes after the clock (local_time.clock).
-                       The limit is inclusive. A call with no CI word, or with no delay or `at`, passes. An agent's
-                       call is refused first (agent-no-remote-tools). The reason names send_later, delay_minutes and
-                       the cap. A missing cap file crashes the rule, which fails open and logs. An override lifts it.
-                       (ci-wait-cap-guard)
+  ci-wait-cap          deny. Text: hooks/guard_ci_wait.py
   merge-checks, draft-pr, impeccable-review-only
                        deny. The MCP merge, pull request and Skill forms of the rules above.
   simulator-boot-bypass
@@ -908,9 +894,24 @@ while True:
         _loading = "guard_simulator"
         import guard_simulator  # noqa: F401  empty until its family moves
         _loading = "guard_workflow_args"
-        import guard_workflow_args  # noqa: F401  empty until its family moves
+        import guard_workflow_args  # noqa: F401  its names come in by the from-import below
+        from guard_workflow_args import (
+            WORKFLOW_ARGS_CAPS,  # noqa: F401  re-export: guard.<name> and its cites keep binding
+            WORKFLOW_ARGS_DUNDER,  # noqa: F401  re-export: guard.<name> and its cites keep binding
+            WORKFLOW_ARGS_REASON,
+            workflow_args_placeholder,  # noqa: F401  re-export: guard.<name> and its cites keep binding
+            workflow_args_hit,
+        )
         _loading = "guard_ci_wait"
-        import guard_ci_wait  # noqa: F401  empty until its family moves
+        import guard_ci_wait  # noqa: F401  its names come in by the from-import below
+        from guard_ci_wait import (
+            CI_WAIT_TOOL,  # noqa: F401  re-export: guard.<name> and its cites keep binding
+            CI_WAIT_WORDS,  # noqa: F401  re-export: guard.<name> and its cites keep binding
+            CI_WAIT_DIGITS,  # noqa: F401  re-export: guard.<name> and its cites keep binding
+            CI_WAIT_REASON,  # noqa: F401  re-export: guard.<name> and its cites keep binding
+            ci_wait_minutes,  # noqa: F401  re-export: guard.<name> and its cites keep binding
+            ci_wait_hit,
+        )
         # Flat modules the guard reads on every call. A failed import takes this same wait-then-refuse
         # path (decision install-hooks-whole), never a fallback that judges with the read missing.
         # guard_kill imports proc_env above, so its failure surfaces under guard_kill's name.
@@ -7868,40 +7869,6 @@ def never_lifted(payload, tool: str, tool_input: dict, cwd: str) -> bool:
     return False
 
 
-# A Workflow call whose args hold a placeholder (rule workflow-args-shape-check). Mistake: a call that ran with a placeholder
-# such as "FACT_CLOSE_PLACEHOLDER" or "__FILL__" as args gave agents nothing to check. The whole value must be the
-# placeholder, so a sentence that names one passes. A bare env var name as a whole value ("MAILBOX_REPO") reads as a
-# placeholder and is refused: that is a false alarm only when the owner means a real value, and the owner's override
-# covers it (decision guard-guards-mistakes-only). The args are structured values, so no quote or comment case applies.
-WORKFLOW_ARGS_CAPS = re.compile(r"[A-Z0-9_]*[A-Z][A-Z0-9_]*")
-WORKFLOW_ARGS_DUNDER = re.compile(r"__\w+__")
-WORKFLOW_ARGS_REASON = ("The Workflow call's args hold the placeholder `%s`, so its agents would check nothing. "
-                        "Replace it with the real value, then start the Workflow again. "
-                        "(decision workflow-args-shape-check, a Workflow call never runs on placeholder args)")
-
-
-def workflow_args_placeholder(value) -> bool:
-    """True when `value` is a string that is, whole, an all-caps word with an underscore or a __X__ word."""
-    if not isinstance(value, str):
-        return False
-    text = value.strip()
-    return bool(text and ((WORKFLOW_ARGS_CAPS.fullmatch(text) and "_" in text) or WORKFLOW_ARGS_DUNDER.fullmatch(text)))
-
-
-def workflow_args_hit(tool: str, tool_input: dict) -> str:
-    """The first placeholder in a Workflow call's args, or "". Reads args, and each array item or object value."""
-    if tool != "Workflow":
-        return ""
-    args = tool_input.get("args")
-    if isinstance(args, list):
-        values = args
-    elif isinstance(args, dict):
-        values = list(args.values())
-    else:
-        values = [args]
-    return next((v.strip() for v in values if workflow_args_placeholder(v)), "")
-
-
 # Set by rule compaction-audit when an Audit: spawn passes it. main() reads it after judge() returns.
 AUDIT_SPAWN_PASSED: list = []
 
@@ -7915,63 +7882,6 @@ def audit_flag_clear_after_allow(payload) -> None:
             audit_clear(payload)
     except Exception:
         pass
-
-
-# A send_later check-in that waits on CI for longer than the cap (rule ci-wait-cap; decision ci-wait-cap-guard).
-# Mistake: a session sets a CI check-in that wakes after the 1-hour prompt cache ends. Harm: the wake pays a full
-# context rewrite. The cap is cap_minutes() in hooks/ci_wait_cap.py, read on each call and never copied here. The message
-# is plain text, so comment openers and lone quotes in it carry no meaning to the scan. A missing cap file raises, and
-# main() logs the crash and lets the call through: a lost source is never turned into a made-up limit.
-CI_WAIT_TOOL = REMOTE_SERVER + "__send_later"
-CI_WAIT_WORDS = re.compile(
-    r"(?<!\w)(?:ci|checks|pr\s+runs?|workflow\s+runs?|check\s+runs?|pipelines?|github\s+actions)(?!\w)", re.IGNORECASE)
-CI_WAIT_DIGITS = re.compile(r"\d+(?:\.\d+)?")
-CI_WAIT_REASON = ("A check-in that waits on CI may wait at most %d minutes, because under the 1-hour prompt cache a later "
-                  "wake pays a full context rewrite. Set send_later with delay_minutes of %d or less, or an `at` no more "
-                  "than %d minutes ahead, then set the next check-in when this one wakes. "
-                  "(decision ci-wait-cap-guard, a CI check-in stays inside the prompt cache)")
-
-
-def ci_wait_minutes(tool_input: dict):
-    """The wait a send_later call asks for, in minutes: the larger of delay_minutes and the `at` time's distance from
-    the clock. delay_minutes is a number or a string of digits. An `at` with no offset reads in the clock's own offset.
-    None when neither reads: no field, or a value that is not a number or an ISO-8601 time."""
-    waits = []
-    delay = tool_input.get("delay_minutes")
-    if isinstance(delay, str) and CI_WAIT_DIGITS.fullmatch(delay.strip()):
-        waits.append(float(delay))
-    elif isinstance(delay, (int, float)) and not isinstance(delay, bool):
-        waits.append(delay)
-    at = tool_input.get("at")
-    if isinstance(at, str):
-        import local_time  # the one home of the clock, which LOCAL_TIME_NOW replaces in tests
-        from datetime import datetime
-        text = at.strip()
-        try:
-            when = datetime.fromisoformat(text[:-1] + "+00:00" if text[-1:] in ("Z", "z") else text)
-        except ValueError:
-            when = None
-        if when is not None:
-            now = local_time.clock()
-            if when.tzinfo is None:
-                when = when.replace(tzinfo=now.tzinfo)
-            waits.append((when - now).total_seconds() / 60)
-    return max(waits) if waits else None
-
-
-def ci_wait_hit(tool: str, tool_input: dict) -> str:
-    """The refusal reason when this send_later waits on CI past the cap, else "". Reads the whole message."""
-    if tool != CI_WAIT_TOOL:
-        return ""
-    message = tool_input.get("message")
-    if not isinstance(message, str) or not CI_WAIT_WORDS.search(message):
-        return ""
-    wait = ci_wait_minutes(tool_input)
-    if wait is None:
-        return ""
-    import ci_wait_cap  # the one home of the cap
-    cap = ci_wait_cap.cap_minutes()
-    return CI_WAIT_REASON % (cap, cap, cap) if wait > cap else ""
 
 
 # The cite of the answered-claim refusal. The reason itself is built by answered_claim_hit (hooks/answered_claims.py).
