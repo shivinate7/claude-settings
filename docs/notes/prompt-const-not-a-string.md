@@ -1,0 +1,1 @@
+- prompt-const-not-a-string: a prompt constant refactored from a string into a call with no string literal makes the lint read nothing for it, and the lint still passes. Decision: `prompt-rule-ids-have-anchors` (prompt rule ids need an anchor). Seen: 2026-11-25 x1

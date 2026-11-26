@@ -119,13 +119,13 @@ SPAWN_PROMPT = (
     "(not only to find files, names or text) and the call's model field is neither sonnet nor opus "
     "(haiku, or no model field, blocks; text in the brief does not count); the fix is model sonnet or "
     "opus with effort high, and the `" + EXPLORE_AUDIT_MARKER + "` marker on the brief's first non-blank line "
-    "so the guard rule agent-role-model passes too (agent-model-cap, audit Explore row). The marker is part of "
+    "so the guard rule agent-role-model passes too (rule agent-model-cap, audit Explore row). The marker is part of "
     "the fix only, never a reason to block or to allow. Otherwise answer {\"ok\": true} for "
-    "Explore. Only for builder, reviewer, and test-author briefs, apply roles-brief-contents (the brief "
+    "Explore. Only for builder, reviewer, and test-author briefs, apply rule roles-brief-contents (the brief "
     "carries the task, the files, governing rulings, and the check that proves done) and "
-    "tokens-point-brief-at-files (the brief names files and never pastes their contents). Flag a brief that "
+    "rule tokens-point-brief-at-files (the brief names files and never pastes their contents). Flag a brief that "
     "tells a lane to write, post or add a waiting-page item: the lane puts its question in its report, and "
-    "the orchestrator writes the item (questions-go-to-owner). A brief that forbids the lane to write a waiting-page item is fine; never flag it. Block only on "
+    "the orchestrator writes the item (rule questions-go-to-owner). A brief that forbids the lane to write a waiting-page item is fine; never flag it. Block only on "  # glossary-ok: "waiting-page item" is the name the question-form records use for the thing the judge reads
     "a clear breach; when unsure answer {\"ok\": true}. Reply JSON only: {\"ok\": true} or "
     "{\"ok\": false, \"reason\": \"<rule id and the fix, one line>\"}."
 )
