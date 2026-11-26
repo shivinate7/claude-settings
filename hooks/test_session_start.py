@@ -123,15 +123,14 @@ class SessionStartAgentWorktreeNoticeTests(unittest.TestCase):
         os.makedirs(self.primary)
         vcs(self.primary, "init", "-q", "-b", "main", ".")
         # Ignores the worktree folder, so the dirty count in the hook's first line never moves.
-        with open(os.path.join(self.primary, ".gitignore"), "w", encoding="utf-8") as handle:
-            handle.write(".claude/\n")
-        with open(os.path.join(self.primary, "f.txt"), "w", encoding="utf-8") as handle:
-            handle.write("base\n")
+        self.put(os.path.join(self.primary, ".gitignore"), ".claude/\n")
+        self.put(os.path.join(self.primary, "f.txt"), "base\n")
         vcs(self.primary, "add", "-A")
         vcs(self.primary, "commit", "-q", "-m", "first")
         self.made = 0
 
-    def put(self, path, text, newline=None):
+    def put(self, path, text, newline="\n"):
+        # LF on every platform. Text mode writes CRLF on Windows, and a CRLF file reads dirty or clean by the reader's core.autocrlf.
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "w", encoding="utf-8", newline=newline) as handle:
             handle.write(text)
