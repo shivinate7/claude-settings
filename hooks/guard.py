@@ -739,7 +739,6 @@ while True:
             segment_tokens, split_segments, strip_heredoc_bodies,
             _git_subcommand_index, amp_pieces, dir_before_segment, dirs_before_segments, shell_abs, walk_quotes, segment_with_vars as _segment_with_vars,
             _checkout_root_by_stat, layout_module as _layout_module,
-            _REDIRECT_OPERATOR, ssh_remote_script, strip_redirections,
         )
         _loading = "guard_branch_worktree"
         from guard_branch_worktree import (
