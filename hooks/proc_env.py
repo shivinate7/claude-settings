@@ -13,8 +13,9 @@ shell) and reads unmarked; its exec'd children read marked. Measured on Linux. T
 CLAUDE_AGENT_ID is unmeasured. Read on macOS and on Linux; lint/test_wait_pid.py reads the session
 tag live on Linux.
 
-Stdlib only, no child process. Every failure (EPERM, EINVAL, a dead pid, a bad id) answers False
-from holds_session_tag and None from entry_value.
+Stdlib only, no child process. Every failure (EPERM, EINVAL, a dead pid, a bad id) answers None from
+entry_value. holds_session_tag answers False for a bad id, another platform and a failed Linux read,
+and None (unreadable, not "absent") when the macOS read fails or shows no environment.
 """
 import sys
 
@@ -31,7 +32,7 @@ def _environ_entries_macos(pid: int):
     read as env. ponytail: an EMPTY argv[0] is eaten by the padding skip, which shifts the env
     by one entry, so a read can miss the tag (foreign) and never invent one.
     """
-    import ctypes  # here, not at the top: a Python without _ctypes still loads this file, and the read answers False
+    import ctypes  # here, not at the top: a Python without _ctypes still loads this file, and the read answers unreadable
     libc = ctypes.CDLL(None, use_errno=True)
     libc.sysctl.argtypes = [ctypes.POINTER(ctypes.c_int), ctypes.c_uint, ctypes.c_void_p,
                             ctypes.POINTER(ctypes.c_size_t), ctypes.c_void_p, ctypes.c_size_t]
@@ -94,17 +95,24 @@ def entry_value(pid: int, name: str):
         return None
 
 
-def holds_session_tag(pid: int, session_id) -> bool:
-    """True when `pid`'s exec-time environment holds exactly `CLAUDE_CODE_SESSION_ID=<session_id>`.
+def holds_session_tag(pid: int, session_id):
+    """True when `pid`'s exec-time environment holds exactly `CLAUDE_CODE_SESSION_ID=<session_id>`,
+    False when the environment was read and does not, None when it could not be read.
 
     A whole entry, never a substring: a suffix, a prefix, another variable's value and argv do not
-    match. An empty or malformed `session_id`, Windows and any other platform answer False.
+    match. Unreadable (None) is macOS only: sysctl failed, or the reply holds argv and no environment
+    (the OS hides the environment of an Apple-signed system program such as sleep, sh or env from
+    other processes). A caller never treats None as "not this session's". An empty or malformed
+    `session_id`, a bad pid, Windows, any other platform and a failed Linux read answer False.
     """
     if not isinstance(session_id, str) or not session_id or "\0" in session_id or not _usable_pid(pid):
         return False
+    mac = sys.platform == "darwin"
     try:
         entries = _entries(pid)
+        if mac and (entries is None or not any(entries)):
+            return None
         want = (TAG_NAME + "=" + session_id).encode()
         return entries is not None and any(entry == want for entry in entries)
     except Exception:
-        return False
+        return None if mac else False

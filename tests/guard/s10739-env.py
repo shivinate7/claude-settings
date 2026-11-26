@@ -491,7 +491,7 @@ sh("env-child: allow, uv --exact takes no value, so pytest runs with the filter 
    "uv run --env-file " + ENV + " --exact pytest -k env", "allow", cwd=NOGIT)
 sh("env-child: deny, uv --exact takes no value, so env is the child, the control for --exact",
    "uv run --env-file " + ENV + " --exact env", "deny", "env-file", cwd=NOGIT)
-sh("env-child: allow, uv --all-groups takes no value, so pytest runs with the filter env",
+sh("env-child: allow, uv --all-groups takes no value, so pytest runs with the filter env, with a bare env argument",
    "uv run --env-file " + ENV + " --all-groups pytest env", "allow", cwd=NOGIT)
 sh("env-child: deny, uv --all-groups takes no value, so env is the child, the control for it",
    "uv run --env-file " + ENV + " --all-groups env", "deny", "env-file", cwd=NOGIT)
@@ -1084,7 +1084,7 @@ for held in (
     "echo " + "$(" * 1200 + "cat " + ENV + ")" * 1200,
     "echo " + "$(" * 70 + "date" + ")" * 70,
 ):
-    sh("env: normalized, glob, heredoc or depth, " + held[:36].replace("\n", " "), held, "deny",
+    sh("env: normalized, glob, heredoc or depth, " + held[:36].replace("\n", " ") + ", %d characters" % len(held), held, "deny",
        "env-file", cwd=NOGIT)
 for text in (
     "ls " + ENV + "*", "ls .e?v", "test -f .e[n]v", "echo $(date) > log",

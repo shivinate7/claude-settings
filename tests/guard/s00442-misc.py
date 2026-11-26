@@ -371,8 +371,9 @@ PUSHSTACK = os.path.join(ROOT, "pushstack")    # lane/fix cut from origin/lane/b
 # PUSHOWNREF is `lane-x`, tracking origin/batch-1, and origin/lane-x exists too. The stray rule
 # reads that ref as a destination already on the remote, so an implied push to its own name is silent there.
 PUSHOWNREF = os.path.join(ROOT, "pushownref")
-# Rule push-main reads the remote a push names (ruling 207 a, judged on its URL). Every push fixture's origin is
-# PUSHREMOTE, a network URL the guard never contacts, so the existing push-main asks keep their meaning.
+# Rule force-push reads the remote a push names to refuse a non-forced push of the default branch (ruling 207 a, judged
+# on its URL). Every push fixture's origin is PUSHREMOTE, a network URL the guard never contacts, so those refusals keep
+# their meaning.
 # PUSHLOCAL has a local origin (a bare path), PUSHSSH an scp-form origin, and PUSHNOREMOTE no remote at all.
 # PUSHLOCALSTRAY has the same local origin, and its branch `feat` tracks origin/other, so an implied destination
 # on it is a stray push. PUSHLOCAL's `feat` has no upstream.
@@ -420,7 +421,7 @@ PUSHALLAGENTAHEAD = os.path.join(ROOT, "pushallagentahead")    # plus agent-<hex
 PUSHALLBROKEN = os.path.join(ROOT, "pushallbroken")            # PUSHALLAGENT, whose listing of refs/heads/ fails
 # The rule ids the push asks name. Each is the one home for its id in this file.
 PUSH_STRAY_RULE = "push-stray-branch"   # ruling 206 a: a push with an implied destination off its upstream
-PUSH_MAIN_RULE = "push-main"            # ruling 207 a: a non-forced push whose destination is main or master
+PUSH_MAIN_RULE = "force-push"           # ruling 207 a: a non-forced push whose destination is main or master (refused under force-push)
 PUSH_AGENT_RULE = "push-agent-branch"   # a non-forced push whose destination is an agent-worktree branch name
 # The remedy a push-agent-branch refusal prints: the lane's own branch, by name. It never names the agent's
 # branch (rule git-remedy-never-names-target). A deny has no approval prompt, so its reason never offers one.

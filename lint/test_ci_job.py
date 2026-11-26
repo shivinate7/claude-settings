@@ -36,7 +36,8 @@ RerunCache: a rerun at the same key runs no passing step and prints PASS (cached
   variable, a changed tool file that ci-job runs, an edited action file a remote uses: step runs from the install or the pointer
   checkout, a changed tree a step before it wrote into, an amend with the same tree, a moved base, and a saved pass seven days old
   from its save (a hit does not refresh it) each miss too. The same commit in another worktree hits, a volatile variable does not
-  change the key, and past 300 saved passes the oldest are pruned.
+  change the key. Past 300 fresh saves every one still hits: only the seven-day age removes a save, and an 8-day-old save goes on
+  the next save (the Cost line names that bound, and its size).
 ScopeLint: --lint with a base reads each needs.scope.outputs flag from the repo's .github/scripts/ci-scope.sh, the script CI's scope
   job runs, on the diff to the base. A step gated on a false flag is skipped. A flag the script does not give, or a script that
   fails, leaves its step to run, and the log says UNKNOWN scope.
@@ -46,6 +47,10 @@ LintListedSuites: merge.lintSuites in .github/stamp.json names checks.yml steps.
   when its flag is on for the change, --lint runs a picked or touched python suite and FAILs on its failure; any other such suite
   prints one `not run` line that names it and says it runs in CI (also in another job), and only a change to its own file or to the
   file it tests reads unknown. A flag that is off keeps its old read.
+LintPythonPin: --lint runs a lint step's python3 under the Python version the job pins (its actions/setup-python python-version). With
+  python<major>.<minor> of the pin on PATH, that interpreter runs the step. With none, and the local python3 at another version, one line
+  names both versions and says interpreter, once per run; the verdict and exit code keep their values. --plan prints that line too.
+  The interpreters are fake stubs (FAKE_INTERPRETER), never this machine's own Pythons.
 Run: python3 lint/test_ci_job.py
 """
 import functools
@@ -54,6 +59,7 @@ import importlib.util
 import json
 import os
 import re
+import shlex
 import shutil
 import signal
 import subprocess
@@ -151,8 +157,9 @@ class Job(unittest.TestCase):
         lines = [ln for ln in done.stdout.splitlines() if not ln.startswith("log=")]
         return done.returncode, lines, done.stdout + done.stderr
 
-    def stub_path(self, **tools):
-        """PATH with each named tool first, as a shell script that runs its body."""
+    def stub_path(self, after=None, **tools):
+        """PATH with each named tool first, as a shell script that runs its body. after: the folder list that follows the stubs in
+        place of this process's PATH, for a case that must see no other tool of that name."""
         bin_dir = os.path.join(self.root, "stubs")
         os.makedirs(bin_dir, exist_ok=True)
         for name, body in tools.items():
@@ -160,7 +167,8 @@ class Job(unittest.TestCase):
             with open(path, "w", encoding="utf-8", newline="\n") as f:
                 f.write("#!/bin/sh\n" + body + "\n")
             os.chmod(path, 0o755)
-        return {"PATH": os.pathsep.join([bin_dir, os.environ.get("PATH", "")])}
+        rest = os.environ.get("PATH", "") if after is None else after
+        return {"PATH": os.pathsep.join([bin_dir, rest])}
 
     VERDICT_EXITS_1 = "import sys\nsys.exit(1)\n"  # a verdict that prints nothing and exits 1
     VERDICT_EXITS_0 = "import sys\nsys.exit(0)\n"  # a verdict that prints nothing and exits 0
@@ -3860,7 +3868,7 @@ class RerunCache(unittest.TestCase):
     the message misses, and a new lane lint merge of one pushed head hits. It holds the base commit, so a moved base misses. It
     does not hold the checkout's path, so the same commit in another worktree hits. A volatile variable never changes the key.
     An action file that a remote uses: step runs from the install or the pointer checkout, so an edit to that file misses.
-    Past 300 saved passes, the oldest are pruned.
+    The store has no count cap: past 300 fresh saves each still hits, and only the seven-day age removes a save.
     Each case runs bin/ci-job, or a copied install of it, in a fresh repo under RUN_FOLDER."""
 
     install = CodeCheckFromCopiedInstall.install  # the copied install: this class calls it, it does not copy it
@@ -4292,25 +4300,72 @@ class RerunCache(unittest.TestCase):
                          "so a step's head.sha reads a pass saved for a different head\n%s" % out)
         self.assertEqual(rc, 0, out)
 
-    def test_past_three_hundred_saved_passes_the_oldest_are_pruned(self):
+    def test_three_hundred_one_fresh_saves_keep_every_pass_and_each_still_hits(self):
+        self.fixture()
+        cache = os.path.join(self.home, "cache", "claude-settings", "ci-job-pass")
+        steps = (rerun_step("check-a"), rerun_step("check-b"), rerun_step("check-c"))
+        before = self.files()
+        _, _, first, out = self.lane_run(*steps)
+        self.assertEqual(sorted(first), ["check-a", "check-b", "check-c"], "scope: the first run should run every step, got %r\n%s" % (first, out))
+        real = [self.saved_entry(name, before) for name in ("check-a", "check-b", "check-c")]
+        now = time.time()  # the planted ages are offsets from this, so no verdict reads the date
+        for path in real:  # older than every planted save below, so a count cap would prune these first; well inside seven days
+            os.utime(path, (now - 400 * 60, now - 400 * 60))
+        for k in range(1, 302):  # 301 fresh saves that no step keys on: plant k is k minutes old
+            self.plant_pass(cache, "%064x" % k, now - 60 * k)
+        self.assertEqual(len(os.listdir(cache)), 304, "scope: the planted store does not hold 301 fresh saves beside the three real passes")
+        _, _, ran, out = self.lane_run(rerun_step("check-new", script="check_a"), *steps)
+        self.assertIn("check-new", ran, "scope: check-new did not run, so no save ran and nothing could be pruned\n%s" % out)
+        for name in ("check-a", "check-b", "check-c"):
+            self.assertNotIn(name, ran, "%s ran again after 301 fresh saves: the store pruned its fresh pass by count, not by age\n%s" % (name, out))
+        left = len(os.listdir(cache))
+        self.assertEqual(left, 305, "a save past 300 fresh passes pruned %d of them: the store has no count cap" % (305 - left))
+
+    def test_a_save_removes_a_pass_older_than_seven_days_and_keeps_a_fresh_one(self):  # control: the age cap is kept, with a small store
         self.fixture()
         cache = os.path.join(self.home, "cache", "claude-settings", "ci-job-pass")
         os.makedirs(cache)
         now = time.time()  # the planted ages are offsets from this, so no verdict reads the date
-        planted = {"%064x" % k for k in range(1, 306)}  # plant k is k minutes old: plant 1 is the newest
-        for k in range(1, 306):
-            self.plant_pass(cache, "%064x" % k, now - 60 * k)
-        old = "%064x" % 0xABCDEF
+        old, fresh = "%064x" % 0xABCDEF, "%064x" % 0x123456
         self.plant_pass(cache, old, now - 8 * self.DAY)
-        self.assertEqual(len(os.listdir(cache)), 306, "scope: the planted store holds 306 files")
+        self.plant_pass(cache, fresh, now - 6 * self.DAY)
+        self.assertEqual(len(os.listdir(cache)), 2, "scope: the planted store does not hold the two planted passes")
         _, _, ran, out = self.lane_run(rerun_step("check-a"))
         self.assertEqual(ran, ["check-a"], "scope: check-a did not run, so no pass was saved\n%s" % out)
         left = set(os.listdir(cache))
-        self.assertEqual(len(left - planted - {old}), 1, "scope: the save kept no new pass of its own")
-        self.assertEqual(len(left), 300, "a save past 300 saved passes left %d files, not 300" % len(left))
-        self.assertEqual(left & planted, {"%064x" % k for k in range(1, 300)},
-                         "the save did not keep the 299 newest planted passes and prune the oldest")
+        self.assertEqual(len(left - {old, fresh}), 1, "scope: the save kept no new pass of its own")
         self.assertNotIn(old, left, "a pass 8 days old survived a save: the store does not age out past passes")
+        self.assertIn(fresh, left, "a pass 6 days old was removed by a save: the age cap is seven days, not less")
+
+    def cost_line(self):
+        """The Cost line of the rerun cache's comment block in bin/ci-job: from `Cost:` to the block's end, as one line."""
+        with open(CI_JOB, encoding="utf-8") as f:
+            lines = f.read().splitlines()
+        start = next((i for i, ln in enumerate(lines) if ln.startswith("# Rerun cache:")), None)
+        self.assertIsNotNone(start, "scope: bin/ci-job has no `# Rerun cache:` comment block")
+        block = []
+        for ln in lines[start:]:
+            if not ln.startswith("#"):
+                break
+            block.append(ln[1:].strip())
+        text = " ".join(block)
+        self.assertIn("Cost:", text, "scope: the rerun cache's comment block has no Cost line")
+        return text[text.index("Cost:"):]
+
+    def test_the_cost_line_names_the_seven_day_age_and_no_count_cap(self):
+        cost = self.cost_line()
+        self.assertIn("7 days", cost, "the Cost line does not name the seven-day age cap:\n%s" % cost)
+        self.assertNotRegex(cost, r"\b\d+ files?\b", "the Cost line still names a count cap of files, which the store no longer has:\n%s" % cost)
+
+    def test_the_cost_line_names_a_file_size_that_a_real_saved_pass_fits_in(self):
+        match = re.search(r"(\d+) bytes", self.cost_line())
+        self.assertIsNotNone(match, "the Cost line names no file size in bytes: it should state the measured size of a saved pass")
+        self.fixture()
+        before = self.files()
+        _, _, first, out = self.lane_run(rerun_step("check-a"))
+        self.assertEqual(first, ["check-a"], "scope: check-a did not run, so no pass was saved\n%s" % out)
+        size = os.path.getsize(self.saved_entry("check-a", before))
+        self.assertLessEqual(size, int(match.group(1)), "a saved pass is %d bytes, more than the Cost line's %s bytes" % (size, match.group(1)))
 
     def plant_pass(self, folder, name, when):
         """A saved pass planted under `name`, its mtime set to `when`: a file the store reads only by its age."""
@@ -4591,10 +4646,17 @@ class SuiteCarry(unittest.TestCase):
                               "if: reads for that file, but the carry reads the delta with SCOPE_FILES, which skips the landed-dir rule\n%s"
                               % (rel, out))
 
-    def test_a_modified_md_under_a_landed_dir_still_carries_a_guard_step_whose_flag_is_off(self):  # control: green on the old code
+    def test_a_modified_top_level_agents_md_runs_a_guard_step_whose_flag_is_on(self):
         flag, (rc, lines, ran, out) = self.guard_flag_case({"agents/old.md": "old, edited\n"}, saved={"agents/old.md": "old\n"})
-        self.assertEqual(flag, "false", "precondition: CI's own scope read sets the guard flag for an edit to an existing agents/*.md, so the "
-                         "case probes nothing: %r" % flag)
+        self.assertEqual(flag, "true", "CI's own scope read does not set the guard flag for an edit to agents/old.md, a top-level agents file "
+                         "the guard suite reads: %r" % flag)
+        self.assertIn("check-s", ran, "check-s carried its saved pass across an edit to agents/old.md, though the guard flag its if: reads is "
+                      "on for that delta\n%s" % out)
+
+    def test_a_modified_nested_agents_md_still_carries_a_guard_step_whose_flag_is_off(self):  # control: green on the old code
+        flag, (rc, lines, ran, out) = self.guard_flag_case({"agents/nested/old.md": "old, edited\n"}, saved={"agents/nested/old.md": "old\n"})
+        self.assertEqual(flag, "false", "CI's own scope read sets the guard flag for an edit to agents/nested/old.md, a nested agents file the "
+                         "guard suite does not read: %r" % flag)
         self.assert_carried(rc, lines, ran, out)
 
     def guard_flag_case(self, files, saved=None):
@@ -5468,6 +5530,208 @@ class LintListedSuites(Job):
         rc, lines, out = self.lint(SuiteSteps.LINT_STEP, self.NODE_STEP)
         self.assertTrue(self.ran("listed-node"), "--lint did not run the listed node suite whose marker names the changed file\n" + out)
         self.assertEqual((rc, by_step(lines).get("Listed scanner suite")), (0, "PASS"), out)
+
+
+FAKE_INTERPRETER = """\
+import collections, json, sys
+name, version, record, args = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4:]
+with open(record, "a", encoding="utf-8") as f:
+    f.write(json.dumps({"name": name, "argv": args}) + "\\n")
+rest = list(args)
+while rest and rest[0] in ("-I", "-S", "-E", "-s", "-B", "-u", "-O", "-P"):
+    rest.pop(0)
+if rest[:1] in (["--version"], ["-V"], ["-VV"]):
+    print("Python " + version)
+elif rest[:1] == ["-c"]:
+    major, minor, micro = (int(p) for p in version.split(".")[:3])
+    info = collections.namedtuple("version_info", "major minor micro releaselevel serial")
+    sys.version_info = info(major, minor, micro, "final", 0)
+    sys.version = version + " (fake)"
+    exec(rest[1], {"__name__": "__main__"})
+else:
+    sys.exit(1 if any("fail" in a for a in rest) else 0)
+"""  # a fake python: records each run, answers the version probes, and exits 1 for a script whose name holds "fail"
+
+
+@unittest.skipIf(os.name == "nt", "the fake interpreters are sh stubs, and the PATH holds symlinks: POSIX only")
+class LintPythonPin(Job):
+    """--lint runs a lint step's python3 under the Python version its job pins (the python-version of its actions/setup-python step,
+    read from the workflow). With python<major>.<minor> of that pin on PATH, that interpreter runs the step. With none on PATH, and
+    the local python3 at another version, one line names both versions and the word interpreter, once per run, and the verdict and
+    exit code keep their values. A local python3 at the pin, a job with no pin, and a pin that only another job holds print no line.
+    --plan prints the line and starts no interpreter more than once. Each case's PATH holds the fake stubs, then a mirror of the real
+    PATH's tools with no python* name, so this machine's own interpreters are never on it."""
+
+    SETUP_ACTION = "actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c"  # the pin checks.yml's own setup-python steps use
+    mirror = None  # set by setUpClass
+
+    @classmethod
+    def setUpClass(cls):
+        cls.mirror = tempfile.mkdtemp(prefix="cijob_mirror_", dir=RUN_FOLDER)
+        cls.addClassCleanup(shutil.rmtree, cls.mirror, True)
+        seen = set()
+        for folder in os.environ.get("PATH", "").split(os.pathsep):
+            try:
+                names = sorted(os.listdir(folder)) if os.path.isdir(folder) else []
+            except OSError:
+                continue
+            for name in names:
+                full = os.path.join(folder, name)
+                if name in seen or name.startswith("python") or not (os.path.isfile(full) and os.access(full, os.X_OK)):
+                    continue
+                seen.add(name)
+                os.symlink(full, os.path.join(cls.mirror, name))
+
+    @staticmethod
+    def setup_step(pin=None):
+        """The job's setup-python step: python-version pinned to `pin`, or no python-version when pin is None."""
+        with_ = {"python-version": '"%s"' % pin} if pin is not None else {"cache": "pip"}
+        return step("Set up Python", uses=LintPythonPin.SETUP_ACTION, **{"with": with_})
+
+    @staticmethod
+    def lint_step(name, script):
+        return step(name, "python3 lint/%s" % script)
+
+    def record_path(self):
+        return os.path.join(self.root, "interpreter-record.jsonl")
+
+    def fake_path(self, versions):
+        """This case's PATH: a stub for each name in `versions` (name -> version), then the mirror. Each stub execs the fake script
+        with its own name, its version and the record file, so every run is recorded under the name it was started by."""
+        fake_dir = os.path.join(self.root, "fake-interpreter")
+        os.makedirs(fake_dir, exist_ok=True)
+        fake = os.path.join(fake_dir, "fake_interpreter.py")
+        with open(fake, "w", encoding="utf-8", newline="\n") as f:
+            f.write(FAKE_INTERPRETER)
+        bodies = {name: "exec %s -I %s %s %s %s \"$@\"" % tuple(shlex.quote(p) for p in (sys.executable, fake, name, version, self.record_path()))
+                  for name, version in versions.items()}
+        return self.stub_path(after=self.mirror, **bodies)["PATH"]
+
+    def calls(self, name=None):
+        """(name, argv) of each run a fake interpreter took, in order: all of them, or only those started as `name`."""
+        try:
+            with open(self.record_path(), encoding="utf-8") as f:
+                rows = [json.loads(ln) for ln in f if ln.strip()]
+        except OSError:
+            return []
+        return [(row["name"], row["argv"]) for row in rows if name is None or row["name"] == name]
+
+    def lint_runs(self, name):
+        """How many runs started as `name` were a lint step's script: one argument under lint/."""
+        return sum(any(a.startswith("lint/") for a in argv) for _, argv in self.calls(name))
+
+    def lint_with(self, path, *steps, args=("--lint",), other=None):
+        """One run of job lane over `steps` with PATH `path`. The rerun cache is off, so every step runs."""
+        return self.run_job(*steps, args=args, env={"PATH": path, "CI_JOB_NO_CACHE": "1"}, other=other)
+
+    @staticmethod
+    def interpreter_lines(out):
+        return [ln for ln in out.splitlines() if "interpreter" in ln.lower()]
+
+    @staticmethod
+    def both_versions(out, pinned, local):
+        """The lines of `out` that name both versions and the word interpreter. A version matches whole: 3.1 is not 3.11, and 3.15.0 names 3.15."""
+        def named(ln, version):
+            return re.search(r"(?<![\d.])%s(?!\d)" % re.escape(version), ln) is not None
+        return [ln for ln in out.splitlines() if "interpreter" in ln.lower() and named(ln, pinned) and named(ln, local)]
+
+    def test_a_pinned_python_on_path_runs_the_lint_step_in_place_of_python3(self):
+        """Red now: the job pins 3.11 and python3.11 is on PATH, but the lint step runs under python3 (3.15), not under python3.11."""
+        path = self.fake_path({"python3": "3.15.0", "python3.11": "3.11.9"})
+        self.assertIsNotNone(shutil.which("python3.11", path=path), "scope: this case's PATH holds no python3.11 stub")
+        rc, lines, out = self.lint_with(path, self.setup_step("3.11"), self.lint_step("Lint one", "check_one.py"))
+        self.assertTrue(self.calls(), "no fake interpreter ran the lint step\n" + out)
+        self.assertEqual(self.lint_runs("python3.11"), 1,
+                         "the lint step did not run under the pinned python3.11 (python3 ran it %d time(s))\n%s"
+                         % (self.lint_runs("python3"), out))
+        self.assertEqual(rc, 0, out)
+
+    def test_the_pin_is_read_from_the_job_so_a_3_13_pin_runs_python3_13(self):
+        """Red now: the job pins 3.13 and python3.13 is on PATH, but the lint step runs under python3, so the pin is not used."""
+        path = self.fake_path({"python3": "3.15.0", "python3.13": "3.13.2"})
+        self.assertIsNotNone(shutil.which("python3.13", path=path), "scope: this case's PATH holds no python3.13 stub")
+        rc, lines, out = self.lint_with(path, self.setup_step("3.13"), self.lint_step("Lint one", "check_one.py"))
+        self.assertTrue(self.calls(), "no fake interpreter ran the lint step\n" + out)
+        self.assertEqual(self.lint_runs("python3.13"), 1,
+                         "the lint step did not run under the pinned python3.13 (python3 ran it %d time(s))\n%s"
+                         % (self.lint_runs("python3"), out))
+        self.assertEqual(rc, 0, out)
+
+    def test_with_no_pinned_python_on_path_one_line_names_both_versions_once_per_run(self):
+        """Red now: the job pins 3.11, no python3.11 is on PATH, and the local python3 is 3.15. The two lint steps should share one line
+        that names both versions and says interpreter. No such line prints."""
+        path = self.fake_path({"python3": "3.15.0"})
+        self.assertIsNone(shutil.which("python3.11", path=path), "scope: a python3.11 is on this case's PATH")
+        rc, lines, out = self.lint_with(path, self.setup_step("3.11"), self.lint_step("Lint one", "check_one.py"),
+                                        self.lint_step("Lint two", "check_two.py"))
+        self.assertEqual(self.lint_runs("python3"), 2, "scope: the two lint steps did not both run under python3\n" + out)
+        named = self.both_versions(out, "3.11", "3.15")
+        self.assertEqual(len(named), 1, "expected one line naming 3.11 and 3.15 and the word interpreter, found %d\n%s" % (len(named), out))
+        self.assertEqual(rc, 0, out)
+
+    def test_plan_prints_the_line_and_starts_no_interpreter_more_than_once(self):
+        """Red now: --plan with the same setup prints no line, so it does not match the run's one line. The plan must also run no lint
+        script, and start the local python3 at most once to learn its version."""
+        path = self.fake_path({"python3": "3.15.0"})
+        self.assertIsNone(shutil.which("python3.11", path=path), "scope: a python3.11 is on this case's PATH")
+        rc, lines, out = self.lint_with(path, self.setup_step("3.11"), self.lint_step("Lint one", "check_one.py"),
+                                        self.lint_step("Lint two", "check_two.py"), args=("--lint", "--plan"))
+        self.assertEqual(len(self.both_versions(out, "3.11", "3.15")), 1,
+                         "--plan did not print one line naming 3.11 and 3.15 and the word interpreter\n" + out)
+        self.assertEqual(self.lint_runs("python3"), 0, "--plan ran a lint step's script\n" + out)
+        self.assertLessEqual(len(self.calls()), 1,
+                             "--plan started the local interpreter %d times, more than once to learn its version" % len(self.calls()))
+
+    def test_a_local_python_at_the_pin_prints_no_line(self):
+        """Control, green now: the local python3 is 3.11, the pin, so no line says interpreter. The run's lines are the setup step's
+        not-run line, the lint step's line and the summary."""
+        path = self.fake_path({"python3": "3.11.9"})
+        self.assertIsNone(shutil.which("python3.11", path=path), "scope: a python3.11 is on this case's PATH")
+        rc, lines, out = self.lint_with(path, self.setup_step("3.11"), self.lint_step("Lint one", "check_one.py"))
+        self.assertEqual(self.lint_runs("python3"), 1, "scope: the lint step did not run under python3\n" + out)
+        self.assertEqual(self.interpreter_lines(out), [], "a line says interpreter though the local python3 is the pin\n" + out)
+        self.assertEqual(len(lines), 3, "the run did not print one line per step and the summary\n" + out)
+        self.assertEqual(rc, 0, out)
+
+    def test_a_job_whose_setup_step_names_no_python_version_prints_no_line(self):
+        """Control, green now: the setup step has no python-version, so there is no pin to compare with, and no line."""
+        path = self.fake_path({"python3": "3.15.0"})
+        rc, lines, out = self.lint_with(path, self.setup_step(None), self.lint_step("Lint one", "check_one.py"))
+        self.assertEqual(self.lint_runs("python3"), 1, "scope: the lint step did not run under python3\n" + out)
+        self.assertEqual(self.interpreter_lines(out), [], "a line says interpreter though the job pins no Python version\n" + out)
+        self.assertEqual(len(lines), 3, "the run did not print one line per step and the summary\n" + out)
+        self.assertEqual(rc, 0, out)
+
+    def test_a_job_with_no_setup_python_step_prints_no_line(self):
+        """Control, green now: the workflow has no setup-python step, so no version is pinned and no line prints."""
+        path = self.fake_path({"python3": "3.15.0"})
+        rc, lines, out = self.lint_with(path, self.lint_step("Lint one", "check_one.py"))
+        self.assertEqual(self.lint_runs("python3"), 1, "scope: the lint step did not run under python3\n" + out)
+        self.assertEqual(self.interpreter_lines(out), [], "a line says interpreter though no step pins a Python version\n" + out)
+        self.assertEqual(len(lines), 2, "the run did not print one line per step and the summary\n" + out)
+        self.assertEqual(rc, 0, out)
+
+    def test_a_pin_that_only_another_job_holds_prints_no_line(self):
+        """Control, green now: the linted job pins nothing; the pin 3.11 sits in job other. The line is for the linted job's own pin."""
+        path = self.fake_path({"python3": "3.15.0"})
+        rc, lines, out = self.lint_with(path, self.lint_step("Lint one", "check_one.py"), other=[self.setup_step("3.11")])
+        self.assertEqual(self.lint_runs("python3"), 1, "scope: the lint step did not run under python3\n" + out)
+        self.assertEqual(self.interpreter_lines(out), [], "a line says interpreter for a pin that only another job holds\n" + out)
+        self.assertEqual(rc, 0, out)
+
+    def test_the_verdict_and_exit_code_match_with_and_without_the_line(self):
+        """Control, green now: the same steps read the same verdicts and exit code whether the local python3 is 3.15 (the line is due)
+        or 3.11 (the pin, no line). One step passes and one fails, so the exit code is a real one."""
+        steps = (self.setup_step("3.11"), self.lint_step("Lint pass", "check_pass.py"), self.lint_step("Lint fail", "check_fail.py"))
+        runs = {}
+        for local in ("3.15.0", "3.11.9"):
+            path = self.fake_path({"python3": local})
+            self.assertIsNone(shutil.which("python3.11", path=path), "scope: a python3.11 is on this case's PATH")
+            rc, lines, out = self.lint_with(path, *steps)
+            verdicts = {k: v for k, v in by_step(lines).items() if k.startswith("Lint")}
+            self.assertEqual(verdicts, {"Lint pass": "PASS", "Lint fail": "FAIL"}, "scope: the steps did not read PASS and FAIL\n" + out)
+            runs[local] = (rc, verdicts)
+        self.assertEqual(runs["3.15.0"], runs["3.11.9"], "the verdicts or the exit code change with the line")
 
 
 BIN_CI_JOB = os.path.join(HERE, "..", "bin", "ci-job")

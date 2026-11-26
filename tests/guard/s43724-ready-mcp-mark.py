@@ -48,6 +48,8 @@ RPM_SKIPPED_PASS = os.path.join(RPM, "skipped-pass-current-head.jsonl")  # a rea
 RPM_SKIPPED_OLD = os.path.join(RPM, "skipped-pass-older-head.jsonl")     # the same pass, skipped step and all, on feat-current^
 RPM_VERDICT_PASS = os.path.join(RPM, "verdict-pass-current-head.jsonl")  # `verdict merge 12 --ready`: verdict's PASS line, then the ready-pass line it keeps, on feat-current
 RPM_VERDICT_ONLY = os.path.join(RPM, "verdict-pass-line-only.jsonl")     # the same wrapped run, whose result is verdict's PASS line alone
+RPM_NOCHECKS_VERDICT = os.path.join(RPM, "verdict-nochecks-current-head.jsonl")  # `verdict merge 12 --ready` in a repo with no ready checks, on feat-current: verdict's real output
+RPM_NOCHECKS_VERDICT_OLD = os.path.join(RPM, "verdict-nochecks-older-head.jsonl")  # the same run, whose kept lines name feat-current^
 
 
 def _rpm_pass(sha):
@@ -68,6 +70,26 @@ def _rpm_ready_run(tool_id, *results):
 def _rpm_verdict_run(tool_id, *results):
     """One paired Bash call, `verdict merge 12 --ready`, whose result lines are `results`: verdict's PASS line, then what it keeps of the run."""
     return [role_use(tool_id, "Bash", {"command": "verdict " + MERGE_SHIM + " 12 --ready"}), role_result(tool_id, "\n".join(results))]
+
+
+def _rpm_verdict_output(name, printed):
+    """verdict's real output for a run that prints the lines `printed`: a fake merge command in this run's folder prints them, and this
+    checkout's bin/verdict wraps it, so the text is what verdict keeps. Its log goes in this run's folder, never the system temp dir."""
+    script = os.path.join(RPM, "%s.py" % name)
+    with open(script, "w", encoding="utf-8") as handle:
+        handle.write("".join("print(%r)\n" % line for line in printed))
+    env = {key: value for key, value in os.environ.items() if not key.startswith("VERDICT_")}
+    env["VERDICT_LOG"] = os.path.join(RPM, "%s.log" % name)
+    done = subprocess.run([sys.executable, os.path.join(REPO, "bin", "verdict"), sys.executable, script],
+                          capture_output=True, text=True, env=env, timeout=120)
+    _rpr_need(done.returncode == 0, "verdict exits %d on the fake merge run %s: %s" % (done.returncode, name, done.stderr[-300:]))
+    return done.stdout.rstrip("\n")
+
+
+def _rpm_verdict_real(name, printed):
+    """One paired Bash call, `verdict merge 12 --ready`, whose result is verdict's real output for the run `name` (_rpm_verdict_output)."""
+    return [role_use("verdict-%s" % name, "Bash", {"command": "verdict " + MERGE_SHIM + " 12 --ready"}),
+            role_result("verdict-%s" % name, _rpm_verdict_output(name, printed))]
 
 
 def _rpm_run(tool_id, args, *results):
@@ -216,6 +238,8 @@ def _build_readymark():
         RPM_SKIPPED_OLD: _rpm_ready_run("skipped-old", _rpm_pass_skipped(older, 1), RPM_DRAFT_LINE),
         RPM_VERDICT_PASS: _rpm_verdict_run("verdict-now", "PASS %s (41.3s)" % (MERGE_SHIM + " 12 --ready"), _rpm_pass(current)),
         RPM_VERDICT_ONLY: _rpm_verdict_run("verdict-only", "PASS %s (41.3s)" % (MERGE_SHIM + " 12 --ready")),
+        RPM_NOCHECKS_VERDICT: _rpm_verdict_real("nochecks-now", [RPM_NO_CHECKS, _rpm_records_current(current), RPM_DRAFT_LINE]),
+        RPM_NOCHECKS_VERDICT_OLD: _rpm_verdict_real("nochecks-old", [RPM_NO_CHECKS, _rpm_records_current(older), RPM_DRAFT_LINE]),
     }
     for path, rows in lines.items():
         with open(path, "w", encoding="utf-8") as handle:
@@ -226,7 +250,8 @@ lazy_fixture([RPM_NO_PASS, RPM_OLD_PASS, RPM_PASS, RPM_CLAIM_PASS, RPM_CONFIRM_P
               RPM_NOCHECKS_PASS, RPM_NOCHECKS_OLD, RPM_DRY_PASS, RPM_DRY_OLD,
               RPM_UNCHECKED_PASS, RPM_UNCHECKED_OLD, RPM_CLAIM_STOP, RPM_CLAIM_STOP_OLD,
               RPM_BG_READ, RPM_BG_CAT, RPM_BG_OLD, RPM_BG_FAILED, RPM_BG_NEVER, RPM_BG_NOTICE, RPM_BG_OTHER, RPM_BG_FAST,
-              RPM_OTHER_PR, RPM_SKIPPED_PASS, RPM_SKIPPED_OLD, RPM_VERDICT_PASS, RPM_VERDICT_ONLY], _build_readymark)
+              RPM_OTHER_PR, RPM_SKIPPED_PASS, RPM_SKIPPED_OLD, RPM_VERDICT_PASS, RPM_VERDICT_ONLY,
+              RPM_NOCHECKS_VERDICT, RPM_NOCHECKS_VERDICT_OLD], _build_readymark)
 
 
 def rpm_mcp(name, expected, transcript, fake=GHREADY_CURRENT, carries=(), lacks=(), cwd=RPR_REPO, **tool_input):
@@ -255,6 +280,14 @@ rpm_mcp("ready-mcp-mark: MCP draft false after a verdict-wrapped ready pass on t
 # verdict's PASS line alone names no head, so a wrapped run whose output keeps no ready-pass line stands for nothing.
 rpm_mcp("ready-mcp-mark: MCP draft false after a verdict PASS line with no kept ready-pass line is refused", "deny", RPM_VERDICT_ONLY,
         carries=RPM_REMEDY, lacks=RPM_TARGET_LACKS, owner="y", repo="x", pullNumber=12, draft=False)
+# V2. `verdict merge <pr> --ready` in a repo with no merge.readyChecks: the result is verdict's real output, which keeps the lines that name
+# the head (verdict's kept lines, the no-checks line and the records line). The guard reads the head from them, as it reads a bare run.
+# Red on the built verdict: it keeps only a PASS line, so the guard finds no head and refuses the mark.
+rpm_mcp("ready-mcp-mark: MCP draft false after a verdict-wrapped ready run with no ready checks, on the current head, is allowed", "allow",
+        RPM_NOCHECKS_VERDICT, owner="y", repo="x", pullNumber=12, draft=False)
+# The control: the same wrapped run on an older head is refused, and names the ready run as its remedy.
+rpm_mcp("ready-mcp-mark: MCP draft false after a verdict-wrapped ready run with no ready checks, on an older head, is refused", "deny",
+        RPM_NOCHECKS_VERDICT_OLD, carries=RPM_REMEDY, lacks=RPM_TARGET_LACKS, owner="y", repo="x", pullNumber=12, draft=False)
 rpm_mcp("ready-mcp-mark: MCP draft true with no ready pass is allowed", "allow", RPM_NO_PASS,
         owner="y", repo="x", pullNumber=12, draft=True)
 rpm_mcp("ready-mcp-mark: an MCP body-only update with no ready pass is allowed", "allow", RPM_NO_PASS,

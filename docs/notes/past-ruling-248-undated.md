@@ -1,0 +1,1 @@
+- past-ruling-248-undated: 248 of 514 records (270 decisions, 244 debts) carry no date stamp in their index line. Among equal scores, an undated line sorts after the dated ones and keeps source order among themselves, so the newest-first tie-break cannot order them. Seen: 2026-11-25 x1

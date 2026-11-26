@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """code-check: one type check and one bug lint per language, read from lint/code_check_standard.json (the one home of the table).
-    python3 code_check.py [--root DIR] [--base REF] [--main REF]
+    python3 code_check.py [--root DIR] [--base REF] [--main REF] [--list-lines]
 Fails when a tracked file has a language with no row, when a row is malformed, when a tool finds a bug, or when the
 repo's mypy list (.code-check.json, "mypy_modules") lost a module since --base or since --main, the current default
 branch (the exclude list likewise only shrinks). A module renamed since that ref must be listed at its new path.
@@ -14,7 +14,9 @@ a relative specifier, extensionless relative imports, TypeScript-only syntax and
 import diagnostics only, and type errors are dropped. Formatter layers are skipped until o2 (one layout) lands; their rows say so.
 It also runs lint/check_comment_narration.py (rule building-comments-say-why) on the Python, JS/TS, Astro, Swift and shell lines the change adds
 since --base, minus the exclude folders. It reads the lint/ and hooks/ folders of the repo the action is pinned to,
-which GitHub fetches whole at the pinned sha."""
+which GitHub fetches whole at the pinned sha.
+--list-lines (off by default; decision source-prose-lint-ships-dark) also runs lint/check_list_lines.py on the Python and shell
+lists the change adds an item to, against --base, minus the exclude folders. The action.yml has no input for it yet."""
 import argparse, json, os, re, subprocess, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -55,6 +57,36 @@ def comment_check(root, base, exclude):
     # Exit 3 is the node tool failing to run; exit 1 with no hit row is a crash. Neither is a verdict, so neither is
     # a clean diff.
     return hits + ["comment check could not run: %s" % err.replace("COULD NOT RUN: ", "", 1)]
+
+
+LIST_LINES_CHECK = os.path.join(HERE, "..", "..", "lint", "check_list_lines.py")
+
+
+def list_lines_check(root, base, exclude):
+    """Failures from the list-lines check on the lists the change adds an item to, behind the dark switch --list-lines
+    (decision source-prose-lint-ships-dark). No base is a skip. The check is the one in lint/, run as a child; its
+    `unknown:` line fails only when it exits 1 (env CI set), and its `not read:` lines never fail."""
+    if not base or base == ZERO:
+        print("list-lines check: skipped, no base to diff against")
+        return []
+    if not os.path.isfile(LIST_LINES_CHECK):
+        print("list-lines check: unknown, %s is not in this copy of the action" % os.path.normpath(LIST_LINES_CHECK))
+        return []
+    cmd = [sys.executable, LIST_LINES_CHECK, "--root", root, "--base", base] + ["--exclude=" + e for e in exclude if e.strip().strip("/")]
+    p = sh(cmd, root)
+    rows = [r for r in p.stdout.splitlines() if r.strip()]
+    info = [r for r in rows if r.startswith("not read:") or (p.returncode == 0 and r.startswith("unknown:"))]
+    for r in info:
+        print("list-lines check: %s" % r)
+    if p.returncode == 0:
+        if not info:
+            print("list-lines check: pass")
+        return []
+    hits = [r for r in rows if r not in info]
+    if p.returncode == 1 and hits:
+        return hits
+    err = (p.stderr.strip().splitlines() or ["exit %d" % p.returncode])[-1]
+    return hits + ["list-lines check could not run: %s" % err]
 
 
 def load_standard():
@@ -346,6 +378,8 @@ def main(argv):
     ap.add_argument("--root", default=".")
     ap.add_argument("--base", default="")
     ap.add_argument("--main", default="", help="the current default branch; the shrink check runs against it too")
+    ap.add_argument("--list-lines", action="store_true",
+                    help="also run lint/check_list_lines.py (decision lists-one-line-per-item) on the lists the change adds an item to; off by default")
     ap.add_argument("--pins", action="store_true", help="print the pip specs of the tools the tests install, then exit")
     args = ap.parse_args(argv)
     if args.pins:
@@ -398,6 +432,8 @@ def main(argv):
             print("code-check: %s %s: %s %s" % (lang, layer, plan[0], "FAIL" if problems else "pass"))
             failures += problems
     failures += comment_check(root, args.base, cfg.get("exclude", []))
+    if args.list_lines:
+        failures += list_lines_check(root, args.base, cfg.get("exclude", []))
     for f in failures:
         print(f)
         if f and not f.startswith((" ", "\t")):

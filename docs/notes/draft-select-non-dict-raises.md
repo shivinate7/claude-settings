@@ -1,0 +1,1 @@
+- draft-select-non-dict-raises: Nit, round 1 review of branch cancel-run-on-back-to-draft (PASS). `select_draft_runs` calls `run.get` on every run with no dict check, so a non-dict run entry raises AttributeError. `main` catches only ReadError. The REST jq filter yields only objects, so REST JSON cannot reach this. Seen: 2026-11-25 x1

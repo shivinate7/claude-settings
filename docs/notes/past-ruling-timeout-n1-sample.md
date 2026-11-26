@@ -1,0 +1,1 @@
+- past-ruling-timeout-n1-sample: The 11.6 s call time is one sample (n=1). A call that still times out refuses the question with the Unvetted remedy, as main's call judge does for a model error (`hooks/call_judge.py`). Seen: 2026-11-25 x1

@@ -1,0 +1,1 @@
+- sigkill-leaks-stderr-temp: A SIGKILL of the hook leaks the stderr temp file made at hooks/session_start.sh:228. The script has no EXIT trap, and the `rm` at line 258 never runs. Seen: 2026-11-25 x1
