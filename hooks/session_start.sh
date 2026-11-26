@@ -51,19 +51,21 @@ tier_line() {
 
 command -v git >/dev/null 2>&1 || { tier_line; exit 0; }
 
-# bounded_run <dir> <outfile> <command and args...>: runs the command in <dir>, stdout to <outfile>, stderr to
-# $bounded_err_file (default /dev/null), killed after CLAUDE_SETTINGS_FETCH_TIMEOUT seconds (default 2). The command
-# runs in its own process group (set -m), so the kill reaches its children too and a hung child cannot hold session
-# start. Returns the command's status, or a kill's (above 1) when the bound hit. The one home for every bounded call below.
+# bounded_run <dir> <outfile> <errfile> <command and args...>: runs the command in <dir>, stdout to <outfile>, stderr to
+# <errfile>, killed after CLAUDE_SETTINGS_FETCH_TIMEOUT seconds (default 2). When the bound hits, the watchdog kills the
+# command and every descendant of it, found by pid from one `ps -A -o pid= -o ppid=` read, so a hung child cannot hold
+# session start or outlive it. That works in every sh without job control: `set -m` prints to stderr under dash with no
+# tty, and dash's `kill` rejects `--` for a group kill. Where ps has no such columns (Git Bash), only the command's own
+# pid is killed. Returns the command's status, or a kill's (above 128) when the bound hit. The ps start happens only on
+# a timeout. The one home for every bounded call below.
 bounded_run() {
   fetch_timeout="${CLAUDE_SETTINGS_FETCH_TIMEOUT:-2}"
   git_dir_arg="$1"
   git_out_arg="$2"
-  shift 2
-  set -m
-  ( cd "$git_dir_arg" 2>/dev/null && "$@" >"$git_out_arg" 2>"${bounded_err_file:-/dev/null}" ) &
+  git_err_arg="$3"
+  shift 3
+  ( cd "$git_dir_arg" 2>/dev/null && "$@" >"$git_out_arg" 2>"$git_err_arg" ) &
   fetch_pid=$!
-  set +m
   # The watchdog's TERM handler kills its own sleep, so a call that returns first leaves no sleep behind for
   # the full bound. (jobs -p is empty inside a dash subshell, so the pid is kept in a variable.)
   ( wd_sleep=""
@@ -71,8 +73,19 @@ bounded_run() {
     sleep "$fetch_timeout" &
     wd_sleep=$!
     wait "$wd_sleep"
-    kill -TERM -- "-$fetch_pid" >/dev/null 2>&1
-    kill "$fetch_pid" >/dev/null 2>&1 ) >/dev/null 2>&1 &
+    wd_ps=$(ps -A -o pid= -o ppid= 2>/dev/null)
+    wd_tree="$fetch_pid"
+    wd_grew=1
+    while [ "$wd_grew" = 1 ]; do
+      wd_grew=0
+      while read -r wd_p wd_pp; do
+        case " $wd_tree " in *" $wd_p "*) continue ;; esac
+        case " $wd_tree " in *" $wd_pp "*) wd_tree="$wd_tree $wd_p"; wd_grew=1 ;; esac
+      done <<WD_PS
+$wd_ps
+WD_PS
+    done
+    kill $wd_tree >/dev/null 2>&1 ) >/dev/null 2>&1 &
   killer_pid=$!
   wait "$fetch_pid" 2>/dev/null
   fetch_rc=$?
@@ -86,7 +99,7 @@ bounded_git() {
   git_dir_arg="$1"
   git_out_arg="$2"
   shift 2
-  bounded_run "$git_dir_arg" "$git_out_arg" git "$@"
+  bounded_run "$git_dir_arg" "$git_out_arg" /dev/null git "$@"
 }
 
 # bounded_fetch <dir>: one quiet, bounded `git fetch` in <dir> that names refs and never prunes or fetches all of
@@ -210,11 +223,11 @@ tier_line
 main_ref_installer="$toplevel/githooks/main-ref/install.sh"
 if [ -f "$main_ref_installer" ] && grep -qF 'main-ref-check: 1' "$main_ref_installer" 2>/dev/null; then
   mr_err=$(mktemp 2>/dev/null)
-  bounded_err_file="${mr_err:-/dev/null}" bounded_run "$toplevel" /dev/null sh githooks/main-ref/install.sh --check
+  bounded_run "$toplevel" /dev/null "${mr_err:-/dev/null}" sh githooks/main-ref/install.sh --check
   mr_rc=$?
   if [ "$mr_rc" -ne 0 ]; then
     mr_text=""
-    [ -n "$mr_err" ] && mr_text=$(sed 's/^[[:space:]]*Remedy:[[:space:]]*/Remedy: /' "$mr_err" 2>/dev/null | tr '\n' ' ' | sed 's/[[:space:]]*$//')
+    [ -n "$mr_err" ] && mr_text=$(sed 's/^[[:space:]]*Remedy:[[:space:]]*/Remedy: /' "$mr_err" 2>/dev/null | tr '\n' ' ' | cut -c1-400 | sed 's/[[:space:]]*$//')
     if [ -z "$mr_text" ]; then
       if [ "$mr_rc" -gt 128 ]; then
         mr_text="main-ref check: unknown: the check did not finish within ${CLAUDE_SETTINGS_FETCH_TIMEOUT:-2} s (exit $mr_rc)."
