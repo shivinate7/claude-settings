@@ -12,6 +12,9 @@ The on: block is read by its text, from the top-level `on:` line to the next top
 is on a fresh runner. A trigger is a key, or a list item, at the block's own indent. A comment is cut before the read,
 and a block scalar's body is skipped, so a schedule word in a comment, a string or a job's if: is no trigger.
 CHECKS_YML overrides the checks.yml path, for a scratch copy.
+
+PushGroup reads the top-level concurrency: block the same way and evaluates its group for a push run and a pull request run, so
+a newer push run of main replaces a pending one (see the comment above PushGroup).
 """
 import os
 import re
@@ -281,6 +284,182 @@ class ReadsTheOnBlock(OnBlockCase):
                                     "    types: [opened, synchronize]\n  workflow_dispatch:\n    inputs:\n      full:\n"
                                     "        description: Run.\n        type: boolean\n"))
         self.assertEqual(self.names(on), ["push", "pull_request", "workflow_dispatch"], "reader loses a trigger in a long on: block")
+
+
+# PushGroup: the top-level concurrency: block of checks.yml, read by its text and evaluated for one push run and one pull request run. GitHub
+# keeps one pending run per group and replaces it with the newer one, so a replaced pending run starts no job (the mechanism pinned here).
+# The expression reader covers the operators checks.yml uses: string literals, context names, ==, !=, &&, ||, format() and parentheses.
+TOKEN = re.compile(r"'[^']*'|==|!=|&&|\|\||[(),]|[A-Za-z_][\w.\-]*|\d+|\s+")
+
+
+def concurrency_block(text):
+    """The lines of the top-level concurrency: block: from its key to the next top-level key. Blank and comment lines are skipped."""
+    out, inside = [], False
+    for line in text.splitlines():
+        if not inside:
+            inside = line.rstrip() == "concurrency:"
+            continue
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        if not line.startswith(" "):
+            break
+        out.append(line)
+    return out
+
+
+def block_value(block, key):
+    """The raw value of a two-space child key of a block, or None when the block has no such key."""
+    for line in block:
+        m = re.match(r"  " + re.escape(key) + r":[ \t]?(.*)$", line)
+        if m:
+            return m.group(1).strip()
+    return None
+
+
+def tokens(text):
+    out, pos = [], 0
+    while pos < len(text):
+        m = TOKEN.match(text, pos)
+        if m is None:
+            raise ValueError("cannot read the expression at %d: %r" % (pos, text))
+        if not m.group().isspace():
+            out.append(m.group())
+        pos = m.end()
+    return out
+
+
+class Expression:
+    """A recursive-descent reader of one ${{ }} expression. Precedence as GitHub's: ==, then &&, then ||, and a value is the value of
+    the operand that decides it (`a || b` is a when a is truthy, else b)."""
+    def __init__(self, text, ctx):
+        self.toks, self.ctx, self.at = tokens(text), ctx, 0
+
+    def peek(self):
+        return self.toks[self.at] if self.at < len(self.toks) else None
+
+    def take(self):
+        tok = self.peek()
+        self.at += 1
+        return tok
+
+    def expect(self, want):
+        if self.take() != want:
+            raise ValueError("expected %r in the expression" % want)
+
+    def value(self):
+        v = self.or_()
+        if self.peek() is not None:
+            raise ValueError("unread tokens after the expression: %r" % self.toks[self.at:])
+        return v
+
+    def or_(self):
+        v = self.and_()
+        while self.peek() == "||":
+            self.take()
+            w = self.and_()
+            v = v or w
+        return v
+
+    def and_(self):
+        v = self.eq()
+        while self.peek() == "&&":
+            self.take()
+            w = self.eq()
+            v = v and w
+        return v
+
+    def eq(self):
+        v = self.atom()
+        if self.peek() in ("==", "!="):
+            op = self.take()
+            w = self.atom()
+            v = (v == w) if op == "==" else (v != w)
+        return v
+
+    def atom(self):
+        tok = self.take()
+        if tok is None:
+            raise ValueError("the expression ends early")
+        if tok.startswith("'"):
+            return tok[1:-1]
+        if tok == "(":
+            v = self.or_()
+            self.expect(")")
+            return v
+        if tok == "format":
+            self.expect("(")
+            args = [self.or_()]
+            while self.peek() == ",":
+                self.take()
+                args.append(self.or_())
+            self.expect(")")
+            return args[0].format(*args[1:])
+        if tok in ("true", "false"):
+            return tok == "true"
+        if tok in self.ctx:
+            return self.ctx[tok]
+        raise ValueError("no such context %r" % tok)
+
+
+def render(raw, ctx):
+    """The string a value like `${{ a }}-${{ b }}` gives: each expression's value, a bool as true or false, null as empty."""
+    out = []
+    for i, part in enumerate(re.split(r"\$\{\{(.*?)\}\}", raw)):
+        if i % 2 == 0:
+            out.append(part)
+            continue
+        v = Expression(part, ctx).value()
+        out.append("true" if v is True else "false" if v is False else "" if v is None else str(v))
+    return "".join(out)
+
+
+def run_context(event, run_id, ref, draft=None):
+    """The github context of one run, the keys checks.yml reads. A push run has no pull request, so its draft is null."""
+    return {"github.workflow": "checks", "github.event_name": event, "github.ref": ref, "github.run_id": str(run_id),
+            "github.event.pull_request.draft": draft}
+
+
+class ExpressionReader(unittest.TestCase):
+    def test_a_string_compare_and_a_bool_render_as_github_writes_them(self):
+        self.assertEqual(render("${{ github.event_name == 'push' }}-${{ false }}", run_context("push", 1, "refs/heads/main")), "true-false")
+
+    def test_or_takes_the_decided_operand_and_format_fills_its_braces(self):
+        ctx = run_context("pull_request", 7, "refs/pull/7/merge", False)
+        self.assertEqual(render("${{ github.event_name == 'pull_request' && format('{0}-{1}', github.ref, github.event.pull_request.draft) || github.run_id }}", ctx),
+                         "refs/pull/7/merge-False")
+        self.assertEqual(render("${{ github.event_name == 'pull_request' && format('{0}', github.ref) || github.run_id }}", run_context("push", 7, "refs/heads/main")),
+                         "7")
+
+
+class PushGroup(unittest.TestCase):
+    """checks.yml's top-level concurrency: group and cancel-in-progress, evaluated for a push run and a pull request run."""
+    def setUp(self):
+        self.block = concurrency_block(checks_text())
+        self.group = block_value(self.block, "group")
+        self.cancel = block_value(self.block, "cancel-in-progress")
+        self.assertIsNotNone(self.group, "checks.yml's top-level concurrency: block has no group key")
+        self.assertIsNotNone(self.cancel, "checks.yml's top-level concurrency: block has no cancel-in-progress key")
+
+    def test_two_push_runs_of_main_share_one_group(self):
+        """Each push run has a group of its own (the run id), so a newer push run never replaces a pending one."""
+        first = render(self.group, run_context("push", 101, "refs/heads/main"))
+        second = render(self.group, run_context("push", 102, "refs/heads/main"))
+        self.assertEqual(first, second, "two push runs of main are in different groups, so a newer push run never replaces a pending one")
+
+    def test_control_two_pull_request_runs_of_one_ref_share_one_group(self):
+        """Control: pull request runs of one ref and draft state still share a group, so a new push cancels the old run."""
+        first = render(self.group, run_context("pull_request", 201, "refs/pull/7/merge", False))
+        second = render(self.group, run_context("pull_request", 202, "refs/pull/7/merge", False))
+        self.assertEqual(first, second, "two pull request runs of one ref are in different groups")
+
+    def test_control_a_push_run_never_cancels_the_run_in_progress(self):
+        """Control: a push run keeps cancel-in-progress false, so a running job is never cancelled."""
+        self.assertEqual(render(self.cancel, run_context("push", 101, "refs/heads/main")), "false", "a push run cancels the run in progress")
+
+    def test_control_a_pull_request_run_cancels_the_older_run_of_its_ref(self):
+        """Control: pull request runs keep cancel-in-progress true."""
+        self.assertEqual(render(self.cancel, run_context("pull_request", 201, "refs/pull/7/merge", False)), "true",
+                         "a pull request run does not cancel the older run in progress")
 
 
 if __name__ == "__main__":

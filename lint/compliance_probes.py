@@ -11,6 +11,7 @@
     python3 lint/compliance_probes.py slugs <child root>
     python3 lint/compliance_probes.py restates <child root>
     python3 lint/compliance_probes.py aligned <child root>
+    python3 lint/compliance_probes.py lines <child root> [--base <ref>]
     python3 lint/compliance_probes.py hooks <child root>
     python3 lint/compliance_probes.py facts <child root>
     python3 lint/compliance_probes.py scorecard <child root> < group-lines
@@ -1451,6 +1452,8 @@ def probe_words(root):
 # The aligned group: a record and each rule unit that cites it change together in a pull request, or the PR body says why
 # not (decision child-cites-not-copies). It reads one `git diff` and the files on disk, so it starts no other process.
 RULES_CHECKED = re.compile("^Rules checked: (\\S+) \u2014 no change$")  # one line per record, in the PR body
+RULES_CHECKED_LINE = "Rules checked: %s \u2014 no change"  # the line RULES_CHECKED reads, for one record
+LINES_BASE = "origin/main"  # the base of the lines mode when --base is not given
 HUNK = re.compile(r"^@@ -\d+(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
 HOME_LINE = re.compile(r"^\s*Home:(.*)$", re.M)
 # Folders at any depth that hold vendored or tool files, never this repo's rule files: a CLAUDE.md a package ships
@@ -1615,14 +1618,13 @@ def pr_body():
     return body if isinstance(body, str) else ("" if body is None else None)
 
 
-def probe_aligned(root):
-    base, head = os.environ.get("BASE_SHA", "").strip(), os.environ.get("HEAD_SHA", "").strip() or "HEAD"
-    if not base:
-        raise CannotRun("BASE_SHA, the base commit of the pull request, is not set")
+def aligned_gaps(root, base, head):
+    """(the gaps, the count of rule files read or None when the diff holds no file, the count of records changed) of base...head. A gap is (record slug, item
+    line). It reads no PR body: probe_aligned clears gaps by the body, the lines mode names the lines that clear them."""
     changes, hunks = diff_changes(root, base, head)
     wheres, records = decision_records(root)
     if not changes:
-        return finish("aligned", [], "in shape - the pull request changes no file", 0)
+        return [], None, 0
     changed = {os.path.basename(path)[:-len(".md")] for path in changes if path.endswith(".md") and os.path.dirname(path) in wheres}
     for slug in changed:
         # A record the PR deleted, or whose Home line it changed, is still cited by the anchor it held at base.
@@ -1647,6 +1649,16 @@ def probe_aligned(root):
                 hits.append((slug, "  %s: %s:%d cites the record, the record changed and this sentence did not" % (slug, rel, first)))
             elif moved and slug not in changed:
                 hits.append((slug, "  %s: %s:%d changed and cites the record, the record did not change" % (slug, rel, first)))
+    return hits, files, len(changed)
+
+
+def probe_aligned(root):
+    base, head = os.environ.get("BASE_SHA", "").strip(), os.environ.get("HEAD_SHA", "").strip() or "HEAD"
+    if not base:
+        raise CannotRun("BASE_SHA, the base commit of the pull request, is not set")
+    hits, files, changed = aligned_gaps(root, base, head)
+    if files is None:
+        return finish("aligned", [], "in shape - the pull request changes no file", 0)
     if hits:
         body = pr_body()
         if body is None:
@@ -1654,13 +1666,21 @@ def probe_aligned(root):
                             "or run in a pull_request workflow, so a `Rules checked:` line can be read" % len(hits))
         checked = {m.group(1) for m in map(RULES_CHECKED.match, (l.strip() for l in body.splitlines())) if m}
         hits = [line for slug, line in hits if slug not in checked]
-    else:
-        hits = []
     if hits:
         hits.append("  fix: change the sentence or the record, or add one PR body line per record, "
                     "`Rules checked: <record> \u2014 no change`, then push a commit")
         return finish("aligned", hits, "out - %d line(s) to read in %d file(s)" % (len(hits) - 1, files), 1)
-    return finish("aligned", hits, "in shape - %d rule file(s) read, %d record(s) changed" % (files, len(changed)), 0)
+    return finish("aligned", hits, "in shape - %d rule file(s) read, %d record(s) changed" % (files, changed), 0)
+
+
+def probe_lines(root, base):
+    """Prints, one per line and once per record, the `Rules checked:` lines that probe_aligned would demand for base...HEAD,
+    in record order. It prints nothing when none is owed. It reads no PR body, so a line a body already holds is printed
+    again. The gaps come from aligned_gaps, the one reader the aligned group uses."""
+    hits, _, _ = aligned_gaps(root, base, "HEAD")
+    for slug in sorted({slug for slug, _ in hits}):
+        print(RULES_CHECKED_LINE % slug)
+    return 0
 
 
 FACTS_PR = re.compile(r"pr ([0-9]+) (open|merged)")
@@ -1807,7 +1827,27 @@ GROUPS = {"layout": probe_layout, "design": probe_design, "lanecap": probe_lanec
           "scorecard": scorecard}
 
 
+def main_lines(argv):
+    """The lines mode: `lines <root> [--base <ref>]`. An unreadable base exits 2 and names it."""
+    base = LINES_BASE
+    if len(argv) == 3 and argv[1] == "--base" and argv[2] and not argv[2].startswith("-"):
+        base = argv[2]
+    elif len(argv) != 1:
+        print("usage: compliance_probes.py lines <child root> [--base <ref>]", file=sys.stderr)
+        return 2
+    if argv[0].startswith("-") or not os.path.isdir(argv[0]):
+        print("usage: compliance_probes.py lines <child root> [--base <ref>]", file=sys.stderr)
+        return 2
+    try:
+        return probe_lines(os.path.abspath(argv[0]), base)
+    except CannotRun as err:
+        print("lines: unknown - base %s: %s" % (base, err), file=sys.stderr)
+        return 2
+
+
 def main(argv):
+    if argv and argv[0] == "lines":
+        return main_lines(argv[1:])
     # A root that is an option or no folder is refused: scorecard would write under the cwd.
     if len(argv) != 2 or argv[0] not in GROUPS or argv[1].startswith("-") or not os.path.isdir(argv[1]):
         print("usage: compliance_probes.py {%s} <child root>" % ",".join(GROUPS), file=sys.stderr)

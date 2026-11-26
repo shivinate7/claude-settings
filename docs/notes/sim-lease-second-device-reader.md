@@ -1,0 +1,1 @@
+- sim-lease-second-device-reader: Review finding F5. `read_devices()` in `bin/sim-lease` reads the device list a second time, beside `sim_read_devices` in `janitor/sweep.py`. Kept on purpose: the plan's refuter chose its own read, with no import of the sweep. Seen: 2026-11-25 x1

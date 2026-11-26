@@ -115,6 +115,9 @@ NO_MD = [
     'Ruled store fixture suite',
     'Guard log report fixture suite',
     'Pace numbers fixture suite',
+    'Zero-case runs suite',
+    'Suites have main suite',
+    'Suites have main check',
     'Guard outcome claims fixture suite',
     'Verdict runner fixture suite',
     'Wait-pid helper fixture suite',
@@ -410,6 +413,10 @@ MAIN_STEPS = [
     'Route judge measure fixture suite',
     'Guard log report fixture suite',
     'Pace numbers fixture suite',
+    'Case runner suite',
+    'Zero-case runs suite',
+    'Suites have main suite',
+    'Suites have main check',
     'Guard outcome claims fixture suite',
     'Verdict runner fixture suite',
     'Wait-pid helper fixture suite',
@@ -587,8 +594,14 @@ TRANSITIVE_ALLOWED = {
     "hooks/test_mutate_ci.py": (["test_guard.py"], "strace, round 1 review: no open of skills/impeccable at run time"),
     "lint/check_unknown_reads_contract.py": (["test_guard.py"], "strace, round 1 review: no open of skills/impeccable at run time"),
 }
-# A shell or JS line that runs or reads something. A line without one (a case pattern, a comment) names no read.
-INVOKE = re.compile(r"\b(python3?|node|bash|sh|source|cat|readFileSync|readFile|spawnSync|spawn|execFileSync|execFile|exec)\b")
+# A shell or JS line that runs or reads something: a command word, or a shell file in command position (COMMAND_PATH). The `sh` after
+# a dot is a file extension (merge/install_from_main.sh), not the command.
+INVOKE = re.compile(r"\b(python3?|node|bash|zsh|dash|source|cat|readFileSync|readFile|spawnSync|spawn|execFileSync|execFile|exec)\b|(?<!\.)\bsh\b")
+# A .sh or .py path run as a command: first on a line, after a separator, an open paren, a backtick, `{`, `!` or `$(`, optionally
+# after `.`, exec, then, do or else.
+COMMAND_PATH = re.compile(r"(?:^|[;&|(`{!]|\$\()\s*(?:(?:\.|exec|then|do|else)\s+)?[\w.\-/]*\.(?:py|sh|mjs)\b")
+# A case arm's pattern: the words before its `)`. Those words name no read; the arm's body after the `)` is looked at.
+CASE_PATTERN = re.compile(r"^\s*(?:[^\s()'\"$`;&|]+\|)*[^\s()'\"$`;&|]+\)")
 
 
 def read_repo(rel):
@@ -741,10 +754,23 @@ def read_strings(arg):
     return out
 
 
+def invoke_lines(text):
+    """The lines of a non-Python file that run or read something, each as the text a read is looked for in. A comment names
+    nothing. A case arm's pattern is cut off before its `)`, so a path that only names a file in a pattern is no read."""
+    names = []
+    for ln in text.splitlines():
+        if ln.lstrip().startswith(("#", "//")):
+            continue
+        body = CASE_PATTERN.sub("", ln, count=1)
+        if INVOKE.search(body) or COMMAND_PATH.search(body):
+            names.append(body)
+    return names
+
+
 def scan_file(rel, text, index):
     """(files reached, names read) for one file. A Python file is read with ast: its imports, and the strings and names
     of its read calls, so a comment or a docstring names nothing. Any other file, or a Python file that does not parse,
-    is read line by line: an INVOKE line, not a comment. A name ALLOWED for the file reaches no file either."""
+    is read line by line: an invoke line (invoke_lines), not a comment. A name ALLOWED for the file reaches no file either."""
     here = os.path.dirname(rel)
     allowed = TRANSITIVE_ALLOWED.get(rel, ([], ""))[0]
 
@@ -759,7 +785,7 @@ def scan_file(rel, text, index):
             tree = None
     reaches, names = set(), []
     if tree is None:
-        names = [ln for ln in text.splitlines() if INVOKE.search(ln) and not ln.lstrip().startswith(("#", "//"))]
+        names = invoke_lines(text)
     else:
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):
@@ -1075,6 +1101,79 @@ class TransitiveWalkFixtures(unittest.TestCase):
         files = {"a/entry.mjs": "const t = `\nspawnSync('node', ['hooks/test_guard.py'])\n`;\necho Don't run it; python3 hooks/test_guard.py\n"}
         self.assertEqual([m for m, _, _ in self.walk(files, entry="a/entry.mjs")[0]], ["test_guard.py"],
                          "a read on a template or a quoted line is not seen")
+
+    def test_a_case_pattern_that_names_a_md_file_is_no_read(self):
+        # ci-scope.sh's case arm lists skills/impeccable/SKILL.md to set the guard flag, beside merge/install_from_main.sh. A pattern runs
+        # no file, and the .sh of the second name is an extension, not a command word.
+        files = {"a/entry.sh": "case \"$f\" in\n  merge/install_from_main.sh|skills/impeccable/SKILL.md) on=\"$on guard\" ;;\nesac\n"}
+        self.assertEqual(self.walk(files, entry="a/entry.sh")[0], [], "a case pattern that names a .md file counts as a read")
+
+    def test_a_shell_line_that_reads_a_md_file_is_a_hit(self):
+        files = {"a/entry.sh": "cat skills/impeccable/SKILL.md\n"}
+        self.assertEqual([m for m, _, _ in self.walk(files, entry="a/entry.sh")[0]], ["skills/impeccable/SKILL.md"],
+                         "a read in a shell line is not seen")
+
+    def test_an_absolute_python_path_is_a_read(self):
+        files = {"a/entry.sh": "/usr/bin/python3 hooks/test_guard.py\n"}
+        self.assertIn("test_guard.py", [m for m, _, _ in self.walk(files, entry="a/entry.sh")[0]],
+                      "a python3 run under an absolute path is not seen")
+
+    def test_an_absolute_bash_path_is_a_read(self):
+        files = {"a/entry.sh": "/bin/bash hooks/test_guard.py\n"}
+        self.assertIn("test_guard.py", [m for m, _, _ in self.walk(files, entry="a/entry.sh")[0]],
+                      "a bash run under an absolute path is not seen")
+
+    def test_a_versioned_python_name_is_a_read(self):
+        files = {"a/entry.sh": "python3.11 hooks/test_guard.py\n"}
+        self.assertIn("test_guard.py", [m for m, _, _ in self.walk(files, entry="a/entry.sh")[0]],
+                      "a versioned python3 name is not seen")
+
+    def test_an_absolute_cat_path_is_a_read(self):
+        files = {"a/entry.sh": "/bin/cat skills/impeccable/SKILL.md\n"}
+        self.assertIn("skills/impeccable/SKILL.md", [m for m, _, _ in self.walk(files, entry="a/entry.sh")[0]],
+                      "a cat under an absolute path is not seen")
+
+    def test_a_read_file_sync_method_call_in_a_mjs_file_is_a_read(self):
+        files = {"a/entry.mjs": 'const s = fs.readFileSync("skills/impeccable/SKILL.md")\n'}
+        self.assertIn("skills/impeccable/SKILL.md", [m for m, _, _ in self.walk(files, entry="a/entry.mjs")[0]],
+                      "a readFileSync method call is not seen")
+
+    def test_an_absolute_bash_run_of_a_shell_file_follows_that_file(self):
+        files = {"a/entry.sh": "/bin/bash lint/helper.sh\n", "lint/helper.sh": "cat skills/impeccable/SKILL.md\n"}
+        self.assertIn(("skills/impeccable/SKILL.md", "lint/helper.sh"), [(m, rel) for m, rel, _ in self.walk(files, entry="a/entry.sh")[0]],
+                      "a bash run under an absolute path does not follow the shell file it runs")
+
+    def follows_helper(self, line):
+        files = {"a/entry.sh": line + "\n", "lint/helper.sh": "cat skills/impeccable/SKILL.md\n"}
+        self.assertIn(("skills/impeccable/SKILL.md", "lint/helper.sh"), [(m, rel) for m, rel, _ in self.walk(files, entry="a/entry.sh")[0]],
+                      "%r does not follow the shell file it runs" % line)
+
+    def test_a_bare_shell_file_run_is_a_read(self):
+        self.follows_helper("lint/helper.sh")
+
+    def test_a_dot_sourced_shell_file_is_a_read(self):
+        self.follows_helper(". lint/helper.sh")
+
+    def test_a_shell_file_in_command_substitution_is_a_read(self):
+        self.follows_helper("$(lint/helper.sh)")
+
+    def test_a_zsh_run_of_a_shell_file_is_a_read(self):
+        self.follows_helper("zsh lint/helper.sh")
+
+    def test_a_dash_run_of_a_shell_file_is_a_read(self):
+        self.follows_helper("dash lint/helper.sh")
+
+    def test_a_command_after_a_case_arm_is_a_read(self):
+        self.follows_helper("  merge/x.sh) bash lint/helper.sh ;;")
+
+    def test_a_case_arm_naming_a_shell_file_is_no_read(self):
+        # The arm of ci-scope.sh line 205, copied: a pattern that names a .sh path and a .md path, and a body with no command.
+        arm = ('      bin/sim-test|docs/decisions/agent-model-cap.md|merge/install_from_main.sh|janitor/sweep.py|janitor/temp_sweep.py|'
+               'lint/_guard_sections.py|lint/check_record_slugs.py|lint/check_red_run.py|lint/check_skill_model_rows.py|lint/hook_catalog.py|'
+               'lint/rule_audit.py|lint/ruled_store.py|lint/stale_cites.py|skills/impeccable/SKILL.md|testing/shallow_clone.py) '
+               'on="$on guard checks_guard " ;;\n')
+        files = {"a/entry.sh": 'case "$f" in\n' + arm + "esac\n"}
+        self.assertEqual(self.walk(files, entry="a/entry.sh")[0], [], "a case arm that names a .sh and a .md path counts as a read")
 
     def test_an_empty_file_reaches_and_reads_nothing(self):
         self.assertEqual(self.walk({"a/entry.py": ""}), ([], False))

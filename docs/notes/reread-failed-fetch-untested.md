@@ -1,0 +1,1 @@
+- reread-failed-fetch-untested: No test covers a first read of main with no merge, then a failed second fetch. The code returns None (merge/merge.py:2197-2199, then merge/merge.py:2262-2267 raises NetStop) and reverts nothing. test_merge.py:5670 fails the only read; test_merge.py:5864 holds the merge on the second read. Seen: 2026-11-25 x1

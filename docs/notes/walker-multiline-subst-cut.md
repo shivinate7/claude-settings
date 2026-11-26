@@ -1,0 +1,1 @@
+- walker-multiline-subst-cut: the case-arm cut at `CASE_PATTERN` (:585) eats a bare path that closes a multi-line `$(`. No such line exists in the repo today. Seen: 2026-11-25 x1

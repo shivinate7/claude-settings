@@ -181,9 +181,9 @@ OV_ACTS = (
      "kill %d" % FOREIGN, NOGIT, "deny", "machine-wide-kill", None),
     ("ask-linked-discard", "a hard reset in a linked worktree, which denies",
      VCS + " reset --hard", GITWT, "deny", "shared-tree", None),
-    # The push-main refusal of ruling 207 a is lifted by an owner override like any refusal. The refusal of
+    # The force-push refusal of ruling 207 a is lifted by an owner override like any refusal. The refusal of
     # rule push-agent-branch is lifted the same way. A stray-branch push is allowed (decision `guard-remedy-not-to-owner`), so it has no refusal for an override to lift, and its row is gone from this list.
-    ("push-main", "a non-forced push of main",
+    ("force-push", "a non-forced push of main",
      VCS + " push origin main", PUSHMAIN, "deny", PUSH_MAIN_RULE, None),
     ("push-agent", "a non-forced push of an agent-worktree branch name",
      VCS + " push origin HEAD", PUSHAGENT, "deny", PUSH_AGENT_RULE, None),

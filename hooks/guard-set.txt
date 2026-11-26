@@ -14,6 +14,7 @@ ci_wait_cap.py
 ci_wake.py
 decision_watch.py
 feedback_guard.py
+git_bash.py
 git_reads.py
 lease.py
 local_time.py
@@ -33,5 +34,6 @@ route_rows.json
 ruling_home.py
 session_role.py
 shared_names.py
+stale_install.py
 stall_watch.py
 wait_common.py

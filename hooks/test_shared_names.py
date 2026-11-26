@@ -29,6 +29,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.append(os.path.join(HERE, "..", "lint"))  # appended: a lint module never shadows a hook module
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
+import case_runner_test  # noqa: E402  the one zero-case check for a hand runner (hooks/case_runner_test.py)
 RUN = _test_temp.run_folder()  # removed when the suite ends
 # settings.json env sets MAILBOX_REPO for every session; local_time would read the live mailbox and print a second
 # line. These cases compare its one Central line, so no child sees a store.
@@ -576,6 +577,8 @@ CASES = [
 
 
 def main() -> int:
+    if case_runner_test.no_cases_exit(CASES, "test_shared_names"):
+        return 1
     print("shared_names cases, %d in all" % len(CASES))
     failed = 0
     for name, run in CASES:

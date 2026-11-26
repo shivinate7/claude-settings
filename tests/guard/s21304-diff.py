@@ -1,5 +1,6 @@
 # section 21304
 FAMILY = "diff"
+from probe import crash_reason  # noqa: E402  the one reader of a guard-crash row, whichever writer logged it (hooks/probe.py)
 BASE_FILES = {
     "src/app.py": "x = 1\n", "src/contest.py": "y = 1\n", "latest_results.md": "ok\n",
     "tests/test_a.py": "def test_a():\n    assert True\n", "pyproject.toml": "[project]\nname = 'x'\n[tool.pytest.ini_options]\nminversion = '7'\n",
@@ -405,20 +406,22 @@ LOG_CHECKS_EXTRA = _TaggedLogs([
 for _label, _check in LOG_CHECKS_EXTRA:  # the literal above is not appended: tag it here
     LOG_FAMILY.setdefault(_label, _family(_label))
 
-# The check-tail crash check, appended here because LOG_CHECKS_EXTRA is defined here. A crash allows the call,
-# so a decision row cannot see it: each command must log no guard-crash line. The run is pd_run, the one
-# guard-run step, which returns the decision and the guard.log rows of a run in a folder of its own.
+# The check-tail crash check, appended here because LOG_CHECKS_EXTRA is defined here. A fail-open crash allows the
+# call and a fail-closed one refuses it as deny, so the decision alone cannot tell a crash from a judged call. Each
+# command must log no guard-crash row, by either writer: crash_reason reads both by rule. The run is pd_run, the one
+# guard-run step, in the folder pd_folder names for it.
 def tail_no_crash_case(index, command):
-    """check-tail: one guard run of `command` logs no guard-crash line (see TAIL_REDIRECT_ONLY)."""
+    """check-tail: one guard run of `command` logs no guard-crash row, by either writer (see TAIL_REDIRECT_ONLY)."""
     def check():
-        decision, reason, rows = pd_run("tail-no-crash-%d" % index, {
+        name = "tail-no-crash-%d" % index
+        decision, reason, _rows = pd_run(name, {
             "tool_name": "Bash", "tool_input": {"command": command}, "cwd": NOGIT})
         if decision == "error":
             return False, reason
-        crashes = [row[4] for row in rows if len(row) == 6 and row[2:4] == ["crash", "guard-crash"]]
-        if crashes:
-            return False, "the guard crashed and allowed the call: %s" % crashes[0]
-        return True, "no guard-crash line"
+        crashed = crash_reason(pd_folder(name))
+        if crashed is not None:
+            return False, "the guard logged a guard-crash row for the call (decision %s): %s" % (decision, crashed[:120])
+        return True, "no guard-crash row"
     return check
 
 
