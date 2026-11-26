@@ -21,6 +21,8 @@ SuiteSteps: --lint runs a CI step that runs a hooks/merge/lint suite only when t
   a FAIL there exits 1. A job on a windows or macos runner prints one `not run` line that names the runner, and runs nothing.
   A suite two jobs hold runs once. A step of that job with an `if:` or `env:` the runner cannot read reads unknown, exit 2.
   --plan prints `would run` for that job's picked suite steps and runs none. Each case counts the suite's runs in a file.
+SuiteShards: a suite that CI runs in several steps differing only by env (one step per shard) is planned and run once per env, so
+  every shard is covered; two steps with the same env are one run. The real-file case reads checks.yml's four merge shard steps.
 Lint mode: a --lint run that picks no lint step is unknown, exit 2; a lint step that a pull-request run would run reads
 unknown when it is skipped; a lint step that runs only off a pull request reads skipped, and the run still exits 0.
 ParallelLint: --lint runs its lint steps at once (CI_JOB_LINT_WORKERS, else the cpu count up to 4), keeps the printed
@@ -1860,9 +1862,13 @@ class SuiteSteps(Job):
                          "a selector that hangs must read as unknown on the CI step, and the job must exit 2\n" + out + err)
 
     @staticmethod
-    def counted(text):
+    def counted(text, env=None):
         """A suite's text that first appends one line to suite-runs.txt in the repo root, where CI's step runs it: the file
-        counts how many times the suite ran, whichever job ran it."""
+        counts how many times the suite ran, whichever job ran it. env: the name of a variable whose value the line holds
+        instead of `ran`, so the file says which step's env each run had."""
+        if env is not None:
+            return ("import os\nwith open('suite-runs.txt', 'a', encoding='utf-8') as f:\n"
+                    "    f.write(os.environ.get(%r, '-') + '\\n')\n" % env) + text
         return "with open('suite-runs.txt', 'a', encoding='utf-8') as f:\n    f.write('ran\\n')\n" + text
 
     def suite_runs(self):
@@ -2149,6 +2155,101 @@ def normal(lines):
         ln = re.sub(r"log=\S+", "log=L", ln)
         out.append(re.sub(r"\s+", " ", ln))
     return out
+
+
+class SuiteShards(Job):
+    """A suite CI runs in several steps that differ only by env (one step per shard, each with its own value) runs once per
+    env: each shard step is planned and run, never only the first. Two steps with the same suite and the same env are one run.
+    The fixture steps differ by FIXTURE_SHARD, so the claim holds for any shard switch; the real-file case reads the repo's own
+    checks.yml, whose four merge shard steps must each get a planned line."""
+
+    # SuiteSteps' fixture helpers, borrowed (one home): a subclass would also run its cases under this class.
+    make_repo = SuiteSteps.make_repo
+    write = SuiteSteps.write
+    git = SuiteSteps.git
+    diff = SuiteSteps.diff
+    LINT_FILE = SuiteSteps.LINT_FILE
+    LINT = SuiteSteps.LINT
+    DOCS = SuiteSteps.DOCS
+    LINT_STEP = SuiteSteps.LINT_STEP
+    FIXTURE = "FIXTURE_SHARD"  # the env variable the fixture's shard steps differ by
+    MERGE_SHARDS = tuple("Merge tool git-half fixture suite (shard %d of 4)" % n for n in range(1, 5))  # checks.yml's four Linux merge shards
+
+    @classmethod
+    def shard(cls, n, of, name=None):
+        """A step that runs the suite as shard n of `of`: the same command, its own env value."""
+        return step(name or "Wiring suite (shard %d of %d)" % (n, of), "python3 hooks/test_wiring.py",
+                    env={cls.FIXTURE: "%d/%d" % (n, of)})
+
+    def make_shards(self):
+        """The base holds the counted suite hooks/test_wiring.py, which opens hooks/bridge.py; the lane changes that file, so the
+        selector picks that suite and no other."""
+        self.make_repo({"hooks/bridge.py": "V = 1\n",
+                        "hooks/test_wiring.py": SuiteSteps.counted(suite_text(("bridge.py",)), env=self.FIXTURE)},
+                       {"hooks/bridge.py": "V = 2\n"}, lint=True)
+        self.assertEqual(self.diff(), ["hooks/bridge.py"], "scope: the diff holds only the file the suite opens")
+
+    def ran_values(self):
+        """The FIXTURE_SHARD value of each run of the counted suite, in the order the runs happened."""
+        try:
+            with open(os.path.join(self.root, "suite-runs.txt"), encoding="utf-8") as f:
+                return f.read().split()
+        except OSError:
+            return []
+
+    def test_a_shard_step_in_a_second_other_job_is_planned_as_well_as_the_first(self):
+        self.make_shards()
+        rc, lines, out = self.run_job(self.DOCS, self.LINT_STEP, job="checks", args=(*self.LINT, "--plan"),
+                                      other=[self.shard(1, 2)], extra=[("third", "ubuntu-latest", [self.shard(2, 2)])])
+        states = by_step(lines)
+        self.assertEqual((states.get("Wiring suite (shard 1 of 2)"), states.get("Wiring suite (shard 2 of 2)")),
+                         ("would run", "would run"),
+                         "shard 2 of 2 in job third is not planned: the suite already counted as run for shard 1 in job other\n" + out)
+
+    def test_two_shard_steps_in_two_other_jobs_each_run_with_their_own_env(self):
+        self.make_shards()
+        rc, lines, out = self.run_job(self.DOCS, self.LINT_STEP, job="checks", args=self.LINT,
+                                      other=[self.shard(1, 2)], extra=[("third", "ubuntu-latest", [self.shard(2, 2)])])
+        self.assertEqual((rc, self.ran_values()), (0, ["1/2", "2/2"]),
+                         "a run must run the suite once per shard, each with its own env: shard 2 of 2 in job third did not run\n" + out)
+
+    def test_a_shard_step_of_the_linted_job_and_one_of_another_job_are_both_planned(self):
+        self.make_shards()
+        rc, lines, out = self.run_job(self.shard(1, 2), self.LINT_STEP, job="checks", args=(*self.LINT, "--plan"),
+                                      other=[self.shard(2, 2)])
+        states = by_step(lines)
+        self.assertEqual((states.get("Wiring suite (shard 1 of 2)"), states.get("Wiring suite (shard 2 of 2)")),
+                         ("would run", "would run"),
+                         "shard 2 of 2 in job other is not planned: the linted job's shard 1 already counted the suite as run\n" + out)
+
+    def test_two_steps_of_one_suite_with_the_same_env_are_planned_once(self):  # the control: the same env is one run, as before
+        self.make_shards()
+        rc, lines, out = self.run_job(self.DOCS, self.LINT_STEP, job="checks", args=(*self.LINT, "--plan"),
+                                      other=[self.shard(1, 2, "Wiring suite (first copy)")],
+                                      extra=[("third", "ubuntu-latest", [self.shard(1, 2, "Wiring suite (second copy)")])])
+        planned = [ln for ln in lines if ln.startswith("would run ") and "Wiring suite" in ln]
+        self.assertEqual(len(planned), 1, "two steps with the same suite and the same env must be planned once\n" + out)
+
+    def test_the_real_checks_workflow_plans_each_of_the_four_merge_shards(self):
+        with open(CHECKS, encoding="utf-8") as f:
+            real = f.read()
+        for name in self.MERGE_SHARDS:  # scope: checks.yml names each shard step
+            self.assertIn(name, real, "scope: checks.yml names no step %r" % name)
+        self.make_repo({"merge/merge.py": "V = 1\n", "merge/test_merge.py": suite_text(("merge.py",)),
+                        ".github/scripts/ci-scope.sh": 'echo "code=true" >> "$GITHUB_OUTPUT"\n'
+                                                       'echo "records_only_skip=false" >> "$GITHUB_OUTPUT"\n'},
+                       {"merge/merge.py": "V = 2\n"}, lint=True)
+        self.assertEqual(self.diff(), ["merge/merge.py"], "scope: the diff holds only the file the merge suite opens")
+        path = os.path.join(self.root, "checks.yml")
+        with open(path, "w", encoding="utf-8", newline="\n") as f:
+            f.write(real)
+        done = plan_job("checks", "--lint", "--plan", "--base", "origin/main", "--workflow", path, cwd=self.root)
+        self.assertIn("job checks-merge-git: picked merge/test_merge.py", done.stdout,
+                      "scope: the plan does not pick the merge suite for the first shard job\n" + done.stdout + done.stderr)
+        states = by_step(done.stdout.splitlines())
+        self.assertEqual({n: states.get(n) for n in self.MERGE_SHARDS}, {n: "would run" for n in self.MERGE_SHARDS},
+                         "the plan must print `would run` for each of the four merge shard steps of checks.yml\n"
+                         + done.stdout + done.stderr)
 
 
 class ParallelLint(Job):

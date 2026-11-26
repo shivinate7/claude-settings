@@ -48,7 +48,7 @@ MIN_JOBS = 3
 # The shard count of each split suite: the one home of the counts. A family is its base job and `<base>-2` to `<base>-<n>`, one job
 # per shard, each full step carrying its shard value (`<VAR>: <i>/<n>`, i = 1..n). Adding a shard means bumping its count here and
 # adding the job: ShardFamilies fails until checks.yml holds both.
-SHARD_COUNTS = {"checks-windows-merge": 10, "checks-windows-guard": 5, "checks-guard": 4, "checks-install-checkout": 3}
+SHARD_COUNTS = {"checks-windows-merge": 10, "checks-windows-guard": 5, "checks-guard": 4, "checks-install-checkout": 3, "checks-merge-git": 4}
 
 
 def family(base):
@@ -60,6 +60,9 @@ WINDOWS_MERGE_JOBS = family("checks-windows-merge")
 WINDOWS_GUARD_JOBS = family("checks-windows-guard")
 LINUX_GUARD_JOBS = family("checks-guard")
 INSTALL_JOBS = family("checks-install-checkout")
+# The Linux merge tool suite (one step, `python3 merge/test_merge.py`) splits across its shard jobs: checks-merge-git and -2 to -4.
+LINUX_MERGE_CMD = "python3 merge/test_merge.py"
+LINUX_MERGE_JOBS = family("checks-merge-git")
 
 # The run commands of the old single `checks-windows` job. Edit here only on purpose.
 REQUIRED = [
@@ -257,7 +260,6 @@ LINUX_SUITES = {
     "bash githooks/main-ref/test_hook.sh": (LINUX_CODE, "bash"),
     "node --test testing/skip-locally-fail-in-ci.test.mjs": (LINUX_CODE, "bash"),
     "python3 merge/test_launch.py": (LINUX_CODE, None),
-    "python3 merge/test_merge.py": (LINUX_CODE, None),
     "python3 merge/test_cmd.py": (LINUX_CODE, None),
     "python3 merge/test_repaired_merges.py": (LINUX_CODE, None),
     "python3 merge/test_lane_lint.py": (LINUX_CODE, None),
@@ -1062,9 +1064,10 @@ def hardening_problems(text):
         problems.append(f"MERGE_TESTS appears {n} times in checks.yml, in {merge_homes}, want 1 in checks-windows-merge (the slice's env)")
     # A shard value outside a full step's own env (job, workflow or $GITHUB_ENV) would cut that suite's cases in every run.
     for var in SHARD_VAR.values():
+        # The Linux merge shard steps are full steps too (LINUX_MERGE_CMD), so their MERGE_SHARD is one of the homes.
         homes = sum(1 for j in all_jobs(text).values() for st in j["steps"]
                     if isinstance(st.get("env"), dict) and var in st["env"]
-                    and (key(st) in REQUIRED or st.get("run") == MACOS_GUARD))
+                    and (key(st) in REQUIRED or st.get("run") == MACOS_GUARD or key(st) == LINUX_MERGE_CMD))
         mentions = sum(strip_comment(line).count(var) for line in text.splitlines())  # a comment that names the var is no home
         if mentions != homes:
             problems.append(f"{var} appears {mentions} times in checks.yml, want {homes} (once per shard step's env)")
@@ -1263,23 +1266,30 @@ INSTALL_CMD = "sh hooks/test_install_src.sh"
 INSTALL_SHARD_VAR = "INSTALL_SRC_SHARD"
 
 
-def install_shard_problems(text):
-    """The install.sh checkout-detection suite runs once in each INSTALL_JOBS shard, each step with its INSTALL_SRC_SHARD=i/n value and
-    the Linux code `if:`. Named failure: a case that runs in two shards, or in none, because a shard value is missing or repeated."""
-    homes = split_homes(text, INSTALL_JOBS, INSTALL_CMD)
+def shard_family_problems(text, jobs, cmd, var, want_if):
+    """`cmd` runs once in each job of `jobs` (a shard family, in shard order), each step with its `var`=i/n value and the `want_if`
+    `if:`. Named failure: a case that runs in two shards, or in none, because a shard value is missing or repeated."""
+    homes = split_homes(text, jobs, cmd)
     names = sorted(job for job, _ in homes)
-    if names != sorted(INSTALL_JOBS):
-        return [f"{INSTALL_CMD!r} runs in {names}, want one shard in each of {sorted(INSTALL_JOBS)}"]
+    if names != sorted(jobs):
+        return [f"{cmd!r} runs in {names}, want one shard in each of {sorted(jobs)}"]
     problems = []
     for job, st in homes:
-        value = f"{INSTALL_JOBS.index(job) + 1}/{len(INSTALL_JOBS)}"
-        problems += pin_problems(job, st, INSTALL_CMD, LINUX_CODE, None, {INSTALL_SHARD_VAR: value}, keep_running=True)
+        value = f"{jobs.index(job) + 1}/{len(jobs)}"
+        problems += pin_problems(job, st, cmd, want_if, None, {var: value}, keep_running=True)
     return problems
+
+
+def install_shard_problems(text):
+    """The install.sh checkout-detection suite runs once in each INSTALL_JOBS shard, each step with its INSTALL_SRC_SHARD=i/n value and
+    the Linux code `if:` (shard_family_problems)."""
+    return shard_family_problems(text, INSTALL_JOBS, INSTALL_CMD, INSTALL_SHARD_VAR, LINUX_CODE)
 
 
 def linux_split_problems(text):
     """Each LINUX_SUITES command runs in exactly one LINUX_SPLIT job, with the `if:` and `shell:` pinned for it. The install suite
-    is no LINUX_SUITES row: its shard family is install_shard_problems'."""
+    and the Linux merge suite are no LINUX_SUITES row: each runs once in each of its shard jobs (install_shard_problems,
+    shard_family_problems over LINUX_MERGE_JOBS)."""
     problems = job_env_problems(text, LINUX_SPLIT)
     for cmd, (want_if, want_shell) in LINUX_SUITES.items():
         homes = split_homes(text, LINUX_SPLIT, cmd)
@@ -1976,6 +1986,15 @@ class SplitJobs(unittest.TestCase):
         self.assertEqual(install_shard_problems(self.text), [])
         linux_conditioned = [n for n in SPEC_JOBS if n in LINUX_SPLIT]
         self.assertEqual(condition_problems(self.text, linux_conditioned), [], "a Linux split job's run step does not carry the records-only condition the spec gives it")
+
+    def test_the_linux_merge_suite_runs_once_in_each_of_its_shard_jobs(self):
+        # Named failure: the merge suite runs whole in one job, so that job's cap bounds every case of the suite (SHARD_COUNTS).
+        self.assertEqual(shard_family_problems(self.text, LINUX_MERGE_JOBS, LINUX_MERGE_CMD, MERGE_VAR, LINUX_CODE), [])
+
+    def test_each_linux_merge_shard_job_is_in_the_split_job_list(self):
+        # Named failure: a shard job is missing from CHECKS_SUITE_JOBS, so the lint-job, step-name and split rules never read it.
+        # The install shards are listed in that tuple the same way.
+        self.assertEqual([job for job in LINUX_MERGE_JOBS if job not in CHECKS_SUITE_JOBS], [])
 
     def test_the_guard_outcome_suite_is_pinned_in_the_linux_split(self):
         # Named failure: the guard outcome suite has no LINUX_SUITES row, so the `if:` of its checks.yml step is not pinned.
@@ -4136,6 +4155,7 @@ SHARD_SUITES = (
     ("windows guard", GUARD_CMD, GUARD_VAR, WINDOWS_GUARD_JOBS),
     ("linux guard", LINUX_GUARD, GUARD_VAR, LINUX_GUARD_JOBS),
     ("install checkout-detection", INSTALL_CMD, INSTALL_VAR, INSTALL_JOBS),
+    ("linux merge", LINUX_MERGE_CMD, MERGE_VAR, LINUX_MERGE_JOBS),
 )
 
 

@@ -1,0 +1,1 @@
+- suite-runs-ignores-run-args: `suite_runs` in `bin/ci-job` (:1216-1220) keys a suite by its path and its step's `env:` only, but `pick_line` (:1201-1207) also accepts arguments and an inline `NAME=value` prefix on the `run:` line. So a second step that shards by argument reads as "each already ran above". Nothing hits it today. Seen: 2026-11-25 x1.

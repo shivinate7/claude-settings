@@ -23,7 +23,7 @@ import unittest
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from test_windows_split import CHECKS, LINUX_GUARD_JOBS, MACOS_JOBS, all_jobs, eval_with, yaml_scalar  # noqa: E402  the one home of the checks.yml path and the guard shards
-from test_windows_split import ALL_JOBS_PASSED_JOB, PUSH_OFF_SHARDS, RECORDS_ONLY_CONDITION, SUITE_FLAG, unwrap  # noqa: E402  the one home of the rollup job name, the shard list, the records-only skip and the suite flags
+from test_windows_split import ALL_JOBS_PASSED_JOB, LINUX_MERGE_JOBS, PUSH_OFF_SHARDS, RECORDS_ONLY_CONDITION, SUITE_FLAG, unwrap  # noqa: E402  the one home of the rollup job name, the shard list, the records-only skip and the suite flags
 from all_jobs_passed_rules import (ALL_JOBS_PASSED_USES, COMMENT_DELTA_CLAUSE, DELTA_CLAUSES, all_problems,  # noqa: E402  the one home of the rules
                                    child_problems, ci_done_problems, needs_of, needs_problems, off_problems, scope_if_problems,
                                    scope_skips_problems, shape_problems, split_jobs, step_with, steps_problems, steps_part)
@@ -728,6 +728,15 @@ class ShardsRunWithTheirFlagFalse(unittest.TestCase):
     def test_a_failed_shard_fails_the_rollup(self):
         # Ruling (owner, 21:19 CST Nov 24 2026): the Windows shards are not needed, so the cases below are the needed jobs only.
         for name in (n for n in SUITE_FLAG if n not in PUSH_OFF_SHARDS):
+            with self.subTest(shard=name):
+                self.assertIn(name, self.needed, f"{ALL_JOBS_PASSED_JOB} does not need {name}, so its failure is no verdict")
+                code, out = check_sh(self.needs_json(failed=name))
+                self.assertNotEqual(code, 0, f"a failed {name} passes the rollup: {out}")
+
+    def test_each_linux_merge_shard_is_needed_and_a_failed_one_fails_the_rollup(self):
+        # Named failure: a Linux merge shard is missing from all-jobs-passed's needs, so its red is no verdict on the merge suite.
+        # The membership assert comes first: needs_json reads each needed job, so a missing one must fail here, not as a KeyError.
+        for name in LINUX_MERGE_JOBS:
             with self.subTest(shard=name):
                 self.assertIn(name, self.needed, f"{ALL_JOBS_PASSED_JOB} does not need {name}, so its failure is no verdict")
                 code, out = check_sh(self.needs_json(failed=name))
