@@ -45,7 +45,7 @@ grants anything, with one stderr line. model_ask() reads the owner's choice of o
 agent-model-cap, the owner's model name), Opus and Fable included: there is no keyword form for any of them. It tells a no
 from an error, because override.grant_model_ask keeps a held model on a no and ends it on an error. override.grant_model_ask
 calls it, from the prompt hook hooks/local_time.py, only for an owner prompt that names a model. Cost: one haiku call (low
-effort, OPUS_ASK_TIMEOUT s), none for any other prompt. override_ask() reads the owner's request to override a refusal and
+effort, OPUS_ASK_TIMEOUT s), none for any other prompt. override_ask() reads the owner's present ask to override a refusal and
 fails CLOSED through _ask_judge, which holds the one call. override.grant_override_ask calls it only for an owner prompt that
 carries the whole word `override` outside code spans, has no whole word `opus`, and passes the gates. Cost: one such haiku
 call, none for any other.

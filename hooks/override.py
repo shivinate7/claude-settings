@@ -181,7 +181,7 @@ ASK_ROLES = tuple(role for role in OPUS_ROLES if role != "claude")
 # The roles a model ask can name: ASK_ROLES and Explore, which has no Opus form of its own (an Explore on Opus is the
 # audit marker's business). A word names a role by its own name, its plural, or `explorer(s)`.
 MODEL_ROLES = ASK_ROLES + ("Explore",)
-ABOVE_SONNET = tuple(family for family in MODEL_FAMILIES if family not in ("haiku", "sonnet"))  # the models that need the owner's word
+ABOVE_SONNET = tuple(family for family in MODEL_FAMILIES if family not in ("haiku", "sonnet"))  # the models that need his typed grant
 MODEL_ROLE_WORDS = {word: role for role in MODEL_ROLES for word in (role.lower(), role.lower() + "s")}
 MODEL_ROLE_WORDS.update({"explorer": "Explore", "explorers": "Explore"})
 FLOOR_RULE, ROLE_RULE = "agent-model-floor", "agent-role-model"
