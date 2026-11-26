@@ -365,6 +365,10 @@ jobs:
         if: ${{ !cancelled() && (needs.scope.outputs.code == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_wait_until.py
 
+      - name: Outline helper fixture suite
+        if: ${{ !cancelled() && (needs.scope.outputs.code == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
+        run: python3 lint/test_outline.py
+
       - name: Now-central helper fixture suite
         if: ${{ !cancelled() && (needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_any == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_now_central.py
@@ -497,6 +501,10 @@ jobs:
         if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}
         run: python3 lint/check_tests_set_config.py
 
+      - name: Merge config layout fixture suite
+        if: ${{ !cancelled() && (needs.scope.outputs.code == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
+        run: python3 lint/test_merge_config_layout.py
+
       - name: Record slug fixture suite
         if: ${{ !cancelled() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_check_record_slugs.py
@@ -609,6 +617,10 @@ jobs:
       - name: Retired repo fixture suite
         if: ${{ !cancelled() && (needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_any == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_retired_repos.py
+
+      - name: Child list fixture suite
+        if: ${{ !cancelled() && needs.scope.outputs.records_only_skip != 'true' }}
+        run: python3 lint/test_children.py
 
       - name: Artifact cite fixture suite
         if: ${{ !cancelled() && (needs.scope.outputs.code == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
