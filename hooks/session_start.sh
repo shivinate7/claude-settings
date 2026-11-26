@@ -51,23 +51,27 @@ tier_line() {
 
 command -v git >/dev/null 2>&1 || { tier_line; exit 0; }
 
-# bounded_git <dir> <outfile> <git args...>: runs git in <dir>, stdout to <outfile>, killed after
-# CLAUDE_SETTINGS_FETCH_TIMEOUT seconds (default 2). Returns git's status, or a kill's (above 1)
-# when the bound hit. The one home for every bounded git call below.
-bounded_git() {
+# bounded_run <dir> <outfile> <command and args...>: runs the command in <dir>, stdout to <outfile>, stderr to
+# $bounded_err_file (default /dev/null), killed after CLAUDE_SETTINGS_FETCH_TIMEOUT seconds (default 2). The command
+# runs in its own process group (set -m), so the kill reaches its children too and a hung child cannot hold session
+# start. Returns the command's status, or a kill's (above 1) when the bound hit. The one home for every bounded call below.
+bounded_run() {
   fetch_timeout="${CLAUDE_SETTINGS_FETCH_TIMEOUT:-2}"
   git_dir_arg="$1"
   git_out_arg="$2"
   shift 2
-  ( cd "$git_dir_arg" 2>/dev/null && git "$@" >"$git_out_arg" 2>/dev/null ) &
+  set -m
+  ( cd "$git_dir_arg" 2>/dev/null && "$@" >"$git_out_arg" 2>"${bounded_err_file:-/dev/null}" ) &
   fetch_pid=$!
-  # The watchdog's TERM handler kills its own sleep, so a git call that returns first leaves no sleep behind for
+  set +m
+  # The watchdog's TERM handler kills its own sleep, so a call that returns first leaves no sleep behind for
   # the full bound. (jobs -p is empty inside a dash subshell, so the pid is kept in a variable.)
   ( wd_sleep=""
     trap 'kill "$wd_sleep" >/dev/null 2>&1; exit 0' TERM
     sleep "$fetch_timeout" &
     wd_sleep=$!
     wait "$wd_sleep"
+    kill -TERM -- "-$fetch_pid" >/dev/null 2>&1
     kill "$fetch_pid" >/dev/null 2>&1 ) >/dev/null 2>&1 &
   killer_pid=$!
   wait "$fetch_pid" 2>/dev/null
@@ -75,6 +79,14 @@ bounded_git() {
   kill "$killer_pid" >/dev/null 2>&1
   wait "$killer_pid" 2>/dev/null
   return "$fetch_rc"
+}
+
+# bounded_git <dir> <outfile> <git args...>: bounded_run for git.
+bounded_git() {
+  git_dir_arg="$1"
+  git_out_arg="$2"
+  shift 2
+  bounded_run "$git_dir_arg" "$git_out_arg" git "$@"
 }
 
 # bounded_fetch <dir>: one quiet, bounded `git fetch` in <dir> that names refs and never prunes or fetches all of
@@ -189,17 +201,30 @@ tier_line
 
 # main_ref_line: one line when the main-ref hook copy is missing or behind main, taken from the installer's own --check
 # (githooks/main-ref/install.sh). It installs nothing and sets no core.hooksPath. Only an installer that carries the
-# `main-ref-check:` marker is run: an older one has no --check, and its install mode would write files. Exit 0 (healthy)
-# and exit 2 (a read failed) print nothing; the check's two stderr lines fold into one. Cost: once per SessionStart
-# event, one sh start and the installer's own git reads; no file written, no network.
+# marker text is run: an older one has no --check, and its install mode would write files. The match is the pre-commit
+# hook's (its twin: MAIN_REF_MARKER in githooks/pre-commit/pre-commit): the text as a substring of the file. Exit 0
+# (healthy) prints nothing. Any other exit prints one line: the installer's stderr folded to one line, or, when it said
+# nothing, a line that names the exit. The run is bounded by CLAUDE_SETTINGS_FETCH_TIMEOUT and its children die with
+# it. Cost: once per SessionStart event, one sh start and the installer's own git reads; one temp file for its stderr,
+# removed at once; no network.
 main_ref_installer="$toplevel/githooks/main-ref/install.sh"
-if [ -f "$main_ref_installer" ] && grep -q '^# main-ref-check:' "$main_ref_installer" 2>/dev/null; then
-  mr_out=$(cd "$toplevel" 2>/dev/null && sh githooks/main-ref/install.sh --check 2>&1 >/dev/null)
+if [ -f "$main_ref_installer" ] && grep -qF 'main-ref-check: 1' "$main_ref_installer" 2>/dev/null; then
+  mr_err=$(mktemp 2>/dev/null)
+  bounded_err_file="${mr_err:-/dev/null}" bounded_run "$toplevel" /dev/null sh githooks/main-ref/install.sh --check
   mr_rc=$?
-  if [ "$mr_rc" -eq 1 ] && [ -n "$mr_out" ]; then
-    printf '%s\n' "$mr_out" | sed 's/^[[:space:]]*Remedy:[[:space:]]*/Remedy: /' | tr '\n' ' ' | sed 's/[[:space:]]*$//'
-    printf '\n'
+  if [ "$mr_rc" -ne 0 ]; then
+    mr_text=""
+    [ -n "$mr_err" ] && mr_text=$(sed 's/^[[:space:]]*Remedy:[[:space:]]*/Remedy: /' "$mr_err" 2>/dev/null | tr '\n' ' ' | sed 's/[[:space:]]*$//')
+    if [ -z "$mr_text" ]; then
+      if [ "$mr_rc" -gt 128 ]; then
+        mr_text="main-ref check: unknown: the check did not finish within ${CLAUDE_SETTINGS_FETCH_TIMEOUT:-2} s (exit $mr_rc)."
+      else
+        mr_text="main-ref check: unknown: the check exited $mr_rc."
+      fi
+    fi
+    printf '%s\n' "$mr_text"
   fi
+  [ -n "$mr_err" ] && rm -f "$mr_err"
 fi
 
 # roster_lines: the standing sessions of this repo with their ids, so a session never types an id by hand (decision
