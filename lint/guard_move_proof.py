@@ -54,6 +54,9 @@ Limits, what stays unchecked:
   expression counts as run, and a `try:` that catches the NameError still fails.
 - A `global X` in a unit that stayed behind counts X as defined in its module, so a read of X that moved out of
   that module is not seen when the staying unit declares it.
+- A moved `def f(x: Later)` whose `Later` stays behind fails rule 3: on Python 3.14+ the annotation scope is read
+  there, though the annotation is deferred. It fails closed; guard code annotates only with builtins. On 3.13 and
+  older an annotation is an import-time read (rule 4); on 3.14+ it is not.
 - `_FAMILY_MODULES` is read only as a plain tuple or list of strings; any other form fails.
 
 Exit 0 on PASS, 1 on FAIL, 2 when a ref or a guard file cannot be read, or `symtable` refuses one (printed as `unknown: ...`, never as a verdict).
@@ -83,6 +86,10 @@ COMPREHENSION_SCOPES = {"listcomp", "dictcomp", "setcomp", "genexpr"}
 LOAD_MARKER = "_loading"  # the name guard.py's load block assigns before each import step
 MODULE_DUNDERS = {"__name__", "__file__", "__doc__", "__package__", "__spec__", "__loader__", "__builtins__",
                   "__cached__", "__class__", "__module__", "__qualname__"}
+# Names `symtable` adds that no source writes. Python 3.14+ puts `__conditional_annotations__` in a module or class
+# scope that holds an annotated assignment; a survey of 3.14 and 3.15 found no other global read of this kind (the
+# annotation scope's `.format` and `__classdict__` are not global).
+COMPILER_MADE_READS = {"__conditional_annotations__"}
 
 
 class Unreadable(Exception):
@@ -387,7 +394,8 @@ def runs_at_import(table):
 
 def global_reads(node, label, import_time=False):
     """Global names that the statement `node` reads. An augmented assignment reads its target. With `import_time`,
-    only the reads that run when the statement does: no def or lambda body."""
+    only the reads that run when the statement does: no def or lambda body. A name the compiler made is no read,
+    unless the source itself names it."""
     out = set()
 
     def walk(table, top):
@@ -409,7 +417,8 @@ def global_reads(node, label, import_time=False):
     for aug in scoped.found:
         if isinstance(aug.target, ast.Name):
             out.add(aug.target.id)
-    return out
+    written = {inner.id for inner in ast.walk(node) if isinstance(inner, ast.Name)}
+    return out - (COMPILER_MADE_READS - written)
 
 
 def global_declarations(node):
