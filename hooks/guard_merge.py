@@ -591,19 +591,36 @@ def ready_page_hit(tool: str, tool_input: dict, command: str, where: str):
 # is out of reach. The merge tool's own pushes run as subprocesses no hook sees; a segment that runs the tool is skipped.
 # Cost: only a call that holds a `git push` reads GitHub, and only in a repo that uses the merge tool. Per such
 # push: one open-pull-request list read (a draft, no pull request or another branch ends there), and, when a ready pull request
-# holds the branch, one read of its head's check runs. Two gh calls at most, one deadline each. No other tool call reads anything.
+# holds the branch, one read of its head's check runs. Each read pages by 100 (host.pages: one gh call per 100 items), so a
+# repo with 100 open pull requests or fewer, and a head with 100 check runs or fewer, costs two gh calls; one deadline each
+# read. No other tool call reads anything.
 READY_PUSH_RED = ("failure", "timed_out", "startup_failure")  # a check run conclusion that is a red job; cancelled and skipped are not
 READY_PUSH_LIST_SECONDS = 10  # the list read's share of the hook's budget; head_read keeps its own MERGE_READ_TIMEOUT
 READY_PUSH_REASON = (
     "Rule (Git, one CI run per pull request): this push goes to the branch of #%s, a ready pull request whose CI run is %s. "
     "A push cancels that run, and the merge needs the run to finish on this head. "
-    "Remedy: wait for the run to finish. To push before then, return the pull request to draft with `gh pr ready --undo %s`, "
-    "push, and mark it ready again with the merge tool. When the run has a red job, a push may go ahead and fix it. "
+    "Remedy: %s "
+    "When the run has a red job, a push may go ahead and fix it. "
     "(decision standing-merge-grant, a ready pull request takes no push; owner ruling 13:05 CST Nov 23, 2026) "
     + COMPLY_TAIL
 )
+READY_PUSH_REMEDY_PENDING = "wait for the run to finish. To push before then, %s, push, and mark it ready again with the merge tool."
+READY_PUSH_REMEDY_GREEN = (
+    "the run has finished green, so there is nothing to wait for: merge this head with the merge tool. "
+    "To push first, %s, push, and mark it ready again with the merge tool; the push starts a new run."
+)
 READY_PUSH_WARNING = "ready-pr-push: the pull request list read failed (%s), so the push is allowed unchecked (decision standing-merge-grant)"
 READY_PUSH_PIN_WARNING = "ready-pr-push: %s, so the push was judged as under the protection pin (decision standing-merge-grant)"
+
+
+def ready_push_remedy(number, verdict: str) -> str:
+    """The remedy text for a push refused in state `verdict` ("pending" or "green"). The way back to draft is the one the merge
+    tool takes (Host.to_draft): a cloud session is refused `gh pr ready --undo` (GraphQL, HTTP 403), so it gets the merge tool's
+    own DRAFT_ROUTES text; a computer gets the command."""
+    module = merge_module()
+    routes = getattr(module, "DRAFT_ROUTES", None) if is_cloud() else None
+    way = "return the pull request to draft (%s)" % routes if routes else "return the pull request to draft with `gh pr ready --undo %s`" % number
+    return (READY_PUSH_REMEDY_PENDING if verdict == "pending" else READY_PUSH_REMEDY_GREEN) % way
 
 
 def _ready_push_branches(args, where: str, overrides):
@@ -649,7 +666,7 @@ def ready_push_hit(stripped: str, cwd: str, read_verb):
                             warning = ("warn", READY_PUSH_WARNING % cap_safe(detail, 120), "")
                     elif verdict != "red":
                         state = "running or queued" if verdict == "pending" else "finished green"
-                        return "deny", READY_PUSH_REASON % (number, state, number), "push to ready #%d" % number
+                        return "deny", READY_PUSH_REASON % (number, state, ready_push_remedy(number, verdict)), "push to ready #%d" % number
     if pin_warning:
         return ("warn", warning[1] + "; " + pin_warning, "") if warning else ("warn", pin_warning, "")
     return warning
