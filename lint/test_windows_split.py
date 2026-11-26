@@ -890,18 +890,16 @@ def scope_condition_step_problems(name, job, scope_condition):
 
 def draft_guard_only(expr):
     """True when a job-level `if:` holds only the draft guard (ci-hygiene steps 11 and 19): it skips a draft PR, runs on a
-    ready PR and on push, and reads no scope flag, so its answer does not change with the flags. Any other expression is False.
+    ready PR and on push, and reads no scope flag. Each row is checked with both flag values, so the guard joined to a flag with
+    OR or AND is no draft guard alone. Any other expression is False.
     It also reads no other job's output: the answer must match for every skip value (SKIP_VALUES)."""
     e = unwrap(expr)
     if not e:
         return False
     try:
-        return all(eval_if(e, event, flag, draft=draft, nightly_skip=nightly_skip) == want for nightly_skip in SKIP_VALUES for event, flag, draft, want in (
-            ("pull_request", "false", True, False),
-            ("pull_request", "false", False, True),
-            ("pull_request", "true", False, True),
-            ("push", "false", False, True),
-            ("push", "true", False, True)))
+        return all(eval_if(e, event, flag, draft=draft, nightly_skip=nightly_skip) == want
+                   for nightly_skip in SKIP_VALUES for flag in ("true", "false")
+                   for event, draft, want in (("pull_request", True, False), ("pull_request", False, True), ("push", False, True)))
     except Exception:
         return False
 
@@ -2352,14 +2350,15 @@ def macos_daily_problems(text):
 
 
 def skip_job_problems(text):
-    """R61 part 3: the nightly skip job is an ubuntu job with no job-level if, so it runs on every event: a skipped one would skip every
+    """R61 part 3, cut 5 (lane draft-run-starts-no-job): the nightly skip job is an ubuntu job whose job-level if is no if, or the draft
+    guard alone (draft_guard_only). Any other if is refused: a skip job that a push, a pull request or a schedule skips would skip every
     job behind scope, since a skipped ancestor skips a job whose own if holds no status function. It reads no flag and needs no other job."""
     nightly_skip = all_jobs(text).get(NIGHTLY_SKIP_JOB)
     if nightly_skip is None:
         return [f"no {NIGHTLY_SKIP_JOB} job: a scheduled run has nothing to read"]
     problems = []
-    if nightly_skip["if"] is not None:
-        problems.append(f"{NIGHTLY_SKIP_JOB} if is {nightly_skip['if']}, want none: if it is skipped, every job behind scope skips")
+    if nightly_skip["if"] is not None and not draft_guard_only(nightly_skip["if"]):
+        problems.append(f"{NIGHTLY_SKIP_JOB} if is {nightly_skip['if']}, want none or the draft guard alone: if it is skipped elsewhere, every job behind scope skips")
     if not (nightly_skip["os"] or "").startswith("ubuntu"):
         problems.append(f"{NIGHTLY_SKIP_JOB} runs on {nightly_skip['os']}, want ubuntu")
     return problems
