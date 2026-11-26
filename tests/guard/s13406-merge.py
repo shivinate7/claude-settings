@@ -1658,6 +1658,41 @@ FIXTURELESS_CHECKS.update((cmk_cost_control_case, cmk_cost_add_commit_case, cmk_
                            cmk_cost_commit_case))  # each builds only the clean repo it runs
 
 
+# The own-tags check (guard_merge, _tags_name_lane_merge_repo) holds the lane merge role for a cs-repo tag that names
+# LANE_MERGE_REPO. The repo moved to the swlshiv org, so a tag naming either owner's claude-settings holds it, and
+# another owner's claude-settings does not. The probe imports the module as the guard does, in a child process.
+LANE_REPO_PROBE = r'''
+import json, sys
+sys.path.insert(0, sys.argv[1])
+import guard_merge
+print(json.dumps(bool(guard_merge._tags_name_lane_merge_repo(json.loads(sys.argv[2])))))
+'''
+
+
+def _lane_repo_tags_check(name, tags_json, want):
+    """The own-tags check's printed answer for the tags in `tags_json` is `want`, "true" or "false"."""
+    done = subprocess.run([sys.executable, "-c", LANE_REPO_PROBE, os.path.dirname(GUARD), tags_json],
+                          capture_output=True, text=True, timeout=60)
+    if done.returncode != 0:
+        return False, "%s: the probe failed: exit %d, error %r" % (name, done.returncode, done.stderr.strip()[-200:])
+    return done.stdout.strip() == want, "%s: the own-tags check printed %s, want %s" % (name, done.stdout.strip(), want)
+
+
+def lane_repo_org_tag_case():
+    return _lane_repo_tags_check("lane-repo-org-tag", '["cs-build:lane", "cs-repo:swlshiv/claude-settings"]', "true")
+
+
+def lane_repo_old_tag_case():
+    return _lane_repo_tags_check("lane-repo-old-tag", '["cs-build:lane", "cs-repo:shivinate7/claude-settings"]', "true")
+
+
+def lane_repo_other_owner_case():
+    return _lane_repo_tags_check("lane-repo-other-owner", '["cs-build:lane", "cs-repo:someoneelse/claude-settings"]', "false")
+
+
+# The three own-tags cases are registered at the end of section 29942: LOG_CHECKS_EXTRA exists only from section 21304 on.
+
+
 # =========================================================================== 5f. the trust card in a cs-build session
 #
 # Rule trust-card-in-build, decision session-tiers. A session whose own newest get_session record carries a

@@ -261,3 +261,12 @@ def strip_redirections_case():
 
 LOG_CHECKS_EXTRA.append(("merge-confirm-repo: strip_redirections keeps quoted text and cuts only the unquoted redirect",
                          strip_redirections_case))
+
+# The own-tags cases of section 13406: the lane merge repo's cs-repo tag names either owner, not another owner's repo.
+for _label, _check in (
+        ("merge-lane-repo: a cs-repo tag naming swlshiv/claude-settings holds the lane merge role", lane_repo_org_tag_case),
+        ("merge-lane-repo: a cs-repo tag naming shivinate7/claude-settings holds the lane merge role", lane_repo_old_tag_case),
+        ("merge-lane-repo: a cs-repo tag naming someoneelse/claude-settings holds no lane merge role",
+         lane_repo_other_owner_case)):
+    FIXTURELESS_CHECKS.add(_check)
+    LOG_CHECKS_EXTRA.append((_label, _check))

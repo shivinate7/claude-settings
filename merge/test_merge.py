@@ -19492,6 +19492,15 @@ class LaneOwnMerge(CloudSession):
         self.assertTrue(self.host.merged, "a lane's confirm on its own ready pull request did not merge: " + out + err)
         self.assertNotIn("Traceback", err)
 
+    def test_a_lane_merges_its_own_ready_pull_request_in_the_org_claude_settings(self):
+        # The repo moved to the swlshiv org. A lane's own ready pull request there must merge as it does in the old repo.
+        self.assert_role_file()
+        self.host.repo = "swlshiv/claude-settings"
+        rc, out, err = self.run_main("7", "--confirm", "--head", self.head())
+        self.assertEqual(rc, 0, "a lane's confirm on its own ready pull request in swlshiv/claude-settings was refused: " + out + err)
+        self.assertTrue(self.host.merged, "a lane's confirm in swlshiv/claude-settings did not merge: " + out + err)
+        self.assertNotIn("Traceback", err)
+
     def test_a_lane_merges_a_pull_request_whose_head_is_its_lane_branch(self):
         self.assert_role_file()
         self.push_branch("lane/feat")

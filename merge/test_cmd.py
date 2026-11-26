@@ -31,7 +31,8 @@ class Launcher(unittest.TestCase):
         return subprocess.run(LAUNCHER + list(args), env=env, capture_output=True, text=True, timeout=60)
 
     def origin(self, url):
-        subprocess.run(["git", "-C", self.co, "remote", "add", "origin", url], check=True)
+        # Sets the origin whether or not a case has added one yet.
+        subprocess.run(["git", "-C", self.co, "config", "remote.origin.url", url], check=True)
 
     def test_near_match_origins_stop_before_any_run(self):
         # Another owner and another repo (the wrong origin), owner swapped, repo swapped, and names that only start or end like the real one.
@@ -51,17 +52,13 @@ class Launcher(unittest.TestCase):
                 self.assertIn("is not a checkout of shivinate7/claude-settings", r.stderr, url)
                 self.assertNotIn("ARGS", r.stdout, url)
 
-    def point_origin(self, url):
-        # Sets the origin whether or not a case has added one yet.
-        subprocess.run(["git", "-C", self.co, "config", "remote.origin.url", url], check=True)
-
     def test_owner_moved_origins_pass_through(self):
         # The repo moved to the swlshiv org: its https and ssh forms must pass the origin check.
         for url in ("https://github.com/swlshiv/claude-settings",
                     "https://github.com/swlshiv/claude-settings.git",
                     "git@github.com:swlshiv/claude-settings.git"):
             with self.subTest(url=url):
-                self.point_origin(url)
+                self.origin(url)
                 r = self.run_launcher("12", "--confirm")
                 self.assertEqual(r.returncode, 7, url + r.stdout + r.stderr)
                 self.assertIn("ARGS", r.stdout, url)
@@ -71,7 +68,7 @@ class Launcher(unittest.TestCase):
         for url in ("https://github.com/shivinate7/claude-settings",
                     "git@github.com:shivinate7/claude-settings.git"):
             with self.subTest(url=url):
-                self.point_origin(url)
+                self.origin(url)
                 r = self.run_launcher("12", "--confirm")
                 self.assertEqual(r.returncode, 7, url + r.stdout + r.stderr)
                 self.assertIn("ARGS", r.stdout, url)
@@ -80,7 +77,7 @@ class Launcher(unittest.TestCase):
         for url in ("https://github.com/someoneelse/claude-settings",
                     "git@github.com:someoneelse/claude-settings.git"):
             with self.subTest(url=url):
-                self.point_origin(url)
+                self.origin(url)
                 r = self.run_launcher("12", "--confirm")
                 self.assertEqual(r.returncode, 1, url + r.stdout + r.stderr)
                 self.assertNotIn("ARGS", r.stdout, url)
