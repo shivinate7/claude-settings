@@ -7,6 +7,7 @@ session_start.sh` with the session payload on stdin. Stdlib only. Exit 0 on PASS
     python hooks/test_session_start.py
 """
 import hashlib
+import importlib.util
 import json
 import os
 import re
@@ -1269,6 +1270,18 @@ MAIN_PAGE = "<!doctype html>\n<title>Queue</title>\n"
 OLDER_PAGE = "<!doctype html>\n<title>Queue, older</title>\n"
 
 
+def freshness_unknown_line(url):
+    """The line session start prints for a page with neither stamp, from the one constant in the skill's script."""
+    path = os.path.join(HERE, "..", "skills", "waiting-page", "stale_pages.py")
+    folder = os.path.dirname(path)
+    if folder not in sys.path:
+        sys.path.insert(0, folder)  # the script imports splice from its own folder
+    spec = importlib.util.spec_from_file_location("stale_pages_for_session_start", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.FRESHNESS_UNKNOWN_LINE % url
+
+
 class SessionStartWaitingPageTests(SessionStartAgentWorktreeNoticeTests):
     """The session-start line for a waiting page built from a page other than main's (rule page-stale)."""
 
@@ -1324,9 +1337,8 @@ class SessionStartWaitingPageTests(SessionStartAgentWorktreeNoticeTests):
     def test_no_page_built_record_prints_freshness_unknown_line_with_the_url(self):
         hits = self.waiting_lines(self.run_checked())
         self.assertEqual(len(hits), 1, "expected one waiting page line, got %r" % hits)
-        self.assertIn(WAITING_URL, hits[0], "the waiting page line does not name the page's url: %r" % hits[0])
-        self.assertIn("freshness unknown", hits[0], "the waiting page line does not say freshness unknown: %r" % hits[0])
-        self.assertIn("no page-built stamp", hits[0], "the waiting page line does not say no page-built stamp: %r" % hits[0])
+        self.assertEqual(hits[0], freshness_unknown_line(WAITING_URL),
+                         "the waiting page line is not the freshness-unknown line: %r" % hits[0])
 
     def test_no_page_built_record_and_no_page_url_prints_no_page_line(self):
         os.remove(os.path.join(self.primary, ".claude", "layout-extras.json"))

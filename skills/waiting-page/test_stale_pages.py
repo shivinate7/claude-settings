@@ -3728,9 +3728,6 @@ class SessionLine(unittest.TestCase):
     # record texts the reader counts as missing: not JSON, no blob key, and a blob that is not 40-hex
     UNREADABLE = (("unparseable", "{not json"), ("no-blob-key", json.dumps({"at": "2026-11-15T00:00:00Z"})),
                   ("short-blob", json.dumps({"blob": "abc123", "at": "2026-11-15T00:00:00Z"})))
-    # the line for a page with neither stamp: "waiting page <url>: freshness unknown, no page-built stamp" (decision page-stale-publish)
-    UNKNOWN = "freshness unknown"
-    NO_BUILD_FILE = "no page-built stamp"
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory(dir=RUN_FOLDER)  # test-temp-standard: never the system temp dir
@@ -3784,9 +3781,8 @@ class SessionLine(unittest.TestCase):
         self.assert_clean(r)
         lines = r.stdout.splitlines()
         self.assertEqual(len(lines), 1, "want one freshness line when neither stamp exists:\n" + r.stdout)
-        self.assertIn(self.UNKNOWN, lines[0], "the line does not say freshness unknown: " + lines[0])
-        self.assertIn(self.NO_BUILD_FILE, lines[0], "the line does not say there is no page-built stamp: " + lines[0])
-        self.assertIn(URL % "sspage", lines[0], "the line does not name the page's url: " + lines[0])
+        want = load_stale_pages().FRESHNESS_UNKNOWN_LINE % (URL % "sspage")  # the script's one constant, never a copy
+        self.assertEqual(lines[0], want, "the line is not the freshness-unknown line: " + lines[0])
 
     def test_1_a_record_equal_to_main_prints_nothing_even_over_a_stale_local_stamp(self):
         root = self.root()
