@@ -15,6 +15,7 @@ import ctypes  # the Windows-branch test patches os.name; ctypes' own import wou
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import merge  # noqa: E402
+import combine_train  # noqa: E402  the build's member set, batch_rows (one home: merge/combine_train.py); the batch hint's set is checked against it
 sys.path.append(os.path.join(HERE, "..", "janitor"))  # noqa: E402  janitor/sweep.py: the one sweep a confirm runs after a merge
 import sweep  # noqa: E402
 from required_check import REQUIRED_CHECK  # noqa: E402  the one home of the required check's name (hooks/required_check.py)
@@ -298,6 +299,14 @@ class FakeHost:
         if self.draft_rows is None:
             return "pass", []
         return DraftRunReads(self.draft_rows, self.draft_reads).draft_run_state(sha)
+
+    queue_depth, queue_error, queue_reads = 0, None, 0  # queued_runs reports queue_depth, or raises queue_error; queue_reads counts each read
+
+    def queued_runs(self):  # the fake of Host.queued_runs: one read of the repo's queued CI run count
+        self.queue_reads += 1
+        if self.queue_error is not None:
+            raise self.queue_error
+        return self.queue_depth
 
 DRAFT_RUN = 4300  # the run id that a draft's lane-touched-tests rows link to
 
@@ -6261,15 +6270,16 @@ class GhHalf(Env):
         self.assertIn("a check is pending: checks", out)
         self.assertNotIn(MERGE_CALL, self.calls())
 
-    def test_no_config_a_clean_main_merge_whose_proven_parent_is_red_refuses(self):
-        # Ruling R1 (owner, 10:49 CST Nov 23, 2026): the clean main merge rides the proof of its parent, so a red parent refuses it before any merge call.
+    def test_no_config_a_clean_main_merge_over_a_red_parent_merges_on_its_own_green_run(self):
+        # Owner, typed in the consultant's chat, 20:31 CST Nov 25, 2026: "Q-A (a) approved, knowing it reverses R1 (10:49 Nov 23) for the case of a red older
+        # lane commit under a green, fully run live head." Decision merge-needs-current-base. Re-pointed from the refusal that R1 named: the live head's own
+        # green run is the proof, because that run ran its checks job, so the red parent no longer refuses it.
         drop_config(self)
         self.proven_parent(rows=[("checks", "fail", "")])  # the parent's run is red
-        self.set(contexts=["checks"], checks_seq=[[("checks", "pass", "")]])  # the merge's own run reads green, so only the parent can refuse it
+        self.set(contexts=["checks"], checks_seq=[[("checks", "pass", "")]])  # the merge's own run reads green and ran its checks job
         rc, out = self.go(required="protection")
-        self.assertEqual(rc, 1, out)
-        self.assertNotIn(MERGE_CALL, self.calls(), "merged a clean main merge on a red proven parent:\n" + out)
-        self.assertIn("red: checks", out, "the refusal does not name the red check of the proven parent:\n" + out)
+        self.assertEqual(rc, 0, "a red parent refused a green, fully run live head:\n" + out)
+        self.assertIn(MERGE_CALL, self.calls(), "the merge call was not sent:\n" + out)
 
     def test_no_config_never_runs_stamp(self):
         drop_config(self)
@@ -7082,7 +7092,7 @@ class SupersededRuns(Env):
 
 class CancelledProofReadsLiveHead(Env):
     """A proven head whose runs were cancelled with no failed job reads like a pending one, so the live head's own green run is the proof. A failed job
-    still refuses. The shape: the tool's clean merge of main on a lane commit, whose runs the lane's next push cancelled (concurrency
+    under it merges too when that run ran its checks job (decision merge-needs-current-base). The shape: the tool's clean merge of main on a lane commit, whose runs the lane's next push cancelled (concurrency
     cancel-in-progress), and whose own run is green. The fake gh serves each head's rows and runs, so classify, judge_runs and head_state read the
     state strings the real code reads. Not a GhHalf subclass: the GhHalf tests must not run twice."""
     set, calls, gh_host, go, proven_parent = GhHalf.set, GhHalf.calls, GhHalf.gh_host, GhHalf.go, GhHalf.proven_parent
@@ -7109,6 +7119,18 @@ class CancelledProofReadsLiveHead(Env):
         self.assertEqual(rc, 1, out)
         self.assertNotIn(MERGE_CALL, self.calls(), "the merge call was sent:\n" + out)
         self.assertEqual(self.refs(), before, "pushed on a refused merge:\n" + out)
+
+    def refused_under_a_red_live_run(self, proven_rows, proven_runs):
+        """Control: a red own run of the live head is never covered by a failed proof under it, whichever row failed under the proof."""
+        proven, live = self.merged_over_lane_commit(
+            proven_rows=proven_rows, proven_runs=proven_runs,
+            live_rows=[("checks", "fail", job_link(NEW_RUN, 201))],
+            live_runs=[("checks", "completed", "failure", NEW_RUN)])
+        self.assertTrue(self.gh_host().head_state(7, live).startswith("red: "), "scope: the live head is not red")
+        before = self.refs()
+        rc, out = self.go()
+        self.assert_refused_unmerged(rc, out, before)
+        self.assertEqual(self.paused, [], "waited on the live head's red run instead of refusing:\n" + out)
 
     def head_state_in_checkout(self, host, n, sha):
         """head_state read in the checkout the run reads its caps from (run_once changes into it), so a scope read sees the same workflow files."""
@@ -7152,8 +7174,10 @@ class CancelledProofReadsLiveHead(Env):
         self.assertIn(MERGE_CALL, self.calls(), "the merge call was not sent:\n" + out)
         self.assertEqual(self.paused, [], "waited instead of merging on the live head's own green run:\n" + out)
 
-    def test_a_failed_job_under_a_cancelled_proof_refuses_control(self):
-        # Control, passes on today's code and after the fix: a failed job on the proven head is red, so the live head's green run does not prove it.
+    def test_a_failed_job_under_a_cancelled_proof_merges_on_a_live_run_that_ran_its_checks(self):
+        # Owner, typed in the consultant's chat, 20:31 CST Nov 25, 2026: "Q-A (a) approved, knowing it reverses R1 (10:49 Nov 23) for the case of a red older
+        # lane commit under a green, fully run live head." Decision merge-needs-current-base. Re-pointed from the refusal this test expected: the proven
+        # head's failed job no longer refuses when the live head's own green run ran its checks job.
         proven, live = self.merged_over_lane_commit(
             proven_rows=[("checks", "cancel", job_link(OLD_RUN, 101)), ("lint", "fail", job_link(OLD_RUN, 102))],
             proven_runs=[("checks", "completed", "cancelled", OLD_RUN)],
@@ -7162,10 +7186,10 @@ class CancelledProofReadsLiveHead(Env):
         host = self.gh_host()
         self.assertIn("lint: fail", host.head_state(7, proven), "scope: the proven head does not read its failed job")
         self.assertEqual(host.head_state(7, live), "green", "scope: the live head is not green")
-        before = self.refs()
         rc, out = self.go()
-        self.assert_refused_unmerged(rc, out, before)
-        self.assertIn("lint: fail", out, "the refusal does not name the failed job of the proven head:\n" + out)
+        self.assertEqual(rc, 0, "a red older lane commit under a green, fully run live head did not merge:\n" + out)
+        self.assertIn(MERGE_CALL, self.calls(), "the merge call was not sent:\n" + out)
+        self.assertEqual(self.paused, [], "waited instead of merging on the live head's own green run:\n" + out)
 
     def test_a_cancelled_proof_under_a_pending_live_run_refuses_control(self):
         # Control, passes on today's code and after the fix: the live head's own run is pending, so nothing is proven, and the refusal does not wait.
@@ -7240,9 +7264,11 @@ class CancelledProofReadsLiveHead(Env):
         rc, out = self.go()
         self.assert_refused_unmerged(rc, out, before)
 
-    # ---- the refusals of a cancel-only proof: each case states "the merge is REFUSED" with the live head's own run green
+    # ---- a failed row under a cancel-only proof: the live head's own green run that ran its checks job is the proof (owner, 20:31 CST Nov 25, 2026)
 
-    def test_a_failed_row_named_like_a_cancel_entry_beside_cancelled_rows_refuses(self):
+    def test_a_failed_row_named_like_a_cancel_entry_beside_cancelled_rows_merges_on_a_live_run_that_ran_its_checks(self):
+        """Owner, typed 20:31 CST Nov 25, 2026: "Q-A (a) approved, knowing it reverses R1 (10:49 Nov 23) for the case of a red older lane commit under a green,
+        fully run live head." Decision merge-needs-current-base. Re-pointed from the refusal this test expected: the live head's checks job passed."""
         # The failed job is named "deploy: cancel", so its entry holds the cancel text but is a failure: the cancel shape must match the whole entry.
         proven, live = self.merged_over_lane_commit(
             proven_rows=[("deploy: cancel", "fail", job_link(OLD_RUN, 103)), ("checks", "cancel", job_link(OLD_RUN, 101))],
@@ -7253,10 +7279,17 @@ class CancelledProofReadsLiveHead(Env):
         state = host.head_state(7, proven)  # scope first: the proven head reads its failed job, and the live head reads green
         self.assertTrue(state.startswith("red: ") and "deploy: cancel: fail" in state, "scope: the proven head does not read its failed job: " + state)
         self.assertEqual(host.head_state(7, live), "green", "scope: the live head is not green")
-        before = self.refs()
         rc, out = self.go()
-        self.assert_refused_unmerged(rc, out, before)
-        self.assertIn("deploy: cancel: fail", out, "the refusal does not name the failed job of the proven head:\n" + out)
+        self.assertEqual(rc, 0, "a failed row named like a cancel entry under a green, fully run live head did not merge:\n" + out)
+        self.assertIn(MERGE_CALL, self.calls(), "the merge call was not sent:\n" + out)
+        self.assertEqual(self.paused, [], "waited instead of merging on the live head's own green run:\n" + out)
+        self.assertIn("deploy: cancel: fail", out, "the merge does not name the failed job of the proven head, so it was not read as a failure:\n" + out)
+
+    def test_a_failed_row_named_like_a_cancel_entry_under_a_red_live_run_refuses_control(self):
+        # Control, passes on today's code and after the fix: the live head's own run is red, so the failed proof under it is not covered.
+        self.refused_under_a_red_live_run(
+            proven_rows=[("deploy: cancel", "fail", job_link(OLD_RUN, 103)), ("checks", "cancel", job_link(OLD_RUN, 101))],
+            proven_runs=[("checks", "completed", "cancelled", OLD_RUN)])
 
     def test_an_earlier_failed_attempt_of_a_cancelled_proof_refuses(self):
         # The latest rows of the proven commit are cancel-only: the next push cancelled the re-run of `checks`. Its first attempt failed, and only the
@@ -7292,7 +7325,9 @@ class CancelledProofReadsLiveHead(Env):
         self.assertIn(MERGE_CALL, self.calls(), "the merge call was not sent:\n" + out)
         self.assertEqual(self.paused, [], "waited instead of merging on the live head's own green run:\n" + out)
 
-    def test_a_timed_out_run_beside_cancelled_rows_refuses(self):
+    def test_a_timed_out_run_beside_cancelled_rows_merges_on_a_live_run_that_ran_its_checks(self):
+        # Owner, typed in the consultant's chat, 20:31 CST Nov 25, 2026: "Q-A (a) approved, knowing it reverses R1 (10:49 Nov 23) for the case of a red older
+        # lane commit under a green, fully run live head." Decision merge-needs-current-base. Re-pointed from the refusal this test expected.
         proven, live = self.merged_over_lane_commit(
             proven_rows=[("checks", "cancel", job_link(OLD_RUN, 101)), ("lint", "cancel", job_link(OLD_RUN, 102))],
             proven_runs=[("checks", "completed", "timed_out", OLD_RUN)],
@@ -7302,12 +7337,14 @@ class CancelledProofReadsLiveHead(Env):
         state = host.head_state(7, proven)  # scope first: the proven head reads its timed-out run, and the live head reads green
         self.assertTrue(state.startswith("red: ") and "workflow checks: timed_out" in state, "scope: the proven head does not read its timed-out run: " + state)
         self.assertEqual(host.head_state(7, live), "green", "scope: the live head is not green")
-        before = self.refs()
         rc, out = self.go()
-        self.assert_refused_unmerged(rc, out, before)
-        self.assertIn("workflow checks: timed_out", out, "the refusal does not name the timed-out run of the proven head:\n" + out)
+        self.assertEqual(rc, 0, "a timed-out older run under a green, fully run live head did not merge:\n" + out)
+        self.assertIn(MERGE_CALL, self.calls(), "the merge call was not sent:\n" + out)
+        self.assertEqual(self.paused, [], "waited instead of merging on the live head's own green run:\n" + out)
 
-    def test_a_startup_failure_run_beside_cancelled_rows_refuses(self):
+    def test_a_startup_failure_run_beside_cancelled_rows_merges_on_a_live_run_that_ran_its_checks(self):
+        # Owner, typed in the consultant's chat, 20:31 CST Nov 25, 2026: "Q-A (a) approved, knowing it reverses R1 (10:49 Nov 23) for the case of a red older
+        # lane commit under a green, fully run live head." Decision merge-needs-current-base. Re-pointed from the refusal this test expected.
         proven, live = self.merged_over_lane_commit(
             proven_rows=[("checks", "cancel", job_link(OLD_RUN, 101)), ("lint", "cancel", job_link(OLD_RUN, 102))],
             proven_runs=[("checks", "completed", "startup_failure", OLD_RUN)],
@@ -7317,12 +7354,14 @@ class CancelledProofReadsLiveHead(Env):
         state = host.head_state(7, proven)  # scope first: the proven head reads its startup failure, and the live head reads green
         self.assertTrue(state.startswith("red: ") and "workflow checks: startup_failure" in state, "scope: the proven head does not read its startup failure: " + state)
         self.assertEqual(host.head_state(7, live), "green", "scope: the live head is not green")
-        before = self.refs()
         rc, out = self.go()
-        self.assert_refused_unmerged(rc, out, before)
-        self.assertIn("workflow checks: startup_failure", out, "the refusal does not name the startup failure of the proven head:\n" + out)
+        self.assertEqual(rc, 0, "a startup-failed older run under a green, fully run live head did not merge:\n" + out)
+        self.assertIn(MERGE_CALL, self.calls(), "the merge call was not sent:\n" + out)
+        self.assertEqual(self.paused, [], "waited instead of merging on the live head's own green run:\n" + out)
 
-    def test_a_cancelled_row_and_a_failed_row_of_one_check_name_refuses(self):
+    def test_a_cancelled_row_and_a_failed_row_of_one_check_name_merges_on_a_live_run_that_ran_its_checks(self):
+        """Owner, typed 20:31 CST Nov 25, 2026: "Q-A (a) approved, knowing it reverses R1 (10:49 Nov 23) for the case of a red older lane commit under a green,
+        fully run live head." Decision merge-needs-current-base. Re-pointed from the refusal this test expected: the live head's checks job passed."""
         proven, live = self.merged_over_lane_commit(
             proven_rows=[("checks", "cancel", job_link(OLD_RUN, 101)), ("checks", "fail", job_link(OLD_RUN, 102))],
             proven_runs=[("checks", "completed", "cancelled", OLD_RUN)],
@@ -7332,12 +7371,21 @@ class CancelledProofReadsLiveHead(Env):
         state = host.head_state(7, proven)  # scope first: the proven head reads its failed row, and the live head reads green
         self.assertTrue(state.startswith("red: ") and "checks: fail" in state, "scope: the proven head does not read its failed row: " + state)
         self.assertEqual(host.head_state(7, live), "green", "scope: the live head is not green")
-        before = self.refs()
         rc, out = self.go()
-        self.assert_refused_unmerged(rc, out, before)
-        self.assertIn("checks: fail", out, "the refusal does not name the failed row of the proven head:\n" + out)
+        self.assertEqual(rc, 0, "a cancelled row and a failed row of one check name under a green, fully run live head did not merge:\n" + out)
+        self.assertIn(MERGE_CALL, self.calls(), "the merge call was not sent:\n" + out)
+        self.assertEqual(self.paused, [], "waited instead of merging on the live head's own green run:\n" + out)
+        self.assertIn("checks: fail", out, "the merge does not name the failed row of the proven head, so it was not read as a failure:\n" + out)
 
-    def test_a_failed_row_on_page_two_of_a_48_row_proof_refuses(self):
+    def test_a_cancelled_row_and_a_failed_row_of_one_check_name_under_a_red_live_run_refuses_control(self):
+        # Control, passes on today's code and after the fix: the live head's own run is red, so the failed proof under it is not covered.
+        self.refused_under_a_red_live_run(
+            proven_rows=[("checks", "cancel", job_link(OLD_RUN, 101)), ("checks", "fail", job_link(OLD_RUN, 102))],
+            proven_runs=[("checks", "completed", "cancelled", OLD_RUN)])
+
+    def test_a_failed_row_on_page_two_of_a_48_row_proof_merges_on_a_live_run_that_ran_its_checks(self):
+        """Owner, typed 20:31 CST Nov 25, 2026: "Q-A (a) approved, knowing it reverses R1 (10:49 Nov 23) for the case of a red older lane commit under a green,
+        fully run live head." Decision merge-needs-current-base. Re-pointed from the refusal this test expected: the live head's checks job passed."""
         # The fake's page_cap of 40 reads the 48 rows in two pages; the one failed row, job48, is the last row, on page 2.
         rows = [(f"job{k:02d}", "cancel", job_link(OLD_RUN, 100 + k)) for k in range(1, 48)] + [("job48", "fail", job_link(OLD_RUN, 148))]
         self.set(page_cap=40)
@@ -7352,12 +7400,22 @@ class CancelledProofReadsLiveHead(Env):
         state = host.head_state(7, proven)
         self.assertTrue(state.startswith("red: ") and "job48: fail" in state, "scope: the proven head does not read its failed row on page 2: " + state)
         self.assertEqual(host.head_state(7, live), "green", "scope: the live head is not green")
-        before = self.refs()
         rc, out = self.go()
-        self.assert_refused_unmerged(rc, out, before)
-        self.assertIn("job48: fail", out, "the refusal does not name the page-two failed row of the proven head:\n" + out)
+        self.assertEqual(rc, 0, "a failed row on page two of a 48-row proof under a green, fully run live head did not merge:\n" + out)
+        self.assertIn(MERGE_CALL, self.calls(), "the merge call was not sent:\n" + out)
+        self.assertEqual(self.paused, [], "waited instead of merging on the live head's own green run:\n" + out)
+        self.assertIn("job48: fail", out, "the merge does not name the page-two failed row of the proven head, so page two was not read:\n" + out)
 
-    def test_a_job_cancelled_at_its_time_cap_refuses(self):
+    def test_a_failed_row_on_page_two_of_a_48_row_proof_under_a_red_live_run_refuses_control(self):
+        # Control, passes on today's code and after the fix: the live head's own run is red, so the failed proof under it is not covered.
+        rows = [(f"job{k:02d}", "cancel", job_link(OLD_RUN, 100 + k)) for k in range(1, 48)] + [("job48", "fail", job_link(OLD_RUN, 148))]
+        self.set(page_cap=40)
+        self.refused_under_a_red_live_run(
+            proven_rows=rows, proven_runs=[("checks", "completed", "cancelled", OLD_RUN)])
+
+    def test_a_job_cancelled_at_its_time_cap_merges_on_a_live_run_that_ran_its_checks(self):
+        # Owner, typed in the consultant's chat, 20:31 CST Nov 25, 2026: "Q-A (a) approved, knowing it reverses R1 (10:49 Nov 23) for the case of a red older
+        # lane commit under a green, fully run live head." Decision merge-needs-current-base. Re-pointed from the refusal this test expected.
         # The cap is read from the workflow file on main: job `checks`, timeout-minutes 50. The cancelled job ran 60 minutes, its full cap and more, so
         # its cancel reads "timed out at its cap", which reads red (checks() says so: "a cancelled check that ran its full cap ... reads red").
         capped = "\n".join(["name: checks", "on: push", "jobs:", "  checks:", "    runs-on: ubuntu-latest", "    timeout-minutes: 50", "    steps:", "      - run: echo ok"]) + "\n"
@@ -7372,10 +7430,118 @@ class CancelledProofReadsLiveHead(Env):
         state = self.head_state_in_checkout(host, 7, proven)  # scope first: the cap is read, so the proven head's cancel reads timed out, and the live head reads green
         self.assertIn("timed out at its 50-minute cap", state, "scope: the cancelled job at its cap does not read as timed out: " + state)
         self.assertEqual(self.head_state_in_checkout(host, 7, live), "green", "scope: the live head is not green")
-        before = self.refs()
         rc, out = self.go()
+        self.assertEqual(rc, 0, "a timed-out older job at its cap under a green, fully run live head did not merge:\n" + out)
+        self.assertIn(MERGE_CALL, self.calls(), "the merge call was not sent:\n" + out)
+        self.assertEqual(self.paused, [], "waited instead of merging on the live head's own green run:\n" + out)
+
+class LiveHeadGreenOverFailedProof(Env):
+    """Owner, typed in the consultant's chat, 20:31 CST Nov 25, 2026: "Q-A (a) approved, knowing it reverses R1 (10:49 Nov 23) for the case of a red older
+    lane commit under a green, fully run live head." Decision merge-needs-current-base. A proven head that failed a job is no barrier when the live head's
+    own run is green and ran its checks job. checks.yml's `checks` job is gated on records_only_skip, so on a records-only run it reads skipping, and that run
+    did not run the jobs its paths reach: it refuses, even with a green rollup. The read is the check rows Host already reads (no new Host read). The helpers
+    are borrowed from CancelledProofReadsLiveHead and GhHalf, so their tests do not run twice."""
+    set, calls, gh_host, go, proven_parent = GhHalf.set, GhHalf.calls, GhHalf.gh_host, GhHalf.go, GhHalf.proven_parent
+    merged_over_lane_commit = CancelledProofReadsLiveHead.merged_over_lane_commit
+    assert_refused_unmerged = CancelledProofReadsLiveHead.assert_refused_unmerged
+
+    def setUp(self):
+        super().setUp()
+        gh_case_setup(self)
+
+    def confirm(self):
+        """The --confirm run with the rollup as the one required check, as on the real repo (decision same-check-kinds)."""
+        return self.go(required=(REQUIRED_CHECK,))
+
+    def failed_proof(self):
+        """The proven head: its checks job failed, so its rollup failed with it."""
+        return [("checks", "fail", job_link(OLD_RUN, 101)), (REQUIRED_CHECK, "fail", job_link(OLD_RUN, 102))]
+
+    def ran_live(self):
+        """The live head's run, green: its scope job passed, its checks job ran and passed, and its rollup passed."""
+        return [(REQUIRED_CHECK, "pass", job_link(NEW_RUN, 203)), ("checks", "pass", job_link(NEW_RUN, 201)), ("scope", "pass", job_link(NEW_RUN, 200))]
+
+    def test_a_failed_proof_under_a_live_run_that_ran_its_checks_merges(self):
+        proven, live = self.merged_over_lane_commit(
+            proven_rows=self.failed_proof(), proven_runs=[("checks", "completed", "failure", OLD_RUN)],
+            live_rows=self.ran_live(), live_runs=[("checks", "completed", "success", NEW_RUN)])
+        host = self.gh_host(required=(REQUIRED_CHECK,))
+        # scope first: the proven head is red by its failed checks job, and the live head's checks job ran and reads green
+        self.assertIn("checks: fail", host.head_state(7, proven), "scope: the proven head does not read its failed checks job: " + host.head_state(7, proven))
+        self.assertEqual(host.checks(7, warn=False, sha=live)["checks"][0][0], "pass", "scope: the live head's checks job did not run")
+        self.assertEqual(host.head_state(7, live), "green", "scope: the live head is not green")
+        rc, out = self.confirm()
+        self.assertEqual(rc, 0, "a failed proof under a live run that ran its checks did not merge:\n" + out)
+        self.assertIn(MERGE_CALL, self.calls(), "the merge call was not sent:\n" + out)
+        self.assertEqual(self.paused, [], "waited instead of merging on the live head's own green run:\n" + out)
+
+    def test_a_failed_proof_under_a_records_only_live_run_refuses_control(self):
+        # Control, passes on today's code and after the fix: a records-only run skips the checks job, so the jobs its paths reach did not run. Its rollup
+        # reads green (scope-skips passes it on records_only_skip), and that green is no proof.
+        proven, live = self.merged_over_lane_commit(
+            proven_rows=self.failed_proof(), proven_runs=[("checks", "completed", "failure", OLD_RUN)],
+            live_rows=[(REQUIRED_CHECK, "pass", job_link(NEW_RUN, 203)), ("checks", "skipping", job_link(NEW_RUN, 201)), ("scope", "pass", job_link(NEW_RUN, 200))],
+            live_runs=[("checks", "completed", "success", NEW_RUN)])
+        host = self.gh_host(required=(REQUIRED_CHECK,))
+        self.assertEqual(host.checks(7, warn=False, sha=live)["checks"][0][0], "skipping", "scope: the live head's checks job ran")
+        self.assertEqual(host.head_state(7, live), "green", "scope: the live head is not green")
+        before = self.refs()
+        rc, out = self.confirm()
         self.assert_refused_unmerged(rc, out, before)
-        self.assertIn("timed out at its 50-minute cap", out, "the refusal does not name the timed-out job of the proven head:\n" + out)
+        self.assertIn("checks: fail", out, "the refusal does not name the proven head's failed checks job:\n" + out)
+
+    def test_a_failed_proof_under_a_live_run_whose_rollup_is_skipped_refuses_control(self):
+        # Control, passes on today's code and after the fix: a skipped rollup and a skipped checks job are a run that ran nothing, not a green proof.
+        proven, live = self.merged_over_lane_commit(
+            proven_rows=self.failed_proof(), proven_runs=[("checks", "completed", "failure", OLD_RUN)],
+            live_rows=[(REQUIRED_CHECK, "skipping", job_link(NEW_RUN, 203)), ("checks", "skipping", job_link(NEW_RUN, 201)), ("scope", "pass", job_link(NEW_RUN, 200))],
+            live_runs=[("checks", "completed", "success", NEW_RUN)])
+        host = self.gh_host(required=(REQUIRED_CHECK,))
+        self.assertEqual(host.checks(7, warn=False, sha=live)["checks"][0][0], "skipping", "scope: the live head's checks job ran")
+        before = self.refs()
+        rc, out = self.confirm()
+        self.assert_refused_unmerged(rc, out, before)
+
+    def test_a_failed_proof_under_a_red_live_run_refuses_control(self):
+        # Control, passes on today's code and after the fix: a red own run of the live head is never covered by the failed proof under it.
+        proven, live = self.merged_over_lane_commit(
+            proven_rows=self.failed_proof(), proven_runs=[("checks", "completed", "failure", OLD_RUN)],
+            live_rows=[(REQUIRED_CHECK, "fail", job_link(NEW_RUN, 203)), ("checks", "fail", job_link(NEW_RUN, 201)), ("scope", "pass", job_link(NEW_RUN, 200))],
+            live_runs=[("checks", "completed", "failure", NEW_RUN)])
+        host = self.gh_host(required=(REQUIRED_CHECK,))
+        self.assertTrue(host.head_state(7, live).startswith("red: "), "scope: the live head is not red: " + host.head_state(7, live))
+        before = self.refs()
+        rc, out = self.confirm()
+        self.assert_refused_unmerged(rc, out, before)
+
+    def test_a_failed_proof_under_a_pending_live_run_refuses_control(self):
+        # Control, passes on today's code and after the fix: a pending own run of the live head is no proof, and the refusal does not wait for it.
+        proven, live = self.merged_over_lane_commit(
+            proven_rows=self.failed_proof(), proven_runs=[("checks", "completed", "failure", OLD_RUN)],
+            live_rows=[(REQUIRED_CHECK, "pending", ""), ("checks", "pending", ""), ("scope", "pass", job_link(NEW_RUN, 200))],
+            live_runs=[("checks", "in_progress", "")])
+        host = self.gh_host(required=(REQUIRED_CHECK,))
+        self.assertTrue(host.head_state(7, live).startswith("pending: "), "scope: the live head is not pending: " + host.head_state(7, live))
+        before = self.refs()
+        rc, out = self.confirm()
+        self.assert_refused_unmerged(rc, out, before)
+        self.assertEqual(self.paused, [], "waited on the live head's pending run instead of refusing:\n" + out)
+
+    def test_a_failed_read_of_the_live_runs_checks_under_a_failed_proof_refuses_control(self):
+        # Control, passes on today's code and after the fix: the live head's check rows did not read, so the run is unknown and the proof is not read as green.
+        # The checks read fails from the second read of a round on (checks_broken), so the proven head's read answers and the live head's read does not.
+        proven, live = self.merged_over_lane_commit(
+            proven_rows=self.failed_proof(), proven_runs=[("checks", "completed", "failure", OLD_RUN)],
+            live_rows=self.ran_live(), live_runs=[("checks", "completed", "success", NEW_RUN)])
+        self.set(n_runs=0, n_status=0, checks_broken=True, broken_from=1)
+        host = self.gh_host(required=(REQUIRED_CHECK,))
+        self.assertTrue(host.head_state(7, proven).startswith("red: "), "scope: the proven head was not read")
+        self.assertTrue(host.head_state(7, live).startswith("unknown ("), "scope: the live head's read did not fail")
+        self.set(n_runs=0, n_status=0)  # the run reads the proven head first, then the live head, as the scope reads did
+        before = self.refs()
+        rc, out = self.confirm()
+        self.assert_refused_unmerged(rc, out, before)
+        self.assertEqual(self.paused, [], "waited on an unread live run instead of refusing:\n" + out)
 
 class RestRoutes(Env):
     """c53: the merge tool reads and merges through the REST API (`gh api`), never GraphQL, which a Claude Code cloud session answers with HTTP 403
@@ -17691,6 +17857,303 @@ class CloudSession(Env):
         """-> run_main of `merge 7 --confirm --head <live head>`: a batch runner's confirm, which names the head its CI ran on
         (decision auto-mode-owner-acts). The head is read when the call is made, so a case that moves feat first reads the moved head."""
         return self.run_main("7", "--confirm", "--head", self.head())
+
+class ReadyList:
+    """A stand-in for merge.reviewed_read, the read a queue hint takes of the ready pull requests. `ready` are the numbers on main whose record passes
+    (act `batch`); `heads` maps a number to its head sha, and a number it lacks gets a made-up one. `calls` counts the reads, so a case proves whether
+    the list was read. This copies test_lane_lint.py's ReviewedRead, which that file cannot share: it imports this module, so an import back is a cycle.
+    One home for both: move ReviewedRead here and have test_lane_lint take tm.ReviewedRead (a test_lane_lint edit)."""
+
+    def __init__(self, ready=(), heads=None):
+        self.ready, self.heads, self.calls = list(ready), dict(heads or {}), 0
+
+    def __call__(self, h, cfgrel=None, facts=None, ledger=None):
+        self.calls += 1
+        ledger.extend({"number": n, "act": "batch", "owner": "batch runner", "ageHours": 1.0, "red": False} for n in self.ready)
+        pulls = [{"number": n, "base": {"ref": "main"}, "head": {"sha": self.heads.get(n, "%040d" % n)}} for n in self.ready]
+        return [], pulls, {}
+
+def batch_hint_lines(text):
+    """The lines a queue hint prints: each one names the queue (the word in any case), so no other message counts as the hint."""
+    return [line for line in text.splitlines() if "queue" in line.lower()]
+
+class ConfirmBatchHint(CloudSession):
+    """The batch hint that `merge <pr> --confirm` and `merge <pr> --ready` print on a ready pull request: one read of the CI queue depth
+    (Host.queued_runs), then one line. The queue depth gates only empty against not empty: an empty queue says the pull request goes alone and
+    reads no ready list. A queue that is not empty reads the ready, reviewed pull requests (merge.reviewed_read) and names the set the build takes:
+    combine_train.batch_rows, the batch rows but the front PR (the lowest number), which merges alone. #7 is named when it is a batch row. The count
+    of that set is compared with BUILD_THRESHOLD, as combine_hint compares it: at the threshold a batch runner gets the build command, and a lane is
+    handed to the batch runner. The hint is a hint: no verdict and no exit code changes. A role needs a cloud run and a role file, so those cases
+    use CloudSession.cloud and put_role; every case counts its reads."""
+
+    def ready_pulls(self, others):
+        """The ready pull requests a read of main finds, with #7 (the pull request under merge) among them: `others` besides #7. #5 is the lowest
+        number, the front PR, which the build leaves out while it keeps #7. The threshold counts the others, as combine_hint's does."""
+        return tuple(sorted({5, 7} | set(range(8, 8 + others - 1)))) if others else (7,)
+
+    def build_set(self, ready, heads=None):
+        """-> the set of members `combine_train.py --build` takes with no queue file, for the ready list `ready` (combine_train.batch_rows, the one home of
+        that set). The read is a ReadyList of its own, so the case's read count is not touched."""
+        self.assertIs(combine_train.merge, merge, "scope: combine_train reads another merge module, so the ready list patch does not reach batch_rows")
+        with unittest.mock.patch.object(merge, "reviewed_read", ReadyList(ready, heads)):
+            members, _heads = combine_train.batch_rows(self.co)
+        return set(members)
+
+    @staticmethod
+    def hint_names(line):
+        """-> the set of pull request numbers a hint line names, as #N tokens."""
+        return {int(n) for n in re.findall(r"#(\d+)\b", line)}
+
+    def hint_run(self, *argv, depth=0, ready=(), heads=None, error=None, cloud=False):
+        """One first step of `merge <argv>` with the queue at `depth` and merge.reviewed_read as a ReadyList of `ready`. The pull request's
+        head is feat's; the others' are origin/main's unless `heads` says otherwise. -> (rc, stdout and stderr together, the ReadyList)."""
+        self.host.queue_depth, self.host.queue_error = depth, error
+        main = self.rev("origin/main")
+        heads = {**{n: main for n in ready}, 7: self.head()} if heads is None else heads
+        reads = ReadyList(ready, heads)
+        out, err = io.StringIO(), io.StringIO()
+        with unittest.mock.patch.object(merge, "reviewed_read", reads), contextlib.ExitStack() as stack:
+            if cloud:
+                stack.enter_context(self.cloud())
+            try:
+                rc = self.run_merge_once(*argv, stdout=out, stderr=err)[0]
+            except SystemExit as e:
+                rc = e.code
+        return rc, out.getvalue() + err.getvalue(), reads
+
+    def test_queue_empty_says_alone_and_reads_no_ready_list(self):
+        rc, text, reads = self.hint_run("7", "--confirm", depth=0, ready=self.ready_pulls(merge.BUILD_THRESHOLD))  # a full-size ready list, which an empty queue never reads
+        self.assertEqual(self.host.queue_reads, 1, "scope: the queue was read %d times, want once: %s" % (self.host.queue_reads, text))
+        self.assertEqual(rc, 0, text)
+        hint = batch_hint_lines(text)
+        self.assertEqual(len(hint), 1, "an empty queue wants one hint line, got %d: %s" % (len(hint), text))
+        self.assertIn("alone", hint[0].lower(), "the empty-queue line does not say the pull request goes alone: " + hint[0])
+        self.assertEqual(reads.calls, 0, "an empty queue read the ready list %d times, want none" % reads.calls)
+
+    def test_deep_queue_names_the_build_set(self):
+        ready = self.ready_pulls(2)  # #5, #7, #8 ready, under the threshold: the line names the build's set anyway, #7 and #8, the front #5 left out
+        rc, text, reads = self.hint_run("7", "--confirm", depth=5, ready=ready)  # the queue depth gates only empty against not empty
+        self.assertEqual(reads.calls, 1, "scope: the ready list was read %d times, want once: %s" % (reads.calls, text))
+        self.assertEqual(rc, 0, text)
+        hint = batch_hint_lines(text)
+        self.assertEqual(len(hint), 1, "a deep queue wants one hint line, got %d: %s" % (len(hint), text))
+        want = self.build_set(ready)
+        self.assertEqual(len(want), 2, "scope: the build takes %d members of these rows, want 2: %s" % (len(want), sorted(want)))
+        self.assertEqual(self.hint_names(hint[0]), want, "the queue hint names a set other than the build's members: %s, the build takes %s: %s"
+                         % (sorted(self.hint_names(hint[0])), sorted(want), hint[0]))
+
+    def test_under_threshold_alone_line_gives_queue_depth_and_ready_count(self):
+        others = merge.BUILD_THRESHOLD - 1  # one short of the threshold: the build takes that many ready pull requests, the front #5 aside
+        rc, text, reads = self.hint_run("7", "--confirm", depth=3, ready=self.ready_pulls(others))
+        self.assertEqual(reads.calls, 1, "scope: the ready list was read %d times, want once: %s" % (reads.calls, text))
+        self.assertEqual(rc, 0, text)
+        hint = batch_hint_lines(text)
+        self.assertEqual(len(hint), 1, "an under-threshold queue wants one hint line, got %d: %s" % (len(hint), text))
+        line = hint[0]
+        self.assertIn("alone", line.lower(), "the under-threshold line does not say the pull request goes alone: " + line)
+        self.assertRegex(line, r"\b3\b", "the line does not give the queue depth, 3: " + line)
+        self.assertRegex(line, r"\b%d\b" % others, "the line does not give the count of other ready pull requests, %d: %s" % (others, line))
+        want = self.build_set(self.ready_pulls(others))
+        self.assertEqual(len(want), others, "scope: the build takes %d members of these rows, want %d" % (len(want), others))
+        self.assertEqual(self.hint_names(line), want, "the queue hint names a set other than the build's members: %s, the build takes %s: %s"
+                         % (sorted(self.hint_names(line)), sorted(want), line))
+
+    def test_at_threshold_batch_runner_hint_names_the_build_set(self):
+        self.put_role("batch-runner")
+        ready = self.ready_pulls(merge.BUILD_THRESHOLD)  # #5 (the front PR) and #7 with eight to sixteen: #7 is a batch row, so the build takes it
+        rc, text, reads = self.hint_run("7", "--confirm", "--head", self.head(), depth=3, ready=ready, cloud=True)
+        self.assertEqual(reads.calls, 1, "scope: the ready list was read %d times, want once: %s" % (reads.calls, text))
+        self.assertEqual(rc, 0, text)
+        hint = batch_hint_lines(text)
+        self.assertEqual(len(hint), 1, "a batch runner at the threshold wants one hint line, got %d: %s" % (len(hint), text))
+        line = hint[0]
+        self.assertRegex(line, r"--build\b", "a batch runner at the threshold got no build command: " + line)
+        want = self.build_set(ready)
+        self.assertEqual(len(want), merge.BUILD_THRESHOLD, "scope: the build takes %d members of these rows, want %d: %s" % (len(want), merge.BUILD_THRESHOLD, sorted(want)))
+        self.assertEqual(self.hint_names(line), want, "the build hint names a set other than the build's members: %s, the build takes %s: %s"
+                         % (sorted(self.hint_names(line)), sorted(want), line))
+
+    def test_batch_runner_build_set_when_n_is_no_batch_row(self):
+        """#7 is no batch row, so the build takes the batch rows but the front #5: nine, one short of the threshold. The hint must count and name those nine,
+        so no build command prints."""
+        self.put_role("batch-runner")
+        ready = (5,) + tuple(range(8, 8 + merge.BUILD_THRESHOLD - 1))  # the front #5 and BUILD_THRESHOLD - 1 more batch rows; #7 is not among them
+        self.assertNotIn(7, ready, "scope: #7 is a batch row here, so this case tests the other shape")
+        rc, text, reads = self.hint_run("7", "--confirm", "--head", self.head(), depth=3, ready=ready, cloud=True)
+        self.assertEqual(reads.calls, 1, "scope: the ready list was read %d times, want once: %s" % (reads.calls, text))
+        self.assertEqual(rc, 0, text)
+        hint = batch_hint_lines(text)
+        self.assertEqual(len(hint), 1, "a batch runner with nine members wants one hint line, got %d: %s" % (len(hint), text))
+        line = hint[0]
+        want = self.build_set(ready)
+        self.assertEqual(len(want), merge.BUILD_THRESHOLD - 1,
+                         "scope: the build takes %d members of these rows, want %d: %s" % (len(want), merge.BUILD_THRESHOLD - 1, sorted(want)))
+        self.assertNotIn("--build", line, "a batch runner got the build command for a set one short of the threshold: " + line)
+        self.assertEqual(self.hint_names(line), want, "the hint names a set other than the build's members: %s, the build takes %s: %s"
+                         % (sorted(self.hint_names(line)), sorted(want), line))
+
+    def test_when_n_is_the_front_pr_hint_and_build_set_agree(self):
+        """Control, green on the current head: #7 is the lowest batch row, the front PR the build leaves out, so the hint's set and the build's set agree."""
+        self.put_role("batch-runner")
+        ready = (7,) + tuple(range(8, 8 + merge.BUILD_THRESHOLD))  # #7 the front, then BUILD_THRESHOLD batch rows
+        rc, text, reads = self.hint_run("7", "--confirm", "--head", self.head(), depth=3, ready=ready, cloud=True)
+        self.assertEqual(reads.calls, 1, "scope: the ready list was read %d times, want once: %s" % (reads.calls, text))
+        self.assertEqual(rc, 0, text)
+        hint = batch_hint_lines(text)
+        self.assertEqual(len(hint), 1, "the control wants one hint line, got %d: %s" % (len(hint), text))
+        want = self.build_set(ready)
+        self.assertEqual(len(want), merge.BUILD_THRESHOLD, "scope: the build takes %d members of these rows, want %d" % (len(want), merge.BUILD_THRESHOLD))
+        self.assertNotIn(7, want, "scope: the build keeps #7, which is the front PR here")
+        self.assertEqual(self.hint_names(hint[0]), want, "the hint names a set other than the build's members: %s, the build takes %s: %s"
+                         % (sorted(self.hint_names(hint[0])), sorted(want), hint[0]))
+
+    def test_at_threshold_lane_gets_hand_to_batch_runner_and_no_build_command(self):
+        self.put_role("lane", step="feat")
+        self.host.repo = "shivinate7/claude-settings"  # ruling own-lanes-merge-claude-settings-prs: a lane merges its own pull request in this repo (LaneOwnMerge.setUp)
+        rc, text, reads = self.hint_run("7", "--confirm", "--head", self.head(), depth=3, ready=self.ready_pulls(merge.BUILD_THRESHOLD), cloud=True)
+        self.assertEqual(reads.calls, 1, "scope: the ready list was read %d times, want once: %s" % (reads.calls, text))
+        self.assertEqual(rc, 0, text)
+        hint = batch_hint_lines(text)
+        self.assertEqual(len(hint), 1, "a lane at the threshold wants one hint line, got %d: %s" % (len(hint), text))
+        line = hint[0]
+        self.assertIn("batch runner", line.lower(), "a lane at the threshold is not handed to the batch runner: " + line)
+        self.assertNotIn("--build", line, "a lane got the build command, which only the batch runner runs: " + line)
+        self.assertNotIn("combine_train", line, "a lane got the combine tool's path: " + line)
+
+    def test_member_clashing_with_n_named(self):
+        o = self.other  # a rival branch from main that writes docs/decisions/second.md, the file this pull request adds: the two heads clash
+        sh(o, "git", "fetch", "-q", "origin")
+        sh(o, "git", "checkout", "-q", "-B", "rival", "origin/main")
+        put(os.path.join(o, "docs/decisions/second.md"), "rival: a second record, written on main's side\n")
+        sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-qm", "rival: second"); sh(o, "git", "push", "-q", "origin", "rival")
+        rival = self.head("rival")
+        row = {"number": 8, "state": "open", "draft": False, "body": "", "head": {"sha": rival, "ref": "rival"}, "base": {"ref": "main"}}
+        self.host.pulls = {8: row}  # the REST row FakeHost.pr and open_pulls read for #8
+        rc, text, reads = self.hint_run("7", "--confirm", depth=3, ready=(7, 8), heads={7: self.head(), 8: rival})
+        self.assertEqual(reads.calls, 1, "scope: the ready list was read %d times, want once: %s" % (reads.calls, text))
+        self.assertEqual(rc, 0, text)
+        hint = batch_hint_lines(text)
+        self.assertEqual(len(hint), 1, "no one queue hint line names the clash: " + text)
+        self.assertRegex(hint[0], r"#8\b", "the pull request that clashes with #7 is not named in the hint: " + hint[0])
+
+    def unknown_clash_lines(self, text):
+        """The lines of stdout and stderr that say the clash read is unknown. Not filtered through batch_hint_lines: the line need not name the queue."""
+        return [line for line in text.splitlines() if "clash" in line.lower() and "unknown" in line.lower()]
+
+    def test_failed_fetch_for_the_clash_read_prints_one_unknown_line(self):
+        """#8's head is a sha the clone lacks, and the fetch that would bring it fails: the clash read of #8 is unknown. The hint prints one line
+        that says so, and the merge's exit code is unchanged."""
+        heads = {7: self.head(), 8: "%040d" % 8}  # a made-up sha the clone lacks: the clash read must fetch it first
+        with unittest.mock.patch.object(merge, "fetch_branch_heads", return_value=(1, "fatal: could not reach origin")) as fetch:
+            rc, text, reads = self.hint_run("7", "--confirm", depth=3, ready=(8,), heads=heads)
+        self.assertEqual(reads.calls, 1, "scope: the ready list was read %d times, want once: %s" % (reads.calls, text))
+        self.assertEqual(fetch.call_count, 1, "scope: the clash read made %d fetches, want one: %s" % (fetch.call_count, text))
+        self.assertEqual(rc, 0, "a failed clash fetch changed the exit code: " + text)
+        unknown = self.unknown_clash_lines(text)
+        self.assertEqual(len(unknown), 1, "a failed fetch for the clash read printed %d lines that say it is unknown, want one: %s" % (len(unknown), text))
+
+    def test_merge_tree_unknown_for_a_member_prints_one_unknown_line(self):
+        """merge-tree reads the pair of #8 and the pull request under merge as unknown (neither clean nor a conflict). The hint prints one line
+        that says the clash read is unknown, and the merge's exit code is unchanged."""
+        sha8 = self.rev("origin/main")  # #8's head: a commit the clone holds, so no fetch runs
+        real, reads_of_8 = merge.conflicting_files, []
+        def unknown_for_8(root, ours, theirs):
+            if theirs == sha8:
+                reads_of_8.append(theirs)
+                return "unknown", ["git merge-tree exited 129: unknown option"]
+            return real(root, ours, theirs)
+        with unittest.mock.patch.object(merge, "conflicting_files", unknown_for_8), unittest.mock.patch.object(merge, "fetch_branch_heads", return_value=(0, "")) as fetch:
+            rc, text, reads = self.hint_run("7", "--confirm", depth=3, ready=(8,))
+        self.assertGreaterEqual(len(reads_of_8), 1, "scope: the merge-tree read of #8 never ran: " + text)
+        self.assertEqual(fetch.call_count, 0, "scope: the clash read fetched %d times, want none, since #8's head is in the clone: %s" % (fetch.call_count, text))
+        self.assertEqual(rc, 0, "a merge-tree unknown changed the exit code: " + text)
+        unknown = self.unknown_clash_lines(text)
+        self.assertEqual(len(unknown), 1, "a merge-tree unknown for #8 printed %d lines that say the clash read is unknown, want one: %s" % (len(unknown), text))
+
+    def test_clean_clash_read_prints_no_unknown_clash_line(self):
+        """Control, green on the old code: #8's head reads clean against the pull request under merge, so no line says the clash read is unknown."""
+        rc, text, reads = self.hint_run("7", "--confirm", depth=3, ready=(8,))
+        self.assertEqual(reads.calls, 1, "scope: the ready list was read %d times, want once: %s" % (reads.calls, text))
+        self.assertEqual(len(batch_hint_lines(text)), 1, "scope: the control printed no queue hint line: " + text)
+        self.assertEqual(rc, 0, text)
+        self.assertEqual(self.unknown_clash_lines(text), [], "a clean clash read printed a line that says it is unknown: " + text)
+
+    def test_hint_printed_before_lock_acquire(self):
+        seen = []  # the hint text on stdout at each lock acquire
+        acquire = self.lock.acquire
+        def acquire_spy(b, ttl):
+            seen.append(sys.stdout.getvalue() if isinstance(sys.stdout, io.StringIO) else "")
+            return acquire(b, ttl)
+        self.lock.acquire = acquire_spy
+        rc, text, reads = self.hint_run("7", "--confirm", depth=3, ready=(8,))
+        self.assertTrue(seen, "scope: the run never took the lock: " + text)
+        self.assertEqual(rc, 0, text)
+        self.assertEqual(len(batch_hint_lines(seen[0])), 1, "no queue hint was printed before the lock was taken: " + text)
+
+    def test_failed_queue_read_prints_unknown_exit_unchanged(self):
+        rc, text, reads = self.hint_run("7", "--confirm", depth=3, ready=(8,), error=RuntimeError("the queue read failed"))
+        self.assertEqual(self.host.queue_reads, 1, "scope: the queue was read %d times, want once: %s" % (self.host.queue_reads, text))
+        hint = batch_hint_lines(text)
+        self.assertEqual(len(hint), 1, "a failed queue read printed %d queue lines, want one unknown line: %s" % (len(hint), text))
+        self.assertIn("unknown", hint[0].lower(), "a failed queue read is not reported as unknown: " + hint[0])
+        self.assertEqual(rc, 0, "a failed queue read changed the exit code: " + text)
+
+    def test_draft_confirm_prints_no_hint(self):
+        self.host.draft = True
+        rc, text, reads = self.hint_run("7", "--confirm", depth=12, ready=(8, 9))
+        self.assertEqual(self.host.readies, [7], "scope: the draft confirm did not mark #7 ready: " + text)
+        self.assertEqual(batch_hint_lines(text), [], "a draft confirm printed a queue hint: " + text)
+        self.assertEqual(self.host.queue_reads, 0, "a draft confirm read the queue %d times, want none" % self.host.queue_reads)
+
+    def test_integration_pr_confirm_prints_no_hint(self):
+        batch = merge.integration_branch("x")
+        self.push_branch(batch)
+        self.host.branch = batch
+        self.host.body = "\n".join(merge.freeze_lines("x", {8: f"{8:040x}", 9: f"{9:040x}"}))
+        self.assertTrue(merge.is_integration_pr(self.host.pr(7)), "scope: #7 is not read as a batch integration PR: " + self.host.body)
+        rc, text, reads = self.hint_run("7", "--confirm", depth=12, ready=(8, 9))
+        self.assertEqual(batch_hint_lines(text), [], "a batch integration PR's confirm printed a queue hint: " + text)
+        self.assertEqual(self.host.queue_reads, 0, "a batch integration PR's confirm read the queue %d times, want none" % self.host.queue_reads)
+
+    def test_ready_flag_hint_after_mark(self):
+        self.host.draft = True
+        events = []  # the order the mark and the queue read happen in
+        mark = self.host.ready
+        self.host.ready = lambda n: (events.append("ready"), mark(n))[1]
+        read = self.host.queued_runs
+        self.host.queued_runs = lambda: (events.append("queued"), read())[1]
+        rc, text, reads = self.hint_run("7", "--ready", depth=3, ready=(8,))
+        self.assertEqual(events.count("ready"), 1, "scope: --ready did not mark #7 ready once: " + text)
+        self.assertEqual(rc, 0, text)
+        self.assertIn("queued", events, "the queue was not read after --ready marked #7 ready: " + text)
+        self.assertLess(events.index("ready"), events.index("queued"), "the queue was read before #7 was marked ready: " + text)
+        self.assertEqual(len(batch_hint_lines(text)), 1, "--ready after the mark printed no one queue hint line: " + text)
+
+    def test_ready_flag_on_a_ready_pr_prints_the_hint(self):
+        rc, text, reads = self.hint_run("7", "--ready", depth=3, ready=(8,))  # #7 is ready already: the mark is skipped, the hint is not
+        self.assertEqual(self.host.queue_reads, 1, "scope: --ready on a ready pull request read the queue %d times, want once: %s" % (self.host.queue_reads, text))
+        self.assertEqual(rc, 0, text)
+        self.assertEqual(len(batch_hint_lines(text)), 1, "--ready on a ready pull request printed no one queue hint line: " + text)
+
+    def test_queued_runs_reads_the_queued_run_count_in_one_get(self):
+        """Host.queued_runs, the real read: one GET of actions/runs with status queued and one run a page, reading total_count."""
+        self.assertTrue(callable(getattr(merge.Host, "queued_runs", None)), "Host has no queued_runs, so the queue depth cannot be read")
+
+        class GhReply(merge.Host):  # the real Host with gh scripted: its one reply carries total_count 4
+            def __init__(self):
+                super().__init__(required=["checks"], base="main", minute=60, now=lambda: 0.0, pause=lambda s: None)
+                self.calls = []
+
+            def gh(self, args, cwd=None, idempotent=False, landed=None):
+                self.calls.append(list(args))
+                return 0, json.dumps({"total_count": 4, "workflow_runs": []})
+
+        h = GhReply()
+        self.assertEqual(h.queued_runs(), 4, "queued_runs did not read total_count from the reply: %r" % (h.calls,))
+        self.assertEqual(len(h.calls), 1, "queued_runs made %d gh calls, want one" % len(h.calls))
+        joined = " ".join(h.calls[0])
+        for want in ("actions/runs", "status=queued", "per_page=1"):
+            self.assertIn(want, joined, "the queued read has no %r: %s" % (want, joined))
 
 class MergeRoleCheck(CloudSession):
     """A cloud session's `merge <pr> --confirm` runs only when the session's recorded role is batch-runner (decision session-tiers: the coordinator never merges).

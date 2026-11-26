@@ -46,8 +46,9 @@ Short and plain are one goal. Never trade one for the other.
   true` on a widening one. When the options trade off heavily, so that every `Lose:` is large (a ruling gone, a known gap left
   open), add one better-solution option that keeps most of the gain. That option is a writing rule only:
   no check reads it. `hooks/question_form.py` checks the box and the page, and vets each question against past rulings
-  read from the decision records: the first 800 characters of each ruling plus its owner-ruling sentences past the cut
-  (decisions `question-form` and `port-keeps-behaviour`).<!-- rule:style-question-form -->
+  read from the decision and debt records, the ruled store and the roadmap step notes: those that share words with it
+  or name it, best first, as many as fit one model call's 80,000-character limit. A record's ruling is its first 800
+  characters plus its owner-ruling sentences past the cut (decisions `question-form` and `port-keeps-behaviour`).<!-- rule:style-question-form -->
 - Put all a question needs inside the question box: its text, its options, or an option's
   preview. Text written before the box may not show. While work runs there is no box (rule
   `questions-go-to-owner`): put the same lines in the reply, under Input Needed, so that the
