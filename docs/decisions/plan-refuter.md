@@ -18,6 +18,14 @@ Nothing argued back against a Plan agent.
 - The verdict goes on the plan record's `Refuter:` line. Lane step-done-needs-check, pending, adds that line.
   This record adds no second line.
 
+## A pick gets a refuter
+
+Owner, 2026-11-25 10:02 CST: before a session takes a pick it would otherwise bring to the owner, it asks
+the consultant when one is reachable, else a refuter (decision `questions-go-to-owner`).
+
+Practice, not ruled: that refuter gets one pick, the question, its options and the session's lean, word for
+word, and nothing else. It runs the refuter's model, as decision `agent-model-cap` sets it.
+
 ## Mechanism
 
 - Role file: `agents/refuter.md`.
