@@ -57,6 +57,8 @@ OV_GRANT_CHILD = (
     "import re\n"
     "import call_judge\n"
     "def judge(text):\n"  # the model judge stood in: a yes names the one model word the owner typed, no model word a no
+    "    if len(sys.argv) > 5:\n"  # the answer a story sets: a model family, or 'no' for the judge's no
+    "        return False if sys.argv[5] == 'no' else sys.argv[5]\n"
     "    found = re.search(r'\\b(opus|fable|sonnet|haiku)\\b', text, re.I)\n"
     "    return found.group(1).lower() if found else False\n"
     "call_judge.model_ask = judge\n"
@@ -84,16 +86,16 @@ def ov_write_pass(config, session, prompt, seconds):
     write(path, json.dumps({"kind": kind, "until": ov_clock(seconds + length)}))
 
 
-def ov_type(config, session, prompt, seconds=0):
+def ov_type(config, session, prompt, seconds=0, judge=None):
     """The owner types `prompt` at OV_T0 + seconds: override.grant runs in a child that reads
-    `config` as its config directory. Returns '' when the module ran, else a note for the story's
+    `config` as its config directory. `judge` is the model judge's answer the stub gives: a family name, or "no";
+    None leaves the stub its reading of the words. Returns '' when the module ran, else a note for the story's
     failure line: the import failed (the override was written by hand), or the module raised."""
     env = dict(os.environ)
     env["CLAUDE_CONFIG_DIR"] = config
     env["LOCAL_TIME_NOW"] = ov_clock(seconds)
-    run = subprocess.run(
-        [sys.executable, "-c", OV_GRANT_CHILD, os.path.dirname(GUARD), session, prompt,
-         ov_clock(seconds)], capture_output=True, text=True, env=env, timeout=60)
+    argv = [sys.executable, "-c", OV_GRANT_CHILD, os.path.dirname(GUARD), session, prompt, ov_clock(seconds)]
+    run = subprocess.run(argv + ([judge] if judge else []), capture_output=True, text=True, env=env, timeout=60)
     if run.returncode == 0:
         return ""
     if run.returncode == 3:
@@ -647,6 +649,157 @@ for _label, _check in (
     ("opus override: every other refusal and ask stands under it", op_lifts_nothing_else_check),
     ("opus override: an unreadable or misshapen override file is no override", op_corrupt_check),
     ("opus override: the grant, each lift and the end each write one log line", op_log_check),
+):
+    LOG_CHECKS_EXTRA.append((_label, _check))
+
+
+# ---- THE JUDGE'S NO, AND THE MODELS HE NAMES. The model judge answers no to a prompt that names a model and asks for
+# none: a question, a quoted mention, a look-alike keyword. Nothing is written, so a reviewer spawn on Opus stays refused
+# under agent-model-cap. Each story first wants that refusal with nothing typed.
+OV_REVIEWER_OPUS = {"prompt": "Check the diff for typos.", "model": "opus", "subagent_type": "reviewer"}
+OV_JUDGED_NO = (
+    ("a question about a model", "Should the reviewers run on opus?"),
+    ("a quoted mention", 'The guard says "use opus for the reviewers", and I disagree.'),
+    ("a look-alike keyword", "opus plan 2h"),
+    ("a look-alike with no unit", "opus 2"),
+)
+
+
+def ov_judged_no_check(n, prompt):
+    """The judge says no to `prompt`: no Opus hold file is written, and the reviewer spawn on Opus is refused."""
+    config, session, rule = ov_config("judged-no-%d" % n), "ov-judged-no-%d" % n, "agent-model-cap"
+
+    def spawn(seconds):
+        return lambda: ov_call("Agent", dict(OV_REVIEWER_OPUS), NOGIT, config, session, seconds)
+
+    def check():
+        ok, why = ov_story([("with nothing typed", spawn(0), "deny", rule)])
+        if not ok:
+            return False, why
+        note = ov_type(config, session, prompt, 60, judge="no")
+        if os.path.exists(op_pass_path(config, session)):
+            return False, "the judge's no wrote an Opus hold file" + ("; " + note if note else "")
+        ok, why = ov_story([("after the judge's no", spawn(120), "deny", rule)], note)
+        if not ok:
+            return False, why
+        return True, "the judge's no wrote no hold, and the reviewer spawn on Opus was refused under %s" % rule
+    return check
+
+
+for _n, (_what, _prompt) in enumerate(OV_JUDGED_NO):
+    LOG_CHECKS_EXTRA.append(("override: %s, judged no, writes no Opus hold, and a reviewer on Opus is refused" % _what,
+                             ov_judged_no_check(_n, _prompt)))
+
+
+# The owner's sentences that name a role or two models (decision agent-model-cap, the owner's model name). The judge's
+# answer is the stub's, set per story: the family he named first, or "no".
+OV_NEGATED_ROLE = "Use opus for the audit, don't use it for reviewers."
+OV_AUDIT_EXPLORE = {"prompt": "Audit: list the hooks that read the config folder.", "model": "opus",
+                    "subagent_type": "Explore"}
+OV_TWO_MODELS = ("just use sonnet agents throughout or even opus if that makes it more likely to succeed you ahve my "
+                 "epxlicit permisison")  # the owner's words, kept as he typed them
+OV_NEGATED_MODEL = "use sonnet, not opus"
+OV_NEGATED_ROLE_MODEL = "use sonnet for the reviewers, not opus"
+
+
+def ov_negated_role_check():
+    """`Use opus for the audit, don't use it for reviewers.` (the judge says opus): the Opus hold reaches no reviewer. A
+    reviewer spawn on Opus is refused under agent-model-cap, and the audit Explore on Opus is allowed."""
+    config, session, rule = ov_config("negated-role"), "ov-negated-role", "agent-model-cap"
+
+    def spawn(seconds, body):
+        return lambda: op_spawn(config, session, seconds, spawn=body)
+
+    def check():
+        ok, why = ov_story([("with nothing typed", spawn(0, OV_REVIEWER_OPUS), "deny", rule)])
+        if not ok:
+            return False, why
+        note = ov_type(config, session, OV_NEGATED_ROLE, 60, judge="opus")
+        ok, why = ov_story([
+            ("a reviewer spawn on Opus after the sentence", spawn(120, OV_REVIEWER_OPUS), "deny", rule),
+            ("the audit Explore on Opus", spawn(180, OV_AUDIT_EXPLORE), "allow", rule),
+        ], note)
+        if not ok:
+            return False, why
+        return True, "the negated reviewer was refused under agent-model-cap, and the audit Explore went through"
+    return check
+
+
+def ov_two_models_check():
+    """`just use sonnet agents throughout or even opus ...` (the judge says sonnet, the first model he names): main writes
+    an Opus override for every role, 2 h, so an Opus spawn goes through. This branch must grant the same."""
+    config, session, rule = ov_config("two-models"), "ov-two-models", "agent-model-cap"
+
+    def check():
+        ok, why = ov_story([("with nothing typed", lambda: op_spawn(config, session, 0), "deny", rule)])
+        if not ok:
+            return False, why
+        note = ov_type(config, session, OV_TWO_MODELS, 60, judge="sonnet")
+        ok, why = ov_story([("an Opus spawn after the sentence", lambda: op_spawn(config, session, 120), "allow", rule)],
+                           note)
+        if not ok:
+            return False, why
+        if not os.path.exists(op_pass_path(config, session)):
+            return False, "no Opus hold file was written; want one for every role"
+        with open(op_pass_path(config, session), encoding="utf-8") as handle:
+            data = json.load(handle)
+        if data.get("model", "opus") != "opus" or data.get("role") is not None:
+            return False, "the hold is model %r, role %r; want an Opus hold for every role" % (
+                data.get("model"), data.get("role"))
+        return True, "the sentence granted an Opus spawn for every role, as main does"
+    return check
+
+
+def ov_negated_model_check():
+    """`use sonnet, not opus` (the judge says sonnet): the Opus ceiling is not lifted, and the sonnet hold is kept. Pinned
+    on this branch; a sentence that negates opus grants only the model it did not negate."""
+    config, session, rule = ov_config("negated-model"), "ov-negated-model", "agent-model-cap"
+
+    def check():
+        ok, why = ov_story([("with nothing typed", lambda: op_spawn(config, session, 0), "deny", rule)])
+        if not ok:
+            return False, why
+        note = ov_type(config, session, OV_NEGATED_MODEL, 60, judge="sonnet")
+        ok, why = ov_story([("an Opus spawn after the sentence", lambda: op_spawn(config, session, 120), "deny", rule)],
+                           note)
+        if not ok:
+            return False, why
+        if not os.path.exists(op_pass_path(config, session)):
+            return False, "no sonnet hold file was written; want the sonnet hold"
+        with open(op_pass_path(config, session), encoding="utf-8") as handle:
+            data = json.load(handle)
+        if data.get("model") != "sonnet":
+            return False, "the hold is model %r; want sonnet only" % data.get("model")
+        return True, "the sonnet hold stands and the Opus spawn is refused under agent-model-cap"
+    return check
+
+
+def ov_negated_role_model_check():
+    """`use sonnet for the reviewers, not opus` (the judge says sonnet): nothing is granted, as main grants nothing. Pinned."""
+    config, session, rule = ov_config("negated-role-model"), "ov-negated-role-model", "agent-model-cap"
+
+    def check():
+        ok, why = ov_story([("with nothing typed", lambda: op_spawn(config, session, 0), "deny", rule)])
+        if not ok:
+            return False, why
+        note = ov_type(config, session, OV_NEGATED_ROLE_MODEL, 60, judge="sonnet")
+        if os.path.exists(op_pass_path(config, session)):
+            return False, "a hold file was written" + ("; " + note if note else "")
+        ok, why = ov_story([("an Opus spawn after the sentence", lambda: op_spawn(config, session, 120), "deny", rule)],
+                           note)
+        if not ok:
+            return False, why
+        return True, "the sentence granted nothing, and the Opus spawn was refused under agent-model-cap, as main does"
+    return check
+
+
+for _label, _check in (
+    ("override: `Use opus for the audit, don't use it for reviewers.` grants no reviewer, and the audit Explore is allowed",
+     ov_negated_role_check()),
+    ("override: `just use sonnet agents ... or even opus` grants an Opus spawn for every role, as main does",
+     ov_two_models_check()),
+    ("override: `use sonnet, not opus` grants sonnet only, and an Opus spawn is refused", ov_negated_model_check()),
+    ("override: `use sonnet for the reviewers, not opus` grants nothing, as main does", ov_negated_role_model_check()),
 ):
     LOG_CHECKS_EXTRA.append((_label, _check))
 
