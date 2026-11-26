@@ -242,6 +242,11 @@ def audit_lane_opus_flagged():
     return lane_expect("opus", audit_folder("lane-opus"), True, ("opus",) + AUDIT_STOP_LINE)
 
 
+def audit_lane_fable_flagged():
+    # One rule for Opus and Fable: a lane start that names Fable with no owner grant for Fable is flagged too.
+    return lane_expect("fable", audit_folder("lane-fable"), True, ("fable",) + AUDIT_STOP_LINE)
+
+
 # The guard's Opus spawn refusal lifts on a live timed `override 2h`: override.take, for rule OPUS_RULE, reads the timed
 # file first. The audit's lane Opus check reads only the Opus override file (override._take_opus), so it must agree with
 # take() on the same override. This probe is a child process, as the hook runs: the config folder and the clock are set
@@ -491,6 +496,7 @@ for _label, _check in (
         ("a lane start with no tags, read from its prompt, with no model is flagged, with the stop line",
          audit_lane_no_model_flagged),
         ("control: a lane start with no tags, read from its prompt, naming sonnet passes", audit_lane_sonnet_silent),
+        ("one rule: a lane start with no tags, read from its prompt, naming fable with no owner grant is flagged, with the stop line", audit_lane_fable_flagged),
         ("a lane start with no tags, read from its prompt, naming opus with no owner grant is flagged, with the stop line",
          audit_lane_opus_flagged),
         ("a live timed override that take() lifts is not flagged on an Opus lane start",

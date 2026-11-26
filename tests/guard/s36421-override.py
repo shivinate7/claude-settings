@@ -290,6 +290,37 @@ def ov_vetoed_check(label, call):
     return check
 
 
+def ov_model_offer_check(role, model):
+    """One rule for Opus and Fable: the Opus-ceiling refusal of a spawn on `model` with no hold ends with the offer line, and
+    that line names no model and no `opus 2h`. The owner lifts it in his own words or with `override`. The reason tells the
+    session to run on the role's model and to say in its report that the named model did not hold."""
+    def check():
+        spawn = {"prompt": "Round 1 of 3. Start the fix.", "model": model, "subagent_type": role}
+        tag = "one-rule-%s-%s" % (role, model)
+        config, session = ov_config("offer-" + tag), "ov-offer-" + tag
+        got, reason = ov_call("Agent", spawn, NOGIT, config, session, 0)
+        if got != "deny":
+            return False, "got %s (%s), want deny" % (got, reason[:70])
+        offer_of = ov_home("offer")
+        if not offer_of:
+            return False, "override.offer is missing, so the line cannot be read from its home"
+        line = offer_of("agent-model-cap", spawn_role=role, spawn_model=model)
+        if not reason.rstrip().endswith(line.strip()):
+            return False, "the refusal does not end with the offer line: %s" % reason[-120:]
+        named = [word for word in ("opus", "fable", "sonnet", "haiku") if word in line.lower()]
+        if named:
+            return False, "the offer line names %s: %s" % (", ".join(named), line[:120])
+        if "role's model" not in reason or not any(p in reason.lower() for p in ("did not hold", "not held")):
+            return False, "the refusal does not say to run on the role's model and that the named model did not hold"
+        return True, "the offer line names no model, and the refusal says the named model did not hold"
+    return check
+
+
+LOG_CHECKS_EXTRA.append(("one rule: a builder spawn on opus, no hold, ends with an offer line that names no model",
+                         ov_model_offer_check("builder", "opus")))
+LOG_CHECKS_EXTRA.append(("one rule: a designer spawn on fable, no hold, ends with an offer line that names no model",
+                         ov_model_offer_check("designer", "fable")))
+
 for _kind in ("main", "agent", "opus"):
     LOG_CHECKS_EXTRA.append(("override: a refusal an override lifts ends with the %s override line" % _kind,
                              ov_offer_check(_kind)))
@@ -646,6 +677,7 @@ GS_LANE = "a1b2c3"  # the lane: its step names it as session_<this>
 GS_ENV = {"CLAUDE_CODE_REMOTE_SESSION_ID": "cse_" + GS_LANE}  # the environment names it as cse_<this>
 GS_STEP = "step-a"  # the step bound to this lane
 GS_AT = "2026-10-17T10:00:00-05:00"  # a grant time before the clock these cases run at
+GS_FABLE_DESIGNER = {"prompt": "Design the empty state.", "model": "fable", "subagent_type": "designer"}
 GS_SONNET = {"prompt": "Round 2 of 3. Review the diff.", "model": "sonnet", "subagent_type": "reviewer"}
 GS_WIZARD = {"prompt": "Round 1 of 3. Start the fix.", "model": "claude-opus-5-5", "subagent_type": "wizard"}
 GS_BAD = ("roadmap/data/steps/%s.json" % GS_STEP,  # a bound record cut short: it does not parse
@@ -660,9 +692,10 @@ def gs_step(step_id, lane, status="in_progress", grants=()):
     return "roadmap/data/steps/%s.json" % step_id, json.dumps(body, indent=2) + "\n"
 
 
-def gs_grant(role="reviewer", drop_role=False):
-    """A grant as triage writes it: role None covers every Opus spawn. drop_role leaves the key out."""
-    grant = {"words": "opus 2h" if role is None else "opus %s 2h" % role, "at": GS_AT, "role": role,
+def gs_grant(role="reviewer", drop_role=False, model="opus"):
+    """A grant as triage writes it: role None covers every spawn of `model`. `words` names that model, as the owner's
+    words do. drop_role leaves the key out."""
+    grant = {"words": "%s 2h" % model if role is None else "%s %s 2h" % (model, role), "at": GS_AT, "role": role,
              "by": "triage"}
     if drop_role:
         del grant["role"]
@@ -823,6 +856,14 @@ GS_CHECKS = (
     ("step grant: a grant with role null allows a builder spawn",
      gs_verdict_check("null-role", dict([gs_step(GS_STEP, GS_LANE, grants=[gs_grant(None)])]),
                       OP_BUILDER, "allow")),
+    # One rule for Opus and Fable: a step grant lifts the model its words name. A Fable designer is an Opus-row role, so the
+    # role row passes it and only the Opus ceiling (agent-model-cap) refuses it.
+    ("one rule: a step grant whose words name fable allows a fable designer spawn",
+     gs_verdict_check("fable-words", dict([gs_step(GS_STEP, GS_LANE, grants=[gs_grant(None, model="fable")])]),
+                      GS_FABLE_DESIGNER, "allow")),
+    ("one rule: control, a step grant whose words name opus does not lift a fable designer spawn",
+     gs_verdict_check("opus-words-fable", dict([gs_step(GS_STEP, GS_LANE, grants=[gs_grant(None, model="opus")])]),
+                      GS_FABLE_DESIGNER, "deny")),
     ("step grant: a step with status done refuses an Opus spawn, even with a grant",
      gs_verdict_check("done", dict([gs_step(GS_STEP, GS_LANE, status="done", grants=[gs_grant(None)])]),
                       OP_REVIEWER, "deny")),

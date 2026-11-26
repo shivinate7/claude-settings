@@ -328,6 +328,9 @@ omw_lets_through("a builder spawn on fable is allowed while the owner's fable ho
 add("owner-model-word: control, a builder spawn on fable is refused under agent-role-model when no hold is on", "deny",
     ROLE_MODEL_RULE, tool="Agent", config=ROLE_REAL_CFG, transcript=OMW_PLAIN, carries=(ROLE_REMEDY,),
     lacks=ROLE_LACKS, **role_input("builder", "fable", "Fix the failing case."))
+# One rule for Opus and Fable: a Fable spawn with no hold is refused by the Opus ceiling, not by the role row (rule 9d).
+add("one rule: a builder spawn on fable with no hold is refused under agent-model-cap, not agent-role-model", "deny",
+    CEILING, tool="Agent", config=ROLE_REAL_CFG, transcript=OMW_PLAIN, **role_input("builder", "fable", "Fix the failing case."))
 
 # ---- A keyword Opus override (`opus 2h`, or `opus builders 2h` for one role) writes no model, and the guard reads its file as an
 # Opus hold. It lifts the Opus ceiling only, as on main, so it must not lift the role row of a spawn on sonnet. `opus 2h` names

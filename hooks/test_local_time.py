@@ -3475,6 +3475,153 @@ def case_model_word_unreadable_report_shape_ends_the_hold():
           got is True, "got %r" % (got,))
 
 
+# ONE RULE FOR OPUS AND FABLE (owner rulings at 14:12 and 18:55 CST): no keyword. A typed `opus 2h` is judged like any
+# model word, and a held model ends on his negation, a judge error or the report. Each red case here is an assert that
+# fails on the unchanged code for the named cause; each control passes on that code too and pins behaviour that must hold.
+def one_rule_report(at=OV_NOW + timedelta(minutes=1)):
+    """An assistant report record stamped after `at`, as the transcript holds one."""
+    return {"type": "assistant", "timestamp": at.isoformat(),
+            "message": {"role": "assistant", "content": [{"type": "text", "text": "> **Done** BUILT abc123\n> **Next** ship it"}]}}
+
+
+def case_one_rule_typed_opus_hold_needs_a_judge_yes():
+    cfg, calls, _, _ = opus_type("opus 2h", answer={"ok": False}, head=model_head())
+    check("one rule: `opus 2h` with a judge no writes no pass file",
+          hold_json(cfg) is None and opus_override(cfg) is None, "pass file %r; files %r" % (hold_json(cfg), ov_files(cfg)))
+    check("one rule: `opus 2h` reaches the model judge once", len(calls) == 1, "model judge calls %d" % len(calls))
+    cfg, _, _, _ = opus_type("send opus judges", answer={"ok": False}, head=model_head())
+    check("one rule: control, `send opus judges` with a judge no writes no pass file",
+          hold_json(cfg) is None and opus_override(cfg) is None, "pass file %r" % (hold_json(cfg),))
+
+
+def case_one_rule_opus_builders_hold_is_judged():
+    cfg, calls, _, _ = opus_type("opus builders 2h", answer={"ok": True, "model": "opus"}, head=model_head())
+    check("one rule: `opus builders 2h` reaches the model judge once", len(calls) == 1, "model judge calls %d" % len(calls))
+    check("one rule: `opus builders 2h` with a judge yes writes a judged opus hold",
+          (hold_json(cfg) or {}).get("model") == "opus", "pass file %r" % (hold_json(cfg),))
+    got = opus_override(cfg)
+    check("one rule: control, the hold is for the builder role and lasts 2 h",
+          got is not None and got[2] == "builder" and abs((got[1] - (OV_NOW + timedelta(hours=2))).total_seconds()) <= 1,
+          "got %r" % (got,))
+    builder, reviewer = take_spawn(cfg, "builder"), take_spawn(cfg, "reviewer")
+    check("one rule: a builder spawn is lifted under the judged builders hold", lifted(builder),
+          "take() returned %r for a builder spawn" % (builder,))
+    check("one rule: a reviewer spawn stays refused under the judged builders hold", not lifted(reviewer),
+          "take() returned %r for a reviewer spawn" % (reviewer,))
+
+
+def case_one_rule_negated_opus_ends_a_judged_hold():
+    """A held Opus ends when the owner's latest turn negates Opus with no un-negated Opus word. The control turn both
+    negates Opus and names it, so it keeps the hold: the test is whether a mention is un-negated, not whether one is negated."""
+    override, _ = hooks_modules()
+    cases = (("don't use opus for the audit", False),
+             ("don't use haiku, use opus", True),
+             ("Don't use opus for the audit. Use opus for the builders.", True))
+    for prompt, keeps in cases:
+        cfg, _, _, _ = opus_type("Use opus for the reviewers.", answer={"ok": True, "model": "opus"}, head=model_head())
+        check("one rule: setup, `Use opus for the reviewers.` writes a judged opus hold",
+              (hold_json(cfg) or {}).get("model") == "opus", "pass file %r" % (hold_json(cfg),))
+        path = transcript_file([owner_turn("Use opus for the reviewers."), owner_turn(prompt)])
+        with config_dir_env(cfg):
+            live = override.model_override(OV_SESSION, transcript=path, at=OV_NOW + timedelta(minutes=5)) is not None
+        if keeps:
+            check("one rule: control, a latest turn %r keeps the held opus" % prompt, live, "hold ended")
+        else:
+            check("one rule: a latest turn %r ends the held opus" % prompt, not live, "hold still live")
+
+
+def case_one_rule_judge_error_on_opus_words_ends_a_held_fable():
+    cfg, _, _, _ = opus_type("Try fable for the fix.", answer={"ok": True, "model": "fable"}, head=model_head())
+    check("one rule: setup, `Try fable for the fix.` writes a fable hold",
+          (hold_json(cfg) or {}).get("model") == "fable", "pass file %r" % (hold_json(cfg),))
+    opus_type("use opus for builders", answer=None, error="timed out after 20 s", cfg=cfg, head=model_head())
+    check("one rule: a judge error on `use opus for builders` ends the held fable",
+          hold_json(cfg) is None, "pass file %r" % (hold_json(cfg),))
+
+
+def case_one_rule_judge_error_on_an_opus_prompt_ends_a_held_haiku_or_sonnet():
+    for name, prompt in (("haiku", "Run the audit on haiku."), ("sonnet", "Use sonnet for the audit.")):
+        cfg, _, _, _ = opus_type(prompt, answer={"ok": True, "model": name}, head=model_head())
+        check("one rule: setup, `%s` writes the %s hold" % (prompt, name), (hold_json(cfg) or {}).get("model") == name,
+              "pass file %r" % (hold_json(cfg),))
+        opus_type("use opus for builders", answer=None, error="timed out after 20 s", cfg=cfg, head=model_head())
+        check("one rule: a judge error on `use opus for builders` ends the held %s" % name, hold_json(cfg) is None,
+              "pass file %r" % (hold_json(cfg),))
+
+
+def case_one_rule_negated_opus_with_a_judge_yes_writes_nothing():
+    cfg, _, _, _ = opus_type("Do not use opus", answer={"ok": True, "model": "opus"}, head=model_head())
+    check("one rule: `Do not use opus` with a judge yes writes no pass file",
+          hold_json(cfg) is None and opus_override(cfg) is None, "pass file %r; files %r" % (hold_json(cfg), ov_files(cfg)))
+
+
+def case_one_rule_question_for_an_opus_agent_holds_opus():
+    cfg, _, _, _ = opus_type("Can you send an opus agent to do this in your session here with a good brief?",
+                             answer={"ok": True, "model": "opus"}, head=model_head())
+    got = hold_json(cfg)
+    check("one rule: control, a question that asks for an opus agent with a judge yes holds opus",
+          got is not None and got.get("model") == "opus", "pass file %r" % (got,))
+
+
+def case_one_rule_seed_turn_naming_opus_writes_no_file():
+    seed = transcript_file([raw_turn("Send an opus agent to measure it.", turnOrigin="host_synthetic")])
+    cfg, _, _, _ = opus_type("Send an opus agent to measure it.", answer={"ok": True, "model": "opus"},
+                             head=model_head(), transcript=seed)
+    check("one rule: a local seed turn (turnOrigin host_synthetic) that names opus writes no pass file",
+          hold_json(cfg) is None and opus_override(cfg) is None, "pass file %r" % (hold_json(cfg),))
+    typed = transcript_file([raw_turn("Send an opus agent to measure it.")])
+    cfg, _, _, _ = opus_type("Send an opus agent to measure it.", answer={"ok": True, "model": "opus"},
+                             head=model_head(), transcript=typed)
+    check("one rule: control, the same words typed by the owner write the opus hold",
+          (hold_json(cfg) or {}).get("model") == "opus", "pass file %r" % (hold_json(cfg),))
+
+
+def case_one_rule_fable_ask_takes_roles_from_the_earlier_prompt():
+    path = transcript_file([owner_turn("The builders should do the refactor next."), owner_turn("use fable")])
+    cfg, _, _, _ = opus_type("use fable", answer={"ok": True, "model": "fable", "roles": ["builder"]},
+                             head=model_head(), transcript=path)
+    got = hold_json(cfg)
+    check("one rule: `use fable` after an earlier builders prompt holds fable for the builder role",
+          got is not None and got.get("model") == "fable" and got.get("role") == "builder", "pass file %r" % (got,))
+
+
+def case_one_rule_judged_opus_hold_ends_at_the_report():
+    """Already true on the base commit: a judged Opus hold with no length ends at the session's next report. A control, not a red."""
+    override, _ = hooks_modules()
+    cfg, _, _, _ = opus_type("Use opus for the builders.", answer={"ok": True, "model": "opus"}, head=model_head())
+    asked = owner_turn("Use opus for the builders.")
+    rec = json.loads(asked)
+    rec["timestamp"] = OV_NOW.isoformat()
+    with config_dir_env(cfg):
+        before = override.model_override(OV_SESSION, records=[rec], report_ok=lambda text: True,
+                                         at=OV_NOW + timedelta(minutes=1))
+        after = override.model_override(OV_SESSION, records=[rec, one_rule_report()], report_ok=lambda text: True,
+                                        at=OV_NOW + timedelta(minutes=2))
+    check("one rule: control, the judged opus hold is live before the report", before is not None, "hold %r" % (before,))
+    check("one rule: control, the judged opus hold ends at the next report", after is None, "hold %r" % (after,))
+
+
+def case_one_rule_opus_explorers_hold_is_explore_only():
+    cfg, _, _, _ = opus_type("Use opus for explorers.", answer={"ok": True, "model": "opus"}, head=model_head())
+    got = hold_json(cfg)
+    check("one rule: `use opus for explorers` writes a judged opus hold for the Explore role",
+          got is not None and got.get("role") == "Explore", "pass file %r" % (got,))
+    explore, builder = take_spawn(cfg, "Explore"), take_spawn(cfg, "builder")
+    check("one rule: an Explore spawn on opus is lifted under the explorers hold", lifted(explore),
+          "take() returned %r for an Explore spawn" % (explore,))
+    check("one rule: a builder spawn stays refused under the explorers hold", not lifted(builder),
+          "take() returned %r for a builder spawn" % (builder,))
+
+
+def case_one_rule_keyword_file_without_a_model_still_lifts_opus():
+    """Control: a pass file on disk with no model field (the old keyword form) still lifts an Opus builder spawn until its time."""
+    cfg = ov_cfg()
+    write_opus_file(cfg, None)
+    took = take_spawn(cfg, "builder")
+    check("one rule: control, a pass file with no model field lifts an Opus builder spawn until its time", lifted(took),
+          "take() returned %r" % (took,))
+
+
 def case_raising_case_does_not_stop_the_run():
     """A case that raises does not stop the run: the case after it still runs, and main returns 1 with a summary."""
     g = globals()
@@ -3707,6 +3854,18 @@ def suite_cases():
         case_model_word_negated_held_model_ends_the_hold,
         case_model_word_negated_other_model_keeps_the_held_model,
         case_model_word_unreadable_report_shape_ends_the_hold,
+        case_one_rule_typed_opus_hold_needs_a_judge_yes,
+        case_one_rule_opus_builders_hold_is_judged,
+        case_one_rule_negated_opus_ends_a_judged_hold,
+        case_one_rule_judge_error_on_opus_words_ends_a_held_fable,
+        case_one_rule_judge_error_on_an_opus_prompt_ends_a_held_haiku_or_sonnet,
+        case_one_rule_negated_opus_with_a_judge_yes_writes_nothing,
+        case_one_rule_question_for_an_opus_agent_holds_opus,
+        case_one_rule_seed_turn_naming_opus_writes_no_file,
+        case_one_rule_fable_ask_takes_roles_from_the_earlier_prompt,
+        case_one_rule_judged_opus_hold_ends_at_the_report,
+        case_one_rule_opus_explorers_hold_is_explore_only,
+        case_one_rule_keyword_file_without_a_model_still_lifts_opus,
         case_raising_case_does_not_stop_the_run,
         case_system_exit_in_a_case_is_a_failed_case,
         case_cost_tests,
