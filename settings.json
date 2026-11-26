@@ -426,6 +426,16 @@
         ]
       },
       {
+        "matcher": "Bash|PowerShell",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "g=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/stall_watch.py\"; [ -f \"$g\" ] || exit 0; IFS= read -r i || :; case $i in *merge*) ;; *) exit 0;; esac; for p in python3 python; do c=$(command -v \"$p\" 2>/dev/null) || continue; case \"$c\" in */WindowsApps/*) continue;; esac; printf %s \"$i\" | \"$c\" \"$g\" --post; exit $?; done; exit 0",
+            "timeout": 10
+          }
+        ]
+      },
+      {
         "matcher": "Bash|PowerShell|mcp__github__update_pull_request",
         "hooks": [
           {

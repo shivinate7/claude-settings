@@ -332,17 +332,32 @@ def output_file(base, job_id, idle):
     return path
 
 
+GH_CLEARED = ("GH_REPO", "GH_TOKEN", "GITHUB_TOKEN", "GH_HOST", "STUB_GH_ANSWER")  # gh's own env, stripped from each child
+
+
+def gh_stubbed(env):
+    """env with the stub gh first on PATH and gh's own variables stripped. Every runner here gives its child this env,
+    so a gh call a case makes reaches the stub, and no real gh and no network. Returns env."""
+    for k in GH_CLEARED:
+        env.pop(k, None)
+    env["PATH"] = GH_STUB_DIR + os.pathsep + env.get("PATH", "")
+    return env
+
+
 def run_stop(transcript_path, base=None, stop_hook_active=False, quiet=None, stdin=None, nt=False,
-             module=None, now=None, path_first=None, long=None):
+             module=None, now=None, path_first=None, long=None, gh_answer=None):
     """Run the Stop mode the way the Stop hook does. Return (rc, stdout, stderr). module, when
     given, is the script run in place of MODULE. now, when given, is the clock of this Stop (epoch
     seconds), so a case can run an earlier Stop than the others. path_first, when given, is a folder put
     first on PATH, so a stub of lsof or ps in it runs in place of the tool. long, when given, is
-    STALL_WATCH_LONG: the age in seconds at which a background agent blocks the Stop."""
+    STALL_WATCH_LONG: the age in seconds at which a background agent blocks the Stop. gh_answer, when given,
+    is what the stub gh prints and exits 0 with; without it the stub exits 1, as a read that fails."""
     mod = module or MODULE
     if not os.path.isfile(mod):
         raise Fail(f"{mod} is missing")
-    env = {k: v for k, v in os.environ.items() if not k.startswith("STALL_WATCH_")}
+    env = gh_stubbed({k: v for k, v in os.environ.items() if not k.startswith("STALL_WATCH_")})
+    if gh_answer is not None:
+        env["STUB_GH_ANSWER"] = gh_answer
     if module is not None:
         env.pop("PYTHONPATH", None)  # a copy must not import its siblings from another checkout
     if path_first is not None:
@@ -594,17 +609,23 @@ def quiet_env_sets_the_age():
     return problems
 
 
-def stop_watch_rows():
-    """The settings.json Stop rows that run stall_watch.py --stop. Raises OSError or ValueError when the file
-    cannot be read."""
+def stall_watch_rows(event, mode):
+    """The settings.json rows of event that run stall_watch.py with mode (--stop or --post), as (matcher, hook)
+    pairs. The matcher is None for an entry without one. Raises OSError or ValueError when the file cannot be read."""
     with open(SETTINGS, encoding="utf-8") as f:
         cfg = json.load(f)
     rows = []
-    for entry in cfg.get("hooks", {}).get("Stop", []):
+    for entry in cfg.get("hooks", {}).get(event, []):
         for h in entry.get("hooks", []):
-            if re.search(r"stall_watch\.py.*--stop\b", h.get("command", "")):
-                rows.append(h)
+            if re.search(r"stall_watch\.py.*" + re.escape(mode) + r"\b", h.get("command", "")):
+                rows.append((entry.get("matcher"), h))
     return rows
+
+
+def stop_watch_rows():
+    """The settings.json Stop rows that run stall_watch.py --stop. Raises OSError or ValueError when the file
+    cannot be read."""
+    return [h for _, h in stall_watch_rows("Stop", "--stop")]
 
 
 @case
@@ -1550,7 +1571,7 @@ def stop_in_process(transcript_path, spies=None, patch=None):
         return real_os_open(path, flags, *args, **kwargs)
 
     seams = [k for k in os.environ if k.startswith("STALL_WATCH_")] + ["STALL_WATCH_NOW"]  # every seam, as run_stop strips them
-    saved = {k: os.environ.get(k) for k in seams}
+    saved = {k: os.environ.get(k) for k in seams + list(GH_CLEARED) + ["PATH"]}  # restored in finally, as the seams are
     payload = {"session_id": "test-stall-watch-stop", "hook_event_name": "Stop", "cwd": SCRATCH,
                "transcript_path": transcript_path, "stop_hook_active": False}
     old_stdin = sys.stdin
@@ -1558,6 +1579,7 @@ def stop_in_process(transcript_path, spies=None, patch=None):
     try:
         for k in seams:
             os.environ.pop(k, None)
+        gh_stubbed(os.environ)  # a gh call of this check reaches the stub, as run_stop's child does
         os.environ["STALL_WATCH_NOW"] = str(NOW)
         sys.stdin = io.StringIO(json.dumps(payload))
         os.stat, os.open, builtins.open, io.open = counted_stat, counted_os_open, counted_open, counted_open
@@ -3125,6 +3147,10 @@ GREEN = "CI green on %s: no failing jobs" % CI_SHA
 RED = "CI red on %s: lint, unit" % CI_SHA
 CANCELLED = "CI cancelled on %s: build" % CI_SHA
 UNKNOWN = "CI unknown on %s: still running" % CI_SHA
+# The ids a CronCreate call returns (toolUseResult id, as the tool returned it), one per PR, and when a check-in
+# fires: seconds from NOW (the Stop clock), negative when it has already fired.
+RET_A, RET_B = "5c1e0a11", "9b2d7f40"
+FIRED_AHEAD, UNFIRED_AHEAD = -60, 600
 CALL_IDS = itertools.count(1)
 # Each call that starts a process, opens a network socket or writes a file. The cost case stands each in for a
 # recorder, so a check that makes one is named.
@@ -3183,9 +3209,25 @@ def checkin(name):
     return tool_call(name, {"message": "CI check on PR %s" % CI_PR})
 
 
-def checkin_answered(name, is_error):
+def checkin_answered(name, is_error, returned=None, fires_in=UNFIRED_AHEAD, pr=CI_PR):
     """A check-in call and its result, in file order. An error result carries its text as toolUseResult, as a
-    failed call does in a transcript."""
+    failed call does in a transcript. CronCreate and ScheduleWakeup take the measured forms: the input the tool
+    is called with, and a result text that holds no CI_KEYS word, so only the record's toolUseResult carries
+    the id and the fire time. A CronCreate returns the id given as returned, and nextFireAt (epoch ms) fires_in
+    seconds from NOW. A ScheduleWakeup returns no id, only scheduledFor."""
+    if name == "CronCreate":
+        call_rec = tool_call(name, {"cron": "14 22 24 11 *", "recurring": False, "prompt": "CI check on PR %s" % pr})
+        call_id = call_rec["message"]["content"][0]["id"]
+        text = ("Scheduled one-shot task %s (14 22 24 11 *). Session-only (not written to disk, dies when Claude "
+                "exits). It will fire once then auto-delete." % returned)
+        fields = {"id": returned, "humanSchedule": "14 22 24 11 *", "recurring": False, "durable": False,
+                  "nextFireAt": (NOW + fires_in) * 1000}
+        return [call_rec, tool_result(call_id, text, tool_use_result=fields)]
+    if name == "ScheduleWakeup":
+        call_rec = tool_call(name, {"delaySeconds": 600, "prompt": "CI check on PR %s" % pr})
+        call_id = call_rec["message"]["content"][0]["id"]
+        fields = {"scheduledFor": (NOW + fires_in) * 1000, "clampedDelaySeconds": 600, "wasClamped": False}
+        return [call_rec, tool_result(call_id, "Next wakeup scheduled for 11:12:00 (in 600s).", tool_use_result=fields)]
     call_rec = checkin(name)
     call_id = call_rec["message"]["content"][0]["id"]
     text = "send_later failed: no session" if is_error else "scheduled"
@@ -3668,6 +3710,15 @@ def stub_calls(log):
         return []
 
 
+# The stub gh that gh_stubbed puts first on PATH. It logs one word per call it answers, so a case counts the gh calls
+# that reached it. It answers STUB_GH_ANSWER with exit 0, and exits 1 when none is set, as a read that fails. Made once
+# per run, under the run folder. sh does not run it on Windows, so a case that counts its calls skips there.
+GH_STUB_DIR = os.path.join(SCRATCH, "gh-stub")
+GH_STUB_LOG = os.path.join(GH_STUB_DIR, "gh-calls.log")
+os.makedirs(GH_STUB_DIR, exist_ok=True)
+stub_tool(GH_STUB_DIR, "gh", 'if [ -n "$STUB_GH_ANSWER" ]; then echo "$STUB_GH_ANSWER"; exit 0; fi\nexit 1', GH_STUB_LOG)
+
+
 BUDGET_SLACK = 1.5  # seconds a Stop may run past BUSY_BUDGET: a python start and the transcript scan
 
 
@@ -3751,6 +3802,28 @@ def CI48_check_reads_only_the_transcript():
         problems.append("no CI block printed, so the cost is not measured on the check")
     else:
         block_reason(out, problems)
+    problems += expect(spies == [], f"the CI check made calls it must not make: {spies}")
+    stray = [p for p in opens if p.startswith(folder) and os.path.basename(p) != "session.jsonl"]
+    problems += expect(stray == [], f"the CI check read files other than the transcript: {stray}")
+    return problems
+
+
+def stood_in_pr_state(repo, number):
+    """The Stop check's PR-state read, stood in as an open PR: no gh call, so the check proper is what runs."""
+    return "open"
+
+
+def cost_problems(path, folder, shown):
+    """The cost of the CI check on the transcript at path: it starts no process, opens no network and writes no
+    file, and it reads no file but the transcript. shown(out) gives the problems with what the check printed, so
+    the calls counted come from a check that printed the thing the case is about (scope). The PR-state read is
+    stood in (stood_in_pr_state), so a process the read starts is not counted here."""
+    spies = []
+    rc, out, stats, opens = stop_in_process(path, spies, patch={"pr_state": stood_in_pr_state})
+    problems = expect(any(os.path.basename(p) == "session.jsonl" for p in opens),
+                      f"scope: stop() did not open the session transcript: opens {opens}")
+    problems += expect(rc == 0, f"exit {rc}, want 0")
+    problems += shown(out)
     problems += expect(spies == [], f"the CI check made calls it must not make: {spies}")
     stray = [p for p in opens if p.startswith(folder) and os.path.basename(p) != "session.jsonl"]
     problems += expect(stray == [], f"the CI check read files other than the transcript: {stray}")
@@ -3930,7 +4003,8 @@ def CI61_checkin_with_an_error_result_does_not_count():
 @case
 def CI62_merge_tool_forms_close_only_their_own_pr():
     """CI62. the merge tool called bare (merge N --confirm), and bin/merge without --confirm, close the wait only
-    when they name the waited PR. Another PR's merge blocks, and the reason names only the waited PR"""
+    when they name the waited PR. Another PR's merge blocks, and the reason names only the waited PR. The dry-run
+    form pins the ask half: it closes the ask, so no block prints. The cancel half is CI126"""
     return closer_pair(merge_bin(CI_PR, cmd="merge"), merge_bin(CI_OTHER_PR, cmd="merge"), "bare merge") + (
         closer_pair(merge_bin(CI_PR, confirm=False), merge_bin(CI_OTHER_PR, confirm=False),
                     "bin/merge without --confirm"))
@@ -4297,8 +4371,8 @@ def CI94_cloud_red_comment_voids_the_checkin():
     if os.name != "posix" or not shutil.which("bash") or not shutil.which("jq"):
         raise Skip("needs bash and jq to run the comment emitter")
     emitter = os.path.join(os.path.dirname(os.path.dirname(MODULE)), "actions", "ci-done-comment", "comment.sh")
-    env = dict(os.environ, CI_DONE_DRY="1", SHA=CI_SHA, RUN_URL="https://example.invalid/run/1",
-               NEEDS=json.dumps({"lint": {"result": "failure"}}))
+    env = gh_stubbed(dict(os.environ, CI_DONE_DRY="1", SHA=CI_SHA, RUN_URL="https://example.invalid/run/1",
+                          NEEDS=json.dumps({"lint": {"result": "failure"}})))
     proc = subprocess.run(["bash", emitter], env=env, capture_output=True, text=True, timeout=30)
     line = next((l for l in proc.stdout.splitlines() if l.startswith("CI ")), "")
     if not line:
@@ -4615,6 +4689,436 @@ def CI110_two_refused_ready_calls_in_one_message_restore_the_earlier_wait():
     return expect_block(items, pr=CI_EARLIER_PR, not_named=[CI_PR, CI_OTHER_PR])
 
 
+# ---- The cancel line (decision ci-wait-reads-run-status): a merge or close of the waited PR, or its return to
+# draft, that closes a CI wait while a check-in this session set has not fired, prints one notice line at the Stop
+# of the merge's own turn. The notice is the Stop output's hookSpecificOutput.additionalContext with hookEventName
+# "Stop", the form that reaches the model; a top-level systemMessage may sit beside it, never in its place. The line
+# names the PR, the id the check-in's tool returned (not the call's own tool_use id), and the tool. A ScheduleWakeup
+# returns no id, so its line says it cannot be deleted by id. The line blocks nothing. A check-in whose nextFireAt
+# (epoch ms) is at or before NOW has fired; a deleted one (CronDelete with its id) is gone. Only a merge or close
+# that succeeded counts: a bin/merge without --confirm, or a gh pr merge that errored, closes nothing.
+
+
+def stop_notice(out, problems):
+    """The text of the one notice line the Stop check prints for the cancel line: hookSpecificOutput.additionalContext
+    of a JSON object whose hookSpecificOutput names hookEventName "Stop". A problem is added when the output is not
+    one such JSON line. A top-level systemMessage is not read here: a case may allow it, never require it. '' when
+    the output is empty or not such a line."""
+    if out.strip() == "":
+        return ""
+    if len(out.strip().splitlines()) != 1:
+        problems.append(f"the Stop output is not one line: {out[:200]!r}")
+    try:
+        body = json.loads(out)
+    except ValueError:
+        problems.append(f"the Stop output is not JSON: {out[:200]!r}")
+        return ""
+    spec = body.get("hookSpecificOutput") if isinstance(body, dict) else None
+    if not isinstance(spec, dict) or spec.get("hookEventName") != "Stop" \
+            or not isinstance(spec.get("additionalContext"), str):
+        problems.append("the Stop output has no hookSpecificOutput with hookEventName \"Stop\" and an "
+                        f"additionalContext string, the form that reaches the model: {out[:200]!r}")
+        return ""
+    return spec["additionalContext"]
+
+
+def cancel_problems(out, pr, ids=(), tool="", not_named=(), says=()):
+    """The problems with out as the cancel line of pr: one Stop notice in hookSpecificOutput.additionalContext that
+    is no block, names pr as a whole token, names each id in ids and tool, has each phrase in says (case-blind), and
+    names no token of not_named."""
+    if out.strip() == "":
+        return ["no cancel line printed, but the merge closed a CI wait with an unfired check-in"]
+    problems = []
+    if '"decision"' in out:
+        problems.append(f"the cancel line blocks the Stop, want a notice only: {out[:200]!r}")
+    msg = stop_notice(out, problems)
+    if msg == "":
+        return problems
+    return problems + cancel_text_problems(msg, pr, ids=ids, tool=tool, not_named=not_named, says=says)
+
+
+def cancel_text_problems(msg, pr, ids=(), tool="", not_named=(), says=()):
+    """The problems with the text of a cancel note (a Stop or a PostToolUse one): it names pr as a whole token, names
+    each id in ids and tool, has each phrase in says (case-blind), and names no token of not_named."""
+    problems = expect(re.search(r"\b%s\b" % pr, msg) is not None, f"cancel line does not name PR {pr}: {msg!r}")
+    for rid in ids:
+        problems += expect(rid in msg, f"cancel line does not name check-in id {rid} as the tool returned it: {msg!r}")
+    problems += expect(tool in msg, f"cancel line does not name the tool {tool} that set the check-in: {msg!r}")
+    for phrase in says:
+        problems += expect(phrase.lower() in msg.lower(), f"cancel line does not say {phrase!r}: {msg!r}")
+    for other in not_named:
+        problems += expect(other not in msg, f"cancel line names {other}, which is not this merge's check-in: {msg!r}")
+    return problems
+
+
+def cancel_line(source, pr, **want):
+    """Run the Stop check on source and return the problems with its output as the cancel line of pr."""
+    problems, out = ci_run(source)
+    return problems + cancel_problems(out, pr, **want)
+
+
+def cron_set(returned, fires_in=UNFIRED_AHEAD, pr=CI_PR):
+    """A CronCreate check-in with its result (checkin_answered), and the call's own tool_use id."""
+    recs = checkin_answered("CronCreate", False, returned=returned, fires_in=fires_in, pr=pr)
+    return recs, recs[0]["message"]["content"][0]["id"]
+
+
+def cron_delete(returned):
+    """A CronDelete call for the id a check-in's tool returned, and its result."""
+    call_rec = tool_call("CronDelete", {"id": returned})
+    call_id = call_rec["message"]["content"][0]["id"]
+    return [call_rec, tool_result(call_id, "Cancelled job %s." % returned, tool_use_result={"id": returned})]
+
+
+def answered(call_rec, text):
+    """A Bash call and its stdout, in file order."""
+    return [call_rec, bash_result(call_rec["message"]["content"][0]["id"], text)]
+
+
+def gh_merge(number=CI_PR):
+    """A Bash call of gh pr merge for the PR."""
+    return shell("gh pr merge %s --squash" % number)
+
+
+@case
+def CI111_gh_pr_merge_names_the_pr_and_the_id_the_tool_returned():
+    """CI111. a gh pr merge that closes a CI wait with an unfired CronCreate check-in prints one notice line in
+    hookSpecificOutput.additionalContext that names the PR, the id the tool returned (and not the call's own tool_use id), and CronCreate, and says to
+    delete it. Control: the same session without the merge prints nothing, so the merge is what prints the line"""
+    recs, call_id = cron_set(RET_A)
+    base = [ready()] + recs
+    problems = cancel_line(base + [gh_merge()], CI_PR, ids=[RET_A], tool="CronCreate",
+                           not_named=[call_id], says=["delete"])
+    return problems + ["control: " + p for p in expect_silent(base)]
+
+
+@case
+def CI112_merge_tool_names_the_pr_and_the_id_the_tool_returned():
+    """CI112. the merge tool (bin/merge N --confirm) that closes a CI wait with an unfired CronCreate check-in prints
+    the same line, though its result reads "merged as <sha>": open_ci_wait reads the call, not that result. Control:
+    the same session without the merge prints nothing"""
+    recs, call_id = cron_set(RET_A)
+    base = [ready()] + recs
+    problems = cancel_line(base + answered(merge_bin(CI_PR), "merged as %s" % CI_SHA), CI_PR, ids=[RET_A],
+                           tool="CronCreate", not_named=[call_id], says=["delete"])
+    return problems + ["control: " + p for p in expect_silent(base)]
+
+
+@case
+def CI113_gh_pr_close_prints_no_cancel_line():
+    """CI113. a gh pr close that closes a CI wait with an unfired CronCreate check-in prints no cancel line: the line
+    is for a merge only, since the task is merge-only (owner task, 11:15 CST Nov 25). Control: a gh pr merge that
+    closes the same wait prints the line, so the check-in is live and the close is what prints nothing"""
+    recs, call_id = cron_set(RET_A)
+    base = [ready()] + recs
+    problems = ["gh pr close: " + p for p in expect_silent(base + [shell("gh pr close %s" % CI_PR)])]
+    return problems + ["control, gh pr merge: " + p
+                       for p in cancel_line(base + [gh_merge()], CI_PR, ids=[RET_A], tool="CronCreate",
+                                            not_named=[call_id], says=["delete"])]
+
+
+@case
+def CI114_return_to_draft_prints_no_cancel_line():
+    """CI114. a GitHub MCP update_pull_request with draft true, which returns the PR to draft and closes its CI wait,
+    prints no cancel line for an unfired CronCreate check-in: the line is for a merge only, since the task is
+    merge-only (owner task, 11:15 CST Nov 25). Control: a gh pr merge that closes the same wait prints the line"""
+    recs, call_id = cron_set(RET_A)
+    base = [ready()] + recs
+    problems = ["return to draft: " + p for p in expect_silent(base + [mcp_pr(MCP_READY, draft=True)])]
+    return problems + ["control, gh pr merge: " + p
+                       for p in cancel_line(base + [gh_merge()], CI_PR, ids=[RET_A], tool="CronCreate",
+                                            not_named=[call_id], says=["delete"])]
+
+
+@case
+def CI115_fired_checkin_prints_no_line():
+    """CI115. a merge after a CronCreate check-in has fired (nextFireAt at or before NOW) prints no line: the one-shot
+    job is gone. Control: the same merge with the check-in still unfired prints the line"""
+    fired, _ = cron_set(RET_A, fires_in=FIRED_AHEAD)
+    unfired, call_id = cron_set(RET_A, fires_in=UNFIRED_AHEAD)
+    problems = ["fired check-in: " + p for p in expect_silent([ready()] + fired + [gh_merge()])]
+    return problems + ["control, unfired: " + p for p in cancel_line([ready()] + unfired + [gh_merge()], CI_PR,
+                                                                     ids=[RET_A], tool="CronCreate",
+                                                                     not_named=[call_id], says=["delete"])]
+
+
+@case
+def CI116_merge_with_no_checkin_prints_no_line():
+    """CI116. a merge of a PR whose CI wait has no check-in prints no line: there is nothing to delete. Control: the
+    same merge with an unfired check-in prints the line"""
+    problems = ["no check-in: " + p for p in expect_silent([ready(), gh_merge()])]
+    recs, call_id = cron_set(RET_A)
+    return problems + ["control, with an unfired check-in: " + p
+                       for p in cancel_line([ready()] + recs + [gh_merge()], CI_PR, ids=[RET_A], tool="CronCreate",
+                                            not_named=[call_id], says=["delete"])]
+
+
+@case
+def CI117_two_prs_names_only_the_merged_pr_and_its_id():
+    """CI117. two PRs, each with a CronCreate check-in, and the newer PR merges: the one line names that PR and its
+    check-in's id, and names neither the other PR nor its id. Control: the same session without the merge prints
+    nothing"""
+    first, _ = cron_set(RET_A, pr=CI_PR)
+    second, _ = cron_set(RET_B, pr=CI_OTHER_PR)
+    base = [ready(CI_PR)] + first + [ready(CI_OTHER_PR)] + second
+    problems = cancel_line(base + [gh_merge(CI_OTHER_PR)], CI_OTHER_PR, ids=[RET_B], tool="CronCreate",
+                           not_named=[RET_A, CI_PR], says=["delete"])
+    return problems + ["control: " + p for p in expect_silent(base)]
+
+
+@case
+def CI118_scheduled_wakeup_names_the_tool_and_says_it_has_no_id():
+    """CI118. a ScheduleWakeup check-in that has not fired, closed by a merge, prints one line that names the PR and
+    ScheduleWakeup, and says it cannot be deleted by id: its result carries no id. Control: the same session without
+    the merge prints nothing"""
+    base = [ready()] + checkin_answered("ScheduleWakeup", False)
+    problems = cancel_line(base + [gh_merge()], CI_PR, tool="ScheduleWakeup", says=["cannot be deleted by id"])
+    return problems + ["control: " + p for p in expect_silent(base)]
+
+
+@case
+def CI119_cancelled_checkin_prints_no_line():
+    """CI119. a CronCreate check-in that the session cancelled with CronDelete, by the id it returned, prints no line
+    at the merge that follows, so the line does not repeat at each Stop. Control: the same merge without the
+    CronDelete prints the line"""
+    recs, call_id = cron_set(RET_A)
+    problems = ["cancelled check-in: " + p
+                for p in expect_silent([ready()] + recs + cron_delete(RET_A) + [gh_merge()])]
+    return problems + ["control, not cancelled: " + p
+                       for p in cancel_line([ready()] + recs + [gh_merge()], CI_PR, ids=[RET_A], tool="CronCreate",
+                                            not_named=[call_id], says=["delete"])]
+
+
+@case
+def CI120_checkin_with_no_ci_wait_prints_no_line():
+    """CI120. a CronCreate check-in set with no CI wait open (no ready call), then a merge, prints no line: the merge
+    closes no CI wait, so the check-in was not a CI wait's. Control: the same check-in under a ready call prints the
+    line"""
+    recs, _ = cron_set(RET_A)
+    problems = ["no CI wait: " + p for p in expect_silent(recs + [gh_merge()])]
+    return problems + ["control, under a ready call: " + p
+                       for p in cancel_line([ready()] + recs + [gh_merge()], CI_PR, ids=[RET_A],
+                                            tool="CronCreate", says=["delete"])]
+
+
+@case
+def CI121_cancel_line_reads_only_the_transcript():
+    """CI121. cost: the cancel line starts no process, opens no network and writes no file, and reads no file but the
+    transcript. The shared cost check (cost_problems, as CI48) on a merge that closes a wait with an unfired check-in.
+    Scope first: the line printed, so the calls counted come from the cancel path"""
+    folder = new_dir()
+    recs, _ = cron_set(RET_A)
+    path = transcript([ready()] + recs + [gh_merge()], folder=folder)
+    return cost_problems(path, folder, lambda out: cancel_problems(out, CI_PR, ids=[RET_A], tool="CronCreate",
+                                                                   says=["delete"]))
+
+
+@case
+def CI122_merge_in_an_earlier_turn_prints_no_line():
+    """CI122. a merge that closed a CI wait with an unfired check-in prints no line at the Stop of a later turn: the
+    line belongs to the Stop of the merge's own turn, and a later user prompt opens a turn after the merge. Control:
+    the same merge with no later prompt is still in its own turn, and prints the line"""
+    recs, call_id = cron_set(RET_A)
+    own = [prompt("merge when green"), ready()] + recs + [gh_merge()]
+    problems = ["later turn: " + p for p in expect_silent(own + [prompt("next request")])]
+    return problems + ["control, own turn: " + p
+                       for p in cancel_line(own, CI_PR, ids=[RET_A], tool="CronCreate", not_named=[call_id],
+                                            says=["delete"])]
+
+
+@case
+def CI123_errored_gh_pr_merge_prints_no_line():
+    """CI123. a gh pr merge whose result is an error (not a PreToolUse refusal) did not merge, so it prints no line:
+    the check-in is still needed. Control: the same merge with a successful result prints the line"""
+    recs, call_id = cron_set(RET_A)
+    merge = gh_merge()
+    merge_id = merge["message"]["content"][0]["id"]
+    errored = [merge, tool_result(merge_id, "Exit code 1\nmerge failed: not mergeable", is_error=True)]
+    problems = ["errored merge: " + p for p in expect_silent([ready()] + recs + errored)]
+    succeeded = [merge, bash_result(merge_id, "Merged pull request")]
+    return problems + ["control, merge succeeded: " + p
+                       for p in cancel_line([ready()] + recs + succeeded, CI_PR, ids=[RET_A], tool="CronCreate",
+                                            not_named=[call_id], says=["delete"])]
+
+
+@case
+def CI124_merge_tool_without_confirm_prints_no_line():
+    """CI124. bin/merge N without --confirm is a dry run, and nothing merged, so it prints no line. Control: the same
+    call with --confirm merged, and prints the line"""
+    recs, call_id = cron_set(RET_A)
+    dry = merge_bin(CI_PR, confirm=False)
+    problems = ["dry run: " + p for p in expect_silent([ready()] + recs + answered(dry, "dry run, nothing merged"))]
+    confirmed = merge_bin(CI_PR)
+    return problems + ["control, with --confirm: " + p
+                       for p in cancel_line([ready()] + recs + answered(confirmed, "merged as %s" % CI_SHA), CI_PR,
+                                            ids=[RET_A], tool="CronCreate", not_named=[call_id], says=["delete"])]
+
+
+def cancel_line_problems(out):
+    """The problems with out holding a cancel line: a Stop notice in hookSpecificOutput.additionalContext that
+    names a delete. Other keys of the same output, such as the job listing's systemMessage, are not judged here."""
+    problems = []
+    for line in out.splitlines():
+        try:
+            body = json.loads(line)
+        except ValueError:
+            continue
+        spec = body.get("hookSpecificOutput") if isinstance(body, dict) else None
+        if isinstance(spec, dict) and isinstance(spec.get("additionalContext"), str) \
+                and "delete" in spec["additionalContext"]:
+            problems.append("cancel line printed, want none: %r" % spec["additionalContext"][:200])
+    return problems
+
+
+@case
+def CI125_queued_green_verdict_does_not_end_the_wait_before_the_merge():
+    """CI125. a ready call, a check-in, then a queued green verdict, then a merge of the PR in the same turn: the
+    verdict is the mark that the wait is green, but the merge still closes the wait, so the cancel line prints.
+    Control: the same verdict with no merge prints nothing, so the line comes from the merge"""
+    recs, call_id = cron_set(RET_A)
+    base = [ready()] + recs
+    problems = cancel_line(base + [queued(GREEN), gh_merge()], CI_PR, ids=[RET_A], tool="CronCreate",
+                           not_named=[call_id], says=["delete"])
+    return problems + ["control: " + p for p in expect_silent(base + [queued(GREEN)])]
+
+
+@case
+def CI126_dry_run_merge_closes_the_wait_and_keeps_it_as_last():
+    """CI126. bin/merge N without --confirm is a preview that merged nothing, but it closes the CI wait and keeps it
+    as the last wait, so the --confirm merge after it still finds the wait, and the cancel line prints. Control: the
+    --confirm merge alone prints the same line. It pins the cancel half of a dry run: the wait stays for the real
+    merge. The ask half is CI62"""
+    recs, call_id = cron_set(RET_A)
+    dry = merge_bin(CI_PR, confirm=False)
+    confirmed = merge_bin(CI_PR)
+    problems = cancel_line([ready()] + recs + answered(dry, "dry run, nothing merged")
+                           + answered(confirmed, "merged as %s" % CI_SHA),
+                           CI_PR, ids=[RET_A], tool="CronCreate", not_named=[call_id], says=["delete"])
+    alone = merge_bin(CI_PR)
+    return problems + ["control, --confirm alone: " + p
+                       for p in cancel_line([ready()] + recs + answered(alone, "merged as %s" % CI_SHA), CI_PR,
+                                            ids=[RET_A], tool="CronCreate", not_named=[call_id], says=["delete"])]
+
+
+@case
+def CI127_bare_ready_wait_closed_by_another_pr_names_no_other_pr():
+    """CI127. a bare gh pr ready opens a wait, and its check-in is set. The check-in's own text names the PR it
+    waits on, not the merged one. A merge of another PR closes that wait, as a merge of any PR does, but the line it
+    prints names no PR number other than the check-in's own. Control: the bare wait with its check-in prints nothing,
+    and the same wait closed by a merge of the check-in's own PR prints the line"""
+    recs, _ = cron_set(RET_A)
+    bare = [ready(command="gh pr ready")] + recs
+    rc_problems, out = ci_run(bare + [gh_merge(CI_OTHER_PR)])
+    problems = rc_problems + expect(re.search(r"\b%s\b" % CI_OTHER_PR, out) is None,
+                                    f"the line for the check-in names PR {CI_OTHER_PR}, which is not its PR: {out[:200]!r}")
+    return problems + ["control, no merge: " + p for p in expect_silent(bare)] \
+        + ["control, merge of the check-in's own PR: " + p
+           for p in cancel_line(bare + [gh_merge(CI_PR)], CI_PR, ids=[RET_A], tool="CronCreate", says=["delete"])]
+
+
+@case
+def CI128_background_merge_closes_the_wait_only_on_a_successful_result():
+    """CI128. a gh pr merge started with run_in_background: its acknowledgement is not a merge, so the Stop after it
+    prints no line, and a merge whose result is failed prints none. Control: the same merge with a completed
+    result prints the line"""
+    recs, call_id = cron_set(RET_A)
+    job = "bgm4217"
+    base = [ready()] + recs + paused_job(job, "gh pr merge %s --squash" % CI_PR)
+    rc_problems, out = ci_run(base)
+    problems = rc_problems + ["background merge acknowledged: " + p for p in cancel_line_problems(out)]
+    failed = attachment_notice(job, "failed", summary='Background command "gh pr merge %s --squash" failed with exit '
+                                                      'code 1' % CI_PR, result="merge failed: not mergeable")
+    rc_problems, out = ci_run(base + [failed])
+    problems += rc_problems + ["background merge failed: " + p for p in cancel_line_problems(out)]
+    completed = attachment_notice(job, "completed", summary='Background command "gh pr merge %s --squash" completed'
+                                                            % CI_PR, result="Merged pull request #%s" % CI_PR)
+    return problems + ["control, completed: " + p
+                       for p in cancel_line(base + [completed], CI_PR, ids=[RET_A], tool="CronCreate",
+                                            not_named=[call_id], says=["delete"])]
+
+
+@case
+def CI129_user_prompt_with_tool_result_text_starts_a_turn():
+    """CI129. a user prompt that holds the words tool_result and no CI key still starts a turn, so the earlier merge's
+    line does not print again at the Stop of that later turn. Control: the merge's own turn prints the line"""
+    recs, call_id = cron_set(RET_A)
+    own = [prompt("merge when green"), ready()] + recs + [gh_merge()]
+    problems = ["later turn: " + p for p in expect_silent(own + [prompt("read the tool_result field")])]
+    return problems + ["control, own turn: " + p
+                       for p in cancel_line(own, CI_PR, ids=[RET_A], tool="CronCreate", not_named=[call_id],
+                                            says=["delete"])]
+
+
+def stop_with_reader(transcript_path, reader, stop_hook_active=False):
+    """The Stop check run in this process, with stall_watch's pr_state seam set to reader. reader(repo, number)
+    returns "open", "merged" or "closed", or raises for a failed read. Returns what the check printed. The module
+    is loaded from MODULE, so the reader is the test's own and no network is touched."""
+    spec = importlib.util.spec_from_file_location("stall_watch_seam", MODULE)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    mod.pr_state = reader
+    saved_stdin, saved_now = sys.stdin, os.environ.get("STALL_WATCH_NOW")
+    sys.stdin = io.StringIO(json.dumps({"transcript_path": transcript_path, "stop_hook_active": stop_hook_active}))
+    os.environ["STALL_WATCH_NOW"] = str(NOW)
+    buf = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(buf):
+            mod.stop()
+    finally:
+        sys.stdin = saved_stdin
+        if saved_now is None:
+            os.environ.pop("STALL_WATCH_NOW", None)
+        else:
+            os.environ["STALL_WATCH_NOW"] = saved_now
+    return buf.getvalue()
+
+
+@case
+def CI130_pr_merged_by_hand_closes_the_wait_before_the_ask():
+    """CI130. the owner merged the PR by hand, so no merge is in the transcript. A wait with a check-in still set
+    reads the PR's state through pr_state (an injected reader here): merged or closed closes the wait, so no ask
+    prints and the check-in gets the delete line. A wait with no check-in starts no process, so the reader is never
+    called, and the ask prints even when the PR was merged by hand. The owner's pick, and the cost rule (no process
+    at Stop for a wait with no check-in) decides it. A failed read cannot reach that wait. A Stop again with
+    stop_hook_active set prints nothing. Control: an open PR still gets the ask"""
+    recs, call_id = cron_set(RET_A)
+    bare = transcript([ready()])
+    checked = transcript([ready()] + recs)
+    calls = []
+
+    def reader(state):
+        def read(repo, number):
+            calls.append(str(number))
+            return state
+        return read
+
+    def failing(repo, number):
+        calls.append(str(number))
+        raise OSError("pr view failed")
+
+    problems = []
+    for state in ("merged", "closed"):
+        before = len(calls)
+        out = stop_with_reader(bare, reader(state))
+        problems += ["%s PR with no check-in: %s" % (state, p) for p in block_problems(out, pr=CI_PR)]
+        problems += expect(len(calls) == before,
+                           f"{state} PR with no check-in: the PR state was read, which the cost rule forbids: "
+                           f"{calls[before:]!r}")
+        out = stop_with_reader(checked, reader(state))
+        problems += ["%s PR with a check-in set: %s" % (state, p)
+                     for p in cancel_problems(out, CI_PR, ids=[RET_A], tool="CronCreate", not_named=[call_id],
+                                              says=["delete"])]
+    problems += expect(CI_PR in calls, f"the PR state of a wait with a check-in was not read: reads {calls!r}")
+    before = len(calls)
+    out = stop_with_reader(bare, failing)
+    problems += ["failed read, no check-in: %s" % p for p in block_problems(out, pr=CI_PR)]
+    problems += expect(len(calls) == before, f"a failed read reached a wait with no check-in: {calls[before:]!r}")
+    again = stop_with_reader(bare, failing, stop_hook_active=True)
+    problems += expect(again.strip() == "", f"a failed read, Stop again in the turn: want nothing: {again[:200]!r}")
+    return problems + ["control, open PR: " + p for p in block_problems(stop_with_reader(bare, reader("open")),
+                                                                        pr=CI_PR)]
+
+
 def paused_job(job_id, command):
     """A Bash call started with run_in_background that runs `command`, and its result."""
     cid = "toolu_" + job_id
@@ -4641,6 +5145,318 @@ def S30_leading_pause_is_quiet_time_at_stop():
             problems += [f"{label}: {p}" for p in listed_once(msg, job_id)]
         else:
             problems += expect(msg == "", f"{label}: listed as quiet, want no listing: {msg!r}")
+    return problems
+
+
+def gh_reads(records, stop_hook_active=False):
+    """The gh calls one Stop makes on records, and what it printed. run_stop runs the Stop with the stub gh answering
+    open, so each read returns and a second read in the same Stop still runs. The count is the growth of the stub's
+    log, so a call that reached no stub is not counted. Returns (calls, rc, out, err)."""
+    before = len(stub_calls(GH_STUB_LOG))
+    rc, out, err = run_stop(transcript(records), gh_answer="open", stop_hook_active=stop_hook_active)
+    return len(stub_calls(GH_STUB_LOG)) - before, rc, out, err
+
+
+@case
+def CI131_pr_state_read_costs_one_gh_call_only_when_it_decides():
+    """CI131. cost: the Stop's read of a numbered CI wait's PR state is one gh call, made only when the read can decide
+    the Stop. A covered wait with its check-in set makes one call, at full size too, and one whose check-ins have all
+    fired makes none. Zero calls under stop_hook_active,
+    when the transcript already closed the wait, for a bare or branch-named wait, and with no wait. Each leg runs the
+    Stop through run_stop with the stub gh answering open. Scope first: the zero legs that name a wait print what they
+    are about (a block or the cancel line), so a zero cannot come from a Stop that skipped the CI check"""
+    if os.name != "posix":
+        raise Skip("needs sh for the gh stub, which this host lacks")
+    problems = []
+    recs, _ = cron_set(RET_A)
+    calls, rc, out, err = gh_reads([ready()] + recs)
+    problems += expect(rc == 0, f"covered numbered wait: exit {rc}, want 0: {err.strip()[:200]}")
+    problems += expect(calls == 1, f"covered numbered wait with its check-in set: {calls} gh calls, want 1")
+    fired, _ = cron_set(RET_A, fires_in=FIRED_AHEAD)  # the unfired leg above reads 1, so this 0 is the gate on the fired check-in
+    calls, rc, out, err = gh_reads([ready()] + fired)
+    problems += expect(calls == 0, f"numbered covered wait whose check-ins have all fired: {calls} gh calls, want 0")
+    calls, rc, out, err = gh_reads([ready()] + recs, stop_hook_active=True)
+    problems += expect(calls == 0, f"under stop_hook_active: {calls} gh calls, want 0")
+    problems += expect(out.strip() == "", f"under stop_hook_active: printed {out[:120]!r}, want nothing")
+    calls, rc, out, err = gh_reads([ready()] + recs + [gh_merge()])
+    problems += expect(RET_A in out, f"transcript closed the wait: no cancel line names the check-in, printed {out[:120]!r}")
+    problems += expect(calls == 0, f"transcript closed the wait: {calls} gh calls, want 0")
+    for label, command in (("bare wait", "gh pr ready"), ("branch-named wait", "gh pr ready feature-x")):
+        calls, rc, out, err = gh_reads([ready(command=command)])
+        problems += expect("marked ready" in out, f"{label}: no block printed, so the zero is not measured: {out[:120]!r}")
+        problems += expect(calls == 0, f"{label}: {calls} gh calls, want 0")
+    calls, rc, out, err = gh_reads([prompt("start")])
+    problems += expect(calls == 0, f"no wait: {calls} gh calls, want 0")
+    big = [prompt("start")] + [assistant_text("step %d" % n) for n in range(2000)]
+    for i in range(30):
+        big += [ready(str(1000 + i)), gh_merge(str(1000 + i))]
+    calls, rc, out, err = gh_reads(big + [ready()] + recs)
+    problems += expect(calls == 1, f"full size, 30 closed waits then a covered wait: {calls} gh calls, want 1")
+    return problems
+
+
+@case
+def CI132_a_gh_call_of_the_check_reaches_the_stub():
+    """CI132. hygiene: a Stop that reads a numbered wait's PR state makes one gh call, and that call reaches the stub
+    on PATH, so the stub's log grows by one. A call that reached a real gh, or no binary, leaves the log as it was.
+    Scope first: the read is the one the Stop makes for a covered wait with its check-in set"""
+    if os.name != "posix":
+        raise Skip("needs sh for the gh stub, which this host lacks")
+    recs, _ = cron_set(RET_A)
+    before = len(stub_calls(GH_STUB_LOG))
+    rc, out, err = run_stop(transcript([ready()] + recs))
+    calls = len(stub_calls(GH_STUB_LOG)) - before
+    problems = expect(rc == 0, f"exit {rc}, want 0: {err.strip()[:200]}")
+    return problems + expect(calls == 1, f"the stub gh logged {calls} calls for one read, want 1: "
+                                         f"the read's gh call did not reach the stub")
+
+
+POST_MODE = "--post"  # the PostToolUse mode of stall_watch.py: a merge's cancel note is printed as the merge returns
+
+
+def bash_command(rec):
+    """The command of one Bash call record."""
+    return rec["message"]["content"][0]["input"]["command"]
+
+
+def post_payload(source, command, stdout="", stderr=""):
+    """The PostToolUse payload of one Bash call of command whose result is stdout and stderr, over the transcript
+    source (records, or a path)."""
+    path = source if isinstance(source, str) else transcript(source)
+    return {"session_id": "test-stall-watch-post", "hook_event_name": "PostToolUse", "tool_name": "Bash",
+            "tool_input": {"command": command},
+            "tool_response": {"stdout": stdout, "stderr": stderr, "interrupted": False},
+            "cwd": SCRATCH, "transcript_path": path}
+
+
+def post_run(source, command, stdout="", stderr=""):
+    """Run the PostToolUse mode on one Bash call of command whose result is stdout and stderr, over the transcript
+    source (records, or a path). Return (rc, stdout, stderr, gh calls). The gh calls are the growth of the stub's log,
+    as gh_reads counts them, so a call that reached no stub is not counted."""
+    payload = post_payload(source, command, stdout, stderr)
+    env = gh_stubbed({k: v for k, v in os.environ.items() if not k.startswith("STALL_WATCH_")})
+    env["STALL_WATCH_NOW"] = str(NOW)
+    before = len(stub_calls(GH_STUB_LOG))
+    proc = subprocess.run([PY, MODULE, POST_MODE], input=json.dumps(payload).encode("utf-8"),
+                          capture_output=True, env=env, timeout=20)
+    return (proc.returncode, proc.stdout.decode("utf-8", "replace"), proc.stderr.decode("utf-8", "replace"),
+            len(stub_calls(GH_STUB_LOG)) - before)
+
+
+def post_note(out):
+    """The additionalContext of the PostToolUse note out holds, or '' when it holds none. A note is a JSON line whose
+    hookSpecificOutput names hookEventName PostToolUse and carries additionalContext, the form that reaches the model."""
+    note = ""
+    for line in out.splitlines():
+        try:
+            body = json.loads(line)
+        except ValueError:
+            continue
+        spec = body.get("hookSpecificOutput") if isinstance(body, dict) else None
+        if isinstance(spec, dict) and spec.get("hookEventName") == "PostToolUse" \
+                and isinstance(spec.get("additionalContext"), str):
+            note = spec["additionalContext"]
+    return note
+
+
+def post_cancel_problems(out, pr, ids=(), tool="", not_named=(), says=()):
+    """The problems with out as the cancel note of pr, printed at the merge's own PostToolUse: the same text checks
+    as the Stop's cancel line (cancel_text_problems)."""
+    note = post_note(out)
+    if note == "":
+        return ["no PostToolUse note printed, but the merge closed a CI wait with an unfired check-in: %r" % out[:200]]
+    return cancel_text_problems(note, pr, ids=ids, tool=tool, not_named=not_named, says=says)
+
+
+def post_silent_problems(out):
+    """The problems with a PostToolUse run that prints a cancel note where none is due."""
+    note = post_note(out)
+    return expect(note == "", f"a PostToolUse note printed where none is due: {note!r}")
+
+
+def post_row_or_problems():
+    """The settings.json PostToolUse row that runs stall_watch.py --post, as (matcher, hook), or None, with the
+    problems found reading it. The row is read only when exactly one row runs the mode (scope before subject, P7)."""
+    try:
+        rows = stall_watch_rows("PostToolUse", POST_MODE)
+    except (OSError, ValueError) as e:
+        return None, [f"cannot read {SETTINGS}: {e}"]
+    problems = expect(len(rows) == 1, f"{len(rows)} PostToolUse rows run stall_watch.py --post, want 1")
+    return (rows[0] if len(rows) == 1 else None), problems
+
+
+def post_row_run(row_command, payload):
+    """Run the PostToolUse row's command text under bash, as the harness runs a hook: the payload's JSON line is the
+    shell's stdin, CLAUDE_CONFIG_DIR names a scratch config whose hooks folder is this checkout's, and a stub python3
+    and a stub python first on PATH log each start, then exec the real interpreter. Return (rc, stdout, stderr,
+    starts), starts being the number of python starts the row made."""
+    folder = new_dir()
+    cfg = os.path.join(folder, "config")
+    stubs = os.path.join(folder, "stub-bin")
+    starts = os.path.join(folder, "starts.log")
+    os.makedirs(cfg)
+    os.makedirs(stubs)
+    os.symlink(HERE, os.path.join(cfg, "hooks"))
+    for name in ("python3", "python"):
+        stub_tool(stubs, name, "exec %s \"$@\"" % shlex.quote(PY), starts)
+    env = gh_stubbed({k: v for k, v in os.environ.items()
+                      if not k.startswith("STALL_WATCH_") and k != "CLAUDE_CONFIG_DIR"})
+    env["CLAUDE_CONFIG_DIR"] = cfg
+    env["PATH"] = stubs + os.pathsep + env.get("PATH", "")
+    env["STALL_WATCH_NOW"] = str(NOW)
+    line = (json.dumps(payload) + "\n").encode("utf-8")
+    proc = subprocess.run(["bash", "-c", row_command], input=line, capture_output=True, env=env, cwd=SCRATCH,
+                          timeout=20)
+    return (proc.returncode, proc.stdout.decode("utf-8", "replace"), proc.stderr.decode("utf-8", "replace"),
+            len(stub_calls(starts)))
+
+
+@case
+def CI133_cost_no_gh_call_per_tool_call_and_at_most_one_per_stop():
+    """CI133. cost: a tool call starts no gh process. The merge's PostToolUse prints its note with no gh call, and an
+    unrelated Bash call's PostToolUse starts none. A Stop starts at most one, and only for a numbered wait still open
+    with an unfired check-in: one there, and none once the merge closed the wait. Scope first: the merge's note is
+    printed, so the zero is counted on the hook that prints it"""
+    if os.name != "posix":
+        raise Skip("needs sh for the gh stub, which this host lacks")
+    recs, call_id = cron_set(RET_A)
+    merge = merge_bin(CI_PR)
+    open_records = [prompt("merge when green"), ready()] + recs
+    closed = open_records + answered(merge, "merged as %s" % CI_SHA)
+    rc, out, err, calls = post_run(closed, bash_command(merge), stdout="merged as %s" % CI_SHA)
+    problems = post_cancel_problems(out, CI_PR, ids=[RET_A], tool="CronCreate", not_named=[call_id], says=["delete"])
+    problems += expect(calls == 0, f"the merge's PostToolUse started {calls} gh calls, want 0")
+    rc, out, err, calls = post_run(open_records, "ls")
+    problems += expect(calls == 0, f"an unrelated Bash call's PostToolUse started {calls} gh calls, want 0")
+    calls, rc, out, err = gh_reads(open_records)
+    problems += expect(calls == 1, f"a Stop with the wait open and its check-in unfired: {calls} gh calls, want 1")
+    calls, rc, out, err = gh_reads(closed)
+    problems += expect(calls == 0, f"a Stop after the merge closed the wait: {calls} gh calls, want 0")
+    return problems
+
+
+@case
+def CI134_merge_tool_confirm_prints_the_delete_note_at_its_post_tool_use():
+    """CI134. the merge tool's real merge (bin/merge N --confirm, result "merged as <sha>") closes a CI wait with an
+    unfired CronCreate check-in. Its PostToolUse prints the note that names the check-in to delete, so the note comes
+    in the turn of the merge (owner task, 11:15 CST Nov 25). The controls are CI136, CI137 and CI138"""
+    recs, call_id = cron_set(RET_A)
+    merge = merge_bin(CI_PR)
+    records = [prompt("merge when green"), ready()] + recs + answered(merge, "merged as %s" % CI_SHA)
+    rc, out, err, calls = post_run(records, bash_command(merge), stdout="merged as %s" % CI_SHA)
+    problems = post_cancel_problems(out, CI_PR, ids=[RET_A], tool="CronCreate", not_named=[call_id], says=["delete"])
+    return problems or expect(rc == 0, f"exit {rc}, want 0: {err.strip()[:200]}")
+
+
+@case
+def CI135_gh_pr_merge_prints_the_delete_note_at_its_post_tool_use():
+    """CI135. a gh pr merge that closes a CI wait with an unfired CronCreate check-in prints the same PostToolUse
+    note in the turn of the merge (owner task, 11:15 CST Nov 25). Its result is the line gh prints for a merge."""
+    recs, call_id = cron_set(RET_A)
+    merge = gh_merge()
+    text = "Merged pull request #%s" % CI_PR
+    records = [prompt("merge when green"), ready()] + recs + answered(merge, text)
+    rc, out, err, calls = post_run(records, bash_command(merge), stdout=text)
+    problems = post_cancel_problems(out, CI_PR, ids=[RET_A], tool="CronCreate", not_named=[call_id], says=["delete"])
+    return problems or expect(rc == 0, f"exit {rc}, want 0: {err.strip()[:200]}")
+
+
+@case
+def CI136_dry_run_and_gh_pr_close_post_no_cancel_note():
+    """CI136. control for CI134 and CI135: a dry run (bin/merge N without --confirm, result "dry run, nothing merged")
+    and a gh pr close of a CI wait with an unfired check-in print no PostToolUse note, since neither merged the PR. The
+    task is merge-only (owner task, 11:15 CST Nov 25)"""
+    recs, _ = cron_set(RET_A)
+    dry = merge_bin(CI_PR, confirm=False)
+    rc, out, err, calls = post_run([prompt("merge when green"), ready()] + recs + answered(dry, "dry run, nothing merged"),
+                                   bash_command(dry), stdout="dry run, nothing merged")
+    problems = ["dry run: " + p for p in post_silent_problems(out)]
+    close = shell("gh pr close %s" % CI_PR)
+    rc, out, err, calls = post_run([prompt("merge when green"), ready()] + recs + answered(close, "Closed pull request #%s" % CI_PR),
+                                   bash_command(close), stdout="Closed pull request #%s" % CI_PR)
+    return problems + ["gh pr close: " + p for p in post_silent_problems(out)]
+
+
+@case
+def CI137_refused_merge_posts_no_cancel_note():
+    """CI137. control for CI134: a merge the tool refused (its result is an error, and nothing merged) prints no
+    PostToolUse note, so the check-in stays for the merge that lands"""
+    recs, _ = cron_set(RET_A)
+    merge = merge_bin(CI_PR)
+    refused = tool_result(merge["message"]["content"][0]["id"], "merge refused: PR %s is not mergeable" % CI_PR,
+                          is_error=True)
+    records = [prompt("merge when green"), ready()] + recs + [merge, refused]
+    rc, out, err, calls = post_run(records, bash_command(merge), stderr="merge refused: PR %s is not mergeable" % CI_PR)
+    return post_silent_problems(out)
+
+
+@case
+def CI138_merge_of_another_pr_posts_no_cancel_note():
+    """CI138. control for CI134: a merge of another PR (bin/merge with another number, merged) closes no wait on the
+    PR that holds the check-in, so its PostToolUse prints no note about that check-in"""
+    recs, _ = cron_set(RET_A)
+    other = merge_bin(CI_OTHER_PR)
+    records = [prompt("merge when green"), ready()] + recs + answered(other, "merged as %s" % CI_SHA)
+    rc, out, err, calls = post_run(records, bash_command(other), stdout="merged as %s" % CI_SHA)
+    return post_silent_problems(out)
+
+
+@case
+def CI139_post_row_starts_no_python_for_a_call_without_merge():
+    """CI139. cost: the settings.json PostToolUse row that runs stall_watch.py --post, run under bash, starts no python
+    for a Bash call whose payload line holds no "merge". Its shell exits 0 before the python loop, so the stub python3
+    and python log no start. The payload is checked first to hold no merge, so the zero is a fact about this payload,
+    over the open CI wait of CI133"""
+    if os.name != "posix" or shutil.which("bash") is None:
+        raise Skip("needs sh and bash for the row's shell and the python stubs, which this host lacks")
+    row, problems = post_row_or_problems()
+    if row is None:
+        return problems
+    recs, _ = cron_set(RET_A)
+    payload = post_payload([prompt("merge when green"), ready()] + recs, "ls")
+    problems += expect("merge" not in json.dumps(payload), "the payload names merge, so the zero proves nothing")
+    rc, out, err, starts = post_row_run(row[1]["command"], payload)
+    problems += expect(rc == 0, f"exit {rc}, want 0: {err.strip()[:200]}")
+    return problems + expect(starts == 0, f"the row started python {starts} times for a call with no merge, want 0")
+
+
+@case
+def CI140_merge_confirm_starts_python_once_and_the_row_prints_the_cancel_note():
+    """CI140. the settings.json PostToolUse row that runs stall_watch.py --post, run under bash, starts python once for
+    bin/merge N --confirm (result "merged as <sha>") that closes a CI wait with an unfired CronCreate check-in, and the
+    real hook prints that cancel note on the row's stdout. It is the merge of CI134, read through the row instead of
+    the hook's own mode"""
+    if os.name != "posix" or shutil.which("bash") is None:
+        raise Skip("needs sh and bash for the row's shell and the python stubs, which this host lacks")
+    row, problems = post_row_or_problems()
+    if row is None:
+        return problems
+    recs, call_id = cron_set(RET_A)
+    merge = merge_bin(CI_PR)
+    records = [prompt("merge when green"), ready()] + recs + answered(merge, "merged as %s" % CI_SHA)
+    payload = post_payload(records, bash_command(merge), stdout="merged as %s" % CI_SHA)
+    rc, out, err, starts = post_row_run(row[1]["command"], payload)
+    problems += expect(rc == 0, f"exit {rc}, want 0: {err.strip()[:200]}")
+    problems += expect(starts == 1, f"the row started python {starts} times for the merge, want 1")
+    if starts == 1:
+        problems += post_cancel_problems(out, CI_PR, ids=[RET_A], tool="CronCreate", not_named=[call_id],
+                                         says=["delete"])
+    return problems
+
+
+@case
+def CI141_post_row_matcher_covers_bash_and_powershell():
+    """CI141. the settings.json PostToolUse row that runs stall_watch.py --post has a matcher that matches the whole
+    tool name Bash and the whole tool name PowerShell, the two tools a merge can run in"""
+    row, problems = post_row_or_problems()
+    if row is None:
+        return problems
+    matcher = row[0]
+    if not isinstance(matcher, str):
+        return [f"the row has no matcher string: {matcher!r}"]
+    for name in ("Bash", "PowerShell"):
+        problems += expect(re.fullmatch(matcher, name) is not None,
+                           f"the row's matcher {matcher!r} does not match {name}, which a merge can run in")
     return problems
 
 
