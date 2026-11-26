@@ -925,9 +925,9 @@ while True:
             raise ImportError("reread_check has no unread_handoff")
         # The rest of what judge() and main() take from it: a stale copy that lacks one would raise mid-judge, and main()
         # fails open on a raise, so the refusal it was loaded for would turn into an allow.
-        _missing = [_name for _name in ("unread_note", "too_big_estimate", "agent_rewrite", "audit_helper_command") if not callable(getattr(reread_check, _name, None))]
+        _missing = [_name for _name in ("unread_note", "too_big_estimate", "agent_rewrite", "audit_helper_command", "audit_helper_allows") if not callable(getattr(reread_check, _name, None))]
         _missing += [_name for _name in ("HANDOFF_MAX_TOKENS", "READ_CAP_TOKENS", "READ_MAX_LINES") if not isinstance(getattr(reread_check, _name, None), int)]
-        _missing += [_name for _name in ("AUDIT_OWED", "AUDIT_REMEDY", "AUDIT_HELPER_HEAD") if not isinstance(getattr(reread_check, _name, None), str)]
+        _missing += [_name for _name in ("AUDIT_OWED", "AUDIT_REMEDY", "AUDIT_HELPER_HEAD", "AUDIT_HELPER_SCRIPT") if not isinstance(getattr(reread_check, _name, None), str)]
         if _missing:
             raise ImportError("reread_check lacks %s" % ", ".join(_missing))
 
@@ -1270,10 +1270,11 @@ COMPACTION_AUDIT_TRANSCRIPT = " This session's transcript path, which the brief 
 
 
 def audit_helper_hit(tool: str, tool_input, handoff: str) -> bool:
-    """True when the call is the audit helper command the compaction-audit remedy prints, in that exact text: the
-    helper under its own path, the handoff path filled in, nothing chained, piped or added."""
+    """True when the call is the audit helper command the compaction-audit remedy prints: that exact text, or the same
+    words in other quotes or through a symlink to the helper (reread_check.audit_helper_allows). Nothing chained,
+    piped, substituted or added."""
     command = tool_input.get("command") if isinstance(tool_input, dict) else None
-    return tool == "Bash" and isinstance(command, str) and command == reread_check.audit_helper_command(handoff)
+    return tool == "Bash" and isinstance(command, str) and reread_check.audit_helper_allows(command, handoff)
 
 
 HANDOFF_SECTIONS_REASON = (
