@@ -44,14 +44,15 @@ import bisect
 import io
 import os
 import re
-import subprocess
 import sys
 import tokenize
 import warnings
 from collections import Counter
 
 HERE = os.path.dirname(os.path.realpath(__file__))
+sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
 sys.path.insert(0, HERE)
+import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
 import check_comment_narration as narration  # noqa: E402  the one home of the diff reader, the language table and the shell scan
 
 Unread = narration.Unread
@@ -470,7 +471,7 @@ def do_fix(path):
 
 
 def git_show(root, ref, path):
-    done = subprocess.run(["git", "-c", "core.quotepath=off", "show", "%s:%s" % (ref, path)], cwd=root, capture_output=True)
+    done = _nowindow.run(["git", "-c", "core.quotepath=off", "show", "%s:%s" % (ref, path)], cwd=root, capture_output=True)
     return done.stdout.decode("utf-8", "replace") if done.returncode == 0 else None
 
 
