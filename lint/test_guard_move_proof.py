@@ -7,9 +7,6 @@ Each case builds a git fixture repo under this run's folder: HEAD~1 holds the ba
 The script runs in-process with `--root` set to that repo, and the case reads its verdict line and exit code.
 The importtime cases stub the timer (`median_import`), so no verdict depends on elapsed time. The one real-process
 importtime case reads only that the timer ran, never the verdict.
-
-A case that pins a known gap is named test_known_gap_...: its docstring says KNOWN GAP, and it asserts what the script
-does today. A fix that makes the script judge that gap turns the case red; re-point it then.
 """
 import contextlib
 import importlib.util
@@ -228,20 +225,28 @@ class FreeNames(Proof):
                         tree(guard='"""Guard module."""\n', guard_x="def a(p):\n    y = p\n    return y\n"),
                         lines=["1 moved module"])
 
-    def test_known_gap_a_unit_that_stays_reads_a_name_moved_out(self):
-        """KNOWN GAP, pinned so it is on record: a unit that stays in guard.py and reads Y, which moved to guard_core.py
-        with no import of Y left in guard.py, should fail: at run time a() raises NameError. Rule 3 checks only the
-        moved units, so this passes today. A fix that checks the staying units turns this case red; re-point it then."""
-        self.assertPass(tree(guard="Y = 1\n\ndef a():\n    return Y\n"),
+    def test_a_unit_that_stays_and_reads_a_name_moved_out_fails(self):
+        """A unit that stays in guard.py reads Y, which moved to guard_core.py with no import of Y left in guard.py:
+        at run time a() raises NameError. Rule 3 checks every unit in a module that lost a name, not only moved units."""
+        self.assertFail(tree(guard="Y = 1\n\ndef a():\n    return Y\n"),
                         tree(guard="def a():\n    return Y\n", guard_core="Y = 1\n"),
+                        lines=["unresolved name `Y` in def a", "guard_core.py"])
+
+    def test_a_unit_that_stays_and_reads_a_name_imported_from_the_moved_module_passes(self):
+        self.assertPass(tree(guard="Y = 1\n\ndef a():\n    return Y\n"),
+                        tree(guard="from guard_core import Y\n\ndef a():\n    return Y\n", guard_core="Y = 1\n"),
                         lines=["1 moved module"])
 
-    def test_known_gap_a_moved_and_changed_unit_skips_the_free_name_check(self):
-        """KNOWN GAP, pinned so it is on record: a unit that moved AND changed, with the flag naming it, reads Y, which
-        resolves nowhere in guard_x.py, and should fail. Rule 3 looks only at units whose exact body sat at base
-        (moved_units), so a changed unit's reads go unchecked and this passes today. A fix that checks changed moved
-        units turns this case red; re-point it then."""
-        self.assertPass(tree(guard="def a():\n    return 1\n"), tree(guard_x="def a():\n    return Y\n"),
+    def test_a_moved_and_changed_unit_listed_in_changed_still_gets_the_free_name_check(self):
+        """A unit that moved and changed, with --changed naming it, reads Y, which resolves nowhere in guard_x.py.
+        --changed allows the edit, never an unresolved name."""
+        self.assertFail(tree(guard="def a():\n    return 1\n"), tree(guard_x="def a():\n    return Y\n"),
+                        "--changed", "a", lines=["unresolved name `Y` in def a", "guard_x.py"])
+
+    def test_a_moved_and_changed_unit_listed_in_changed_whose_name_is_imported_passes(self):
+        self.assertPass(tree(guard="Y = 1\n\ndef a():\n    return 1\n"),
+                        tree(guard='"""Guard module."""\n', guard_core="Y = 1\n",
+                             guard_x="from guard_core import Y\n\ndef a():\n    return Y\n"),
                         "--changed", "a", lines=["changed (allowed by --changed): def a"])
 
 
@@ -251,27 +256,24 @@ class AugAssign(Proof):
         self.assertFail(base, head, lines=["new unit not in --new: X at guard.py:2 (a second copy of one in base)"])
         self.assertPass(base, head, "--new", "X", lines=["new copy (allowed by --new): X at guard.py:2"])
 
-    def test_known_gap_a_moved_aug_assign_whose_target_is_not_defined_there(self):
-        """KNOWN GAP, pinned so it is on record: X is imported from outside the guard family, so no guard module
-        defines it, and `X += [2]` moved to guard_x.py reads X at import with no X there: NameError. Rule 3 reads an
-        augmented assignment's target as assigned, not read, so it passes today. A fix that counts the read turns this
-        case red; re-point it then."""
-        self.assertPass(tree(guard="from shared_state import X\nX += [2]\n"),
-                        tree(guard='"""Guard module."""\n', guard_x="X += [2]\n"), lines=["1 moved module"])
+    def test_a_moved_aug_assign_whose_target_is_not_defined_there_fails(self):
+        """X comes from outside the guard family, so no guard module defines it. `X += [2]` moved to guard_x.py reads
+        X at import, with no X there: NameError. An augmented assignment reads its target as well as binding it."""
+        self.assertFail(tree(guard="from shared_state import X\nX += [2]\n"),
+                        tree(guard='"""Guard module."""\n', guard_x="X += [2]\n"),
+                        lines=["unresolved name `X`", "guard_x.py"])
 
     def test_a_moved_aug_assign_whose_target_is_imported_passes(self):
         self.assertPass(tree(guard="from shared_state import X\nX += [2]\n"),
                         tree(guard='"""Guard module."""\n', guard_x="from shared_state import X\n\nX += [2]\n"),
                         lines=["1 moved module"])
 
-    def test_known_gap_a_moved_aug_assign_is_a_second_definition_of_its_name(self):
-        """KNOWN GAP, pinned so it is on record: `X = [1]` stays in guard.py and `X += [2]` moves to guard_x.py, which
-        imports X, so X resolves there. Rule 2 counts an augmented assignment as a definition, so the move fails as
-        "defined in two modules" though no module binds X twice. Pinned as that FAIL; a fix that stops counting `X +=`
-        as a definition turns this case red; re-point it then."""
-        self.assertFail(tree(guard="X = [1]\nX += [2]\n"),
+    def test_a_moved_aug_assign_on_an_imported_name_is_not_a_second_definer(self):
+        """`X = [1]` stays in guard.py and `X += [2]` moves to guard_x.py, which imports X from guard. An augmented
+        assignment does not define its target, so X is defined once, in guard.py, and the move passes."""
+        self.assertPass(tree(guard="X = [1]\nX += [2]\n"),
                         tree(guard="X = [1]\n", guard_x="from guard import X\n\nX += [2]\n"),
-                        lines=["defined in two modules at head: X in guard.py, guard_x.py"])
+                        lines=["1 moved module"])
 
 
 class TupleAndSubscript(Proof):
@@ -398,13 +400,12 @@ class DroppedCopy(Proof):
         self.assertFail(tree(guard="def a():\n    return 1\n\ndef a():\n    return 1\n"),
                         tree(guard="def a():\n    return 1\n"))
 
-    def test_known_gap_the_changed_flag_excuses_a_dropped_copy(self):
-        """KNOWN GAP, pinned so it is on record: the second identical `def a` is dropped, no body changed, so the
-        "none lost" claim fails. Rule 1 files the drop under `changed`, and --changed a excuses it, so this passes
-        today. A fix that reads a drop as lost turns this case red; re-point it then."""
-        self.assertPass(tree(guard="def a():\n    return 1\n\ndef a():\n    return 1\n"),
+    def test_a_dropped_copy_is_lost_even_with_the_changed_flag(self):
+        """The second identical `def a` is dropped and no body changed, so one unit is lost. --changed a names the
+        unit, but a drop is not an edit: this fails, and says lost."""
+        self.assertFail(tree(guard="def a():\n    return 1\n\ndef a():\n    return 1\n"),
                         tree(guard="def a():\n    return 1\n"), "--changed", "a",
-                        lines=["changed (allowed by --changed): def a"])
+                        lines=["lost: def a"])
 
 
 if __name__ == "__main__":
