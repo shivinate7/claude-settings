@@ -5716,15 +5716,14 @@ def audit_cleanup_form(tool: str, tool_input) -> bool:
 def audit_remedy_hit(tool: str, tool_input, handoff: str) -> bool:
     """True when this call is the command the compaction-audit refusal prints: the helper from this guard's own hooks
     folder with exactly --audit-brief --handoff <the session's handoff>, and nothing chained, piped or redirected. The
-    printed text is the exact form (reread_check.audit_remedy_command, the one home). Otherwise the words must read
-    back the same: python3 or python, the same script by realpath (a symlinked or hash-suffixed folder), quotes
-    optional, and no shell syntax anywhere. A pass clears nothing: the audit stays owed."""
+    words are python3 or python, the script (the same file by realpath, so a symlinked or hash-suffixed folder
+    matches) and the flags of reread_check.AUDIT_BRIEF_ARGS. Quotes are optional. The printed spelling is
+    reread_check.audit_remedy_command, the one home; any other spelling may hold no shell syntax. A pass clears
+    nothing: the audit stays owed."""
     command = tool_input.get("command") if isinstance(tool_input, dict) else None
     if tool != "Bash" or not isinstance(command, str) or not isinstance(handoff, str) or not handoff:
         return False
     command = command.strip()
-    if command == reread_check.audit_remedy_command(handoff):
-        return True
     try:
         words = shlex.split(command)
     except ValueError:
@@ -5734,10 +5733,12 @@ def audit_remedy_hit(tool: str, tool_input, handoff: str) -> bool:
     script, args = words[1], words[2:]
     if args != list(reread_check.AUDIT_BRIEF_ARGS) + [handoff]:
         return False
-    if AUDIT_CLEANUP_SHELL_BAD.search(script) or AUDIT_CLEANUP_SHELL_BAD.search(handoff):
-        return False
-    if AUDIT_CLEANUP_SHELL_BAD.search(command.replace(script, "", 1).replace(handoff, "", 1)):
-        return False
+    # The printed spelling needs no syntax check: the script is judged below. Any other spelling may carry none.
+    if command != reread_check.audit_remedy_command(handoff, script):
+        if AUDIT_CLEANUP_SHELL_BAD.search(script) or AUDIT_CLEANUP_SHELL_BAD.search(handoff):
+            return False
+        if AUDIT_CLEANUP_SHELL_BAD.search(command.replace(script, "", 1).replace(handoff, "", 1)):
+            return False
     own = os.path.join(os.path.dirname(__file__), reread_check.AUDIT_SCRIPT_NAME)
     return os.path.realpath(script) == os.path.realpath(own)
 
