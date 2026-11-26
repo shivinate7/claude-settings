@@ -131,9 +131,9 @@ class SessionStartAgentWorktreeNoticeTests(unittest.TestCase):
         vcs(self.primary, "commit", "-q", "-m", "first")
         self.made = 0
 
-    def put(self, path, text):
+    def put(self, path, text, newline=None):
         os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path, "w", encoding="utf-8") as handle:
+        with open(path, "w", encoding="utf-8", newline=newline) as handle:
             handle.write(text)
 
     def add_agent_worktrees(self, count):
@@ -3104,6 +3104,10 @@ OLD_MTIME = 1000000000
 # A case that finds none skips; it never installs one.
 DASH = shutil.which("dash")
 DASH_SKIP = "no dash binary on PATH; the case never installs one"
+# Why a case that needs the sh shim is skipped on Windows: Git's sh launcher puts its own folders ahead of PATH, so the
+# shim logs no call (the probe in assert_shim_is_live shows it). Each such case names this one reason.
+SH_SHIM_SKIP = ("the sh shim does not stand in for Git Bash's sh on Windows: Git's sh launcher puts its own folders "
+                "ahead of PATH, so the shim logs no call")
 
 
 def process_state(pid):
@@ -3306,7 +3310,8 @@ class SessionStartMainRefTests(SessionStartAgentWorktreeNoticeTests):
         self.assertEqual(count, 1, "scope: the installer has %d marker lines, want 1" % count)
         self.assertNotIn(pre_commit_marker(), base, "scope: the marker text is already in the installer outside the heredoc")
         path = os.path.join(self.root, name)
-        self.put(path, base + "\n: <<'NOTE'\n%s\nNOTE\n" % body_line)
+        # LF, as the checked-in installer is (eol=lf), so the copy shipped here has the bytes the missing-copy case ships.
+        self.put(path, base + "\n: <<'NOTE'\n%s\nNOTE\n" % body_line, newline="\n")
         return path
 
     def assert_one_missing_copy_line(self, where, control):
@@ -3398,9 +3403,11 @@ class SessionStartMainRefTests(SessionStartAgentWorktreeNoticeTests):
         self.assertTrue(any(line.startswith("checkout ") for line in lines), "control: no checkout line: %r" % lines)
         self.assertEqual([line for line in lines if "main-ref" in line], [], "a main-ref line printed with no installer")
 
+    @unittest.skipIf(os.name == "nt", SH_SHIM_SKIP)
     def test_an_installer_from_before_check_is_never_run(self):
         self.assert_installer_is_not_run("old", OLD_INSTALLER)
 
+    @unittest.skipIf(os.name == "nt", SH_SHIM_SKIP)
     def test_the_check_starts_once_and_writes_no_file(self):
         control = self.control()
         for state in ("missing", "armed"):
@@ -3443,7 +3450,7 @@ class SessionStartMainRefTests(SessionStartAgentWorktreeNoticeTests):
         """A marked installer whose --check exits 3, which is neither a finding (1) nor an unknown (2)."""
         installer = os.path.join(self.root, "exit-three-install.sh")
         self.put(installer, "#!/bin/sh\n# main-ref-check: 1\n"
-                            "echo 'main-ref check: unknown: the fixture read failed' >&2\nexit 3\n")
+                            "echo 'main-ref check: unknown: the fixture read failed' >&2\nexit 3\n", newline="\n")
         where = self.make_repo("exit-three")
         self.ship(where, installer=installer)
         code, _, err = self.check(where)
@@ -3463,7 +3470,8 @@ class SessionStartMainRefTests(SessionStartAgentWorktreeNoticeTests):
         remedy = "Remedy: sh githooks/main-ref/install.sh"
         self.assertGreater(len(list_text), 400, "scope: the list line is not over 400 characters")
         installer = os.path.join(self.root, "long-list-install.sh")
-        self.put(installer, "#!/bin/sh\n# main-ref-check: 1\necho '%s' >&2\necho '%s' >&2\nexit 1\n" % (list_text, remedy))
+        self.put(installer, "#!/bin/sh\n# main-ref-check: 1\necho '%s' >&2\necho '%s' >&2\nexit 1\n" % (list_text, remedy),
+                 newline="\n")
         where = self.make_repo("long-list")
         self.ship(where, installer=installer)
         code, _, err = self.check(where)
@@ -3480,6 +3488,7 @@ class SessionStartMainRefTests(SessionStartAgentWorktreeNoticeTests):
         self.assertEqual(listed, list_text[:400], "the list part is %d characters, want its first 400: %r" % (len(listed), listed))
 
     @unittest.skipIf(DASH is None, DASH_SKIP)
+    @unittest.skipIf(os.name == "nt", SH_SHIM_SKIP)
     def test_the_hook_run_by_dash_prints_what_the_sh_run_prints_and_no_stderr(self):
         """Under dash, bounded_run's `set -m` has no tty to act on and prints a line to stderr on each call. The hook and its
         installer run under dash here, as on the CI runner, where sh is dash. The sh run is the control."""
@@ -3577,7 +3586,7 @@ class SessionStartMainRefTests(SessionStartAgentWorktreeNoticeTests):
         self.assertEqual(count, 1, "scope: the installer has %d marker lines, want 1" % count)
         self.assertIn(pre_commit_marker(), indented, "scope: the pre-commit marker is not in the indented installer")
         installer = os.path.join(self.root, "indented-install.sh")
-        self.put(installer, indented)
+        self.put(installer, indented, newline="\n")
         control = self.control()
         where = self.make_repo("indented")
         self.ship(where, installer=installer)
