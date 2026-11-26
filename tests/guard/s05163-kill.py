@@ -1335,6 +1335,10 @@ sh("detached: a busy while colon loop with no sleep, in the background, is refus
    "while :; do :; done & pid=$!", "deny", "detached-launch", cwd=NOGIT)
 sh("detached: yes under a time limit but not its own session is refused",
    "timeout 600 yes > /dev/null & pid=$!", "deny", "detached-launch", cwd=NOGIT)
+# A brace group is a job too: its `&` starts the load generator inside it, and the group's `$!` is the one pid
+# the call holds. No `timeout N setsid` form wraps the yes, so the rule refuses it.
+sh("detached: yes inside a brace group run in the background, with its $! captured, is refused",
+   "{ yes > /dev/null; } & echo $!", "deny", "detached-launch", cwd=NOGIT)
 # CONTROLS. A test job or server with its own capture is no load generator; a time-limited yes in its
 # own session, a foreground pipe and a short sleep start nothing the rule refuses.
 sh("detached: one background test job with its own pid capture is allowed",
