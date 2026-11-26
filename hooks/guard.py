@@ -604,15 +604,19 @@ Other tools, in `judge` order:
   handoff-shell-write
                        deny. A Bash or PowerShell call that writes a session handoff whose text the guard cannot
                        read before the command runs: a pipe from a program, computed text, a file the command makes
-                       itself, a `sed -i`, or a python script whose text or path is no literal. A write it can read
-                       is judged by the three rules above: `cp` or `mv` of a readable file, `cat FILE > PATH`, a
-                       `cat > PATH` or `tee PATH` with a heredoc, `python3 -c` with literal text; `>>` and `tee -a`
-                       add to the file on disk. A read of the handoff, a copy out of it, an append to the session's
+                       itself, a `perl -pi -e` or `sed -i`, or a python script whose text or path is no literal. A
+                       write it can read is judged by the three rules above: `cp`, `mv`, `rsync` or `ditto` of a
+                       readable file onto the handoff or into the handoffs folder (the copy takes the source's name),
+                       `dd if=FILE of=PATH`, `cat FILE > PATH` or `>|`, a `cat > PATH` or `tee PATH` with a heredoc,
+                       `python3 -c` with literal text; `>>` and `tee -a` add to the file on disk. The folder counts
+                       in any letter case the volume reads as the same folder, and `$CLAUDE_CONFIG_DIR` is read from
+                       the guard's environment. A read of the handoff, a copy out of it, an append to the session's
                        `.inbox.md` and a command that only names the path in a string pass. The targets come from
-                       `shell_write_hit` and `interpreter_write_hit`, the frozen-path readers. The reason names the
-                       Write tool. An override lifts it. Cost: a substring test for a call that never says
-                       `handoffs`; for one that does, the readers' parse and a read of the source file.
-                       (precompact-handoff, "a Bash write to the handoff is judged too")
+                       `_handoff_segment_writes` (the redirect, `tee` and copy readers), `shell_write_hit` and
+                       `interpreter_write_hit` (the frozen-path readers). The reason names the Write tool. An
+                       override lifts it. Cost: a substring test for a call that never says `handoffs`; for one that
+                       does, the readers' parse and a read of the source file.
+                       (precompact-handoff, "a Bash write onto the handoff is judged too")
   env-file, frozen-path, config-edit, agent-model-cap
                        the write-tool forms of the rules above. Every deny runs over all path
                        fields of a call before any ask.
@@ -1633,7 +1637,9 @@ HANDOFF_SECTIONS_REASON = (
 def session_handoff_path(target, cwd, shell=False):
     """The absolute path of `target` when it is a session handoff (`<config dir>/handoffs/<session id>.md`, the path
     precompact_handoff.handoff_path builds; `<id>.inbox.md` and any other file there are not), else ''. A path a shell
-    command names (`shell`) has its quotes dropped and its `$VAR` expanded too. A path compare: it reads no file."""
+    command names (`shell`) has its quotes dropped and its `$VAR` expanded too. A folder named `handoffs` in any letter
+    case is also compared as a file, so a spelling the volume reads as the same folder counts (`HANDOFFS` on a
+    case-insensitive one). A path compare and, for that name only, three stats: it reads no file."""
     if shell:
         target = target.strip("'\"")
     if not target.lower().endswith(".md"):
@@ -1644,7 +1650,9 @@ def session_handoff_path(target, cwd, shell=False):
     folder = os.path.join(guard_core.config_dir(), "handoffs")
     here = os.path.dirname(path)
     same = (os.path.normcase(os.path.normpath(here)) == os.path.normcase(os.path.normpath(folder))
-            or os.path.normcase(os.path.realpath(here)) == os.path.normcase(os.path.realpath(folder)))
+            or os.path.normcase(os.path.realpath(here)) == os.path.normcase(os.path.realpath(folder))
+            or (os.path.basename(here).lower() == "handoffs" and os.path.isdir(here) and os.path.isdir(folder)
+                and os.path.samefile(here, folder)))
     stem = os.path.basename(path)[:-3]
     return path if same and stem and "." not in stem else ""
 
@@ -1781,10 +1789,10 @@ HANDOFF_SHELL_WRITE_REASON = (
     "the command runs (a pipe from a program, computed text, or a file the command makes itself), so the handoff "
     "rules cannot judge it. "
     "Remedy: write the handoff with the Write tool, then repeat the call. "
-    "(decision precompact-handoff, a Bash write to the handoff is judged too)"
+    "(decision precompact-handoff, a Bash write onto the handoff is judged too)"
 )
 
-HANDOFF_FOLDER_NAME = re.compile(r"handoffs", re.IGNORECASE)   # the gate: a command that never says it cannot name the folder
+HANDOFF_FOLDER_NAME = re.compile(r"handoffs", re.IGNORECASE)   # the pre-check: a command that never says it cannot name the folder
 HANDOFF_READ_CAP = 1 << 20   # a source file is read to this many bytes: a handoff that long is over the limit anyway
 
 
@@ -1817,48 +1825,67 @@ def _handoff_heredoc_texts(segments, bodies):
     return texts
 
 
-def _handoff_segment_write(segment, where, heredoc):
-    """(path, text, append) for the write one shell segment makes onto a session handoff, when the guard can tell its
-    text before it runs: `cp` or `mv` of a readable file, `cat FILE... > PATH`, a `cat > PATH` or `tee PATH` fed by a
-    heredoc of the segment (`heredoc`), a bare `> PATH`. Else (path or '', None, False). A segment with no such write,
-    or with more than one, is unknown. Targets come from the readers the redirect, `tee` and `cp`/`mv` rules use."""
+HANDOFF_COPY_VERBS = ("cp", "mv", "rsync", "ditto")   # copy a file onto a destination: the source's text lands there
+HANDOFF_DD_KEYS = ("if", "of", "bs", "status")   # a `dd` with any other key (`seek=`, `count=`, `conv=`) writes a part or a change of its input
+HANDOFF_IN_PLACE = re.compile(r"-(?![MIe])[A-Za-z0-9]*i|--in-place\b")   # `perl -pi -e`, `sed -i`: a program's text rewrites the file
+
+
+def _handoff_redirect_text(verb, args, where, heredoc):
+    """The text a `> PATH` redirect puts on its target, as the command in front of it makes it: nothing for a bare
+    redirect, `:` or `true`; the heredoc for `cat`; the files `cat` names; else None (not told before it runs)."""
+    if verb in ("", ":", "true") and not args:
+        return ""
+    if verb != "cat" or any(arg.startswith("-") or "$" in arg or "`" in arg for arg in args):
+        return None
+    if not args:
+        return heredoc
+    texts = [_read_text(shell_abs(arg, where) or "") for arg in args]
+    return None if None in texts else "".join(texts)
+
+
+def _handoff_segment_writes(segment, where, heredoc):
+    """[(path, text, append)] for each write one shell segment makes onto a session handoff, `text` None when the guard
+    cannot tell it before the command runs; [] for a segment that writes none, or one it cannot read. Only this reads a
+    segment's write forms for the handoff rules, over the redirect, `tee` and copy readers the other rules use
+    (`_redirect_writes`, `_verb_written_paths`, `scratchpad_copies`):
+    - a redirect (`>`, `>>`, `>|`), the text of the command in front of it;
+    - `tee PATH`, the heredoc of the segment;
+    - `cp`, `mv`, `rsync` and `ditto` of a readable file, onto the handoff or into the handoffs folder (the copy takes
+      the source's name), the source's text;
+    - `dd if=FILE of=PATH`, the file's text; `dd` with another key, and stdin, are unknown;
+    - `perl -pi -e` and `sed -i` on the handoff, unknown."""
     tokens = segment_tokens(strip_redirections(segment))
     starts = command_indexes(tokens) if tokens else []
-    if tokens is None or len(starts) > 1:
-        return "", None, False
-    verb = basename(tokens[starts[0]]).lower() if starts else ""
-    args = tokens[starts[0] + 1:] if starts else []
-    writes = []   # (kind, path, append, source)
+    one = tokens is not None and len(starts) <= 1
+    verb = basename(tokens[starts[0]]).lower() if one and starts else ""
+    args = tokens[starts[0] + 1:] if one and starts else []
+    out = []
     for target, append in _redirect_writes(segment):
         path = session_handoff_path(target, where, True)
         if path:
-            writes.append(("redirect", path, append, ""))
+            out.append((path, _handoff_redirect_text(verb, args, where, heredoc) if one else None, append))
+    if not one:
+        return out
     if verb == "tee":
         append = any(arg == "--append" or (arg.startswith("-") and not arg.startswith("--") and "a" in arg) for arg in args)
         for target in _verb_written_paths("tee", args):
             path = session_handoff_path(target, where, True)
             if path:
-                writes.append(("tee", path, append, ""))
-    elif verb in ("cp", "mv"):
-        for _verb, source, dest, _into in scratchpad_copies(segment, where):
+                out.append((path, heredoc, append))
+    elif verb in HANDOFF_COPY_VERBS:
+        for _verb, source, dest, _into in scratchpad_copies(segment, where, HANDOFF_COPY_VERBS):
             path = session_handoff_path(dest, where, True)
             if path:
-                writes.append(("copy", path, False, source))
-    if len(writes) != 1:
-        return "", None, False
-    kind, path, append, source = writes[0]
-    if kind == "copy":
-        return path, _read_text(source), False
-    if kind == "tee":
-        return path, heredoc, append
-    if verb in ("", ":", "true") and not args:
-        return path, "", append
-    if verb != "cat" or any(arg.startswith("-") or "$" in arg or "`" in arg for arg in args):
-        return path, None, append
-    if not args:
-        return path, heredoc, append
-    texts = [_read_text(shell_abs(arg, where) or "") for arg in args]
-    return path, (None if None in texts else "".join(texts)), append
+                out.append((path, _read_text(source), False))
+    elif verb == "dd":
+        keys = {arg.partition("=")[0]: arg.partition("=")[2] for arg in args if "=" in arg and not arg.startswith("-")}
+        path = session_handoff_path(keys.get("of", ""), where, True) if keys.get("of") else ""
+        if path:
+            plain = len(keys) == len(args) and set(keys) <= set(HANDOFF_DD_KEYS)
+            out.append((path, _read_text(shell_abs(keys["if"], where) or "") if plain and keys.get("if") else None, False))
+    elif verb in ("perl", "sed") and any(HANDOFF_IN_PLACE.match(arg) for arg in args):
+        out += [(path, None, False) for path in (session_handoff_path(arg, where, True) for arg in args) if path]
+    return out
 
 
 def _py_handoff_writes(script, where):
@@ -1947,13 +1974,22 @@ def _py_handoff_writes(script, where):
     return out
 
 
-def handoff_shell_writes(raw, cwd):
+def _expand_config_dir(text):
+    """`text` with `$CLAUDE_CONFIG_DIR` and `${CLAUDE_CONFIG_DIR}` read as the value the guard's own environment holds,
+    the one the session's tools run with. An unset variable stays as written: it names no folder."""
+    value = os.environ.get("CLAUDE_CONFIG_DIR")
+    if not value or "CLAUDE_CONFIG_DIR" not in text:
+        return text
+    return re.sub(r"\$\{CLAUDE_CONFIG_DIR\}|\$CLAUDE_CONFIG_DIR\b", lambda _found: value, text)
+
+
+def handoff_shell_writes(raw, cwd, tool="Bash"):
     """[(path, text, append)] for each write a shell call makes onto a session handoff, `text` None when it cannot be
-    told before the command runs; None for a call that writes none. The targets are the ones `shell_write_hit` and
-    `interpreter_write_hit` find (the readers of the frozen-path and protected-path rules), judged with
-    `session_handoff_path`. The command is read segment by segment, so each write keeps its own text. A hit that no
-    segment explains is unknown; a crash of the read allows, as every scan here does. Cost: a substring test for a call
-    that never says `handoffs`; the readers' parse only after it; a file read only for a write onto a handoff."""
+    told before the command runs; None for a call that writes none. The command is read segment by segment
+    (`_handoff_segment_writes`), so each write keeps its own text, with `$CLAUDE_CONFIG_DIR` expanded first. A
+    segment that `shell_write_hit` (the frozen-path and protected-path reader) hits and `_handoff_segment_writes`
+    does not explain is unknown, as is a hit of `interpreter_write_hit` that no script explains. A crash of the read allows and is logged, as every scan here fails open. Cost: a substring test for a
+    call that never says `handoffs`; the parse only after it; a file read only for a write onto a handoff."""
     if not HANDOFF_FOLDER_NAME.search(raw):
         return None
     try:
@@ -1961,23 +1997,26 @@ def handoff_shell_writes(raw, cwd):
             return bool(session_handoff_path(word, where, True))
         shell_hit = shell_write_hit(raw, cwd, is_handoff, follow_cd=True)
         py_hit = interpreter_write_hit(raw, cwd, is_handoff)
-        if not shell_hit and not py_hit:
-            return None
         writes = []
-        if shell_hit:
-            kept, bodies = _split_heredocs(raw)
-            ends = []
-            segments = split_segments(_resolve_vars("\n".join(kept)), ends)
-            heredocs = _handoff_heredoc_texts(segments, bodies)
-            for number, segment in enumerate(segments):
-                where = dir_before_segment(segments, number, cwd, ends) or cwd
-                if segment.strip() and shell_write_hit(segment, where, is_handoff):
-                    writes.append(_handoff_segment_write(segment, where, heredocs.get(number)))
+        kept, bodies = _split_heredocs(raw)
+        ends = []
+        segments = split_segments(_expand_config_dir(_resolve_vars("\n".join(kept))), ends)
+        heredocs = _handoff_heredoc_texts(segments, bodies)
+        for number, segment in enumerate(segments):
+            if not segment.strip():
+                continue
+            where = dir_before_segment(segments, number, cwd, ends) or cwd
+            found = _handoff_segment_writes(segment, where, heredocs.get(number))
+            if found:
+                writes += found
+            elif shell_hit and shell_write_hit(segment, where, is_handoff):
+                writes.append(("", None, False))
         if py_hit:
             for kind, script, at in interpreter_scripts(raw, cwd):
                 writes += _py_handoff_writes(script, at) if kind == "py" else []
-        return writes or [("", None, False)]
-    except Exception:
+        return writes or ([("", None, False)] if shell_hit or py_hit else None)
+    except Exception as exc:
+        record(tool, "noted", "handoff-shell-write", "unknown: " + cap_safe(type(exc).__name__ + ": " + str(exc), 100))
         return None
 
 
@@ -1985,7 +2024,7 @@ def handoff_shell_judge(tool, raw, cwd, transcript):
     """Judge a shell call that writes a session handoff as the three handoff rules judge a Write of the same text. A
     `>>` or `tee -a` leaves the handoff on disk with the text added. A write whose text is not known before the command
     runs is refused under handoff-shell-write."""
-    for path, text, append in handoff_shell_writes(raw, cwd) or ():
+    for path, text, append in handoff_shell_writes(raw, cwd, tool) or ():
         if text is None:
             refuse(tool, "deny", "handoff-shell-write", HANDOFF_SHELL_WRITE_REASON, path or "shell write")
         before = _read_text(path) if append else None
@@ -7952,9 +7991,11 @@ def scratchpad_agent(payload) -> str:
 REDIRECT_WORD = re.compile(r"(?:\d*[<>]+&?|&>>?)")
 
 
-def scratchpad_copies(command: str, cwd: str):
-    """[(verb, source, destination, into)] for each `cp` and `mv` of the shell text, as absolute paths: the
-    destination of each source (a folder destination takes the source's name), with `-t DIR` read too. A flag
+def scratchpad_copies(command: str, cwd: str, verbs=("cp", "mv")):
+    """[(verb, source, destination, into)] for each `cp` and `mv` of the shell text (or each command word in `verbs`:
+    the handoff rules add `rsync` and `ditto`), as absolute paths: the
+    destination of each source (a folder destination takes the source's name), with `-t DIR` read too, for `cp` and `mv` only
+    (`rsync -t` keeps times). A flag
     is skipped and so is a redirect; a flag's own value is not told (`cp -S .bak`), a rare miss. `into` is the
     folder an `mv` moves its sources into (a folder destination, or the `-t` folder), else ''. It is '' too when
     the destination word holds a brace list or a glob, which the shell makes into other words, and when any other
@@ -7973,17 +8014,18 @@ def scratchpad_copies(command: str, cwd: str):
                 names[os.path.normpath(named)] = names.get(os.path.normpath(named), 0) + 1
         for word, args in scratchpad_command_words(tokens):
             verb = basename(word)
-            if verb not in ("cp", "mv"):
+            if verb not in verbs:
                 continue
+            target_flag = verb in ("cp", "mv")
             plain, target, take, skip = [], "", False, False
             for arg in args:
                 if skip:
                     skip = False
                 elif take:
                     target, take = arg, False
-                elif arg in ("-t", "--target-directory"):
+                elif target_flag and arg in ("-t", "--target-directory"):
                     take = True
-                elif arg.startswith("--target-directory="):
+                elif target_flag and arg.startswith("--target-directory="):
                     target = arg.split("=", 1)[1]
                 elif REDIRECT_WORD.match(arg):
                     skip = bool(REDIRECT_WORD.fullmatch(arg))   # `2> f` names its file in the next word
