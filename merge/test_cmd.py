@@ -51,6 +51,40 @@ class Launcher(unittest.TestCase):
                 self.assertIn("is not a checkout of shivinate7/claude-settings", r.stderr, url)
                 self.assertNotIn("ARGS", r.stdout, url)
 
+    def point_origin(self, url):
+        # Sets the origin whether or not a case has added one yet.
+        subprocess.run(["git", "-C", self.co, "config", "remote.origin.url", url], check=True)
+
+    def test_owner_moved_origins_pass_through(self):
+        # The repo moved to the swlshiv org: its https and ssh forms must pass the origin check.
+        for url in ("https://github.com/swlshiv/claude-settings",
+                    "https://github.com/swlshiv/claude-settings.git",
+                    "git@github.com:swlshiv/claude-settings.git"):
+            with self.subTest(url=url):
+                self.point_origin(url)
+                r = self.run_launcher("12", "--confirm")
+                self.assertEqual(r.returncode, 7, url + r.stdout + r.stderr)
+                self.assertIn("ARGS", r.stdout, url)
+
+    def test_old_owner_origins_still_pass_through(self):
+        # The old owner keeps passing during the move, in both forms.
+        for url in ("https://github.com/shivinate7/claude-settings",
+                    "git@github.com:shivinate7/claude-settings.git"):
+            with self.subTest(url=url):
+                self.point_origin(url)
+                r = self.run_launcher("12", "--confirm")
+                self.assertEqual(r.returncode, 7, url + r.stdout + r.stderr)
+                self.assertIn("ARGS", r.stdout, url)
+
+    def test_other_owner_origins_stop_before_any_run(self):
+        for url in ("https://github.com/someoneelse/claude-settings",
+                    "git@github.com:someoneelse/claude-settings.git"):
+            with self.subTest(url=url):
+                self.point_origin(url)
+                r = self.run_launcher("12", "--confirm")
+                self.assertEqual(r.returncode, 1, url + r.stdout + r.stderr)
+                self.assertNotIn("ARGS", r.stdout, url)
+
     def test_arguments_and_exit_code_pass_through(self):
         self.origin(URL)
         r = self.run_launcher("12", "--confirm")

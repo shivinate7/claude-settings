@@ -168,7 +168,9 @@ make_uname_stub() {
 # exactly what GitHub's archive/refs/heads/<ref>.tar.gz would serve: a top-level
 # "claude-settings-main" directory holding every tracked file.
 tarsrc="$work/tarsrc/claude-settings-main"; mkdir -p "$tarsrc"
-( cd "$REPO_ROOT" && git ls-files -z | tar -cf - --null -T - ) | tar -xf - -C "$tarsrc"
+# A copy with no .git (a source export, such as a red run's copy) has no ls-files list, so it walks the tree.
+( cd "$REPO_ROOT" && if [ -e .git ]; then git ls-files -z; else find . -path ./.git -prune -o -type f -print0; fi ) \
+  | tar -cf - --null -T - | tar -xf - -C "$tarsrc"
 tar -czf "$work/repo.tar.gz" -C "$work/tarsrc" claude-settings-main
 
 # Make a bare-bones fake checkout of the repo at $1, with CLAUDE.md/settings.json content
@@ -365,6 +367,14 @@ case_origins() {
   origin_case "origin: wrong host (gitlab.com) does not match" "https://gitlab.com/shivinate7/claude-settings.git" no
   origin_case "origin: extra leading path segment does not match" "https://github.com/mirror/shivinate7/claude-settings.git" no
   origin_case "origin: bare path with no host does not match" "file:///local/shivinate7/claude-settings" no
+  # The repo moved to the swlshiv org: its origins match in the same forms as the old owner's.
+  origin_case "origin: swlshiv https with .git matches"        "https://github.com/swlshiv/claude-settings.git"   yes
+  origin_case "origin: swlshiv https without .git matches"     "https://github.com/swlshiv/claude-settings"       yes
+  origin_case "origin: swlshiv ssh with .git matches"          "git@github.com:swlshiv/claude-settings.git"       yes
+  origin_case "origin: swlshiv ssh without .git matches"       "git@github.com:swlshiv/claude-settings"           yes
+  origin_case "origin: swlshiv name-suffix-evil does not match" "https://github.com/swlshiv/claude-settings-evil.git" no
+  origin_case "origin: swlshiv owner-prefix-evil does not match" "https://github.com/evil-swlshiv/claude-settings.git" no
+  origin_case "origin: someoneelse owner does not match"      "https://github.com/someoneelse/claude-settings.git" no
 }
 
 # ---- Case 7: no $CLAUDE_PROJECT_DIR, cwd not the checkout -> bounded root search finds it --

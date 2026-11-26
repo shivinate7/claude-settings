@@ -137,6 +137,29 @@ def case_gh_logins_pinned():
             "GH_DEFAULT_LOGIN=%r GH_FALLBACK_LOGIN=%r" % (default, fallback))
 
 
+def case_settings_repo_is_the_org_repo():
+    """The settings repo moved from shivinate7 to the swlshiv org: every emitted settings slug names the org repo."""
+    repo = getattr(_shared(), "SETTINGS_REPO", None)
+    return repo == "swlshiv/claude-settings", "SETTINGS_REPO=%r" % (repo,)
+
+
+def case_login_stays_with_the_person():
+    """The org move renames the repo owner only. The person's gh login stays shivinate7."""
+    login = getattr(_shared(), "GH_DEFAULT_LOGIN", None)
+    return login == "shivinate7", "GH_DEFAULT_LOGIN=%r" % (login,)
+
+
+def case_lane_merge_repo_is_the_org_repo():
+    """guard_merge.py keeps its own copy of the lane merge repo, since it cannot import merge.py. The copy names the
+    org repo. The value is read from the module's parsed assignment, not by a text match."""
+    with open(os.path.join(HERE, "guard_merge.py"), encoding="utf-8") as handle:
+        tree = ast.parse(handle.read())
+    values = [node.value.value for node in tree.body
+              if isinstance(node, ast.Assign) and isinstance(node.value, ast.Constant)
+              and any(isinstance(t, ast.Name) and t.id == "LANE_MERGE_REPO" for t in node.targets)]
+    return values == ["swlshiv/claude-settings"], "guard_merge.py LANE_MERGE_REPO=%r" % (values,)
+
+
 def case_config_dir_answers_as_guard():
     shared = _shared()
     saved = os.environ.get("CLAUDE_CONFIG_DIR")
@@ -542,6 +565,10 @@ CASES = [
     ("(b) shared_names holds today's watched names and config_dir", case_values_pinned),
     ("(b) shared_names.config_dir answers as the guard's does", case_config_dir_answers_as_guard),
     ("(b2) shared_names holds the gh login pair: shivinate7 default, ssemwal-cdc fallback", case_gh_logins_pinned),
+    ("(b3) shared_names.SETTINGS_REPO is swlshiv/claude-settings after the org move", case_settings_repo_is_the_org_repo),
+    ("(b4) the gh login stays shivinate7 after the org move", case_login_stays_with_the_person),
+    ("(b5) guard_merge.py's LANE_MERGE_REPO is swlshiv/claude-settings after the org move",
+     case_lane_merge_repo_is_the_org_repo),
     ("(c) the guard's names are shared_names' own objects", case_guard_reexports_same_objects),
     ("(d) config_watch.py holds no literal watched name", case_config_watch_has_no_literal_copy),
     ("(e) guard_frozen.py and guard_core.py hold no literal copy of a watched name or config_dir",
