@@ -2618,6 +2618,116 @@ class MacOnceByBatch(unittest.TestCase):
                 self.assertTrue(scope_waits_on_skip_jobs_problems("jobs:\n" + text + nightly_skip), label)
 
 
+# The one daily-skipped output a macOS job-level if may read (macos_daily_ok): the name is read from RECORDS_ONLY_CONDITION, the one home
+# of the records-only condition, so no copy of the name lives here.
+DAILY_SKIP_OUTPUT = re.search(r"needs\.scope\.outputs\.(\w+)", RECORDS_ONLY_CONDITION).group(1)
+# The scope outputs a skipped daily and a plain daily set (ci-scope.sh header): the records-only skip is on, the 14 flags are off, and
+# tool_pins stays on (decision tool-pins). A plain daily keeps records-only off.
+SKIPPED_DAILY = {DAILY_SKIP_OUTPUT: "true", "skip_comment_delta": "true", "tool_pins": "true"}
+PLAIN_DAILY = {DAILY_SKIP_OUTPUT: "false", "tool_pins": "true"}
+MAC_EVENTS = "github.event_name != 'pull_request' && github.event_name != 'push'"
+
+
+class MacosSkippedDailyStartsNoMacRunner(unittest.TestCase):
+    """F1 (review of the macOS daily skip, lane macos-jobs-skip-on-skipped-daily). A skipped daily starts no macOS runner, except
+    checks-macos, which starts on it through its Tool pins step (decision tool-pins). Each case reads the real job-level if in
+    checks.yml. The plain-daily, ready pull_request and push controls pass on the current file."""
+
+    def setUp(self):
+        with open(CHECKS, encoding="utf-8") as f:
+            self.text = f.read()
+        self.jobs = all_jobs(self.text)
+
+    def starts(self, name, event, values, draft=False):
+        return eval_with(self.jobs[name]["if"], event, values, default="false", draft=draft)
+
+    def test_each_macos_job_starts_on_a_plain_daily_and_not_on_a_push_or_a_ready_pull_request(self):
+        # Control. Named failure: a macOS job is off on a plain daily, or starts on a push or on a ready pull_request.
+        for name in MACOS_JOBS:
+            with self.subTest(job=name):
+                self.assertTrue(self.starts(name, "schedule", PLAIN_DAILY), f"{name} does not start on a plain daily")
+                self.assertFalse(self.starts(name, "push", PLAIN_DAILY), f"{name} starts on a push")
+                self.assertFalse(self.starts(name, "pull_request", PLAIN_DAILY, draft=False), f"{name} starts on a ready pull_request")
+
+    def test_shell_macos_does_not_start_on_a_skipped_daily(self):
+        # Named failure: shell-macos starts on a skipped daily, since its if reads no records-only skip and scope no longer skips there.
+        expr = self.jobs["shell-macos"]["if"]
+        self.assertFalse(self.starts("shell-macos", "schedule", SKIPPED_DAILY), f"shell-macos starts on a skipped daily: {expr}")
+
+    def test_checks_macos_b_does_not_start_on_a_skipped_daily(self):
+        # Named failure: checks-macos-b starts on a skipped daily, since its if reads no records-only skip.
+        expr = self.jobs["checks-macos-b"]["if"]
+        self.assertFalse(self.starts("checks-macos-b", "schedule", SKIPPED_DAILY), f"checks-macos-b starts on a skipped daily: {expr}")
+
+    def test_checks_macos_starts_on_a_skipped_daily_only_through_tool_pins(self):
+        # Control: with tool_pins on, checks-macos starts, so its Tool pins step runs on a skipped daily (decision tool-pins).
+        self.assertTrue(self.starts("checks-macos", "schedule", SKIPPED_DAILY), "checks-macos does not start on a skipped daily with tool_pins on")
+        # Named failure: checks-macos starts on a skipped daily that tool_pins does not admit. Its if reads no tool_pins clause.
+        expr = self.jobs["checks-macos"]["if"]
+        self.assertFalse(self.starts("checks-macos", "schedule", dict(SKIPPED_DAILY, tool_pins="false")),
+                         f"checks-macos starts on a skipped daily with tool_pins off: {expr}")
+
+    def test_checks_macos_runs_no_suite_step_on_a_skipped_daily(self):
+        # Named failure: a suite step of checks-macos runs on a skipped daily, so the macOS suites run again on a quiet day.
+        job = self.jobs["checks-macos"]
+        suites = suite_names(self.text, "checks-macos")
+        self.assertTrue(suites, "checks-macos has no suite step, so the case has nothing to read")
+        for st in job["steps"]:
+            if st.get("name") in suites:
+                with self.subTest(step=st.get("name")):
+                    self.assertFalse(runs_with_values(job, st, "schedule", SKIPPED_DAILY),
+                                     f"checks-macos step {st.get('name')!r} runs on a skipped daily")
+
+
+class MacosDailySkipReading(unittest.TestCase):
+    """F2 and F3 (review of the macOS daily skip). macos_daily_ok accepts the one named daily-skipped output, DAILY_SKIP_OUTPUT, and
+    refuses every other reading of a job-level if. Each case gives the whole if, as the workflow would write it."""
+
+    def test_the_one_named_output_alone_is_accepted(self):
+        # F3, the acceptance no case pinned. Named failure: the check refuses a daily-only if whose only daily-skip reading is the
+        # named output, so the fix cannot land.
+        self.assertTrue(macos_daily_ok("shell-macos", f"{MAC_EVENTS} && {RECORDS_ONLY_CONDITION}"),
+                        "macos_daily_ok refuses the named records-only output alone")
+
+    def test_the_named_output_beside_a_flag_is_accepted_with_or_without_its_clause(self):
+        # Named failure: the check refuses the named output beside the flag clause the workflow keeps, or the form job_check_problems
+        # reads with the records-only clause taken off.
+        inner = f"{MAC_EVENTS} && (needs.scope.outputs.shell_macos == 'true' || github.event_name != 'pull_request')"
+        wrapped = f"({inner}) && {RECORDS_ONLY_CONDITION}"
+        self.assertTrue(macos_daily_ok("shell-macos", wrapped), "macos_daily_ok refuses the named output beside the shell_macos clause")
+        self.assertTrue(macos_daily_ok("shell-macos", drop_condition(wrapped)), "macos_daily_ok refuses the if with the records-only clause taken off")
+
+    def test_a_tool_pins_clause_forced_true_on_the_daily_is_refused(self):
+        # F2. Named failure: a schedule or dispatch clause that reads tool_pins or code passes, because the check forces tool_pins on.
+        expr = ("(github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && "
+                "(needs.scope.outputs.tool_pins == 'true' || needs.scope.outputs.code == 'true')")
+        self.assertFalse(macos_daily_ok("shell-macos", expr), f"macos_daily_ok accepts a tool_pins clause that a skipped daily meets: {expr}")
+
+    def test_a_tool_pins_clause_joined_to_the_named_output_by_or_is_refused(self):
+        # F2. Named failure: a second output joined by || to the named one passes, so the named output no longer alone decides the skip.
+        expr = f"{MAC_EVENTS} && ({RECORDS_ONLY_CONDITION} || needs.scope.outputs.tool_pins == 'true')"
+        self.assertFalse(macos_daily_ok("shell-macos", expr), f"macos_daily_ok accepts a second output joined by ||: {expr}")
+
+    def test_a_code_clause_joined_to_the_named_output_by_or_is_refused(self):
+        # Control, green on the old check too. Named failure: code joined by || to the named output is accepted.
+        expr = f"{MAC_EVENTS} && ({RECORDS_ONLY_CONDITION} || needs.scope.outputs.code == 'true')"
+        self.assertFalse(macos_daily_ok("shell-macos", expr), f"macos_daily_ok accepts code OR'd into the named output: {expr}")
+
+    def test_a_bare_daily_skip_output_is_refused(self):
+        # F2. Named failure: the output named bare, as a truthy string, reads true on a skipped daily, where the job must be off.
+        expr = f"{MAC_EVENTS} && needs.scope.outputs.{DAILY_SKIP_OUTPUT}"
+        self.assertFalse(macos_daily_ok("shell-macos", expr), f"macos_daily_ok accepts a bare output: {expr}")
+
+    def test_a_pull_request_wide_if_is_refused(self):
+        # Control, green on the old check too. Named failure: an if that starts on a pull_request is accepted as daily only.
+        expr = f"github.event_name != 'push' && {RECORDS_ONLY_CONDITION}"
+        self.assertFalse(macos_daily_ok("shell-macos", expr), f"macos_daily_ok accepts an if that starts on a pull_request: {expr}")
+
+    def test_a_bare_always_is_refused(self):
+        # Control, green on the old check too. Named failure: always() alone starts the job on a push.
+        self.assertFalse(macos_daily_ok("shell-macos", "always()"), "macos_daily_ok accepts a bare always()")
+
+
 def runs_on_event(expr, event, draft=False):
     """True when a job whose job-level if is `expr` runs on `event`. A job with no job-level if runs on every event. The push-off forms
     read no scope flag, so the flag reads false."""
