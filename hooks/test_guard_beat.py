@@ -403,12 +403,12 @@ def loader_run(env):
         return Run(done.returncode, out.read().decode("utf-8", "replace"), err.read().decode("utf-8", "replace"))
 
 
-def cache_file(prefix):
-    """The path Python writes the guard's own bytecode to, with `prefix` as the cache root (None: beside the guard)."""
+def cache_file(prefix, source=GUARD):
+    """The path Python writes `source`'s bytecode to, with `prefix` as the cache root (None: beside the source)."""
     saved = sys.pycache_prefix
     sys.pycache_prefix = prefix
     try:
-        return importlib.util.cache_from_source(GUARD)
+        return importlib.util.cache_from_source(source)
     finally:
         sys.pycache_prefix = saved
 
@@ -621,7 +621,7 @@ class GuardLoaderCache(unittest.TestCase):
         self.tampered_run(other_version, "a cache written by another version, its magic number wrong")
 
     def test_same_size_edit_in_one_second_gives_the_uncached_verdict(self):
-        # F1: a same-size edit of guard.py, its mtime pinned back to the cached one. A cache trusted by mtime and size
+        # A same-size edit of guard.py, its mtime pinned back to the cached one. A cache trusted by mtime and size
         # judges with the edited code; the launcher must rebuild it from the hash of the source it reads, and give
         # the verdict a plain start gives. No sleep: the mtime is set to the cached one's exact value.
         root = tempfile.mkdtemp(dir=RUN_FOLDER)
@@ -630,7 +630,7 @@ class GuardLoaderCache(unittest.TestCase):
         mutate_shared.guard_tree(hooks)
         guard_copy = os.path.join(hooks, "guard.py")
         launcher = os.path.join(hooks, "guard_launch.py")
-        cache = importlib.util.cache_from_source(guard_copy)
+        cache = cache_file(None, guard_copy)   # beside the copy: base_env strips PYTHONPYCACHEPREFIX for every child
         nogit = os.path.join(root, "nogit")   # a folder that is no git tree, so the payload reads no repo
         os.makedirs(nogit)
         payload = json.dumps({"tool_name": "Bash", "tool_input": {"command": "cat .env"}, "cwd": nogit,
