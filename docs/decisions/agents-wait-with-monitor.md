@@ -19,5 +19,7 @@ Whether Monitor still errors is unmeasured too (notes entry `waiter-monitor-fail
 
 Monitor waits for a condition, such as a port or a file. A long command still runs in the background, and the agent waits for its completion notice.
 
+- Own agent: wait for its completion notice. Peer lane: the peer sends `mail send --to <addr> --kind inform`, and you run `mail wait` in the background. Whether a Monitor loop on a remote ref works live is unmeasured.
+
 Kind: process
 Home: hooks/guard_stream.py
