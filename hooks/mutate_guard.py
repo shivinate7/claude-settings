@@ -5122,9 +5122,10 @@ def control_case(target: str, entries) -> str:
 
 
 # The mutant folder (decision mutants-one-file-per-rule): each hooks/mutants/<rule-slug>.py adds its rows after the table.
-# The literal above takes deletes only. MUTATIONS is the one list every reader gets, so it is rebound here, before any reader.
+# The literal above takes deletes only. MUTATIONS is the one list every reader gets. The slice assignment fills that same
+# list in place: the name keeps one top-level binding, and no reader sees the bare table.
 MUTANT_FOLDER = os.path.join(HERE, "mutants")
-MUTATIONS = mutate_shared.assemble_mutations(MUTATIONS, MUTANT_FOLDER)
+MUTATIONS[:] = mutate_shared.assemble_mutations(MUTATIONS, MUTANT_FOLDER)
 
 
 def run_control(sources, work: str, target: str, entries=None):
