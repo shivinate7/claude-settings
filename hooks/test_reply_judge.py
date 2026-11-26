@@ -20,6 +20,11 @@ not load cannot make a "never called" check pass for no reason.
 Sampling cases (case 8 on) run several Stops of one config dir in a row. Each Stop is still a
 new process, so the counter must persist in files, not in memory.
 
+Every Stop with a reply makes one model call: Haiku reads every reply. The older rules ride only on a
+sampled or triggered Stop. The two new rules ride on every call,
+and a finding for either one is a guard.log line and no note. A case that once asserted "no call" on
+a Stop the older rules skip now asserts the one call, with the new rules only (`new_rules_only`).
+
 Route-row cases give each run its own rows file and point GUARD_ROUTE_ROWS at it, so no run reads the
 repo's rows file. The stub logs each read of that file in the hook process to RJ_OPENS.
 """
@@ -57,6 +62,16 @@ RULE_IDS = ("output-start-with-point", "style-cut-narration", "output-never-past
             "style-limits-kept-silently")
 BACKGROUND_WORDS = ("background", "unfinished", "never")
 REPLY_SESSION = "reply-judge-cases"
+# The two rules the every-reply judge adds. Log only: each finding on either is one guard.log line and no note.
+# The model reports them in its own list, `new_rules`, one {"rule", "reason"} entry per finding. The ids are the
+# root CLAUDE.md anchors, so the judge gives no second name to a rule the file already anchors.
+NEW_FINDING_RULE = "roles-findings-are-debts-or-notes"  # a finding the reply names with no home (a rule anchor)
+NEW_WAIT_RULE = "parallelism-keep-going"  # a wait or hold that names nothing it waits for (a rule anchor)
+NEW_RULES = (NEW_FINDING_RULE, NEW_WAIT_RULE)
+NEW_FINDING_ANSWER = json.dumps({"ok": True, "new_rules": [{"rule": NEW_FINDING_RULE,
+                                 "reason": "the finding has no home; file it as a debt or a note."}]})
+NEW_WAIT_ANSWER = json.dumps({"ok": True, "new_rules": [{"rule": NEW_WAIT_RULE,
+                             "reason": "the wait names no event; name what it waits for."}]})
 
 STUB_SOURCE = '''
 import json
@@ -276,6 +291,32 @@ def run_hook(text, scenario="ok", answer="", stop_active=False, config=None, ses
     run = Run(proc, base, config)
     check("canary: stub loaded in the hook process (scenario %s)" % scenario, run.loaded, run.err)
     return run
+
+
+def prompt_head(prompt):
+    """The prompt before the reply: the rules the judge was told to apply."""
+    return prompt.split("\n\nReply:\n", 1)[0]
+
+
+def older_rules():
+    """The judged rules that are not the two new ones, read from the module (one home: JUDGED_RULES)."""
+    return [rule for rule in judged_rules() if rule not in NEW_RULES]
+
+
+def carries_older_rules(run):
+    """True when the Stop made one model call and its prompt judges the older rules, as a sampled or
+    triggered Stop does."""
+    head = prompt_head(run.prompt())
+    return len(run.calls) == 1 and all(rule in head for rule in older_rules())
+
+
+def new_rules_only(run):
+    """True when the Stop made exactly one model call whose prompt holds both new rules and no older rule: the
+    call a Stop the older rules do not sample makes: the judge reads every reply."""
+    if len(run.calls) != 1:
+        return False
+    head = prompt_head(run.prompt())
+    return all(rule in head for rule in NEW_RULES) and not any(rule in head for rule in older_rules())
 
 
 # --------------------------------------------------------------------------- case 1
@@ -642,12 +683,302 @@ def case_settings_reply_judge_is_async_and_report_guard_is_not():
           len(guard) == 1 and guard[0].get("async") is not True, guard)
 
 
+# --------------------------------------------------------------------------- every-reply cases
+# Haiku reads every reply, and the new rules are log only. A Stop with a reply makes one model call, never two. The two new rules are judged on every call. A finding for either is one guard.log
+# line, and it prints nothing.
+
+def case_reply_with_no_older_trigger_makes_one_call():
+    config = sample_config("every-reply")
+    run_hook(MARK, answer=OK_ANSWER, config=config, session=SESSION_ALPHA)  # Stop 1, sampled
+    plain = run_hook(MARK, answer=OK_ANSWER, config=config, session=SESSION_ALPHA)  # Stop 2: no older trigger
+    check("every reply: Stop 2 with no older trigger makes exactly one model call, for the new rules",
+          new_rules_only(plain), plain.calls)
+    empty = run_hook("", answer=OK_ANSWER, config=config, session=SESSION_ALPHA)  # control: no reply text
+    check("every reply, control: an empty reply makes no model call", empty.calls == [], empty.calls)
+    check("every reply, control: an empty reply exits 0 and prints nothing",
+          empty.code == 0 and empty.out.strip() == "", (empty.code, empty.out))
+
+
+# An older trigger (a table with no gold column) and new-rule text (a finding with no home, a wait with no event)
+# in one reply. One call judges both, so the reply costs one model call, not two.
+OLD_AND_NEW_REPLY = (
+    "Done: two hooks compared.\n\n| Hook | Runs per day |\n|---|---:|\n| guard | 400 |\n| judge | 80 |\n\n"
+    "Possible false alarm in the judge, left as it is for now.\n"
+    "Holding the rest until the judge settles.\n"
+)
+
+
+def case_older_trigger_and_new_rule_text_make_one_call():
+    config = sample_config("old-and-new")
+    run_hook(MARK, answer=OK_ANSWER, config=config, session=SESSION_ALPHA)  # Stop 1, sampled
+    both = run_hook(OLD_AND_NEW_REPLY, answer=OK_ANSWER, config=config, session=SESSION_ALPHA)  # Stop 2
+    check("both rules: Stop 2 makes one model call, not two", len(both.calls) == 1, both.calls)
+    head = prompt_head(both.prompt()) if both.calls else ""
+    check("both rules: the one call judges the older rules and both new rules",
+          carries_older_rules(both) and all(rule in head for rule in NEW_RULES), both.calls)
+
+
+def case_new_rule_finding_logs_one_line_and_prints_nothing():
+    for rule, answer in ((NEW_FINDING_RULE, NEW_FINDING_ANSWER), (NEW_WAIT_RULE, NEW_WAIT_ANSWER)):
+        session = "log-" + rule
+        config = sample_config("log-" + rule)
+        run = run_hook(MARK, answer=answer, config=config, session=session)  # Stop 1
+        check("new finding, %s: exit 0" % rule, run.code == 0, run.code)
+        check("new finding, %s: nothing printed: no note, no additionalContext" % rule, run.out == "", run.out)
+        lines = guard_lines(config)
+        check("new finding, %s: one guard.log line" % rule, len(lines) == 1, lines)
+        parts = lines[0].split("\t") if lines else []
+        check("new finding, %s: the line is Stop, noted, and names the rule" % rule,
+              len(parts) == 6 and parts[1:3] == ["Stop", "noted"] and parts[3] == rule, parts)
+        check("new finding, %s: the line carries a time" % rule,
+              bool(parts) and re.match(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}", parts[0]) is not None, parts[:1])
+        check("new finding, %s: the line carries the session" % rule,
+              len(parts) == 6 and parts[5] == session, parts)
+
+
+def case_older_rule_finding_still_prints_its_note():
+    config = sample_config("old-note")
+    run = run_hook(OLD_AND_NEW_REPLY, answer=json.dumps({"ok": False, "reason": BLOCK_REASON}),
+                   config=config, session=SESSION_ALPHA)
+    got = parse_stdout(run)
+    specific = got.get("hookSpecificOutput") if got else None
+    note = specific.get("additionalContext") if isinstance(specific, dict) else None
+    check("older finding, control: exit 0", run.code == 0, run.code)
+    check("older finding, control: the note names the older rule id",
+          isinstance(note, str) and "output-never-paste-passing-output" in note, run.out)
+
+
+def case_failed_new_rules_call_prints_nothing_and_exits_zero():
+    for label, scenario in (("error", "error"), ("timeout", "timeout")):
+        config = sample_config("fail-" + label)
+        run_hook(MARK, answer=OK_ANSWER, config=config, session=SESSION_ALPHA)  # Stop 1, sampled
+        run = run_hook(MARK, scenario=scenario, config=config, session=SESSION_ALPHA)  # Stop 2: new rules only
+        check("failed call, %s: Stop 2 makes its one call, for the new rules" % label, new_rules_only(run),
+              run.calls)
+        check("failed call, %s: exit 0" % label, run.code == 0, run.code)
+        check("failed call, %s: nothing printed on stdout" % label, run.out.strip() == "", run.out)
+
+
+def case_new_rules_are_judged_rules_and_counted():
+    rules = judged_rules()
+    for rule in NEW_RULES:
+        check("new rules: %s is in JUDGED_RULES" % rule, rule in rules, rules)
+    check("new rules: JUDGED_RULES holds thirteen rules", len(rules) == 13, rules)
+    config = sample_config("count-words")
+    full = run_hook(MARK, answer=OK_ANSWER, config=config, session=SESSION_ALPHA)  # Stop 1: the full prompt
+    m = re.search(r"against (\w+) rules", prompt_head(full.prompt()))
+    check("new rules: the full prompt's count word is thirteen", bool(m) and m.group(1) == "thirteen",
+          prompt_head(full.prompt())[:120])
+    only = run_hook(MARK, answer=OK_ANSWER, config=config, session=SESSION_ALPHA)  # Stop 2: the new rules only
+    m2 = re.search(r"against (\w+) rules", prompt_head(only.prompt()))
+    check("new rules: the new-rules-only prompt's count word is two", bool(m2) and m2.group(1) == "two",
+          prompt_head(only.prompt())[:120])
+
+
+def case_new_rules_prompt_names_the_exemptions():
+    config = sample_config("new-exempt")
+    run_hook(MARK, answer=OK_ANSWER, config=config, session=SESSION_ALPHA)  # Stop 1, sampled
+    run = run_hook(MARK, answer=OK_ANSWER, config=config, session=SESSION_ALPHA)  # Stop 2: the new rules only
+    sentences = rule_sentences(run, MARK)
+    never = ("never flag", "not a finding", "not flag")
+    check("new rules, exemption: an Unstarted or Next line is not a finding",
+          has_pin(sentences, ("unstarted", "next"), never), sentences)
+    check("new rules, exemption: quoted or negated finding words are not a finding",
+          has_pin(sentences, ("quoted", "negat"), never), sentences)
+    check("new rules, exemption: a reviewer's or auditor's own report is not a finding",
+          has_pin(sentences, ("reviewer", "auditor"), ("own report",), never), sentences)
+    check("new rules, exemption: a wait on named agents is not a wait that names nothing",
+          has_pin(sentences, ("agent",), ("named",), never), sentences)
+
+
+# --------------------------------------------------------------------------- every-reply: two fields
+# The answer has two fields. `ok` and `reason` judge the older rules, as today. `new_rules` is a list of
+# {"rule": <id>, "reason": <text>}, one entry per finding on a newer rule. The note prints only the older
+# `reason`. Each entry appends its own guard.log line, and nothing from the list is ever printed.
+
+OLDER_ID = "output-never-paste-passing-output"  # the older rule the stub's reason names
+NEW_ENTRY_TEXT = "NEW-ENTRY-9b2d, file the finding as a debt or a note"  # a marker: the note never carries it
+BAD_ENTRY = "BAD-ENTRY-5a7c"  # a marker inside a malformed entry: it never prints and never logs
+# Two stable phrases the full prompt must hold, the ones that ask for the two fields: the list's key, and what
+# each entry holds. The new-only prompt asks for the list too, so it must hold both.
+FIELD_PHRASES = ("new_rules", "a rule id and a short reason")
+
+
+def new_entry(rule, reason):
+    return {"rule": rule, "reason": reason}
+
+
+def two_field_answer(ok, reason, new_rules):
+    body = {"ok": ok, "new_rules": new_rules}
+    if reason is not None:
+        body["reason"] = reason
+    return json.dumps(body)
+
+
+def note_of(run):
+    got = parse_stdout(run)
+    specific = got.get("hookSpecificOutput") if got else None
+    return specific.get("additionalContext") if isinstance(specific, dict) else None
+
+
+def guard_rules(config):
+    """The rule of each guard.log line (the fourth tab field), in order. Empty when there is no log."""
+    return [line.split("\t")[3] for line in guard_lines(config) if len(line.split("\t")) == 6]
+
+
+def case_note_holds_older_reason_and_no_new_entry_text():
+    config = sample_config("note-two-fields")
+    answer = two_field_answer(False, BLOCK_REASON, [new_entry(NEW_FINDING_RULE, NEW_ENTRY_TEXT)])
+    run = run_hook(MARK, answer=answer, config=config, session=SESSION_ALPHA)  # Stop 1: the full prompt
+    note = note_of(run)
+    check("note, two-field answer: exit 0", run.code == 0, run.code)
+    check("note, two-field answer: the note holds the older reason", isinstance(note, str) and OLDER_ID in note, run.out)
+    check("note, two-field answer: the note holds no word of the new entry",
+          isinstance(note, str) and NEW_ENTRY_TEXT not in note and NEW_FINDING_RULE not in note, run.out)
+    rules = guard_rules(config)
+    check("note, two-field answer: one guard.log line carries the new rule id", rules.count(NEW_FINDING_RULE) == 1, rules)
+    check("note, two-field answer: the older finding keeps its own guard.log line", rules.count(OLDER_ID) == 1, rules)
+
+
+def case_full_prompt_answer_carries_note_and_new_entry():
+    config = sample_config("full-prompt-both-fields")
+    answer = two_field_answer(False, BLOCK_REASON, [new_entry(NEW_FINDING_RULE, NEW_ENTRY_TEXT)])
+    run = run_hook(MARK, answer=answer, config=config, session=SESSION_ALPHA)  # Stop 1: the full prompt
+    note = note_of(run)
+    check("full prompt, two-field answer: the note holds the older reason",
+          isinstance(note, str) and OLDER_ID in note, run.out)
+    rules = guard_rules(config)
+    check("full prompt, two-field answer: the new entry arrives as its own guard.log line",
+          rules.count(NEW_FINDING_RULE) == 1, rules)
+
+
+def case_both_prompts_ask_for_the_two_fields():
+    config = sample_config("prompts-two-fields")
+    full = run_hook(MARK, answer=OK_ANSWER, config=config, session=SESSION_ALPHA)  # Stop 1: the full prompt
+    only = run_hook(MARK, answer=OK_ANSWER, config=config, session=SESSION_ALPHA)  # Stop 2: the new rules only
+    for label, run in (("full prompt", full), ("new-only prompt", only)):
+        head = prompt_head(run.prompt())
+        for phrase in FIELD_PHRASES:
+            check("prompt, two fields: the %s asks for the two fields, phrase %r" % (label, phrase), phrase in head, head[:200])
+
+
+def case_two_new_entries_and_no_older_reason_log_two_lines_and_print_nothing():
+    config = sample_config("two-entries")
+    answer = two_field_answer(True, None, [new_entry(NEW_FINDING_RULE, "FIND-A-3f1c"),
+                                           new_entry(NEW_WAIT_RULE, "WAIT-B-8d2e")])
+    run = run_hook(MARK, answer=answer, config=config, session=SESSION_ALPHA)  # Stop 1
+    check("two entries: exit 0", run.code == 0, run.code)
+    check("two entries: nothing printed on Stop 1", run.out.strip() == "", run.out)
+    check("two entries: one guard.log line per entry, in order",
+          guard_rules(config) == [NEW_FINDING_RULE, NEW_WAIT_RULE], guard_rules(config))
+    later = run_hook(MARK, answer=answer, config=config, session=SESSION_ALPHA)  # Stop 2: the new rules only
+    check("two entries, Stop 2: nothing printed", later.out.strip() == "", later.out)
+    check("two entries, Stop 2: two more lines, in order",
+          guard_rules(config) == [NEW_FINDING_RULE, NEW_WAIT_RULE] * 2, guard_rules(config))
+
+
+def case_malformed_new_field_prints_nothing_and_logs_nothing_for_it():
+    # A malformed `new_rules` (a non-list, or an entry with an unknown id and no rule key) drops only that field:
+    # the older reason on the same answer still prints and logs, and the bad entry prints and logs nothing.
+    shapes = (
+        ("not a list", two_field_answer(False, BLOCK_REASON, NEW_FINDING_RULE + ": " + BAD_ENTRY)),
+        ("unknown id and no rule key", two_field_answer(False, BLOCK_REASON, [new_entry("not-a-rule-anchor", BAD_ENTRY),
+                                                                             {"reason": BAD_ENTRY}])),
+    )
+    for label, answer in shapes:
+        config = sample_config("malformed-" + label.replace(" ", "-"))
+        run = run_hook(MARK, answer=answer, config=config, session=SESSION_ALPHA)  # Stop 1
+        note = note_of(run)
+        check("malformed, %s: exit 0" % label, run.code == 0, run.code)
+        check("malformed, %s: the older reason still prints" % label, isinstance(note, str) and OLDER_ID in note, run.out)
+        check("malformed, %s: nothing from the bad field prints" % label,
+              BAD_ENTRY not in run.out and BAD_ENTRY not in run.err, run.out)
+        check("malformed, %s: the bad field logs no line, so only the older finding's line" % label,
+              guard_rules(config) == [OLDER_ID], guard_rules(config))
+    config = sample_config("malformed-ok-reply")
+    run = run_hook(MARK, answer=two_field_answer(True, None, [new_entry("not-a-rule-anchor", BAD_ENTRY)]),
+                   config=config, session=SESSION_ALPHA)  # Stop 1: an ok reply with a bad entry
+    check("malformed, ok reply: exit 0 and nothing printed", run.code == 0 and run.out.strip() == "", run.out)
+    check("malformed, ok reply: no guard.log line for the bad entry", guard_rules(config) == [], guard_rules(config))
+
+
+# --------------------------------------------------------------------------- every-reply: the new-rules-only answer
+# A Stop that does not sample the older rules sends the new-rules-only prompt. The hook's docstring says its `ok` and
+# `reason` are not read, so an answer that carries only `new_rules` must still log each valid entry.
+
+def case_new_rules_only_answer_without_ok_still_logs_its_line():
+    config = sample_config("no-ok-new-rules")
+    run_hook(MARK, answer=OK_ANSWER, config=config, session=SESSION_ALPHA)  # Stop 1: the full prompt, sampled
+    answer = json.dumps({"new_rules": [new_entry(NEW_WAIT_RULE, "the wait names no event; name what it waits for.")]})
+    run = run_hook(MARK, answer=answer, config=config, session=SESSION_ALPHA)  # Stop 2: the new rules only
+    check("new-only answer, no ok: Stop 2 makes the new-rules-only call", new_rules_only(run), run.calls)
+    check("new-only answer, no ok: its new_rules line is logged", guard_rules(config) == [NEW_WAIT_RULE], guard_rules(config))
+
+
+def case_new_rules_only_answer_with_ok_still_logs_its_line():
+    # Control for the case above: the same entry with `ok` true. The line is logged whether or not `ok` is present.
+    config = sample_config("with-ok-new-rules")
+    run_hook(MARK, answer=OK_ANSWER, config=config, session=SESSION_ALPHA)  # Stop 1: the full prompt, sampled
+    answer = json.dumps({"ok": True, "new_rules": [new_entry(NEW_WAIT_RULE, "the wait names no event; name what it waits for.")]})
+    run = run_hook(MARK, answer=answer, config=config, session=SESSION_ALPHA)  # Stop 2: the new rules only
+    check("new-only answer, with ok: Stop 2 makes the new-rules-only call", new_rules_only(run), run.calls)
+    check("new-only answer, with ok: its new_rules line is logged", guard_rules(config) == [NEW_WAIT_RULE], guard_rules(config))
+
+
+# --------------------------------------------------------------------------- every-reply: the note's reason
+# A finding on the older prompt prints its note unless its reason names a newer rule: the suppress branch in
+# hooks/reply_judge.py, `if not any(r in reason for r in NEW_RULES)`. So a reason that names an older id and a
+# newer id prints nothing, and its verdict still gets its guard.log line. The green control is a reason that
+# names only newer ids: it prints nothing either. A reason that names only older ids prints its note
+# (case_older_rule_finding_still_prints_its_note).
+
+MIXED_REASON = ("output-never-paste-passing-output: paste the verdict, not the run's output; "
+                "also parallelism-keep-going: name the event the wait ends on.")
+NEWER_ONLY_REASON = "parallelism-keep-going: name the event the wait ends on."
+
+
+def case_reason_naming_an_older_and_a_newer_id_is_logged_and_prints_no_note():
+    config = sample_config("note-mixed")
+    run = run_hook(MARK, answer=two_field_answer(False, MIXED_REASON, []), config=config, session=SESSION_ALPHA)
+    check("note, mixed reason: exit 0", run.code == 0, run.code)
+    check("note, mixed reason: nothing printed, because the reason also names a newer rule",
+          run.out.strip() == "", run.out)
+    check("note, mixed reason: the verdict is still logged, under its older rule",
+          guard_rules(config) == [OLDER_ID], guard_rules(config))
+
+
+def case_reason_naming_only_newer_ids_prints_no_note():
+    config = sample_config("note-newer-only")
+    run = run_hook(MARK, answer=two_field_answer(False, NEWER_ONLY_REASON, []), config=config, session=SESSION_ALPHA)
+    check("note, newer-only reason: exit 0", run.code == 0, run.code)
+    check("note, newer-only reason: nothing printed, because the reason names only newer rules",
+          run.out.strip() == "", run.out)
+
+
+def case_newer_only_reason_on_the_older_prompt_is_logged_under_its_newer_id():
+    # A newer rule's line is keyed under that rule's id, so the per-rule reader command finds it.
+    config = sample_config("newer-only-reason-key")
+    run_hook(MARK, answer=two_field_answer(False, NEWER_ONLY_REASON, []), config=config, session=SESSION_ALPHA)  # Stop 1: sampled
+    check("newer-only reason, older prompt: the one guard.log line is keyed under the newer rule id",
+          guard_rules(config) == [NEW_WAIT_RULE], guard_rules(config))
+
+
+def case_new_rule_ids_are_the_claude_md_anchors():
+    with open(os.path.join(REPO_ROOT, "CLAUDE.md"), encoding="utf-8") as f:
+        text = f.read()
+    rules = judged_rules()
+    for rule in NEW_RULES:
+        check("anchors: %s is a rule anchor in the root CLAUDE.md" % rule, "<!-- rule:%s -->" % rule in text, rule)
+        check("anchors: %s is a judged rule" % rule, rule in rules, rules)
+    check("anchors: JUDGED_RULES holds thirteen rules", len(rules) == 13, rules)
+
+
 # --------------------------------------------------------------------------- cases 8-13
-# Sampling: the reply judge runs on one Stop in five. Stop n
-# of a session is judged when (n - 1) % 5 == 0: Stops 1, 6, 11, so a short session is judged
-# once. The count is a file in the state folder under CLAUDE_CONFIG_DIR, one per session, the
-# home decision_watch.py uses. Every Stop writes it back, skipped Stops included. A skipped Stop
-# returns at once: no model call, no output, exit 0.
+# Sampling: the older rules run on one Stop in five. Stop n of a session carries the older rules when
+# (n - 1) % 5 == 0: Stops 1, 6, 11, so a short session carries them once. Every other Stop with a reply
+# still makes one model call, for the two new rules only. The count is a
+# file in the state folder under CLAUDE_CONFIG_DIR, one per session, the home decision_watch.py uses. Every
+# Stop writes it back, Stops the older rules skip included. An empty Stop makes no call and writes nothing.
 #
 # Assumptions pinned here:
 #   (a) the file holds the Stops so far; this Stop is n = stored + 1.
@@ -697,34 +1028,53 @@ def damage_counter(config, how):
 
 
 # --------------------------------------------------------------------------- case 8
-# The model is called on Stops 1, 6 and 11 of one session, once each, and on no other Stop.
+# Every Stop with a reply makes one model call. The older rules ride only on
+# Stops 1, 6 and 11 of one session, the sampled ones.
 
 def case_sampling_judges_stops_1_6_11():
     config = sample_config("eleven")
     codes = []
     called = {}
+    older = []
     for n in range(1, 12):
         run = run_hook(MARK, answer=OK_ANSWER, config=config, session=SESSION_ALPHA)
         codes.append(run.code)
-        if run.calls:
-            called[n] = len(run.calls)
+        called[n] = len(run.calls)
+        if carries_older_rules(run):
+            older.append(n)
     check("sampling: exit 0 on each of 11 Stops", all(c == 0 for c in codes), codes)
-    check("sampling: claude called once on Stops 1, 6 and 11, never on the others",
-          called == {1: 1, 6: 1, 11: 1}, called)
+    check("sampling: one model call on each of the 11 Stops", called == {n: 1 for n in range(1, 12)}, called)
+    check("sampling: the older rules ride only on Stops 1, 6 and 11", older == [1, 6, 11], older)
 
 
 # --------------------------------------------------------------------------- case 9
-# A skipped Stop: no model call, nothing on stdout or stderr, exit 0. The stubbed answer on
-# Stop 2 is a finding, so a hook that called the model would print a note and fail this case.
+# A Stop the older rules skip: one model call for the new rules, nothing on stdout or stderr, exit 0. The stubbed
+# answer on Stop 2 is a new-rule finding: it writes a guard.log line and prints nothing.
 
 def case_skipped_stop_is_silent():
     config = sample_config("skip")
-    run_hook(MARK, answer=OK_ANSWER, config=config, session=SESSION_ALPHA)  # Stop 1, judged
-    skipped = run_hook(MARK, answer=FINDING_ANSWER, config=config, session=SESSION_ALPHA)  # Stop 2
+    run_hook(MARK, answer=OK_ANSWER, config=config, session=SESSION_ALPHA)  # Stop 1, sampled
+    skipped = run_hook(MARK, answer=NEW_FINDING_ANSWER, config=config, session=SESSION_ALPHA)  # Stop 2
     check("skip: Stop 2 exit 0", skipped.code == 0, skipped.code)
-    check("skip: Stop 2 never calls the model", skipped.calls == [], skipped.calls)
+    check("skip: Stop 2 makes one model call, for the new rules only", new_rules_only(skipped), skipped.calls)
     check("skip: Stop 2 prints nothing on stdout", skipped.out.strip() == "", skipped.out)
     check("skip: Stop 2 prints nothing on stderr", skipped.err.strip() == "", skipped.err)
+
+
+# --------------------------------------------------------------------------- every-reply: a skipped Stop's failed verdict
+# A Stop the older rules skip sends the new rules only. Its answer may say `ok` false with a reason, but the older rules
+# did not judge this reply, so nothing prints and nothing logs. The gate is `if older and verdict.get("ok") is False:`
+# in hooks/reply_judge.py; without `older and`, Stop 2 prints the reason, and this case goes red.
+
+def case_skipped_stop_with_ok_false_and_a_reason_prints_nothing():
+    config = sample_config("skip-ok-false")
+    run_hook(MARK, answer=OK_ANSWER, config=config, session=SESSION_ALPHA)  # Stop 1, sampled
+    skipped = run_hook(MARK, answer=FINDING_ANSWER, config=config, session=SESSION_ALPHA)  # Stop 2: new rules only
+    check("skip, ok false: Stop 2 exit 0", skipped.code == 0, skipped.code)
+    check("skip, ok false: Stop 2 makes one model call, for the new rules only", new_rules_only(skipped), skipped.calls)
+    check("skip, ok false: Stop 2 prints nothing on stdout", skipped.out.strip() == "", skipped.out)
+    check("skip, ok false: Stop 2 logs no line, since the older rules did not judge it",
+          guard_rules(config) == [], guard_rules(config))
 
 
 # --------------------------------------------------------------------------- case 10
@@ -733,14 +1083,19 @@ def case_skipped_stop_is_silent():
 
 def case_sessions_keep_separate_counters():
     config = sample_config("two-sessions")
-    called = {SESSION_ALPHA: [], SESSION_BETA: []}
+    older = {SESSION_ALPHA: [], SESSION_BETA: []}
+    new_only = {SESSION_ALPHA: [], SESSION_BETA: []}
     for n in range(1, 7):
         for session in (SESSION_ALPHA, SESSION_BETA):
             run = run_hook(MARK, answer=OK_ANSWER, config=config, session=session)
-            if run.calls:
-                called[session].append(n)
-    check("sessions: each session judged on its own Stops 1 and 6",
-          called == {SESSION_ALPHA: [1, 6], SESSION_BETA: [1, 6]}, called)
+            if carries_older_rules(run):
+                older[session].append(n)
+            elif new_rules_only(run):
+                new_only[session].append(n)
+    check("sessions: each session judged on its own Stops 1 and 6 with the older rules",
+          older == {SESSION_ALPHA: [1, 6], SESSION_BETA: [1, 6]}, older)
+    check("sessions: Stops 2 to 5 of each session carry the new rules only",
+          new_only == {SESSION_ALPHA: [2, 3, 4, 5], SESSION_BETA: [2, 3, 4, 5]}, new_only)
 
 
 # --------------------------------------------------------------------------- case 11
@@ -756,8 +1111,8 @@ def case_counter_is_a_file_that_survives_between_processes():
     copied = os.path.join(ROOT, "sample-survives-copy", "config")
     shutil.copytree(config, copied)
     second = run_hook(MARK, answer=OK_ANSWER, config=copied, session=SESSION_ALPHA)  # Stop 2
-    check("counter: Stop 2 reads the count back from the copied file and is skipped",
-          second.calls == [], second.calls)
+    check("counter: Stop 2 reads the count back from the copied file, so it is a new-rules-only Stop",
+          new_rules_only(second), second.calls)
     fresh = run_hook(MARK, answer=OK_ANSWER, session=SESSION_ALPHA)  # empty config, no state
     check("counter: an empty config dir has no count, so its Stop is judged",
           len(fresh.calls) == 1, fresh.calls)
@@ -783,8 +1138,8 @@ def case_damaged_counter_fails_open():
         check("damaged %s: Stop 2 prints nothing on stdout" % how, second.out.strip() == "", second.out)
         if how != "unreadable":
             third = run_hook(MARK, answer=OK_ANSWER, config=config, session=SESSION_ALPHA)  # Stop 3
-            check("damaged %s: the write repaired the counter, so Stop 3 is skipped" % how,
-                  third.calls == [], third.calls)
+            check("damaged %s: the write repaired the counter, so Stop 3 is a new-rules-only Stop" % how,
+                  new_rules_only(third), third.calls)
 
 
 # --------------------------------------------------------------------------- case 13
@@ -819,13 +1174,16 @@ def case_failed_write_does_not_freeze_the_count():
     check("write refused: Stop 1 wrote a counter", bool(counter_files(config)), counter_files(config))
     codes = []
     called = {}
+    stop2 = None
     for n in range(2, 10):
         run = run_hook(MARK, answer=OK_ANSWER, config=config, session=SESSION_ALPHA, fail_replace=True)
         codes.append(run.code)
         called[n] = len(run.calls)
+        if n == 2:
+            stop2 = run
     check("write refused: exit 0 on Stops 2 to 9", all(c == 0 for c in codes), codes)
-    check("write refused: Stop 2 is skipped, its read was good", called[2] == 0, called)
-    check("write refused: Stops 3 to 9 are each judged, none skipped forever",
+    check("write refused: Stop 2 is a new-rules-only Stop, its read was good", new_rules_only(stop2), called)
+    check("write refused: Stops 3 to 9 each make a call, none skipped forever",
           all(called[n] == 1 for n in range(3, 10)), called)
 
 
@@ -863,6 +1221,7 @@ def case_empty_stop_writes_nothing_and_counts_nothing():
 def case_empty_stops_between_replies_do_not_shift_samples():
     config = sample_config("empty-between")
     judged = []
+    older = []
     bad_empty = []
     for i in range(1, 12):  # 11 replies, each after one empty Stop of a different kind
         kind = EMPTY_REPLIES[i % len(EMPTY_REPLIES)]
@@ -873,10 +1232,13 @@ def case_empty_stops_between_replies_do_not_shift_samples():
         reply = run_hook(MARK, answer=OK_ANSWER, config=config, session=SESSION_ALPHA)
         if reply.calls:
             judged.append(i)
+        if carries_older_rules(reply):
+            older.append(i)
     check("empty between replies: each empty Stop is silent and changes no counter",
           bad_empty == [], bad_empty)
-    check("empty between replies: the model is called on reply 1, 6 and 11 only",
-          judged == [1, 6, 11], judged)
+    check("empty between replies: every reply makes one model call", judged == list(range(1, 12)), judged)
+    check("empty between replies: the older rules ride on reply 1, 6 and 11 only",
+          older == [1, 6, 11], older)
 
 
 # --------------------------------------------------------------------------- cases 17-20
@@ -885,7 +1247,7 @@ def case_empty_stops_between_replies_do_not_shift_samples():
 # be skipped. When the write and the remove both fail, the Stop is judged, as a damaged
 # counter is (n = 1). Stops 1 to 3 with good writes leave the stored count at 3, so Stop 4 reads 3.
 
-FREEZE_SETUP_JUDGED = [1]  # Stop 1 is judged; Stops 2 and 3 are skipped by sampling
+FREEZE_SETUP_JUDGED = [1]  # Stop 1 carries the older rules; Stops 2 and 3 carry the new rules only
 
 
 def freeze_counter_at_three(config):
@@ -893,9 +1255,9 @@ def freeze_counter_at_three(config):
     judged = []
     for n in range(1, 4):
         run = run_hook(MARK, answer=OK_ANSWER, config=config, session=SESSION_ALPHA)
-        if run.calls:
+        if carries_older_rules(run):
             judged.append(n)
-    check("freeze setup: Stops 1 to 3 judged on Stop 1 only", judged == FREEZE_SETUP_JUDGED, judged)
+    check("freeze setup: the older rules ride on Stop 1 only", judged == FREEZE_SETUP_JUDGED, judged)
 
 
 def case_write_and_remove_both_fail_judges_the_stop():
@@ -945,6 +1307,7 @@ def case_write_fails_remove_ok_judges_the_next_stop():
 def case_good_write_path_judges_stops_1_6_11():
     config = sample_config("good-path")
     judged = []
+    older = []
     bad = []
     for n in range(1, 12):  # no fault injected: the good write path must keep its sampling
         run = run_hook(MARK, answer=OK_ANSWER, config=config, session=SESSION_ALPHA)
@@ -952,8 +1315,11 @@ def case_good_write_path_judges_stops_1_6_11():
             bad.append(n)
         if run.calls:
             judged.append(n)
+        if carries_older_rules(run):
+            older.append(n)
     check("good path: exit 0 and no stderr on Stops 1 to 11", bad == [], bad)
-    check("good path: judged on Stops 1, 6 and 11 only", judged == [1, 6, 11], judged)
+    check("good path: one model call on each of Stops 1 to 11", judged == list(range(1, 12)), judged)
+    check("good path: the older rules ride on Stops 1, 6 and 11 only", older == [1, 6, 11], older)
 
 
 # --------------------------------------------------------------------------- imports on an ignored Stop
@@ -1022,13 +1388,15 @@ def case_ignored_stop_imports_no_guard_family_module():
 
 def case_sampling_skipped_stop_imports_no_guard_family_module():
     config = sample_config("skip-imports")
-    seed = run_hook(MARK, answer=OK_ANSWER, config=config, session=SESSION_ALPHA)  # Stop 1, judged
-    check("skip imports: Stop 1 is judged, so Stop 2 is sampled out", len(seed.calls) == 1, seed.calls)
+    seed = run_hook(MARK, answer=OK_ANSWER, config=config, session=SESSION_ALPHA)  # Stop 1, sampled
+    check("skip imports: Stop 1 carries the older rules, so Stop 2 is a new-rules-only Stop",
+          carries_older_rules(seed), seed.calls)
     payload = {"session_id": SESSION_ALPHA, "stop_hook_active": False, "last_assistant_message": MARK}
-    out, imported, called = probe_ignored_stop(payload, config=config)  # Stop 2, skipped
-    check("skip imports: Stop 2 prints nothing and calls no model", out.strip() == "" and not called, out)
-    check("skip imports: Stop 2 imports no guard-family module", imported == [],
-          "imported before it had work to do: %s" % imported)
+    out, imported, called = probe_ignored_stop(payload, config=config, answer=OK_ANSWER)  # Stop 2: new rules only
+    check("skip imports: Stop 2 prints nothing and makes its one model call", out.strip() == "" and called, out)
+    check("skip imports: Stop 2 loads only guard and decision_watch, no lint module",
+          set(imported) <= {"guard", "decision_watch"},
+          "imported beyond guard and decision_watch: %s" % imported)
 
 
 # Row tables. A row is one case body from above. A row that raises is red and names
@@ -1083,8 +1451,8 @@ def case_input_needed_label_is_judged_off_sample():
 
 
 def case_no_input_needed_off_sample_is_not_judged():
-    run, _ = second_stop(NO_IN, answer=json.dumps(FINDING), label="c45-none")
-    check("no Input Needed label: Stop 2 never calls the model", not run.calls, run.calls)
+    run, _ = second_stop(NO_IN, answer=NEW_FINDING_ANSWER, label="c45-none")
+    check("no Input Needed label: Stop 2 makes one call, for the new rules only", new_rules_only(run), run.calls)
     check("no Input Needed label: Stop 2 is silent", run.out == "" and run.code == 0, (run.code, run.out))
 
 
@@ -1104,7 +1472,8 @@ def case_label_forms_judged_and_non_labels_not():
     }
     for name, text in not_judged.items():
         run, _ = second_stop(text, label="c45-non-" + name.split()[0] + name[-2:])
-        check("not a label hand-off (%s): not judged off-sample" % name, not run.calls, run.calls)
+        check("not a label hand-off (%s): the older rules are not judged; one call, new rules only" % name,
+              new_rules_only(run), run.calls)
 
 
 def case_prompt_asks_for_reason_and_check():
@@ -1194,7 +1563,7 @@ def case_table_reply_is_judged_off_sample():
 
 def case_pipes_without_table_not_judged_off_sample():
     run, _ = second_stop(PIPES_NO_TABLE, label="c93-pipes", session="c93-pipes-session")
-    check("pipes with no separator row: Stop 2 never calls the model", not run.calls, run.calls)
+    check("pipes with no separator row: Stop 2 makes one call, for the new rules only", new_rules_only(run), run.calls)
 
 
 def case_prompt_asks_for_gold_column():
@@ -1216,7 +1585,10 @@ UNDOABLE_ASK = (
     "Done: built the waiting page.\n"
     "Input Needed: link the waiting page now with a folder move, or later? Later changes nothing.\n"
 )
-UNDOABLE_FINDING = {"ok": False, "reason": ASK_RULE + ": the pick can be undone; take it and name it under Done."}
+UNDOABLE_FINDING = {"ok": False, "reason": ASK_RULE + ": the pick can be undone; ask the consultant when one is "
+                                          "reachable, else a refuter, before you take it; name it under Done."}
+# The phrases that would send a pick to the owner. The rule id itself holds "owner", so a case reads the phrases.
+ASK_TO_OWNER_PHRASES = ("ask the owner", "ask the user", "ask me", "ask you", "to the owner", "to me")
 
 
 def case_undoable_pick_question_is_judged_off_sample():
@@ -1231,8 +1603,14 @@ def case_prompt_notes_an_undoable_pick():
           run.prompt()[:300])
     check("prompt: a sentence flags an Input Needed pick that can be undone",
           has_pin(sentences, ("input needed",), ("undo",), ("flag",)), sentences)
-    check("prompt: a sentence says the session takes the pick and names it under Done",
-          has_pin(sentences, ("take",), ("done",)), sentences)
+    check("prompt: a sentence has the session ask the consultant when one is reachable, else a refuter",
+          has_pin(sentences, (ASK_RULE,), ("consult",), ("reachable",), ("refuter",)), sentences)
+    check("prompt: that sentence has the consultant asked before the session takes the pick",
+          has_pin(sentences, (ASK_RULE,), ("consult",), ("before",), ("take",)), sentences)
+    check("prompt: that sentence says the session names the pick under Done",
+          has_pin(sentences, (ASK_RULE,), ("name",), ("done",)), sentences)
+    check("prompt: that sentence never tells the session to ask the owner or the user",
+          not any(ASK_RULE in s and any(p in s for p in ASK_TO_OWNER_PHRASES) for s in sentences), sentences)
 
 
 def case_prompt_spares_irreversible_and_goal_picks():
@@ -1278,10 +1656,11 @@ def case_blocked_on_reply_is_judged_off_sample():
     check("blocked on: the words are read in any case", len(run.calls) == 1, run.calls)
     run, _ = second_stop("Plan: the work is blocking nothing; unblocked and moving.", label="c148-none",
                          session="c148-none")
-    check("blocked on: a reply without the words is not judged off-sample", len(run.calls) == 0, run.calls)
+    check("blocked on: a reply without the words gets one call, for the new rules only", new_rules_only(run),
+          run.calls)
     run, _ = second_stop("Plan: the test went green, unblocked on retry.", label="c148-unblocked",
                          session="c148-unblocked")
-    check("blocked on: unblocked on retry is not judged off-sample", len(run.calls) == 0, run.calls)
+    check("blocked on: unblocked on retry gets one call, for the new rules only", new_rules_only(run), run.calls)
 
 
 def case_prompt_flags_a_port_question_marked_blocking():
@@ -1334,7 +1713,8 @@ WIDENS_ASK = (
     "I recommend A.\n"
 )
 WIDENS_FINDING = {"ok": False, "reason": WIDENS_RULE + ": A widens a shared tool; label it and recommend B."}
-COUNT_WORDS = ("one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven")
+COUNT_WORDS = ("one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve",
+               "thirteen")
 
 
 def judged_rules():
@@ -1454,8 +1834,8 @@ def case_prompt_flags_a_pick_one_question_whose_options_could_combine():
           sentences)
     check("prompt: a sentence never flags options that exclude each other",
           has_pin(sentences, ("never flag",), ("exclude",)), sentences)
-    check("prompt: the prompt judges against eleven rules",
-          has_pin(sentences, ("against eleven rules",)), sentences[:2])
+    check("prompt: the prompt judges against thirteen rules",
+          has_pin(sentences, ("against thirteen rules",)), sentences[:2])
 
 
 def case_widens_finding_logs_its_rule():
@@ -1840,7 +2220,7 @@ def case_search_total_finding_is_a_note_logged_as_its_rule():
 def case_rest_count_reply_is_not_judged_off_sample():
     run, _ = second_stop(REST_COUNT_REPLY, label="counts-b", session="counts-b")
     check("REST count: Stop 2 exit 0 and silent", run.code == 0 and run.out == "", (run.code, run.out))
-    check("REST count: Stop 2 never calls the model", not run.calls, run.calls)
+    check("REST count: Stop 2 makes one call, for the new rules only", new_rules_only(run), run.calls)
 
 
 def case_search_used_for_candidates_is_judged_off_sample():
@@ -1867,7 +2247,8 @@ def case_search_word_far_from_a_digit_is_not_judged_off_sample():
     for n, (name, text) in enumerate((("a digit %d characters past the search word" % gap, FAR_FROM_DIGIT),
                                       ("research, which holds the letters search", RESEARCH_REPLY))):
         run, _ = second_stop(text, label="counts-far-%02d" % n, session="counts-far-%02d" % n)
-        check("no search trigger, %s: Stop 2 never calls the model" % name, not run.calls, run.calls)
+        check("no search trigger, %s: Stop 2 makes one call, for the new rules only" % name, new_rules_only(run),
+              run.calls)
 
 
 def case_long_reply_search_total_past_the_clip_is_judged():
@@ -1917,23 +2298,24 @@ def case_prompt_never_flags_a_search_used_only_for_candidates():
           has_pin(sentences, ("never flag",), ("search",), ("candidate",)), sentences)
 
 
-def case_prompt_says_eleven_rules_with_the_counts_rule():
+def case_prompt_says_thirteen_rules_with_the_new_rules():
     run = run_hook(SEARCH_COUNT_REPLY, answer=OK_ANSWER)
     sentences = rule_sentences(run, SEARCH_COUNT_REPLY)
-    check("eleven rules: the prompt says against eleven rules", has_pin(sentences, ("against eleven rules",)),
+    check("thirteen rules: the prompt says against thirteen rules", has_pin(sentences, ("against thirteen rules",)),
           sentences[:2])
     rules = judged_rules()
-    check("eleven rules: JUDGED_RULES holds eleven rules", len(rules) == 11, rules)
-    check("eleven rules: JUDGED_RULES holds %s" % SEARCH_RULE, SEARCH_RULE in rules, rules)
+    check("thirteen rules: JUDGED_RULES holds thirteen rules", len(rules) == 13, rules)
+    check("thirteen rules: JUDGED_RULES holds %s" % SEARCH_RULE, SEARCH_RULE in rules, rules)
     with open(MODULE_PATH, encoding="utf-8") as f:
         first = f.read().split("\n", 2)[1]
-    check("eleven rules: the docstring says against eleven rules", "against eleven rules" in first, first[:120])
+    check("thirteen rules: the docstring says against thirteen rules", "against thirteen rules" in first,
+          first[:120])
 
 
-# Cost. A Stop that the trigger does not match starts no process and writes no file beyond the count file. Stop 1
-# is judged first, so the spy is seen to record a real start before a zero count means anything.
+# Cost. A Stop the older rules skip starts only the one claude call and writes no file beyond the count file. Stop 1
+# is judged first, so the spy is seen to record a real start before the count means anything.
 
-def case_rest_count_stop_starts_no_process_and_writes_no_file():
+def case_rest_count_stop_starts_only_the_model_call_and_writes_no_file():
     config = sample_config("counts-cost-rest")
     judged = []
     probe_ignored_stop(stop_payload(MARK), config=config, starts=judged, answer=OK_ANSWER)  # Stop 1, judged
@@ -1943,10 +2325,13 @@ def case_rest_count_stop_starts_no_process_and_writes_no_file():
     check("cost, count file: Stop 1 leaves the count file and nothing else", before == counter_files(config)
           and len(before) == 1, before)
     starts = []
-    out, imported, called = probe_ignored_stop(stop_payload(REST_COUNT_REPLY), config=config, starts=starts)  # Stop 2
-    check("cost, REST Stop 2: prints nothing and calls no model", out.strip() == "" and not called, (out, called))
-    check("cost, REST Stop 2: starts no process", starts == [], starts)
-    check("cost, REST Stop 2: imports no guard-family module", imported == [], imported)
+    out, imported, called = probe_ignored_stop(stop_payload(REST_COUNT_REPLY), config=config, starts=starts,
+                                               answer=OK_ANSWER)  # Stop 2
+    check("cost, REST Stop 2: prints nothing and makes one model call", out.strip() == "" and called, (out, called))
+    check("cost, REST Stop 2: its only process start is the claude call",
+          [os.path.basename(s["argv"][0]) for s in starts] == ["claude"], starts)
+    check("cost, REST Stop 2: loads only guard and decision_watch, no lint module",
+          set(imported) <= {"guard", "decision_watch"}, imported)
     check("cost, REST Stop 2: writes no file beyond the count file", every_file(config) == before,
           every_file(config))
 
@@ -2013,7 +2398,8 @@ def case_count_words_without_a_search_word_are_not_judged_off_sample():
     run, _ = second_stop(REST_COUNT_WORDS_REPLY, label="counts-d-rest", session="counts-d-rest")
     check("REST count words, no search word: Stop 2 exit 0 and silent", run.code == 0 and run.out == "",
           (run.code, run.out))
-    check("REST count words, no search word: Stop 2 never calls the model", not run.calls, run.calls)
+    check("REST count words, no search word: Stop 2 makes one call, for the new rules only", new_rules_only(run),
+          run.calls)
 
 
 def case_search_word_far_from_a_count_word_is_not_judged_off_sample():
@@ -2021,7 +2407,8 @@ def case_search_word_far_from_a_count_word_is_not_judged_off_sample():
     gap = FAR_FROM_COUNT_WORD.index("zero") - (FAR_FROM_COUNT_WORD.index("search") + len("search"))
     check("far count word: the count word sits more than 120 characters past the search word", gap > 120, gap)
     run, _ = second_stop(FAR_FROM_COUNT_WORD, label="counts-d-far", session="counts-d-far")
-    check("far count word, %d characters away: Stop 2 never calls the model" % gap, not run.calls, run.calls)
+    check("far count word, %d characters away: Stop 2 makes one call, for the new rules only" % gap,
+          new_rules_only(run), run.calls)
 
 
 # The window is 120 characters, in either order. The near fixtures sit past 60 and within 120, so only the
@@ -2084,7 +2471,8 @@ def case_search_word_121_characters_from_a_count_word_is_not_judged_off_sample()
         gap = gap_chars(text, first, second)
         check("window edge 121, %s: the words sit exactly 121 characters apart" % order, gap == 121, gap)
         run, _ = second_stop(text, label="counts-h-past-%02d" % n, session="counts-h-past-%02d" % n)
-        check("window edge 121, %s: Stop 2 never calls the model" % order, not run.calls, run.calls)
+        check("window edge 121, %s: Stop 2 makes one call, for the new rules only" % order, new_rules_only(run),
+              run.calls)
 
 
 def case_count_word_past_120_characters_is_not_judged_off_sample():
@@ -2094,7 +2482,8 @@ def case_count_word_past_120_characters_is_not_judged_off_sample():
         gap = gap_chars(text, first, second)
         check("far count word, %s: the gap is more than 120 characters" % name, gap > 120, gap)
         run, _ = second_stop(text, label="counts-i-far-%02d" % n, session="counts-i-far-%02d" % n)
-        check("far count word, %s: Stop 2 never calls the model" % name, not run.calls, run.calls)
+        check("far count word, %s: Stop 2 makes one call, for the new rules only" % name, new_rules_only(run),
+              run.calls)
 
 
 def case_prompt_never_flags_a_reply_that_refutes_a_search_total():
@@ -2216,7 +2605,8 @@ COST_FINDING = {"ok": False, "reason": COST_RULE + ": a cost ranking names no me
                 "and a date, run id or sample count."}
 MOST_OF_TIME_REPLY = "Done: the wake check passes most of the time, so the lane rarely retries."
 
-# (label, reply, kind). A "judged" row makes Stop 2 call the model once. Every other row never calls it. The
+# (label, reply, kind). A "judged" row makes Stop 2 call the model once, with the older rules. Every other row makes
+# one call for the new rules only. The
 # "question" and "quoted" rows also check their scope first: a question ends in "?", a quote holds the phrase.
 # The controls sit beside a trigger row, so a regex that matches too much fails a control, and one that
 # matches too little fails a trigger.
@@ -2283,7 +2673,8 @@ def case_cost_rank_phrase_table_is_judged_off_sample():
         if kind == "judged":
             check("cost rank, %s: Stop 2 calls the model once" % phrase, len(run.calls) == 1, run.calls)
         else:
-            check("cost rank, %s: Stop 2 never calls the model" % phrase, not run.calls, run.calls)
+            check("cost rank, %s: Stop 2 makes one call, for the new rules only" % phrase, new_rules_only(run),
+                  run.calls)
 
 
 def case_cost_rank_reply_is_judged_off_sample():
@@ -2311,7 +2702,7 @@ def case_cost_rank_finding_is_a_note_logged_as_its_rule():
 def case_most_of_the_time_is_not_judged_off_sample():
     run, _ = second_stop(MOST_OF_TIME_REPLY, label="cost-time", session="cost-time")
     check("most of the time: Stop 2 exit 0 and silent", run.code == 0 and run.out == "", (run.code, run.out))
-    check("most of the time: Stop 2 never calls the model", not run.calls, run.calls)
+    check("most of the time: Stop 2 makes one call, for the new rules only", new_rules_only(run), run.calls)
 
 
 def case_cost_rank_phrase_past_the_clip_is_judged():
@@ -2405,7 +2796,8 @@ def case_bold_or_parenthesized_cost_question_is_not_judged_off_sample():
         check("cost question, %s: the ranking words in a question are not a cost ranking" % label,
               not module.has_cost_rank(reply), reply)
         run, _ = second_stop(reply, label="cost-q-" + label, session="cost-q-" + label)
-        check("cost question, %s: Stop 2 never calls the model" % label, not run.calls, run.calls)
+        check("cost question, %s: Stop 2 makes one call, for the new rules only" % label, new_rules_only(run),
+              run.calls)
 
 
 # verification-report-unknown-reads: a reply that says a change matches main, is main's own, or is no worse than main is
@@ -2475,7 +2867,8 @@ MAIN_CLAIM_CONTROLS = (  # the words domain and maintain, with no main claim
 
 
 def run_main_claim_rows(scope, rows, judged):
-    """Each row's reply on Stop 2. A judged row calls the model once; every other row never calls it."""
+    """Each row's reply on Stop 2. A judged row calls the model once, with the older rules; every other row makes one
+    call for the new rules only."""
     module = reference_module()
     for n, (phrase, reply) in enumerate(rows):
         label = "%s-%02d" % (scope.replace(" ", "-"), n)
@@ -2486,7 +2879,8 @@ def run_main_claim_rows(scope, rows, judged):
         if judged:
             check("%s, %s: Stop 2 calls the model once" % (scope, phrase), len(run.calls) == 1, run.calls)
         else:
-            check("%s, %s: Stop 2 never calls the model" % (scope, phrase), not run.calls, run.calls)
+            check("%s, %s: Stop 2 makes one call, for the new rules only" % (scope, phrase), new_rules_only(run),
+                  run.calls)
 
 
 def case_main_claim_reply_is_judged_off_sample():
@@ -2509,6 +2903,24 @@ def case_domain_and_maintain_are_not_judged_off_sample():
 
 CASES = (
     case_stop_hook_active_never_calls_model,
+    case_reply_with_no_older_trigger_makes_one_call,
+    case_older_trigger_and_new_rule_text_make_one_call,
+    case_new_rule_finding_logs_one_line_and_prints_nothing,
+    case_older_rule_finding_still_prints_its_note,
+    case_failed_new_rules_call_prints_nothing_and_exits_zero,
+    case_new_rules_are_judged_rules_and_counted,
+    case_new_rules_prompt_names_the_exemptions,
+    case_note_holds_older_reason_and_no_new_entry_text,
+    case_full_prompt_answer_carries_note_and_new_entry,
+    case_both_prompts_ask_for_the_two_fields,
+    case_two_new_entries_and_no_older_reason_log_two_lines_and_print_nothing,
+    case_malformed_new_field_prints_nothing_and_logs_nothing_for_it,
+    case_new_rules_only_answer_without_ok_still_logs_its_line,
+    case_new_rules_only_answer_with_ok_still_logs_its_line,
+    case_reason_naming_an_older_and_a_newer_id_is_logged_and_prints_no_note,
+    case_reason_naming_only_newer_ids_prints_no_note,
+    case_newer_only_reason_on_the_older_prompt_is_logged_under_its_newer_id,
+    case_new_rule_ids_are_the_claude_md_anchors,
     case_ignored_stop_imports_no_guard_family_module,
     case_sampling_skipped_stop_imports_no_guard_family_module,
     case_model_ok_is_silent,
@@ -2530,6 +2942,7 @@ CASES = (
     case_child_cannot_retrigger_hook,
     case_settings_reply_judge_is_async_and_report_guard_is_not,
     table_sampling,
+    case_skipped_stop_with_ok_false_and_a_reason_prints_nothing,
     case_sessions_keep_separate_counters,
     case_damaged_counter_fails_open,
     case_counter_write_failure_never_blocks,
@@ -2591,8 +3004,8 @@ CASES = (
     case_prompt_never_flags_a_count_read_from_rest,
     case_prompt_names_the_fix_confirm_with_rest,
     case_prompt_never_flags_a_search_used_only_for_candidates,
-    case_prompt_says_eleven_rules_with_the_counts_rule,
-    case_rest_count_stop_starts_no_process_and_writes_no_file,
+    case_prompt_says_thirteen_rules_with_the_new_rules,
+    case_rest_count_stop_starts_only_the_model_call_and_writes_no_file,
     case_search_total_stop_starts_only_the_judge_call,
     case_searched_word_with_a_digit_is_judged_off_sample,
     case_search_with_a_count_word_is_judged_off_sample,
@@ -2644,8 +3057,9 @@ def run_case(case):
         RED_CASES.append(case.__name__)
 
 
-# The cost of one Stop (decision reply-judge). The first Stop of a session is judged: one model call, no child of
-# its own. A Stop sampled out makes no call and writes only its counter. A finding is a note, and adds one guard line.
+# The cost of one Stop (decision reply-judge). Every Stop with a reply makes one model call and no child of its own.
+# The first Stop of a session also carries the older rules, and a Stop the older rules skip carries the new rules
+# only. An older-rule finding is a note and one guard line. A new-rule finding is one guard line and no note.
 REPLY = "Done. The change is in place."
 JUDGED_REASON = "output-start-with-point: start with the point."
 
@@ -2691,15 +3105,28 @@ class CostTests(unittest.TestCase):
         self.assertEqual(len(run["files"]), 1, "a judged allow writes the counter only; got %r" % run["files"])
         self.assertTrue(run["files"][0].startswith("state/reply-judge/"), run["files"])
 
-    def test_a_sampled_out_stop_costs_no_model_call_and_writes_only_the_counter(self):
+    def test_a_stop_the_older_rules_skip_costs_one_model_call_and_writes_only_the_counter(self):
         folder = self.folder()
         first = self.stop(folder, stop_hook(), [[{"ok": True}, None]])
-        second = self.stop(folder, stop_hook(), [[{"ok": False, "reason": JUDGED_REASON}, None]])
+        second = self.stop(folder, stop_hook(), [[{"ok": True}, None]])
         self.assertEqual(len(first["models"]), 1, "Stop 1 is judged")
-        self.assertEqual(second["models"], [], "Stop 2 is sampled out: no model call")
-        self.assertEqual(second["children"], [])
-        self.assertEqual(len(second["files"]), 1, "a sampled-out Stop writes the counter only; got %r" % second["files"])
+        self.assertEqual(len(second["models"]), 1, "Stop 2 makes one model call, for the new rules: %r" % second["models"])
+        self.assertEqual(second["children"], [], "the one call is the only process the Stop starts")
+        self.assertEqual(second["out"].strip(), "", "an allow prints nothing")
+        self.assertEqual(len(second["files"]), 1, "a Stop the older rules skip writes the counter only; got %r"
+                         % second["files"])
         self.assertTrue(second["files"][0].startswith("state/reply-judge/"), second["files"])
+
+    def test_a_new_rule_finding_appends_one_guard_line_and_prints_nothing(self):
+        folder = self.folder()
+        answer = {"ok": True, "new_rules": [{"rule": NEW_FINDING_RULE, "reason": "no home."}]}
+        run = self.stop(folder, stop_hook(), [[answer, None]])
+        self.assertEqual(len(run["models"]), 1, "Stop 1 makes one model call")
+        self.assertEqual(run["out"], "", "a new-rule finding prints no note")
+        self.assertEqual(run["children"], [], "the finding starts no process of its own")
+        lines = guard_lines(os.path.join(folder, "config"))
+        self.assertEqual(len(lines), 1, "one finding, one guard.log append; got %r" % lines)
+        self.assertEqual(lines[0].split("\t")[3], NEW_FINDING_RULE, lines)
 
     def test_a_judged_stop_with_a_finding_adds_the_guard_log_line(self):
         run = self.stop(self.folder(), stop_hook(), [[{"ok": False, "reason": JUDGED_REASON}, None]])
