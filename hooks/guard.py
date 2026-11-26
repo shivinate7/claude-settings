@@ -3971,8 +3971,9 @@ AGENT_NO_REMOTE_REASON = (
 )
 AGENT_NO_MCP_REASON = (
     "An agent cannot answer a permission prompt, and the permission allow list does not cover this MCP tool, so the "
-    "call would wait with no one to answer it. Do the work with the shell and file tools, and put what you needed in "
-    "your report so the session that spawned you can act on it. (an agent holds no MCP tool)"
+    "call would wait with no one to answer it. An agent may call only the MCP tools on that allow list. Do the work "
+    "with the shell and file tools, and put what you needed in your report so the session that spawned you can act "
+    "on it."
 )
 
 

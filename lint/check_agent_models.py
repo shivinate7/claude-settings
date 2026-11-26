@@ -40,7 +40,8 @@ HAIKU_ROLES = tuple(role.lower() for role in _guard.HAIKU_ROLES)
 LANE_EFFORT = _guard.LANE_EFFORT
 REMOTE_SERVER = _guard.REMOTE_SERVER
 # Every MCP tool, as an agent file's `disallowedTools` writes it. The designer and the design-reviewer keep the MCP tools of
-# the browser pane and the simulator (agents/designer.md), so they withhold the remote server alone.
+# the browser pane (agents/designer.md), so they withhold the remote server alone. The guard still refuses an agent's
+# simulator call (rule agent-no-mcp-tools).
 MCP_GLOB = "mcp__*"
 MCP_KEEPING_ROLES = ("designer", "design-reviewer")
 LANE_RECORD = os.path.join(*layout.path(ROOT, "decisions").split("/"), "agent-model-cap.md")
