@@ -487,14 +487,19 @@ STAMPNOCHECK = os.path.join(ROOT, "stamp_no_checks")  # stamp.json pins required
 FIRST_PROOF_REPO = os.path.join(ROOT, "first_proof_repo")  # its merge config pins requiredChecks "first-proof", and a workflows folder holds one workflow file
 
 
-def _merge_config_path():
-    """The merge config path, merge.DEFAULT_CONFIG, read with the ast from merge/merge.py: the guard cases never import the merge tool."""
+def _merge_constant(name):
+    """The string constant `name` of merge/merge.py, read with the ast: the guard cases never import the merge tool."""
     with open(os.path.join(os.path.dirname(HERE), "merge", "merge.py"), encoding="utf-8") as f:
         tree = ast.parse(f.read())
     for node in tree.body:
-        if isinstance(node, ast.Assign) and any(getattr(t, "id", None) == "DEFAULT_CONFIG" for t in node.targets):
+        if isinstance(node, ast.Assign) and any(getattr(t, "id", None) == name for t in node.targets):
             return node.value.value
-    raise AssertionError("merge/merge.py has no DEFAULT_CONFIG")
+    raise AssertionError("merge/merge.py has no %s" % name)
+
+
+def _merge_config_path():
+    """The merge config path, merge.DEFAULT_CONFIG (see _merge_constant)."""
+    return _merge_constant("DEFAULT_CONFIG")
 
 
 def _build_stamp_repos():
