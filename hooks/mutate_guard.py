@@ -4110,6 +4110,8 @@ GUARD_MODULE_FAMILIES = {
     "hooks/guard_browser.py": ["browser-keychain"],
     # hooks/guard_write.py holds the silent-write family moved out of guard.py. Its mutants meet the write section.
     "hooks/guard_write.py": ["write"],
+    # hooks/guard_impeccable.py holds the impeccable family moved out of guard.py. Its mutants meet the impeccable section.
+    "hooks/guard_impeccable.py": ["impeccable"],
     "hooks/guard_workflow_args.py": ["workflow-args"],
     "hooks/guard_ci_wait.py": ["ci-wait-cap"],
     # hooks/guard_cite.py holds the cite family moved out of guard.py. Its mutants meet the cite and scratchpad-message sections.
@@ -4137,7 +4139,6 @@ GUARD_MODULE_EXEMPT = {
     "hooks/guard_paths.py": EMPTY_MOVE_REASON,
     "hooks/guard_scratchpad_owner.py": EMPTY_MOVE_REASON,
     "hooks/guard_pages.py": EMPTY_MOVE_REASON,
-    "hooks/guard_impeccable.py": EMPTY_MOVE_REASON,
     "hooks/guard_simulator.py": EMPTY_MOVE_REASON,
 }
 # The gold standard: the guard's own suite against the same mechanical mutants, so the comparison is

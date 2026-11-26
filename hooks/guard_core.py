@@ -28,6 +28,12 @@ from git_reads import (  # noqa: F401
     worktree_locked,
 )
 
+# The hooks folder: the one home a family module reads to find a file beside the hooks. It is guard.py's own `_HERE`.
+# An installed guard.py loads this file from <hooks>/guard.d/<id>, one level down, so that folder reads as its parent's
+# parent; the repo copy and a flat install sit in the hooks folder itself.
+HOOKS_HOME = (lambda own: os.path.dirname(os.path.dirname(own)) if os.path.basename(os.path.dirname(own)) == "guard.d"
+              else own)(os.path.dirname(os.path.realpath(__file__)))
+
 
 def is_cloud() -> bool:
     """True in a Claude Code cloud session: CLAUDE_CODE_REMOTE is exactly "true". Read at each call. The one home of the
