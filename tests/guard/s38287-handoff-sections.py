@@ -863,6 +863,7 @@ HBD_HOME = os.path.join(ROOT, "hbd-home")             # the fixture home; its .c
 HBD_CFG = os.path.join(HBD_HOME, ".claude")           # the installed prompt and a session handoff, as HS_CFG holds
 HBD_HANDOFF = hs_handoff(HBD_CFG)                     # the plain path to the session handoff under HBD_CFG
 HBD_ENV = {"CLAUDE_CONFIG_DIR": None, "HOME": HBD_HOME}   # the variable unset, and HOME at the fixture home
+HBD_ENV_WIN = dict(HBD_ENV, USERPROFILE=HBD_HOME)   # the same, and USERPROFILE too: Windows' ~ reads it, not HOME
 HBD_DEFAULT = "\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/handoffs/%s.md\"" % HS_SID
 
 
@@ -887,11 +888,11 @@ hbw_allow("handoff-sections: a Bash > redirect of a complete scratch file to the
           "cat %s > %s" % (HBW_GOOD, HBD_DEFAULT))
 sh("handoff-sections: a Bash cp of a scratch file that drops the tail to the default-value path, with the variable unset, "
    "is refused, naming the three",
-   "cp %s %s" % (HBW_NOSEC, HBD_DEFAULT), "deny", HS_RULE, cwd=NOGIT, session=HS_SID, config=HBD_CFG, env=HBD_ENV,
+   "cp %s %s" % (HBW_NOSEC, HBD_DEFAULT), "deny", HS_RULE, cwd=NOGIT, session=HS_SID, config=HBD_CFG, env=HBD_ENV_WIN,
    carries=HS_TAIL, lacks=HBW_KEEP)
 sh("handoff-sections: a Bash > redirect of a scratch file that drops the tail to the default-value path, with the variable "
    "unset, is refused, naming the three",
-   "cat %s > %s" % (HBW_NOSEC, HBD_DEFAULT), "deny", HS_RULE, cwd=NOGIT, session=HS_SID, config=HBD_CFG, env=HBD_ENV,
+   "cat %s > %s" % (HBW_NOSEC, HBD_DEFAULT), "deny", HS_RULE, cwd=NOGIT, session=HS_SID, config=HBD_CFG, env=HBD_ENV_WIN,
    carries=HS_TAIL, lacks=HBW_KEEP)
 sh("handoff-sections: a Bash cp of a complete scratch file to the default-value path, with the variable unset, passes, "
    "silently",
