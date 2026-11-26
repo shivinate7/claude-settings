@@ -2228,7 +2228,9 @@ CHAT_REASONS = {"uniform-pick": CHAT_WIDENS_REASON, "press-link": CHAT_PRESS_LIN
 # Decision question-form holds the ruling. `past_rulings` gathers what the owner already decided, so the one
 # question judge (hooks/call_judge.py, and lint/report_guard.py for a relayed question) can refuse a question a
 # standing record settles. Sources: docs/decisions and docs/debts (every record, one index line each), and the
-# ruling sentences of the `roadmap` ref's step notes (the 30 with the most word overlap). Closed page items are
+# ruling sentences of the `roadmap` ref's step notes (the 30 with the most word overlap). Of the records, only
+# the RECORD_TOP that share the most words with the question go in, and a record the question names always does.
+# The whole block holds at most CANDIDATES_CAP characters (see candidates_block). Closed page items are
 # always unknown: a hook cannot call the Artifact tool, and the decision records carry their rulings.
 # Cost: one git process, only when the caller already makes a model call; no file written.
 PAST_RULING_RULE = "past-ruling"
@@ -2236,6 +2238,11 @@ UNVETTED_LINE = re.compile(r"^[ \t>*+-]*Unvetted:[ \t]*\S", re.I | re.M)
 UNREADABLE = "unreadable"
 CLOSED_ITEMS = "closed page items"
 INDEX_CAP, STEP_TOP, STEP_GIT_TIMEOUT, RULED_TOP = 800, 30, 10, 8
+RECORD_TOP = 40  # the most decision and debt records sent that share words with the question (a record it names is extra)
+# The most characters of the candidate block (candidates_block): the judge call has a 60 s limit (call_judge.py), and
+# the unfiltered block of about 475,000 characters timed out. Three 500-600 character questions against the live docs
+# tree gave filtered blocks of 63,862, 65,754 and 64,895 characters; 80,000 leaves about 22% headroom over the largest.
+CANDIDATES_CAP = 80000
 RULING_EXTRA_CAP = 600  # the most a record's ruling section adds past INDEX_CAP, as sentences that state a ruling by the owner
 RULING_HEADING = re.compile(r"^##[ \t]+The ruling[ \t]*$", re.I | re.M)
 RULING_WORDS = re.compile(r"ruling|owner|shiv", re.I)
@@ -2487,12 +2494,41 @@ def _ruled_candidates(roots, unknown, words):
     return []
 
 
+def _line_score(line, words) -> int:
+    """The words of `words` that the text of a candidate line (`<id>: <text>`) shares. A ruled-store line's own
+    `(owner <at>; ...)` tail is not its ruling and is left out."""
+    text = line.split(": ", 1)[-1]
+    if line.startswith("ruled:"):
+        text = text.rsplit(" (owner ", 1)[0]
+    return len(_words(text) & words)
+
+
+def _records_to_send(lines, words, named) -> list:
+    """The record lines to send, in their own order: every record in `named`, and the RECORD_TOP others that share
+    the most words with the question (`words`; the first in the folder's order among equal counts). A record that
+    shares no word is never one of the top."""
+    scored = sorted((-_line_score(line, words), i) for i, line in enumerate(lines) if line.split(": ", 1)[0] not in named)
+    top = {i for count, i in scored[:RECORD_TOP] if count}
+    return [line for i, line in enumerate(lines) if line.split(": ", 1)[0] in named or i in top]
+
+
+def _best_first(lines, words, named) -> list:
+    """`lines` with the records in `named` first, then the most shared words first; a stable sort, so equal counts keep
+    the order the sources gave. candidates_block drops lines from the end, so the lowest-scored go first."""
+    return [line for _key, line in sorted(
+        ((line.split(": ", 1)[0] not in named, -_line_score(line, words), i), line) for i, line in enumerate(lines))]
+
+
 def past_rulings(question_text, repo_root):
-    """(candidates, unknown). `candidates` are lines `<id>: <text>`: the (up to eight) open ruled-store entries that share words with the question, as `ruled:<id>`, every decision and debt record, then the step
-    rulings that share words with the question. `unknown` lists each source not searched: "<source> (absent)"
+    """(candidates, unknown). `candidates` are lines `<id>: <text>`, best first (see _best_first): the (up to eight)
+    open ruled-store entries that share words with the question, as `ruled:<id>`; the decision and debt records the
+    question names, then the RECORD_TOP records that share the most words (a record with no shared word is left
+    out unless named); the step rulings that share words with the question. `unknown` lists each source not
+    searched: "<source> (absent)"
     for a source the repo does not have, "<source> (unreadable: ...)" for one that exists and failed, and always
     "closed page items". Absent sources never refuse; unreadable ones do (see unreadable_sources)."""
-    candidates, unknown, seen = [], [], set()
+    candidates, records, unknown, seen = [], [], [], set()
+    words = _words(question_text)
     roots = [repo_root]
     try:
         import guard_pointer  # the claude-settings checkout: the one home of the pointer line
@@ -2503,24 +2539,26 @@ def past_rulings(question_text, repo_root):
         unknown.append("claude-settings decision records (absent)")
     elif os.path.realpath(other) != os.path.realpath(repo_root):
         roots.append(other)
-    candidates += _ruled_candidates(roots, unknown, _words(question_text))
+    candidates += _ruled_candidates(roots, unknown, words)
     for folder, label in (("decisions", "decision records"), ("debts", "debt records")):
         found = False
         for root in roots if folder == "decisions" else roots[:1]:
             exists, lines = _record_index(root, folder, unknown, label, seen)
             found = found or exists
-            candidates += lines
+            records += lines
         if not found:
             unknown.append("%s (absent)" % label)
+    named = set(cited_rulings(question_text, [line.split(": ", 1)[0] for line in records]))
+    candidates += _records_to_send(records, words, named)
     steps, state = _read_steps(repo_root)
     if state == "ok":
-        candidates += _step_rulings(steps, _words(question_text))
+        candidates += _step_rulings(steps, words)
     elif state == "absent":
         unknown.append("roadmap step notes (absent)")
     else:
         unknown.append("roadmap step notes (%s)" % state)
     unknown.append(CLOSED_ITEMS)
-    return candidates, unknown
+    return _best_first(candidates, words, named), unknown
 
 
 def unreadable_sources(unknown) -> list:
@@ -2538,15 +2576,23 @@ def candidate_ids(candidates) -> list:
     return [c.split(": ", 1)[0] for c in candidates]
 
 
-def candidates_block(candidates, unknown, questions=None) -> str:
-    """The text added after the judge prompt's reply line: the candidate rulings, then the sources not searched, then
-    (with `questions`) the labelled questions of labels_block."""
+def _past_text(candidates, unknown) -> str:
     text = "\n\nPast rulings (item 8), one per line as `<id>: <text>`:\n" + (
         "\n".join(candidates) if candidates else "(none found)")
     if unknown:
         text += ("\nNot searched: %s. A source not searched never means the question is clear."
                  % ", ".join(unknown))
-    return text + (labels_block(questions) if questions else "")
+    return text
+
+
+def candidates_block(candidates, unknown, questions=None) -> str:
+    """The text added after the judge prompt's reply line: the candidate rulings, then the sources not searched, then
+    (with `questions`) the labelled questions of labels_block. `candidates` come best first (past_rulings): while the
+    text before the labelled questions is over CANDIDATES_CAP characters, the last line goes, so no line is cut."""
+    kept = list(candidates)
+    while kept and len(_past_text(kept, unknown)) > CANDIDATES_CAP:
+        kept.pop()
+    return _past_text(kept, unknown) + (labels_block(questions) if questions else "")
 
 
 def _plain_records(text) -> str:
