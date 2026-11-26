@@ -43,6 +43,7 @@ The URL is the link of the `waiting-page` role entry in the `artifacts` key of t
 - `unknown` is not an error. Ask in the reply while anything runs, else in the terminal question
   box, and say in one line that the repo has no waiting page.
 - Never guess a URL, and never use the page of another repo.
+- A session-start line `waiting page <url> is behind main's page.html` or `waiting page <url>: freshness unknown, no page-built stamp` means the page is not proven current. Republish the page first, as the first act (see "Keep the page on main's code" in `reference/republish.md`).
 
 ## Print the page link
 
