@@ -2320,6 +2320,9 @@ AUTHOR_BASENAMES = {"requirements-dev.txt"}
 # `is_test_rel`.
 AUTHOR_MUTATION_TESTS = {"hooks/mutate_guard.py", "hooks/mutate_shared.py", "janitor/mutate_sweep.py"}
 MUTATION_TEST_NAMES = {name.rsplit("/", 1)[-1] for name in AUTHOR_MUTATION_TESTS}
+# A mutant row file: a direct child .py of hooks/mutants/, read by hooks/mutate_guard.py. Matched by path, since
+# every row file has its own name.
+MUTANT_FILE_REL = re.compile(r"^hooks/mutants/[^/]+\.py$")
 TEST_CONFIG = re.compile(
     r"^(?:pytest\.ini|tox\.ini|setup\.cfg|pyproject\.toml|package\.json"
     r"|(?:jest|vitest|playwright|karma)\.conf(?:ig)?\.\w+|vitest\.workspace\.\w+|\.mocharc(?:\.\w+)?|[^/]+\.xctestplan)$")
@@ -2412,7 +2415,10 @@ def is_test_config_rel(rel: str) -> bool:
 
 
 def is_mutation_test_rel(rel: str) -> bool:
-    """True when a repository-relative path is one of the three mutation tests (`AUTHOR_MUTATION_TESTS`)."""
+    """True when a repository-relative path is one of the three mutation tests (`AUTHOR_MUTATION_TESTS`), or a
+    direct child `.py` file of `hooks/mutants/` (one file of mutant rows per rule)."""
+    if MUTANT_FILE_REL.match(norm(rel).lstrip("/").lower()):
+        return True
     return norm(rel).lstrip("/").lower() in AUTHOR_MUTATION_TESTS
 
 
@@ -2632,7 +2638,8 @@ def workflow_runs_test(path: str) -> bool:
     """A run of this path is a test run: a test path, or a mutation test (also a test path for edit ownership).
     A mutation test counts by file name, so `cd hooks && python3 mutate_guard.py` and a `working-directory`
     step are runs too."""
-    return is_test_rel(path) or basename(norm(path).lower()) in MUTATION_TEST_NAMES
+    return (is_test_rel(path) or basename(norm(path).lower()) in MUTATION_TEST_NAMES
+            or bool(MUTANT_FILE_REL.match(norm(path).lstrip("/").lower())))
 
 
 def workflow_command_tests(command: str) -> set:

@@ -5130,6 +5130,13 @@ def control_case(target: str, entries) -> str:
     raise ValueError("no mutation of target %s has a required case to run here" % target)
 
 
+# The mutant folder (decision mutants-one-file-per-rule): each hooks/mutants/<rule-slug>.py adds its rows after the table.
+# The literal above takes deletes only. MUTATIONS is the one list every reader gets. The slice assignment fills that same
+# list in place: the name keeps one top-level binding, and no reader sees the bare table.
+MUTANT_FOLDER = os.path.join(HERE, "mutants")
+MUTATIONS[:] = mutate_shared.assemble_mutations(MUTATIONS, MUTANT_FOLDER)
+
+
 def run_control(sources, work: str, target: str, entries=None):
     """Run one filtered case of `target`'s suite on the unmutated layout. Return run_suite's result tuple.
     `entries` defaults to MUTATIONS."""

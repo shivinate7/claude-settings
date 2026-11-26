@@ -1173,6 +1173,10 @@ jobs:
         if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_mutate_shared.py
 
+      - name: Mutant folder fixture suite
+        if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
+        run: python3 hooks/test_mutate_mutants.py
+
       - name: Mutation report-mode fixture suite
         if: ${{ (needs.scope.outputs.code == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_mutate_report.py
