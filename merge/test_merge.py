@@ -4319,10 +4319,13 @@ def ref(name):
     return ""
 def feat_head(): return ref("refs/heads/" + S.get("head_ref", "feat"))  # the pull request's head branch: feat, or the case's head_ref (a batch integration PR's batch-x, whose claim commit moves it)
 RUN_FIELDS = ("databaseId", "name", "workflowName", "workflowDatabaseId", "status", "conclusion", "headSha", "headBranch", "event", "createdAt", "url")
-def next_runs():
+def next_runs(sha=None):
     """The next answer to a workflow-run read: runs_seq, one entry a read, the last one again. An entry is (name, status, conclusion[, databaseId[, workflowDatabaseId]]).
+    sha_runs: {sha: entries}, the same entries on every read of that sha, as sha_checks gives check rows. A sha in it takes no step of runs_seq,
+    so a case can keep one head's run pending while the sequence answers the other reads in order.
     Without an id a run gets 9000 plus its place; without a workflow id, one derived from its name, so runs of one name share one workflow."""
-    seq = S.get("runs_seq") or [[]]; cur = seq.pop(0) if len(seq) > 1 else seq[0]; save()
+    own = (S.get("sha_runs") or {}).get(sha)
+    seq = S.get("runs_seq") or [[]]; cur = own if own is not None else (seq.pop(0) if len(seq) > 1 else seq[0]); save()
     return [(r[0], r[1], r[2], r[3] if len(r) > 3 else 9000 + i, r[4] if len(r) > 4 else sum(map(ord, r[0]))) for i, r in enumerate(cur)]
 def run_list_json(runs, sha, argv):
     """`gh run list --json F,...` as gh prints it: only the fields asked for. A field the fake does not know is gh's refusal. Every run's createdAt is one hour before FAKE_NOW (S runs_created sets it), the same for each run."""
@@ -4377,7 +4380,7 @@ if a[:1] != ["api"]:
         commit = a[a.index("--commit") + 1] if "--commit" in a else ""
         if commit and commit in {r[1] for r in S.get("open_prs", [])} and commit != feat_head():  # another open pull request's head, read by the batch brake: its own runs, and the head's script is not used
             print(json.dumps([{"name": n, "status": st, "conclusion": c} for n, st, c in S.get("other_runs", {}).get(commit, [])])); sys.exit(0)
-        print(run_list_json(next_runs(), commit or feat_head(), a))
+        print(run_list_json(next_runs(commit or feat_head()), commit or feat_head(), a))
         sys.exit(0)
     if a[:2] == ["run", "watch"]:
         sys.exit(0)
@@ -4587,7 +4590,7 @@ try:
                 raise Refused(S["runs_fail"])
             runs = [{"id": rid, "name": n, "status": st, "conclusion": c or None, "head_sha": params["head_sha"], "head_branch": "feat",
                      "workflow_id": wf, "event": "pull_request", "html_url": "https://github.com/o/r/actions/runs/%d" % rid}
-                    for n, st, c, rid, wf in next_runs()]
+                    for n, st, c, rid, wf in next_runs(params["head_sha"])]
             finish(one({"total_count": len(runs), "workflow_runs": runs}, jq), 0, include)
         runs = S.get("base_runs", [])
         finish(one({"total_count": len(runs), "workflow_runs": runs}, jq), 0, include)
@@ -6119,10 +6122,11 @@ class GhHalf(Env):
 
     def test_a_pending_run_of_the_workflow_that_defines_the_required_job_refuses_at_once(self):
         # The folder defines the required job `checks`, so its pending run makes the head pending: refused at once, the later complete run is never read.
+        # The head's own run is pending too (sha_runs): a green own run of the head would prove it, which this case does not test.
         push_base(self, {".github/workflows/checks.yml": workflow_text("checks", "checks")})
         before = self.head()
         self.proven_parent()  # the head is a clean merge of main: its proof is read on the parent the fake gh must know
-        self.set(runs_seq=[[("checks", "in_progress", "")], [("checks", "completed", "success")]])
+        self.set(runs_seq=[[("checks", "in_progress", "")], [("checks", "completed", "success")]], sha_runs={before: [("checks", "in_progress", "")]})
         rc, out = self.go()
         self.assertEqual(rc, 1, out)
         self.assertIn("a check is pending: workflow checks", out)
@@ -6133,10 +6137,12 @@ class GhHalf(Env):
 
     def assert_pending_run_refused_at_once(self, runs_name, required=("checks",)):
         """A pending run that no workflow file shows to be outside the required names makes the head pending: refused at once, with no pause,
-        and nothing claimed or pushed. The required names pass, so only the run holds the head."""
+        and nothing claimed or pushed. The required names pass, so only the run holds the head. The head's own run is pending too (sha_runs), so the
+        head has no green run of its own to prove it."""
         before = self.head()
         self.proven_parent()  # the head is a clean merge of main (the tool's base merge): its proof is read on the parent
-        self.set(checks_seq=[[(n, "pass", "") for n in required]], runs_seq=[[(runs_name, "in_progress", "")], [(runs_name, "completed", "success")]])
+        self.set(checks_seq=[[(n, "pass", "") for n in required]], runs_seq=[[(runs_name, "in_progress", "")], [(runs_name, "completed", "success")]],
+                 sha_runs={before: [(runs_name, "in_progress", "")]})
         rc, out = self.go(required=required)
         self.assertEqual(self.paused, [], f"the pending run {runs_name!r} waited before it refused")
         self.assertEqual(rc, 1, out)
@@ -11406,6 +11412,103 @@ class RecordsRebuild(RecordsEnv):
         rc, out = self.run_merge_once("7", "--confirm")
         self.assertEqual(rc, 0, "one clean main merge above a green head did not merge on its parent's proof:\n" + out)
         self.assertTrue(getattr(self.host, "merged", False), out)
+
+    def merge_and_page_over_a_draft_head(self):
+        """A draft head H whose page is current, then the tool's heal as `merge --ready` pushes it: main merged in, and the page rebuilt on that
+        merge. -> (H, the live head L, main's tip). The heal's two commits are the tool's own, so the walk from L reaches H."""
+        self.set_required(["all-jobs-passed"])
+        self.drop_pending_record()
+        self.on("feat", {"docs/records.md": page()})  # current for the head's own debts
+        draft = self.head()
+        self.on("main", {"debts/gap-one.md": DEBT_TEXT}, "untooled push")  # a record the head lacks: the page goes stale on the merge
+        main_tip = self.head("main")
+        page_sha = self.merge_and_page_pushed_on()
+        live = self.head()
+        self.assertEqual(live, page_sha, "fixture: the live head is not the page commit the tool pushed")
+        merged = self.rev(f"{page_sha}^")
+        self.assert_merge_shape(merged, draft, main_tip, clean=True)
+        self.assert_page_scope(page_sha, merged)
+        return draft, live, main_tip
+
+    def test_a_green_live_run_over_a_draft_head_with_a_skipped_rollup_merges(self):
+        # The draft head's rollup is skipped, and head_state reads a skipped all-jobs-passed as pending. The live head's own run is green, and under a
+        # named list that run proves the live head, so no check of the draft is needed.
+        draft, live, main_tip = self.merge_and_page_over_a_draft_head()
+        self.rollup_reads(draft, "pending: all-jobs-passed", states={live: "green"})
+        rc, out = self.run_merge_once("7", "--confirm")
+        self.assertEqual(rc, 0, "a live head with its own green run did not merge over a draft head whose rollup is skipped:\n" + out)
+        self.assertTrue(getattr(self.host, "merged", False), out)
+        self.assertEqual(self.host.waits, [], "waited on a run instead of merging on the live head's own green run:\n" + out)
+        self.assert_healed_merge(out, main_tip, draft)
+
+    def test_a_red_live_run_over_a_draft_head_with_a_skipped_rollup_refuses(self):
+        # The live head's own run finished red. The pending rollup under it must not hide that: the refusal names the live head's red run.
+        draft, live, main_tip = self.merge_and_page_over_a_draft_head()
+        self.rollup_reads(draft, "pending: all-jobs-passed", states={live: "red: all-jobs-passed: fail"})
+        refs_before = self.refs()
+        rc, out = self.run_merge_once("7", "--confirm")
+        self.assertFalse(getattr(self.host, "merged", False), "merged a live head whose own run finished red:\n" + out)
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(self.refs(), refs_before, "pushed over a live head whose own run finished red:\n" + out)
+        self.assertIn("red: all-jobs-passed", out, "the refusal does not name the red own run of the live head:\n" + out)
+
+    def test_a_pending_live_run_over_a_green_draft_head_still_merges_control(self):
+        # Control, passes on today's code: the green head under the heal proves the merge while the live head's own run is still pending.
+        draft, live, main_tip = self.merge_and_page_over_a_draft_head()
+        self.rollup_reads(draft, "green", states={live: "pending: all-jobs-passed"})
+        rc, out = self.run_merge_once("7", "--confirm")
+        self.assertEqual(rc, 0, "a pending live run did not merge on the green proven head under the heal:\n" + out)
+        self.assertTrue(getattr(self.host, "merged", False), out)
+        self.assertEqual(self.host.waits, [], "waited on the live head's own pending run:\n" + out)
+
+    def test_an_unread_live_run_over_a_green_draft_head_refuses_control(self):
+        # Control, passes on today's code: an unread own run of the live head is never a green proof, whatever the head under it reads.
+        draft, live, main_tip = self.merge_and_page_over_a_draft_head()
+        self.rollup_reads(draft, "green", states={live: "unknown (the read of the head's checks failed: HTTP 500)"})
+        refs_before = self.refs()
+        rc, out = self.run_merge_once("7", "--confirm")
+        self.assertFalse(getattr(self.host, "merged", False), "merged a live head whose own run was unread, on the green head under it:\n" + out)
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(self.refs(), refs_before, "pushed over a live head whose own run was unread:\n" + out)
+        self.assertIn("unknown", out, "the refusal does not name the unread own run of the live head:\n" + out)
+
+    def test_a_skipped_live_run_over_a_skipped_draft_head_refuses_control(self):
+        # Control, passes on today's code: with both rollups skipped, neither head is proven, so the merge is refused and nothing waits.
+        draft, live, main_tip = self.merge_and_page_over_a_draft_head()
+        self.rollup_reads(draft, "pending: all-jobs-passed", states={live: "pending: all-jobs-passed"})
+        refs_before = self.refs()
+        rc, out = self.run_merge_once("7", "--confirm")
+        self.assertFalse(getattr(self.host, "merged", False), "merged with both rollups skipped:\n" + out)
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(self.refs(), refs_before, "pushed with both rollups skipped:\n" + out)
+        self.assertEqual(self.host.waits, [], "waited on a skipped run instead of refusing:\n" + out)
+        self.assertIn("pending: all-jobs-passed", out, "the refusal does not name the skipped rollup:\n" + out)
+
+    def test_a_hand_commit_over_a_heal_merges_on_its_own_green_run_control(self):
+        # Control, today's rule: a commit a person pushed on top ends the walk, so the heal under it is not carried. The commit's own green run proves the merge.
+        draft, live, main_tip = self.merge_and_page_over_a_draft_head()
+        self.on("feat", {"lane-note.txt": "a lane commit above the heal\n"}, "lane commit")
+        hand = self.head()
+        self.assertNotEqual(hand, live, "fixture: the lane commit did not move the branch off the heal")
+        self.rollup_reads(hand, "green")
+        rc, out = self.run_merge_once("7", "--confirm")
+        self.assertEqual(rc, 0, "a hand commit with its own green run did not merge:\n" + out)
+        self.assertTrue(getattr(self.host, "merged", False), out)
+        self.assertEqual(self.host.waits, [], "waited on a run instead of merging on the hand commit's own green run:\n" + out)
+
+    def test_a_hand_commit_over_a_heal_with_its_own_run_pending_refuses_control(self):
+        # Control, today's rule: the green head under the heal does not carry over a commit a person pushed on top, whose own run is pending.
+        draft, live, main_tip = self.merge_and_page_over_a_draft_head()
+        self.on("feat", {"lane-note.txt": "a lane commit above the heal\n"}, "lane commit")
+        hand = self.head()
+        self.assertNotEqual(hand, live, "fixture: the lane commit did not move the branch off the heal")
+        self.rollup_reads(draft, "green", states={hand: "pending: all-jobs-passed"})
+        refs_before = self.refs()
+        rc, out = self.run_merge_once("7", "--confirm")
+        self.assertFalse(getattr(self.host, "merged", False), "merged a hand commit whose own run is pending, on the green head under it:\n" + out)
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(self.refs(), refs_before, "pushed over a hand commit whose own run is pending:\n" + out)
+        self.assertIn("pending: all-jobs-passed", out, "the refusal does not name the pending own run of the hand commit:\n" + out)
 
     # Ruling (owner, 15:36 CST Nov 23, 2026, option a): no cap on stacked clean merges of main above a proven head, on either path. A busy main
     # never forces a second full CI run: main's own run after the merge is the net. The live head's own run decides only when it is red or unread.
