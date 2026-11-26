@@ -64,21 +64,31 @@ DARWIN_DRIVER = ("import runpy, sys\nsys.platform = 'darwin'\nsys.argv = sys.arg
                  "runpy.run_path(sys.argv[0], run_name='__main__')\n")
 # Runs bin/wait-pid with the macOS environment read answering `entries` for every pid: the reader function is
 # replaced in the helper's own process (hooks/proc_env.py `_environ_entries_macos`), so the ownership read sees
-# what a process shows or hides.
+# what a process shows or hides. The %s is POLL_COUNT, or nothing.
 READER_DRIVER = ("import runpy, sys\nsys.platform = 'darwin'\nsys.path.insert(0, %r)\nimport proc_env\n"
-                 "proc_env._environ_entries_macos = lambda pid: %r\nsys.argv = sys.argv[1:]\n"
+                 "proc_env._environ_entries_macos = lambda pid: %r\n%ssys.argv = sys.argv[1:]\n"
                  "runpy.run_path(sys.argv[0], run_name='__main__')\n")
+# Counts the polls of the helper's wait loop (hooks/wait_common.py wait_loop) into the file named by %r. Only
+# wait_common's clock is replaced, and a poll advances a fake clock instead of sleeping, so a waiting helper ends
+# at its --timeout with no wall time. The file is made first, so a zero count shows the patch ran. This is a copy
+# of FakeClock: the child cannot import this file, which would open a second run folder.
+POLL_COUNT = ("import wait_common\nLOG = %r\nopen(LOG, 'w').close()\n"
+              "class _Clock:\n    now = 0.0\n"
+              "    def monotonic(self):\n        return self.now\n"
+              "    def sleep(self, secs):\n        self.now += secs\n        open(LOG, 'a').write('poll\\n')\n"
+              "wait_common.time = _Clock()\n")
 # What the macOS reader gives for a process whose environment the OS hides: argv, then the trailing NUL, so [b""].
 HIDDEN = [b""]
 PRESENT_NO_TAG = [b"HOME=/Users/example", b"PATH=/usr/bin:/bin", b""]
 
 
 def run_helper(args, session=SESSION, root=None, heartbeat=None, timeout=20, darwin=False, path_first=None,
-               entries=None):
+               entries=None, polls=None):
     """Run bin/wait-pid itself (so its executable bit and shebang count). stdout and stderr are
     one stream. rc is None when it did not return in `timeout` seconds. `darwin` runs it through
     DARWIN_DRIVER (the ps path); `path_first` is a folder put first on PATH; `entries` runs it through
-    READER_DRIVER, with the macOS environment read answering those entries for every pid."""
+    READER_DRIVER, with the macOS environment read answering those entries for every pid; `polls` (with
+    `entries`) names the file that counts the wait loop's polls."""
     if not os.path.exists(WP):
         raise AssertionError("bin/wait-pid does not exist: %s" % WP)
     env = {k: v for k, v in os.environ.items()
@@ -91,7 +101,8 @@ def run_helper(args, session=SESSION, root=None, heartbeat=None, timeout=20, dar
     if path_first:
         env["PATH"] = path_first + os.pathsep + env.get("PATH", os.defpath)
     if entries is not None:
-        command = [sys.executable, "-c", READER_DRIVER % (os.path.abspath(HOOKS), entries), WP]
+        patch = POLL_COUNT % polls if polls else ""
+        command = [sys.executable, "-c", READER_DRIVER % (os.path.abspath(HOOKS), entries, patch), WP]
     else:
         command = [sys.executable, "-c", DARWIN_DRIVER, WP] if darwin else [WP]
     start = time.monotonic()
@@ -442,11 +453,18 @@ class T(unittest.TestCase):
 
     def test_unreadable_environment_is_unknown_not_not_this_session(self):
         """The environment read cannot run (macOS hides it): exit 3 and one unknown line that names the pid.
-        Before the read says unknown, the helper answered "not this session" with exit 2."""
+        Before the read says unknown, the helper answered "not this session" with exit 2. It answers at once:
+        no poll of its wait loop runs before the answer."""
         pid = self.stranded(None, SESSION)
-        r = run_helper([pid], entries=HIDDEN, timeout=15)
+        folder = tempfile.mkdtemp(dir=RUN_FOLDER)
+        self.addCleanup(shutil.rmtree, folder, True)
+        polls = os.path.join(folder, "polls")
+        r = run_helper([pid], entries=HIDDEN, timeout=15, polls=polls)
         self.assertTrue(alive(pid), "the helper ended or signalled the pid, so this case proves nothing")
-        self.assertLess(r.elapsed, 5, "did not return at once")
+        self.assertTrue(os.path.exists(polls), "the clock patch never ran, so a zero poll count proves nothing")
+        with open(polls, encoding="utf-8") as handle:
+            count = len(handle.read().splitlines())
+        self.assertEqual(count, 0, "polled %d times before answering: did not return at once" % count)
         self.assertUnknownNamesPid(r, pid)
 
     def test_environment_without_the_tag_is_refused_at_once_not_unknown(self):
