@@ -187,6 +187,21 @@ n=$(cd "$cwd" 2>/dev/null && git status --porcelain 2>/dev/null | wc -l | tr -d 
 printf 'checkout %s on %s, %s dirty files\n' "$toplevel" "$branch" "$n"
 tier_line
 
+# main_ref_line: one line when the main-ref hook copy is missing or behind main, taken from the installer's own --check
+# (githooks/main-ref/install.sh). It installs nothing and sets no core.hooksPath. Only an installer that carries the
+# `main-ref-check:` marker is run: an older one has no --check, and its install mode would write files. Exit 0 (healthy)
+# and exit 2 (a read failed) print nothing; the check's two stderr lines fold into one. Cost: once per SessionStart
+# event, one sh start and the installer's own git reads; no file written, no network.
+main_ref_installer="$toplevel/githooks/main-ref/install.sh"
+if [ -f "$main_ref_installer" ] && grep -q '^# main-ref-check:' "$main_ref_installer" 2>/dev/null; then
+  mr_out=$(cd "$toplevel" 2>/dev/null && sh githooks/main-ref/install.sh --check 2>&1 >/dev/null)
+  mr_rc=$?
+  if [ "$mr_rc" -eq 1 ] && [ -n "$mr_out" ]; then
+    printf '%s\n' "$mr_out" | sed 's/^[[:space:]]*Remedy:[[:space:]]*/Remedy: /' | tr '\n' ' ' | sed 's/[[:space:]]*$//'
+    printf '\n'
+  fi
+fi
+
 # roster_lines: the standing sessions of this repo with their ids, so a session never types an id by hand (decision
 # brief-ids-in-roster). The rows are the Standing sessions section of CLAUDE.md on the local origin/roadmap ref, read
 # by hooks/own_session.py; no row prints one line that says so. Status is the record's, not live: a hook cannot call
