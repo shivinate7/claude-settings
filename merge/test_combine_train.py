@@ -34,7 +34,8 @@ The contract these cases read (the tool's own output; the labels are exact):
     merge.BATCH_END: the body the PR carries (ruling own-811-c-marker-line, the combined PR's marker line). It pushes nothing
     and makes no gh pr create, ready or merge call.
   A member whose live head has a run with a failed job leaves by name with that job; one whose runs cannot be read leaves, named unknown.
-    Under merge.requiredChecks "none" no run is read and no member leaves for its runs (BatchMemberOwnRunGreen).
+    Under merge.requiredChecks "none" no run is read and no member leaves for its runs; under "first-proof" the runs are read as usual.
+    A job that merge.ignoreChecks names does not leave a member, and a --queue --build judges its members' runs too (BatchMemberOwnRunGreen).
 """
 import ast
 import atexit
@@ -1259,14 +1260,19 @@ def job(name, conclusion="success", status="completed", run=1):
     return {"name": name, "status": status, "conclusion": conclusion, "run": run}
 
 
+def config_files(merge_fields):
+    """reviewed_fixture's `files`: main's .github/stamp.json with `merge_fields` as its merge block. The batch read takes its settings from the base's stamp."""
+    return {".github/stamp.json": json.dumps({"defaultBranch": "main", "merge": merge_fields})}
+
+
 class BatchMemberOwnRunGreen(unittest.TestCase):
     """--build and the combine hint drop a member whose own live head has a run with a failed job, and keep one whose runs are green,
     running, queued, absent, or cancelled with no failed job (owner word, 15:14 CST Nov 25: drop a failing member). A failed read of a
     member's runs leaves that member out, named unknown. Under stamp value none no run is read (decision private-repos-no-ci). The cases
     assert a gh call that names the member's head, not one route: the merge tool reads a head's runs through several."""
 
-    def assert_left_out(self, jobs, named, unnamed=()):
-        fx = reviewed_fixture(BATCH12, jobs={MID: jobs})
+    def assert_left_out(self, jobs, named, unnamed=(), files=None):
+        fx = reviewed_fixture(BATCH12, jobs={MID: jobs}, files=files)
         rc, out, err, chain = build_run(fx)
         left = left_out_lines(out)
         self.assertIn(MID, left, "the build keeps #%d though a run of its own head has a failed job; the run ended with: %s" % (MID, shown(out, err)))
@@ -1278,8 +1284,8 @@ class BatchMemberOwnRunGreen(unittest.TestCase):
         self.assertEqual(len(chain), 10, "the batch holds %d merges, not the 10 members whose runs did not fail" % len(chain))
         self.assertNotIn(fx["heads"][MID], [p2 for _s, _p1, p2 in chain], "the head of #%d is a second parent of the batch though its run failed" % MID)
 
-    def assert_stays_in(self, jobs, what):
-        fx = reviewed_fixture(BATCH12, jobs={MID: jobs})
+    def assert_stays_in(self, jobs, what, files=None):
+        fx = reviewed_fixture(BATCH12, jobs={MID: jobs}, files=files)
         rc, out, err, chain = build_run(fx)
         head = fx["heads"][MID]
         reads = [c for c in calls(fx["log"]) if c[0] == "gh" and head in " ".join(c)]
@@ -1318,6 +1324,7 @@ class BatchMemberOwnRunGreen(unittest.TestCase):
         rc, out, err, chain = build_run(fx)
         named = [line for line in out.splitlines() if re.search(r"#%d\b" % MID, line) and "unknown" in line]
         self.assertTrue(named, "no line names #%d with the word unknown: its runs could not be read and the build did not say so; the run ended with: %s" % (MID, shown(out, err)))
+        self.assertEqual(rc, 2, "the build exits %s, not 2 (unknown), though the runs of #%d could not be read: %s" % (rc, MID, shown(out, err)))
         self.assertIsNotNone(chain, "the build left no %s branch, so the batch cannot be checked; the run ended with: %s" % (merge.integration_branch(BUILD_NAME), shown(out, err)))
         self.assertEqual(len(chain), 10, "the batch holds %d merges, not the 10 members whose runs were read" % len(chain))
         self.assertNotIn(fx["heads"][MID], [p2 for _s, _p1, p2 in chain], "the head of #%d is a second parent though its runs could not be read" % MID)
@@ -1332,12 +1339,8 @@ class BatchMemberOwnRunGreen(unittest.TestCase):
         why = [line for line in out.splitlines() if re.search(r"fewer than two|merge alone|no (integration )?branch built", line, re.I)]
         self.assertTrue(why, "one member left builds nothing and prints no line that says why: %s" % shown(out, err))
 
-    def test_hint_names_the_members_the_build_keeps(self):
-        fx = reviewed_fixture(BATCH12, jobs={MID: [job("unit-linux", "failure")]})
-        rc, out, err, chain = build_run(fx)
-        self.assertIsNotNone(chain, "the build left no %s branch to compare the hint with: %s" % (merge.integration_branch(BUILD_NAME), shown(out, err)))
-        by_head = {head: number for number, head in fx["heads"].items()}
-        kept = sorted(by_head[p2] for _s, _p1, p2 in chain)
+    def hint_text(self, fx):
+        """The combine hint of the fixture's repo, as the lane lint prints it: merge.combine_hint, with the build's runs read through the shim."""
         hint = io.StringIO()
         env = {"PATH": fx["shims"] + os.pathsep + os.environ.get("PATH", "")}
         with unittest.mock.patch.dict(os.environ, env), \
@@ -1346,10 +1349,33 @@ class BatchMemberOwnRunGreen(unittest.TestCase):
                 contextlib.redirect_stdout(hint), contextlib.redirect_stderr(io.StringIO()):
             strip_caller_env()
             merge.combine_hint(fx["root"], merge.Host(cwd=fx["root"]))
-        named = sorted(int(n) for n in re.findall(r"#(\d+)", hint.getvalue()))
-        self.assertTrue(named, "the combine hint names no PR: %s" % hint.getvalue()[:300])
-        self.assertNotIn(MID, named, "the combine hint names #%d, which the build leaves out for its failed job: %s" % (MID, hint.getvalue()[:300]))
+        return hint.getvalue()
+
+    @staticmethod
+    def names_line(text):
+        """The hint's line that names the ready PRs it keeps, the one with the words `passing records`. A line for a member left out is not it."""
+        return next((line for line in text.splitlines() if "passing records" in line), "")
+
+    def test_hint_names_the_members_the_build_keeps(self):
+        fx = reviewed_fixture(BATCH12, jobs={MID: [job("unit-linux", "failure")]})
+        rc, out, err, chain = build_run(fx)
+        self.assertIsNotNone(chain, "the build left no %s branch to compare the hint with: %s" % (merge.integration_branch(BUILD_NAME), shown(out, err)))
+        by_head = {head: number for number, head in fx["heads"].items()}
+        kept = sorted(by_head[p2] for _s, _p1, p2 in chain)
+        text = self.hint_text(fx)
+        named = sorted(int(n) for n in re.findall(r"#(\d+)", self.names_line(text)))
+        self.assertTrue(named, "the combine hint's names line names no PR: %s" % text[:300])
+        self.assertNotIn(MID, named, "the combine hint names #%d, which the build leaves out for its failed job: %s" % (MID, text[:300]))
         self.assertEqual(named, kept, "the combine hint names %s, but the build keeps %s" % (named, kept))
+
+    def test_hint_prints_a_line_naming_a_member_left_out_for_its_failed_job_before_the_names(self):
+        fx = reviewed_fixture(BATCH12, jobs={MID: [job("unit-linux", "failure")]})
+        lines = self.hint_text(fx).splitlines()
+        names_at = [i for i, line in enumerate(lines) if "passing records" in line]
+        self.assertTrue(names_at, "the combine hint has no names line: %s" % "\n".join(lines)[:300])
+        before = [line for line in lines[:names_at[0]] if re.search(r"#%d\b" % MID, line)]
+        self.assertTrue(before, "the combine hint prints no line for #%d before its names line, though the build leaves it out for its failed job: %s" % (MID, "\n".join(lines)[:300]))
+        self.assertIn("unit-linux", before[0], "the combine hint's line for #%d does not name its failed job unit-linux: %r" % (MID, before[0]))
 
     def test_requiredchecks_none_reads_no_run_and_drops_no_member(self):
         config = json.dumps({"defaultBranch": "main", "merge": {"requiredChecks": "none"}})
@@ -1363,6 +1389,30 @@ class BatchMemberOwnRunGreen(unittest.TestCase):
         self.assertIsNotNone(chain, "the build left no %s branch, so the batch cannot be checked; the run ended with: %s" % (merge.integration_branch(BUILD_NAME), shown(out, err)))
         self.assertEqual(len(chain), 11, "the batch holds %d merges, not the 11 members behind the front" % len(chain))
         self.assertIn(fx["heads"][MID], [p2 for _s, _p1, p2 in chain], "under requiredChecks none #%d is not a second parent of the batch" % MID)
+
+    def test_first_proof_member_with_a_failed_job_is_left_out_and_named(self):
+        self.assert_left_out([job("unit-linux", "failure")], "unit-linux", files=config_files({"requiredChecks": merge.FIRST_PROOF}))
+
+    def test_failed_job_that_ignore_checks_names_does_not_drop_the_member(self):
+        ignore = [{"name": "unit-linux", "reason": "fixture: a known flake"}]
+        self.assert_stays_in([job("unit-linux", "failure")], "a failed job that merge.ignoreChecks names", files=config_files({"ignoreChecks": ignore}))
+
+    def test_queued_build_leaves_out_a_member_whose_own_run_failed(self):
+        root = make_repo({"README.md": "x\n"}, checks=READY)
+        heads = add_members(root, TWELVE)
+        by_number = dict(heads)
+        shims, _log = write_shims(heads={by_number[MID]: [job("unit-linux", "failure")]})
+        queue = build_queue(root, heads)
+        base = git_ok(root, "rev-parse", "origin/main").strip()
+        rc, out, err, _ci = run_build(root, queue, shims=shims)
+        left = left_out_lines(out)
+        self.assertIn(MID, left, "the queued build keeps #%d though a run of its own head has a failed job; the run ended with: %s" % (MID, shown(out, err)))
+        self.assertIn("unit-linux", left[MID], "the line that leaves #%d out does not name its failed job unit-linux: %r" % (MID, left[MID]))
+        self.assertEqual(rc, 1, "the queued build that leaves #%d out exits %s, not 1: %s" % (MID, rc, shown(out, err)))
+        chain = first_parent_chain(root, merge.integration_branch(BUILD_NAME), base)
+        self.assertIsNotNone(chain, "the queued build left no %s branch; the run ended with: %s" % (merge.integration_branch(BUILD_NAME), shown(out, err)))
+        self.assertEqual(len(chain), 11, "the queued batch holds %d merges, not the 11 members whose runs did not fail" % len(chain))
+        self.assertNotIn(by_number[MID], [p2 for _s, _p1, p2 in chain], "the head of #%d is a second parent of the queued batch though its run failed" % MID)
 
 
 if __name__ == "__main__":
