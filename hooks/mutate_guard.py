@@ -1309,7 +1309,7 @@ MUTATIONS = [
     ("role-model: the reviewer lift drops its rank test, so a reviewer on a model the table does not rank walks past with the marker",
      'any(role_model_rank(word) >= named\n',
      'any(True or role_model_rank(word) >= named\n', "guard",
-     'role-model: fix check: reviewer on claude-fable-5-1 with the marker on line one is denied, the lift does not reach an unranked model'),
+     'role-model: fix check: reviewer on claude-mystery-9 with the marker on line one is denied under agent-role-model, the lift does not reach an unranked model'),
     ("role-model: the guard marker lifts nothing, so a reviewer on sonnet with it is denied",
      '    if review_guard_marked(prompt):\n        words.append(',
      '    if False:\n        words.append(', "guard",

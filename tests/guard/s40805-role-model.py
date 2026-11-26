@@ -1217,9 +1217,9 @@ role_model_refuse("role-model: fix check: a lowercase marker on line one does no
                   "remedy names the marker", "reviewer", "sonnet", FIX_MARKER_LOWER + ". Re-run the cases.",
                   carries=(ROLE_REMEDY, FIX_MARKER))
 # The lift reaches only a model below the top rank. A model the table does not rank counts above it, so the marker does not
-# lift a reviewer on it. The refusal is checked under agent-model-cap alone.
-role_opus_refuse("role-model: fix check: reviewer on claude-fable-5-1 with the marker on line one is denied under "
-                 "agent-model-cap, the lift does not reach an unranked model", "reviewer", "claude-fable-5-1",
+# lift a reviewer on it. The refusal is the role row's, under agent-role-model.
+role_model_refuse("role-model: fix check: reviewer on claude-mystery-9 with the marker on line one is denied under "
+                  "agent-role-model, the lift does not reach an unranked model", "reviewer", "claude-mystery-9",
                  FIX_MARKER + ". Re-run the cases.")
 role_opus_refuse("role-model: fix check: reviewer on opus with the marker is denied under agent-model-cap, the ceiling holds",
                  "reviewer", "opus", FIX_MARKER + ". Re-run the cases.")
