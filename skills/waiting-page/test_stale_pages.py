@@ -3717,8 +3717,10 @@ class SessionLine(unittest.TestCase):
     roadmap/data/meta/page-built.json on origin/roadmap and the local stamp <git common dir>/waiting-page-built. While the record
     file holds a 40-hex blob, either stamp equal to main's blob sha prints nothing, and a stamp that differs from it prints the
     behind line. While the record file is missing or unreadable, the local stamp alone decides: it prints the behind line when it
-    differs from main's blob, and nothing when it is equal or missing. A repo with no waiting page prints nothing.
-    Every run exits 0 and prints no traceback. Each silence case asserts that before it asserts the silence."""
+    differs from main's blob, and nothing when it is equal. With no local stamp either, neither stamp exists, and the line names
+    the page and says its freshness is unknown, with no page-built stamp (decision page-stale-publish: an unread state is named,
+    never silent). A repo with no waiting page prints nothing. Every run exits 0 and prints no traceback. Each silence case
+    asserts that before it asserts the silence."""
 
     run_script = Stale.run_script  # the one script-run helper of this file: it reads no instance state
     RECORD = "roadmap/data/meta/page-built.json"
@@ -3726,6 +3728,9 @@ class SessionLine(unittest.TestCase):
     # record texts the reader counts as missing: not JSON, no blob key, and a blob that is not 40-hex
     UNREADABLE = (("unparseable", "{not json"), ("no-blob-key", json.dumps({"at": "2026-11-15T00:00:00Z"})),
                   ("short-blob", json.dumps({"blob": "abc123", "at": "2026-11-15T00:00:00Z"})))
+    # the line for a page with neither stamp: "waiting page <url>: freshness unknown, no page-built stamp" (decision page-stale-publish)
+    UNKNOWN = "freshness unknown"
+    NO_BUILD_FILE = "no page-built stamp"
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory(dir=RUN_FOLDER)  # test-temp-standard: never the system temp dir
@@ -3773,6 +3778,16 @@ class SessionLine(unittest.TestCase):
         self.assertEqual(r.returncode, 0, "the session line exited %d: %s" % (r.returncode, r.stderr))
         self.assertNotIn("Traceback", r.stdout + r.stderr, "the session line crashed: " + r.stderr)
 
+    def assert_freshness_unknown(self, r):
+        """Neither stamp exists: the run printed one line that names the page and says its freshness is unknown, with no page-built
+        stamp. Silence fails the count, so a page with no line can never pass as a named one."""
+        self.assert_clean(r)
+        lines = r.stdout.splitlines()
+        self.assertEqual(len(lines), 1, "want one freshness line when neither stamp exists:\n" + r.stdout)
+        self.assertIn(self.UNKNOWN, lines[0], "the line does not say freshness unknown: " + lines[0])
+        self.assertIn(self.NO_BUILD_FILE, lines[0], "the line does not say there is no page-built stamp: " + lines[0])
+        self.assertIn(URL % "sspage", lines[0], "the line does not name the page's url: " + lines[0])
+
     def test_1_a_record_equal_to_main_prints_nothing_even_over_a_stale_local_stamp(self):
         root = self.root()
         self.roadmap(root, self.record(self.main_blob))
@@ -3798,6 +3813,16 @@ class SessionLine(unittest.TestCase):
         self.assertEqual(len(lines), 1, "want one session line for a record behind main:\n" + r.stdout)
         self.assertIn(self.BEHIND, lines[0], "the line does not say the page is behind main's page.html: " + lines[0])
 
+    def test_2_a_record_differing_from_main_prints_today_s_behind_line_word_for_word(self):  # control: the freshness line leaves this one unchanged
+        root = self.root()
+        self.roadmap(root, self.record(self.other_blob))
+        r = self.session_run(root)
+        self.assert_clean(r)
+        want = ("waiting page %s is behind main's page.html: it was last published from another version. "
+                "The writer runs stale_pages.py --page <file> --write <out> and publishes <out> "
+                "(skill waiting-page, \"Keep the page on main's code\")." % (URL % "sspage"))
+        self.assertEqual(r.stdout.splitlines(), [want], "the behind line changed wording:\n" + r.stdout)
+
     def test_2_both_stamps_differing_from_main_prints_the_behind_line(self):
         root = self.root()
         self.roadmap(root, self.record(self.other_blob))
@@ -3809,12 +3834,11 @@ class SessionLine(unittest.TestCase):
         self.assertEqual(len(lines), 1, "want one session line when both stamps differ from main:\n" + r.stdout)
         self.assertIn(self.BEHIND, lines[0], "the line does not say the page is behind main's page.html: " + lines[0])
 
-    def test_3_no_record_and_no_local_stamp_prints_nothing(self):
+    def test_3_no_record_file_on_the_branch_and_no_local_build_file_says_freshness_unknown(self):  # the branch exists, no record file yet: no page-built record
         root = self.root()
         self.roadmap(root, None)
         r = self.session_run(root)
-        self.assert_clean(r)
-        self.assertEqual(r.stdout, "", "a repo with no record and no local stamp printed a line:\n" + r.stdout)
+        self.assert_freshness_unknown(r)
 
     def test_4_no_record_and_a_local_stamp_equal_to_main_prints_nothing(self):
         root = self.root()
@@ -3834,11 +3858,10 @@ class SessionLine(unittest.TestCase):
         self.assertEqual(len(lines), 1, "want one behind line from the local stamp when the record is missing:\n" + r.stdout)
         self.assertIn(self.BEHIND, lines[0], "the fallback line does not say behind: " + lines[0])
 
-    def test_3_no_branch_and_no_local_stamp_prints_nothing(self):  # no roadmap branch at all: a missing ref is missing, not unreadable
+    def test_3_no_roadmap_branch_and_no_local_build_file_says_freshness_unknown(self):  # no roadmap branch at all: a missing ref is missing, not unreadable
         root = self.root()
         r = self.session_run(root)
-        self.assert_clean(r)
-        self.assertEqual(r.stdout, "", "a repo with no roadmap branch and no local stamp printed a line:\n" + r.stdout)
+        self.assert_freshness_unknown(r)
 
     def test_4_no_branch_and_a_stale_local_stamp_prints_the_behind_line(self):  # the fallback with no roadmap branch at all
         root = self.root()
@@ -3849,14 +3872,13 @@ class SessionLine(unittest.TestCase):
         self.assertEqual(len(lines), 1, "want one behind line from the local stamp when there is no roadmap branch:\n" + r.stdout)
         self.assertIn(self.BEHIND, lines[0], "the fallback line does not say behind: " + lines[0])
 
-    def test_5_an_unreadable_record_with_no_local_stamp_prints_nothing_and_never_crashes(self):
+    def test_5_an_unreadable_record_and_no_local_build_file_says_freshness_unknown_and_never_crashes(self):  # unreadable counts as missing (decision page-stale-publish)
         for name, text in self.UNREADABLE:
             with self.subTest(record=name):
                 root = self.root(name)
                 self.roadmap(root, text)
                 r = self.session_run(root)
-                self.assert_clean(r)
-                self.assertEqual(r.stdout, "", "a record with no usable blob and no local stamp printed a line:\n" + r.stdout)
+                self.assert_freshness_unknown(r)
 
     def test_5_an_unreadable_record_with_a_differing_local_stamp_prints_the_behind_line(self):
         for name, text in self.UNREADABLE:
@@ -3876,6 +3898,12 @@ class SessionLine(unittest.TestCase):
         r = self.session_run(root)
         self.assert_clean(r)
         self.assertEqual(r.stdout, "", "a repo with no waiting page printed a line:\n" + r.stdout)
+
+    def test_6_a_repo_without_the_page_and_no_build_file_prints_nothing(self):  # the freshness line names a page, so no page means no line
+        root = self.root("nopage-nostamp", extras=False)
+        r = self.session_run(root)
+        self.assert_clean(r)
+        self.assertEqual(r.stdout, "", "a repo with no waiting page and no stamp printed a line:\n" + r.stdout)
 
 
 if __name__ == "__main__":
