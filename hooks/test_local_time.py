@@ -3328,6 +3328,22 @@ def case_cost_tests():
     return ["the CostTests class has a failing case (its report is above)"]
 
 
+def case_zero_cases_exit_nonzero():
+    """main with no cases exits non-zero: a run that checked nothing must not read as a pass"""
+    # The child imports this file and empties its case list; an exit that escapes main ends the child, never this suite.
+    stub = r'''
+import sys
+sys.path.insert(0, %r)
+import test_local_time as t
+t.suite_cases = lambda: []
+sys.exit(t.main())
+''' % HERE
+    proc = subprocess.run([sys.executable, "-c", stub], capture_output=True, text=True, timeout=120)
+    seen = "child exited %r; output %r" % (proc.returncode, proc.stdout[-300:])
+    check("a run with no cases: main exits non-zero", proc.returncode != 0, seen)
+    check("a run with no cases: the output says no cases ran", "no cases ran" in proc.stdout, seen)
+
+
 def suite_cases():
     """The cases main() runs, in order. Built on each call, so a stub in a case's globals is seen."""
     return [
@@ -3459,17 +3475,20 @@ def suite_cases():
         case_raising_case_does_not_stop_the_run,
         case_system_exit_in_a_case_is_a_failed_case,
         case_cost_tests,
+        case_zero_cases_exit_nonzero,
     ]
 
 
 def main():
     try:
-        run_cases(suite_cases(), failures=FAILED, echo_pass=False)
+        code = run_cases(suite_cases(), failures=FAILED, echo_pass=False)
     finally:
         shutil.rmtree(ROOT, ignore_errors=True)
     if FAILED:
         print("FAILED: %d case(s)" % len(FAILED))
         return 1
+    if code:
+        return code
     print("all cases passed")
     return 0
 
