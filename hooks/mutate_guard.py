@@ -4114,6 +4114,9 @@ GUARD_MODULE_FAMILIES = {
     "hooks/guard_impeccable.py": ["impeccable"],
     # hooks/guard_readonly.py holds the readonly family moved out of guard.py. Its mutants meet the readonly-shell-write section.
     "hooks/guard_readonly.py": ["readonly-shell-write"],
+    # hooks/guard_checkout.py holds the checkout family moved out of guard.py. Its mutants meet the worktree-home, session-home
+    # and hand-made-worktree sections.
+    "hooks/guard_checkout.py": ["worktree-home", "session-home", "hand-made-worktree"],
     "hooks/guard_workflow_args.py": ["workflow-args"],
     "hooks/guard_ci_wait.py": ["ci-wait-cap"],
     # hooks/guard_cite.py holds the cite family moved out of guard.py. Its mutants meet the cite and scratchpad-message sections.
@@ -4135,7 +4138,6 @@ EMPTY_MOVE_REASON = ("empty in the write-family move (decision guard-split-by-fa
 GUARD_MODULE_EXEMPT = {
     "hooks/guard_core.py": "shared by every family, so a mutant of it needs the whole test_guard.py, which takes minutes",
     "hooks/guard_model_cap.py": EMPTY_MOVE_REASON,
-    "hooks/guard_checkout.py": EMPTY_MOVE_REASON,
     "hooks/guard_handoff.py": EMPTY_MOVE_REASON,
     "hooks/guard_paths.py": EMPTY_MOVE_REASON,
     "hooks/guard_scratchpad_owner.py": EMPTY_MOVE_REASON,

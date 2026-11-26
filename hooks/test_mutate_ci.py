@@ -2005,6 +2005,14 @@ class GuardModuleFamilyTests(unittest.TestCase):
         self.assertIn("readonly-shell-write", families, "hooks/guard_readonly.py needs a GUARD_MODULE_FAMILIES row that names "
                                                         "the readonly-shell-write family, the family of its read-only write rule")
 
+    def test_guard_checkout_has_a_row_that_names_the_checkout_families(self):
+        """The checkout family moved to hooks/guard_checkout.py, so its mutants meet the worktree-home, session-home and hand-made-worktree sections from its own row."""
+        families = guard_table().get("hooks/guard_checkout.py") or []
+        for family in ("worktree-home", "session-home", "hand-made-worktree"):
+            with self.subTest(family=family):
+                self.assertIn(family, families, "hooks/guard_checkout.py needs a GUARD_MODULE_FAMILIES row that names the "
+                                                "%s family, one of the families of its checkout rules" % family)
+
     def test_guard_workflow_args_has_a_row_that_names_the_workflow_args_family(self):
         """The workflow-args family moved to hooks/guard_workflow_args.py, so its mutants meet the Workflow args section from its own row."""
         families = guard_table().get("hooks/guard_workflow_args.py") or []
