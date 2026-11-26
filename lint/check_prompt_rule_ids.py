@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""CI check: a rule id that a model prompt names has an anchor.
+"""CI check: an id that a model prompt names has a home that declares it.
 
     python3 lint/check_prompt_rule_ids.py [--root DIR]
 
-A model judge's prompt names the rule ids it may file a finding under. An id with no
-`<!-- rule:<id> -->` anchor in a RULE_FILES file (lint/rule_audit.py) files its findings under a
-dead id. The case that started this: JUDGED_RULES held `measure-before-priority`, and the anchor
+A model judge's prompt names the rule ids it may file a finding under. An id that no home declares
+files its findings under a dead id. A home, each read at run time: a `<!-- rule:<id> -->` anchor in a
+RULE_FILES file; a guard rule name (rule_audit.emitted_rule_ids, over hooks/guard*.py); a decision record
+slug (a file in the decisions folder of lint/layout.py). The case that started this: JUDGED_RULES held `measure-before-priority`, and the anchor
 was `style-measure-before-priority`.
 
 WHAT IT READS. hooks/*.py, with `ast` and `tokenize`, in two places. A test file (`test_*.py`,
@@ -28,7 +29,7 @@ pieces, so the pieces come from the tokenizer.
 WHAT IT CANNOT SEE. A prompt constant that is not in PROMPT_CONSTANTS, a prompt built across
 functions or files, a function whose name lacks `prompt`, and an id in free prose.
 
-Exit 0 when each id has an anchor. Exit 1 and one line per bad id otherwise, or when no id was
+Exit 0 when each id has a home. Exit 1 and one line per bad id otherwise, or when no id was
 read at all: a reader that sees nothing must not print ok.
 """
 from __future__ import annotations
@@ -44,7 +45,8 @@ import tokenize
 
 HERE = os.path.dirname(os.path.realpath(__file__))
 sys.path.insert(0, HERE)
-import rule_audit  # noqa: E402  the one home of the anchor pattern and the anchor files
+import layout  # noqa: E402  the one home of where decision records live
+import rule_audit  # noqa: E402  the one home of the anchor pattern, the anchor files and the guard rule names
 
 # hooks/ file -> {prompt constant: how its strings read}. `ids`: each string is an id. `prose`: ids
 # are read from id positions.
@@ -247,12 +249,27 @@ def prompt_ids(root):
     return sorted(found)
 
 
+def decision_dir(root):
+    """The folder of decision records under `root`: the first of the layout's candidates that exists."""
+    homes = layout.candidates(root, "decisions")
+    return next((h for h in homes if os.path.isdir(os.path.join(root, *h.split("/")))), homes[0])
+
+
+def decision_slugs(root):
+    """The slug of each decision record under `root`: its file name without `.md`."""
+    folder = os.path.join(root, *decision_dir(root).split("/"))
+    return {os.path.basename(p)[:-3] for p in glob.glob(os.path.join(folder, "*.md"))}
+
+
 def problems(root):
-    """One message per id with no anchor, naming its file, line and id."""
-    anchored = set(rule_audit.claude_md_anchors(rule_audit.rule_text(root)))
-    where = " or ".join(p.replace(os.sep, "/") for p in rule_audit.RULE_FILES)
-    return ["%s:%d: the prompt names rule id %s, which has no anchor in %s" % (path, line, rid, where)
-            for path, line, rid in prompt_ids(root) if rid not in anchored]
+    """One message per id that no home declares, naming its file, line and id. The homes: a rule anchor,
+    a guard rule name (rule_audit.emitted_rule_ids), a decision record slug."""
+    homes = (set(rule_audit.claude_md_anchors(rule_audit.rule_text(root)))
+             | rule_audit.emitted_rule_ids(root) | decision_slugs(root))
+    where = "%s (rule anchors), hooks/guard*.py (guard rule names), %s/ (decision record slugs)" % (
+        " or ".join(p.replace(os.sep, "/") for p in rule_audit.RULE_FILES), decision_dir(root))
+    return ["%s:%d: the prompt names id %s, which no home declares; looked in %s" % (path, line, rid, where)
+            for path, line, rid in prompt_ids(root) if rid not in homes]
 
 
 def main(argv):
@@ -275,7 +292,7 @@ def main(argv):
         print("check_prompt_rule_ids: FAIL, " + message)
     if bad:
         return 1
-    print("check_prompt_rule_ids: ok, %d prompt rule ids, each anchored" % len(read))
+    print("check_prompt_rule_ids: ok, %d prompt ids, each with a home" % len(read))
     return 0
 
 

@@ -2,12 +2,15 @@
 
 ## The ruling
 
-Question: does every rule id that a judge prompt names have a home anchor? Ruling: yes, and CI checks it. `lint/check_prompt_rule_ids.py` fails a prompt that names an id with no `<!-- rule:<id> -->` anchor in the rule files.
+Question: does every rule id that a judge prompt names have a home anchor? Ruling: yes, and CI checks it. `lint/check_prompt_rule_ids.py` fails a prompt that names an id that no home declares: no `<!-- rule:<id> -->` anchor in the rule files, no guard rule name, no decision record slug.
 
 - It reads `hooks/*.py` with `ast` and `tokenize`, in two places. A prompt constant in its `PROMPT_CONSTANTS` table, with a name it is built from in the same module. And the string a function returns, in a hooks file that is not a test file, when the function's name has `prompt` in it (a plain, f-string, implicitly joined or plus-joined string, or a local name that it assigns and returns). A comment, a docstring or any other string is not read.
 - An id is read only from an id position, never from free prose, and its first word may be any word. The positions: an item of an id list (`JUDGED_RULES` in `hooks/reply_judge.py`), where the whole item is the id; a rule-list line, an id that opens a string piece or follows a newline in one, then a colon; the word "rule", an optional colon, then the id; and a backticked id. The pieces come from the tokenizer, because implicit joining merges them in `ast`.
-- The anchors come from `lint/rule_audit.py`. Its `RULE_FILES` are `CLAUDE.md` and `output-styles/shiv-stylisms.md`, read through `ANCHOR_RE`.
-- It prints one `FAIL` line for each id with no anchor, naming the file, the line and the id. It also fails when it reads no id at all, and when a file cannot be read or parsed. A clean run prints `ok` and the count of ids.
+- An id in an id position passes when a home declares it. Each home is read at run time, never copied into the lint:
+  - a rule anchor: `lint/rule_audit.py` `RULE_FILES` (`CLAUDE.md` and `output-styles/shiv-stylisms.md`), read through `ANCHOR_RE`.
+  - a guard rule name: `rule_audit.emitted_rule_ids`, which reads `hooks/guard*.py` with `ast` (`agent-role-model` is the rule argument of a `refuse()` call).
+  - a decision record slug: a file `<slug>.md` in the decisions folder (`rulings-declare-kind`).
+- It prints one `FAIL` line for each id that no home declares, naming the file, the line, the id and the homes it looked in. It also fails when it reads no id at all, and when a file cannot be read or parsed. A clean run prints `ok` and the count of ids.
 - CI runs it as CI step "Prompt rule-id lint" of the checks job, and runs its fixture suite as CI step "Prompt rule-id fixture suite". The lint is in `merge.readyChecks` of `.github/stamp.json`, so a lane runs it before its draft goes ready.
 
 ## Why and harm
