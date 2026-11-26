@@ -1,18 +1,18 @@
 # section 43830
 FAMILY = "force-push-main"
 
-# Ruling, owner, 2026-11-25 20:53 CST, "Approved": push-main merges into force-push. Each MAIN row is a form that
-# push-main alone refuses today. Under the merged rule force-push refuses it, its reason still names the default
-# branch and the lane-branch remedy, and it carries no lease retry. Each MAIN row is red today on the rule id only:
-# it asserts force-push where the guard prints push-main. The FORCED rows and the CONTROLS hold under the merged
-# rule, and they pass today.
+# Rule force-push refuses a non-forced push that writes the default branch. Each MAIN row is such a form: the refusal
+# is force-push's, its reason names the default branch and the lane-branch remedy, and it carries no lease retry. The
+# FORCED rows keep force-push's own refusal for a forced push to another branch, a delete of the default branch, and a
+# forced push to the default branch. The CONTROLS and NEIGHBOURS pass: a lease that cannot overwrite newer work, a dry
+# run, a local-path origin, and the agent and all-branch refusals keep their own rules.
 MERGED_RULE = "force-push"
 MAIN_NAMES = ("default branch", "git push origin HEAD:")
 MAIN_LACKS = (REMEDY, CHAIN_ASK, "HEAD:main", "HEAD:master", "push origin main", "push origin master")
 
 
 def merged_main(name, command, cwd=PUSHFEAT, tool="Bash", config=None, carries=MAIN_NAMES):
-    """A form push-main alone refuses today. The refusal is force-push's, and its reason names the default branch."""
+    """A non-forced push that writes the default branch. The refusal is force-push's, and its reason names the default branch."""
     sh("force-push-main: " + name, command, "deny", MERGED_RULE, tool=tool, cwd=cwd, config=config,
        carries=carries, lacks=MAIN_LACKS)
 
