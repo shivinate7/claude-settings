@@ -4,7 +4,7 @@
 lint/layout.json is the one list of where each kind of file lives (decision one-layout-every-repo).
 Three things can drift from it, and this check reads each:
 
-  1. The hooks' literals. hooks/guard.py reads the layout file at run time from RECORD_LAYOUT_FILE,
+  1. The hooks' literals. hooks/guard_cite.py reads the layout file at run time from RECORD_LAYOUT_FILE,
      its own literal. That literal must equal LAYOUT_FILE in lint/layout.py. hooks/git_reads.py reads the
      layout's extras file from LAYOUT_EXTRAS, which must equal "extras" in lint/layout.json.
   2. A path literal in a reader: any Python file in lint/, hooks/, merge/ or janitor/, tests and
@@ -34,7 +34,7 @@ import sys
 HERE = os.path.dirname(os.path.realpath(__file__))
 ROOT = os.path.dirname(HERE)
 
-GUARD = "hooks/guard.py"
+GUARD = "hooks/guard_cite.py"
 GUARD_NAME = "RECORD_LAYOUT_FILE"
 GIT_READS = "hooks/git_reads.py"
 EXTRAS_NAME = "LAYOUT_EXTRAS"

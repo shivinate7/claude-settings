@@ -1,0 +1,1 @@
+- list-lines-python-append-passes: Python `X += [...]` and `X.append(...)` to a one-line list of 10 pass. The add rule reads only shell `NAME+=(...)`, and the module docstring names only shell `+=`. Seen: 2026-11-25 x1

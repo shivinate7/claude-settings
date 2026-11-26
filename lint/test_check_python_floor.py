@@ -856,5 +856,107 @@ class Docstring(unittest.TestCase):
         self.assertIn("15 MB", paragraph, "the Cost line does not say 15 MB")
 
 
+# A float-tested name, and the same name bound to an int literal in another function of the same file. vermin keeps
+# one table of names per file, so that int binding reaches the float test and the check reports int.is_integer
+# (3.12) on a float value. The float form is valid on 3.9.
+INT_ELSEWHERE = "def count():\n    item = 0\n    return item\n"
+FLOAT_FILE = INT_ELSEWHERE + "\n\ndef is_whole(item):\n    return isinstance(item, float) and item.is_integer()\n"
+BARE_FILE = INT_ELSEWHERE + "\n\ndef is_whole(item):\n    return item.is_integer()\n"
+MIXED_FILE = "import glob\n\n" + FLOAT_FILE + '\nFILES = glob.iglob("*.py", root_dir=".")\n'
+
+
+class FloatMember(unittest.TestCase):
+    def test_is_integer_after_an_isinstance_float_test_is_not_flagged_as_int(self):
+        # Scope control first (P7): the 3.10 call in glob_use.py shows the scan reached hooks/, so a clean float
+        # line is not a vacuous pass.
+        code, out = run_check(tree({"hooks/floor_float.py": FLOAT_FILE, "hooks/glob_use.py": IGLOB}))
+        self.assertTrue(naming(out, "glob_use.py"), "scope control: the 3.10 call in hooks/glob_use.py was not named: %r"
+                        % out)
+        self.assertEqual(naming(out, "floor_float.py"), [],
+                         "isinstance(item, float) then item.is_integer() was flagged as int.is_integer: %r" % out)
+
+    def test_bare_is_integer_on_a_name_with_no_known_type_is_not_flagged(self):
+        # Scope control first, as above. Then the bare form: its own function tests no type, so no int is known there.
+        # The check treats an unknown receiver as silent for other members too (`x.bit_count()`, `x.as_integer_ratio()`).
+        code, out = run_check(tree({"hooks/floor_bare.py": BARE_FILE, "hooks/glob_use.py": IGLOB}))
+        self.assertTrue(naming(out, "glob_use.py"), "scope control: the 3.10 call in hooks/glob_use.py was not named: %r"
+                        % out)
+        self.assertEqual(naming(out, "floor_bare.py"), [],
+                         "bare item.is_integer() on a name with no known type was flagged as int.is_integer: %r" % out)
+
+    def test_real_3_12_is_integer_still_fails(self):
+        # Control: a real 3.12 use is still flagged, for each form that really binds an int.
+        forms = (("literal receiver", "VALUE = (5).is_integer()\n"),
+                 ("class call", "VALUE = int.is_integer(5)\n"),
+                 ("int bound in the same function", "def f():\n    item = 5\n    return item.is_integer()\n"))
+        for label, text in forms:
+            with self.subTest(form=label):
+                code, out = run_check(tree({"hooks/floor_int.py": text}))
+                self.assertEqual(code, 1, "%s: a real int.is_integer (3.12) was not flagged: exit %d" % (label, code))
+                self.assertTrue(naming(out, "int.is_integer"), "%s: no line names int.is_integer: %r" % (label, out))
+
+    def test_iglob_beside_a_float_tested_name_still_fails(self):
+        # Control: the real 3.10 call in the same file as the float form is still flagged and named.
+        code, out = run_check(tree({"hooks/floor_mixed.py": MIXED_FILE}))
+        self.assertEqual(code, 1, "glob.iglob(root_dir=) (3.10) beside a float test was not flagged: exit %d" % code)
+        lines = naming(out, "floor_mixed.py")
+        self.assertTrue(any("iglob" in line for line in lines),
+                        "no line for hooks/floor_mixed.py names the 3.10 iglob: %r" % out)
+
+
+# An int receiver that no name carries: an expression, a walrus, or a default value. vermin reports each as 3.10.
+INT_RECEIVER_FORMS = (
+    ("hooks/int_and.py", "def f(x):\n    return (x & 0xFF).bit_count()\n"),
+    ("hooks/int_shift.py", "def f(x):\n    return (x >> 1).bit_count()\n"),
+    ("hooks/int_add.py", "def f(x):\n    return (x + 1).bit_count()\n"),
+    ("hooks/int_neg.py", "VALUE = (-5).bit_count()\n"),
+    ("hooks/int_walrus.py", "def f():\n    return (n := 5).bit_count()\n"),
+    ("hooks/int_default.py", "def g(x=(5).bit_count()):\n    return x\n"),
+)
+# A loop target and an int default parameter. vermin reads each as int only because another function binds the same
+# name to an int (vermin keeps one name table per file), so its 3.10 line is there for the check to keep.
+INT_ELSEWHERE_N = "def count():\n    n = 0\n    return n\n"
+SHADOWED_INT_FORMS = (
+    ("hooks/int_loop.py", INT_ELSEWHERE_N + "\n\ndef h():\n    for n in range(3):\n        n.bit_count()\n"),
+    ("hooks/int_param.py", INT_ELSEWHERE_N + "\n\ndef f(n=0):\n    return n.bit_count()\n"),
+)
+FLOAT_DIVIDE = "def is_whole(x):\n    return (x / 2.0).is_integer()\n"
+
+
+def int_bit_count_lines(out, rel):
+    return [line for line in naming(out, rel) if "int.bit_count" in line]
+
+
+class IntMemberReceiver(unittest.TestCase):
+    def run_beside_scope(self, files):
+        """Runs the check on `files` with a 3.10 call beside them. -> the output. The scope control must be named."""
+        files = dict(files)
+        files["hooks/glob_use.py"] = IGLOB
+        code, out = run_check(tree(files))
+        self.assertTrue(naming(out, "glob_use.py"),
+                        "scope control: the 3.10 call in hooks/glob_use.py was not named: %r" % out)
+        return out
+
+    def test_int_member_on_an_expression_or_default_receiver_is_flagged(self):
+        out = self.run_beside_scope(dict(INT_RECEIVER_FORMS))
+        for rel, _text in INT_RECEIVER_FORMS:
+            with self.subTest(file=rel):
+                self.assertTrue(int_bit_count_lines(out, rel),
+                                "%s: an int receiver's bit_count (3.10) was not flagged: %r" % (rel, out))
+
+    def test_loop_target_and_int_default_parameter_are_flagged_when_another_function_binds_int(self):
+        out = self.run_beside_scope(dict(SHADOWED_INT_FORMS))
+        for rel, _text in SHADOWED_INT_FORMS:
+            with self.subTest(file=rel):
+                self.assertTrue(int_bit_count_lines(out, rel),
+                                "%s: a name bound to int by range or a default (3.10 bit_count) was not flagged: %r"
+                                % (rel, out))
+
+    def test_float_quotient_is_integer_is_not_flagged(self):
+        out = self.run_beside_scope({"hooks/float_div.py": FLOAT_DIVIDE})
+        self.assertEqual(naming(out, "float_div.py"), [],
+                         "(x / 2.0).is_integer() on a float was flagged as int.is_integer: %r" % out)
+
+
 if __name__ == "__main__":
     unittest.main()

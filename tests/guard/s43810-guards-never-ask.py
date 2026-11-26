@@ -79,7 +79,7 @@ NA_MAIN_WHY = ("default branch", "reviewed", "pull request", "merge tool")
 NA_MAIN_ACT = ("own branch", "lane branch", "pull request", "HEAD:<")
 NA_MAIN_REFUSED = ("prompt", "Approving", "push origin main", "HEAD:main")
 na_register("never ask: a push of main is denied, and names the lane's own branch",
-            "push-delete", na_payload(VCS + " push origin main", PUSHFEAT), "push-main",
+            "push-delete", na_payload(VCS + " push origin main", PUSHFEAT), "force-push",
             NA_MAIN_WHY, NA_MAIN_ACT, NA_MAIN_REFUSED)
 
 # A bare merge in a repo that uses the merge tool is denied. The remedy is the merge tool itself.

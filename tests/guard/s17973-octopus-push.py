@@ -93,8 +93,8 @@ def _build_octopus_push():
     _cmk_commit(OCT_MAIN, "m.txt", "m\n", "main one, unpushed")
     _oct_merge(OCT_MAIN, "main", ["x", "y"])
     _oct_must(OCT_MAIN, "origin/main..HEAD", [3], "the unpushed three-parent merge on main")
-    # push-main reads the remote's URL, and a local bare path is no network remote, so the ask would go silent.
-    # Give origin the network URL that the push-main fixtures use (PUSHREMOTE). The guard never contacts it, and
+    # force-push reads the remote's URL, and a local bare path is no network remote, so the refusal would go silent.
+    # Give origin the network URL that the default-branch fixtures use (PUSHREMOTE). The guard never contacts it, and
     # the tracking refs above stay as they are.
     _cmk_run(OCT_MAIN, "config", "remote.origin.url", PUSHREMOTE)
 
@@ -187,10 +187,10 @@ oct_allow("a push of a range with no merge", VCS + " push", OCT_PLAIN)
 oct_allow("a push of a clean commit, with a three-parent merge already on the remote", VCS + " push", OCT_REMOTE)
 oct_allow("a push with nothing unpushed, its three-parent merge already on the remote", VCS + " push", OCT_EMPTY)
 
-# Main is out of scope. The push-main refusal is its own rule's, so this rule's deny must not replace it:
+# Main is out of scope. The force-push refusal is its own rule's, so this rule's deny must not replace it:
 # this case fails if a builder's rule forgets the main exemption. (Decision `guard-remedy-not-to-owner`:
 # a push to main is denied, not asked.)
-sh("octopus-push: a push of main with a three-parent merge is denied by push-main",
+sh("octopus-push: a push of main with a three-parent merge is denied by force-push",
    VCS + " push origin main", "deny", PUSH_MAIN_RULE, cwd=OCT_MAIN)
 
 # A false alarm: the range is what the push adds to the remote. An octopus already on a remote ref is not sent,

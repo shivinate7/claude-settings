@@ -437,6 +437,18 @@ cmk_refuse("a cd into a clean repo, then a cd into a missing folder, then cd -, 
 cmk_refuse("a cd into a clean repo, then cd -, then add -A and commit, the triplet in the cwd repo",
            "cd " + slash(CMK_CL) + " ; cd - ; " + VCS + " add -A && " + VCS + " commit -m x", CMK_CLT)
 
+# NEIGHBOURS of the default-branch refusal. The cd branch names the held command: a held forced push is named first,
+# and a held push to main leaves the markers to refuse. The push gets a network origin for its own call, so the
+# default-branch rule holds it, and the commit before it carries the triplet.
+cmk_refuse("a cd into a missing folder, then ; add -A, commit and a push to main, the triplet in the cwd repo",
+           "cd " + slash(CMK_GONE) + " ; " + VCS + " add -A && " + VCS + " commit -m x && " + VCS
+           + " -c remote.origin.url=" + PUSHREMOTE + " push origin main", CMK_CLT)
+sh("conflict-markers: a cd into a missing folder, then ; add -A, commit and a forced push to main, the triplet in the "
+   "cwd repo, is refused by force-push first",
+   "cd " + slash(CMK_GONE) + " ; " + VCS + " add -A && " + VCS + " commit -m x && " + VCS
+   + " -c remote.origin.url=" + PUSHREMOTE + " push --force origin main", "deny", "force-push", cwd=CMK_CLT,
+   carries=("forced push", "default branch"), lacks=(REMEDY,))
+
 # An earlier commit is a safe segment too, so each commit is judged and the push sees both.
 cmk_allow("two clean commits, each after an add, then a push",
           VCS + " add a.txt && " + VCS + " commit -m a && " + VCS + " add b.txt && " + VCS + " commit -m b && "
@@ -566,7 +578,7 @@ cmk_allow("two commits, the first adding a triplet and the second removing it, t
 # `octopus-push`. A `git push` is refused when a commit it would send is a merge with more than two parents
 # (an octopus merge). The range is the one the conflict-markers push check reads: the destination's
 # remote-tracking tip to the pushed ref, else HEAD. An octopus merge already in that tip's history is outside
-# the range and passes. A push that writes main or master is out of scope: it keeps its push-main ask. The
+# the range and passes. A push that writes main or master is out of scope: it keeps its force-push refusal. The
 # remedy names the two-parent form, so the push can be redone as chained two-parent merges.
 #
 # Each push case runs in a checkout whose remote is a bare repository beside it: nothing leaves the machine.

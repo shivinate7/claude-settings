@@ -290,6 +290,10 @@ def run_hook(hook, stdin_text, folder, answers=None, env=None):
 
 
 def run_class(case_class):
-    """Runs one unittest.TestCase class and prints its report. True when every case passed."""
+    """Runs one unittest.TestCase class and prints its report. True when every case passed.
+    A class with no test methods fails: nothing ran, so nothing was checked."""
     suite = unittest.defaultTestLoader.loadTestsFromTestCase(case_class)
+    if suite.countTestCases() == 0:
+        print("run_class FAIL: %s has no test methods, so no case ran" % case_class.__name__)
+        return False
     return unittest.TextTestRunner(verbosity=1).run(suite).wasSuccessful()
