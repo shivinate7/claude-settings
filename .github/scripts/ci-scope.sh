@@ -135,8 +135,9 @@ if [ -n "$files" ]; then
       .gitignore) on="$on $W $X mods code " ;;
       # bin/rm: the shim imports hooks/guard_rm_var.py (hooks/* above); it runs on posix jobs.
       bin/rm|lint/test_rm_shim.py) on="$on $X code " ;;
-      # The CI alarm's events and clear rule: GUARD_READ_FILES (hooks/mutate_guard.py) lists them, so the guard suite reads them.
-      actions/ci-alarm/events.json|actions/ci-alarm/clear_rule.py) on="$on code guard " ;;
+      # The CI alarm's events and clear rule: GUARD_READ_FILES (hooks/mutate_guard.py) lists them, so the guard suite reads them;
+      # merge/merge.py reads both, and merge/test_merge.py imports it, so it sets checks_windows_merge, which runs that suite.
+      actions/ci-alarm/events.json|actions/ci-alarm/clear_rule.py) on="$on $M code guard " ;;
       # Linux `checks` job only: the lints and opt-in templates.
       actions/*|githooks/*|testing/*|lint/*|.github/dependabot.yml) on="$on code " ;;
       # Map skill .md files: its tests read them, so this arm turns on `mods` before the *.md arm.
@@ -203,6 +204,16 @@ if [ -n "$files" ]; then
           mods/*/*/*.md) ;;
           mods/*/README.md) on="$on doc_other " ;;
         esac ;;
+    esac
+    # The files the guard suite reads under the GUARD_READ_FOLDERS folders (hooks/mutate_guard.py): the import closure of its entry points
+    # plus TRACED_READS. Each sets `guard` and `checks_guard` (a .md file sets no `code`, which the checks_guard line below needs) and keeps the flags the table above gave it, so this is a fifth case, not a rule for the folders:
+    # a folder rule would start the guard suite on files it never opens. The GUARD_READ_FILES entries set `guard` in their own arms above.
+    # The list cannot drift silently: lint/test_guard_inputs.py (guard_read_paths) computes it and fails on a file missing here.
+    case "$f" in
+      # The guard suite reads the real agents folder (hooks/guard.py role_agent_keys): a top-level agents file turns the guard on, so a new one needs no edit here. The empty nested arm comes first because bash's `*` matches `/`.
+      agents/*/*.md) ;;
+      agents/*.md) on="$on guard checks_guard " ;;
+      bin/sim-test|docs/decisions/agent-model-cap.md|merge/install_from_main.sh|janitor/sweep.py|janitor/temp_sweep.py|lint/_guard_sections.py|lint/check_record_slugs.py|lint/check_red_run.py|lint/check_skill_model_rows.py|lint/hook_catalog.py|lint/rule_audit.py|lint/ruled_store.py|lint/stale_cites.py|skills/impeccable/SKILL.md|testing/shallow_clone.py) on="$on guard checks_guard " ;;
     esac
   done <<< "$files"
   # SCOPE_FILES (the header) skips the guard-inputs pass below, which reads every changed path of the range, and keeps the landed-dir read.
