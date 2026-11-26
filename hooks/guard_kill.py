@@ -625,6 +625,8 @@ def _busy_loop_ends(segments):
     stack, found = [], []
     for at, segment in enumerate(segments):
         tokens = segment_tokens(segment) if segment.strip() else None
+        while tokens and tokens[0] in ("{", "("):   # a group opener ahead of the loop head
+            tokens = tokens[1:]
         if not tokens:
             continue
         if tokens[0] in ("while", "until", "for"):
@@ -671,11 +673,41 @@ def _under_limit_and_session(tokens) -> bool:
             and basename(tokens[index + 1]) == "setsid")
 
 
+def _group_moves(segment: str):
+    """The group openers and closers one segment holds, in order, as 'open' or 'close': an unquoted
+    `(` or `)`, and a `{` or `}` that stands alone as a word (`${x}` and `{a,b}` do not)."""
+    moves = []
+    for index, char, quote in walk_quotes(segment):
+        if quote or char not in "(){}":
+            continue
+        if char in "{}":
+            before, after = (segment[index - 1] if index else " "), segment[index + 1:index + 2]
+            if before not in " \t\r\n" or after not in ("", " ", "\t", "\r", "\n", "&"):
+                continue
+        moves.append("open" if char in "({" else "close")
+    return moves
+
+
+def _group_job_hit(segments, first: int, last: int, job_words, busy_done) -> str:
+    """The load generator a `{ ...; } &` or `( ... ) &` group runs, else ''. The group's `&` ends one
+    job whose body spans `segments[first:last]` (the `;`, `&&` and `|` cuts split it) and the
+    job words of segment `last`. Each stage is held to the same `timeout N setsid` form as a plain job."""
+    if any(first <= done <= last for done in busy_done):
+        return "a `while true` or `while :` loop with no sleep, in a group run as a job `&`"
+    body = [segment_tokens(segment) for segment in segments[first:last]] + [job_words]
+    for stage in body:
+        found = _load_stage(stage) if stage else ""
+        if found and not _under_limit_and_session(stage):
+            return found + " in a group run as a job `&` without `timeout N setsid`"
+    return ""
+
+
 def load_generator_hit(cmd: str) -> str:
     """Return the matched text when a background job runs a CPU load generator (LOAD_GENERATOR_WORDS)
     without the form `timeout N setsid <cmd> &`, else ''. The job is the `&`-ended piece and every
-    earlier stage joined to it by `|`, `&&` or `||`. The time limit ends it with its lane (decision
-    detached-launch-refused). A foreground load generator starts no job and passes."""
+    earlier stage joined to it by `|`, `&&` or `||`; a `{ ...; } &` or `( ... ) &` group is one job
+    whose body is every segment from its opener (`_group_job_hit`). The time limit ends it with its
+    lane (decision detached-launch-refused). A foreground load generator starts no job and passes."""
     cmd = _strip_heredoc_bodies_unconditionally(cmd)
     ends = []
     segments = split_segments(cmd, ends)
@@ -683,12 +715,23 @@ def load_generator_hit(cmd: str) -> str:
         ends = [""] * len(segments)
     busy_done = set(_busy_loop_ends(segments))
     stages = []   # the tokens of the segments before this one that belong to the same job
+    open_groups = []   # the segment index where each group still open began
     for at, (segment, end) in enumerate(zip(segments, ends)):
         tokens = segment_tokens(segment) if segment.strip() else None
         if not tokens:
             stages = []
             continue
         jobs = backgrounding_amps(segment, tokens, _skip_assignments_and_keywords(tokens))
+        closed = None
+        for move in _group_moves(segment):
+            if move == "open":
+                open_groups.append(at)
+            elif open_groups:
+                closed = open_groups.pop()
+        if jobs and closed is not None and closed < at:
+            found = _group_job_hit(segments, closed, at, jobs[0][1], busy_done)
+            if found:
+                return found
         for number, (text, words) in enumerate(jobs):
             if number == 0 and at in busy_done:
                 return "a `while true` or `while :` loop with no sleep, as a job `&`"
