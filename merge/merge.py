@@ -2119,6 +2119,31 @@ class Host:
         s = "red: " + "; ".join(red) if red else "pending: " + ", ".join(held) if held else "green"
         return s + (" (ignored: " + "; ".join(ignored) + ")" if ignored else "")
 
+    def batch_member_runs(self, members, heads):
+        """-> (kept, left): `members` split by the runs of the queued head `heads[n]` of each one (the head the review list read; no live pull is re-read). The one home of that decision: `combine_train.py --build` (with or without a queue file) and combine_hint both call it.
+        left is [(n, line, unknown)] in member order. A member whose head has a failed job leaves, named by that job's entry ("name: fail link"). A job that merge.ignoreChecks names is no failure, the reading `merge` itself makes (ignore_checks). A cancelled job is not named, and a head whose only
+        red is cancels stays in, as head_check_failed reads a head. A head with green, pending or no runs stays. A failed read of a head's runs leaves it too, as unknown (`unknown` True), never green or red.
+        Under merge.requiredChecks "none", read from the base's stamp in self.cwd, no run is read and no member leaves (decision private-repos-no-ci). "first-proof" has CI live on the base, so its members' runs are read (decision merge-needs-current-base). A stamp that cannot be read raises Stop.
+        Cost: one fetch of the base (load_config); then per member the reads of `checks`: two gh calls (the head's check runs and its commit statuses, one page each), and one more (gh run list) when its rows link more than one workflow run. Nothing is kept."""
+        with contextlib.redirect_stdout(io.StringIO()):  # load_config says its defaults; only requiredChecks and ignoreChecks are read here
+            cfg = load_config(self.cwd, self.base, DEFAULT_CONFIG, " " + BATCH_CITE)
+        if cfg["merge"].get("requiredChecks") == "none":  # not waits_on_no_check: "first-proof" has CI live, so its members' runs are read
+            return list(members), []
+        ignore = ignore_checks(cfg)  # the config's own list, as the merge tool reads it: the build's Host is made with none
+        kept, left = [], []
+        for n in members:
+            try:
+                red, _pending, _ignored = self.classify(self.checks(n, warn=False, sha=heads[n]), [], ignore, self.branch)
+            except (Stop, subprocess.TimeoutExpired, OSError) as e:
+                left.append((n, f"unknown (the runs of its head {heads[n][:9]} could not be read: {' '.join(str(e).split())[:120]})", True))
+                continue
+            failed = [e for e in red if NO_CHECK_RAN not in e and not cancel_entry().fullmatch(e)]
+            if failed:
+                left.append((n, f"its head {heads[n][:9]} has a failed job: {'; '.join(failed)}", False))
+            else:
+                kept.append(n)
+        return kept, left
+
     def check_state(self, n, sha, name):
         """-> the state of the one check `name` on head `sha`: "pass", "fail", "pending", or None when the head has no row for it that ran (absent, or skipped
         only). The per-check read: head_state is green when every row is, and a check that never runs on pull
@@ -3372,11 +3397,11 @@ def combine_hint(root, host, trigger=None, exclude=None):
     does not wait on a queue the batch could skip (decision session-tiers, merge alone or combine). The set is the one `combine_train.py --build` takes
     (batch_rows there): the rows whose act is `batch` on a main base (ready_batch_numbers), the lowest number, the front PR, which merges alone, left out. That
     slice is mirrored in batch_rows, which cannot call a new merge.py name (test_combine_train GIT_WRAPPERS). The count of that set is compared with
-    BUILD_THRESHOLD, and only a set at the threshold gets the build command. Never stops a lint: a read that fails prints one line saying so.
+    BUILD_THRESHOLD after the members whose queued head has a failed job or unreadable runs are left out of it at a backlog (Host.batch_member_runs, the build's call), each named on a line of its own before the names line. Only a set at the threshold gets the build command. Never stops a lint: a read that fails prints one line saying so.
     `trigger` None: the trigger is another lane lint of this clone, running or queued. Or `trigger` is the caller's own words for why it asks (queue_hint's CI
     queue depth) and `exclude` is the info row of the pull request under merge: its head is read against every other ready PR, a clash is named, and a clash
     read git could not make adds one sentence saying the clash read is unknown. At the backlog only a batch runner gets the build command; any other
-    session is handed to the batch runner (decision session-tiers: only the batch runner owns a batch)."""
+    session is handed to the batch runner (decision session-tiers: only the batch runner owns a batch). Cost, at the threshold: Host.batch_member_runs per ready member."""
     if trigger is None:
         pids = other_lane_lint_pids(root)
         if not pids:
@@ -3385,14 +3410,18 @@ def combine_hint(root, host, trigger=None, exclude=None):
     else:
         who = trigger
     try:
-        rows = []
+        rows, left_out = [], []
         _lines, pulls, _totals = reviewed_read(host, None, ledger=rows)
         every = ready_batch_numbers(rows, pulls)
         ready = every[1:]
+        if len(ready) >= BUILD_THRESHOLD:  # under the backlog no train is built, so no run is read; the build drops a member by the same call
+            ready, left_out = host.batch_member_runs(ready, {d["number"]: d["head"]["sha"] for d in pulls})
         clashes, unknown, why = clashing_members(root, pulls, [m for m in every if m != exclude["number"]], exclude["head"]) if exclude else ([], [], "")
     except Exception as e:  # a hint is never a verdict: an unreadable list is reported as unknown
         say(f"merge: {who}. The ready PRs with passing records are unknown: the read failed ({type(e).__name__}), so no combine hint. Run `merge --reviewed`.")
         return
+    for n, detail, _unknown in left_out:  # the build names each of these too; a reader who sees #N missing from the names line learns why
+        say(f"merge: {who}. #{n} is left out of the combine: {detail}")
     names = ", ".join(f"#{n}" for n in ready) or "none"
     clash = "".join(f" #{m} clashes with this pull request ({', '.join(files[:3]) or 'no path named'}), so it cannot join a train with it." for m, files in clashes)
     if unknown:

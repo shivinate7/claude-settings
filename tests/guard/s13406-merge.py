@@ -489,14 +489,19 @@ STAMPUNKNOWN = os.path.join(ROOT, "pin_unknown_repo")  # its merge config pins r
 STAMPPROTECT = os.path.join(ROOT, "pin_protect_repo")  # its merge config pins requiredChecks "protection", the default's own string
 
 
-def _merge_config_path():
-    """The merge config path, merge.DEFAULT_CONFIG, read with the ast from merge/merge.py: the guard cases never import the merge tool."""
+def _merge_constant(name):
+    """The string constant `name` of merge/merge.py, read with the ast: the guard cases never import the merge tool."""
     with open(os.path.join(os.path.dirname(HERE), "merge", "merge.py"), encoding="utf-8") as f:
         tree = ast.parse(f.read())
     for node in tree.body:
-        if isinstance(node, ast.Assign) and any(getattr(t, "id", None) == "DEFAULT_CONFIG" for t in node.targets):
+        if isinstance(node, ast.Assign) and any(getattr(t, "id", None) == name for t in node.targets):
             return node.value.value
-    raise AssertionError("merge/merge.py has no DEFAULT_CONFIG")
+    raise AssertionError("merge/merge.py has no %s" % name)
+
+
+def _merge_config_path():
+    """The merge config path, merge.DEFAULT_CONFIG (see _merge_constant)."""
+    return _merge_constant("DEFAULT_CONFIG")
 
 
 def _build_stamp_repos():
@@ -1502,7 +1507,7 @@ def record_push_cost_case():
     `git rev-parse --show-toplevel`. A refspec push adds one `git symbolic-ref`. A HEAD push adds two
     `git symbolic-ref`, and reads no push.default. A bare push adds two
     `git symbolic-ref` and two `git config` reads, and reads push.default. A literal main destination
-    (`origin main`, `HEAD:main`) adds one `git config` read, the remote's URL (rule push-main). A literal
+    (`origin main`, `HEAD:main`) adds one `git config` read, the remote's URL (rule force-push). A literal
     `HEAD:<branch>` adds no read. A `--all` push (rule push-all-main) reads that URL the same way, then the current
     branch (`symbolic-ref`, the agent test), one `git for-each-ref` of the tracking refs, and, when those refs show no
     update, one more `git for-each-ref` of the local branches (the all-agent test). A glob refspec reads the URL and
@@ -1543,9 +1548,10 @@ def record_push_cost_case():
         ("a push with no remote-tracking ref and no upstream", "push origin HEAD:lane/bar",
          {"rev-parse": 2, "symbolic-ref": 1, "diff": 3, "rev-list": 1, "log": 1}),
         # A stray push: HEAD on a branch tracking another name. It is allowed, so push_ask_hit reads no upstream. The
-        # conflict check finds no tracking ref for the destination and reads the upstream: two diff reads.
+        # conflict check finds no tracking ref for the destination and reads the upstream: two diff reads. The red-run
+        # base is that upstream, so one rev-parse reads its full name to see whether it sits on another remote.
         ("a stray push, HEAD on a branch tracking another name", "push origin HEAD",
-         {"rev-parse": 1, "symbolic-ref": 2, "diff": 2, "rev-list": 1, "log": 1}, PUSHSTRAY),
+         {"rev-parse": 2, "symbolic-ref": 2, "diff": 2, "rev-list": 1, "log": 1}, PUSHSTRAY),
         # rule push-all-main. push_ask_hit alone reads, for a --all push to a network remote, the remote's config, the
         # current branch (the agent test), one for-each-ref of the tracking refs, and one for-each-ref of the local
         # branches when the tracking refs show no update. A glob reads the config and the same two for-each-ref reads.

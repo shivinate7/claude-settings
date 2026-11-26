@@ -474,6 +474,47 @@ class CheckCase(Fixture):
         found = self.pending_judge("add widget tests\n", rel)
         self.assertEqual(found, [["new", "add widget tests", rel]], "a pending plain test commit is not one gap row")
 
+    def judge_shas(self, base, remotes=""):
+        """judge() on base..HEAD, with `remotes` as its remotes option when set (the guard's --remotes forms). Returns
+        the short sha of each row, oldest first. The module is loaded by path (MODULE), as pending_judge does."""
+        probe = ("import importlib.util, sys\n"
+                 "spec = importlib.util.spec_from_file_location('check_red_run', sys.argv[1])\n"
+                 "module = importlib.util.module_from_spec(spec)\n"
+                 "spec.loader.exec_module(module)\n"
+                 "kwargs = {'remotes': sys.argv[3]} if sys.argv[3] else {}\n"
+                 "found, _last = module.judge(sys.argv[2], sys.argv[4], 'HEAD', **kwargs)\n"
+                 "for row in found:\n"
+                 "    print(row[0])\n")
+        done = subprocess.run([sys.executable, "-c", probe, MODULE, self.tree, remotes, base],
+                              capture_output=True, text=True, encoding="utf-8", errors="replace", env=GIT_ENV)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        return done.stdout.split()
+
+    def test_judge_with_remotes_leaves_out_only_the_commits_that_remote_holds(self):
+        """judge() with `remotes` set leaves out the commits that remote's refs hold, and no other. Two sibling gaps
+        join in a merge: origin holds the first, other holds the second. A chain would not do, for a ref that holds the
+        second also holds its ancestor the first. Scope first: the gaps are siblings and each ref holds its own. The
+        control judges both with no option."""
+        self.base()
+        base = self.base_sha
+        self.git("checkout", "-q", "-b", "side", base)
+        second = self.commit("add gadget tests", {self.new_test_path(): TEST_TEXT})
+        self.git("checkout", "-q", "main")
+        first = self.commit("add widget tests", {self.new_test_path(): TEST_TEXT})
+        self.merge("side")  # HEAD is a merge of the two gaps, and the merge is not judged
+        self.assertEqual(self.git("merge-base", first, second), base, "fixture: the two gaps are siblings")
+        self.git("update-ref", "refs/remotes/origin/topic", first)
+        self.git("update-ref", "refs/remotes/other/topic", second)
+        self.assertEqual(self.git("rev-parse", "refs/remotes/origin/topic"), first, "fixture: origin holds the first gap")
+        self.assertEqual(self.git("rev-parse", "refs/remotes/other/topic"), second, "fixture: other holds the second gap")
+        self.assertEqual(sorted(self.judge_shas(base)), sorted([first[:7], second[:7]]),
+                         "control: no remotes option judges both gaps")
+        self.assertEqual(self.judge_shas(base, "--remotes=origin"), [second[:7]],
+                         "--remotes=origin leaves out the commit only origin holds, and judges the one other holds")
+        self.assertEqual(self.judge_shas(base, "--remotes=other"), [first[:7]],
+                         "--remotes=other leaves out the commit only other holds, and judges the one origin holds")
+        self.assertEqual(self.judge_shas(base, "--remotes"), [], "--remotes, every remote's refs, leaves out both gaps")
+
 
 class VerifiedCase(Fixture):
     """Cases for the Verified line: each commit says how it was verified. In observe mode a gap prints and the exit

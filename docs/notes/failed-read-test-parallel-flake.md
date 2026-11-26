@@ -1,0 +1,1 @@
+- failed-read-test-parallel-flake: `test_a_failed_read_keeps_every_tree_and_removes_none` in `janitor/test_sweep.py` failed once while two suites ran in parallel, then passed three times. Possible flake; the cause is unverified. Seen: 2026-11-25 x1
