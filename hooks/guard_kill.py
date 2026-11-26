@@ -21,7 +21,7 @@ from guard_core import (
     ASSIGNMENT, CMD_EXE_NAMES, ENV_PATTERN_COMMANDS, PLAYWRIGHT_PS_SHELLS,
     POWERSHELL_CALL, PowerShellScript, SILENT_WRITE_REDIRECT, _pwsh_script, _skip_assignments_and_keywords,
     _split_heredocs, _strip_heredoc_bodies_unconditionally, backgrounding_amp, basename, inline_script,
-    inner_commands, resolve_command, segment_tokens, split_segments,
+    inner_commands, resolve_command, segment_tokens, split_segments, strip_heredoc_bodies,
 )
 from guard_env import substitution_commands
 import own_session  # the one home of the agent transcript folder
@@ -99,7 +99,11 @@ def nested_kill_texts(texts):
     each: `sh -c BODY`, `bash -lc`, `env`, `timeout 5 bash -c`, `xargs sh -c`, `red-run SHA -- CMD`, `su -c`,
     `find -exec`. Parsed as shell by `inner_commands`, the one reader of wrappers, so a kill word that is only data to
     another program (an echo, a grep pattern, a Python string, a commit message) is never a text here. Texts that run
-    on another machine or in a container (`ssh`, `docker exec`) are left out: they kill no process of this one.
+    on another machine or in a container (`ssh`, `docker exec`) are not judged as a local kill: ssh to this same host
+    and a container that shares the host's process space are not read.
+    Each text is read as the outer command is (`judge_shell`): `strip_heredoc_bodies`, the one reader of heredoc bodies,
+    drops a body that is data to another program (`cat`, a file redirect, `git commit -F -`) and keeps in view a body
+    that a shell or an interpreter reads.
     Each text in the result is new: none is in `texts`."""
     found = list(texts)
     for text in found:   # the list grows while it is read, so a text inside a text is read too
@@ -108,7 +112,8 @@ def nested_kill_texts(texts):
             tokens = segment_tokens(segment) if segment.strip() else None
             handed.extend(inner_commands(tokens, local=True) if tokens else ())
         for inner in handed:
-            for new in (inner, *substitution_commands(inner, inner)):
+            stripped = strip_heredoc_bodies(inner)
+            for new in (stripped, *substitution_commands(inner, stripped)):
                 if new not in found:
                     found.append(new)
     return found[len(texts):]

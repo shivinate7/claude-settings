@@ -6124,7 +6124,12 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     # as a text of its own (`sh -c BODY`, `red-run SHA -- CMD`: nested_kill_texts); text that is only data
     # to another program is no command.
     call_tokens = []
-    for text in [*texts, *nested_kill_texts(texts)]:
+
+    def kill_texts():   # lazy: the outer texts are judged before the nested read runs, so a raise there cannot skip them
+        yield from texts
+        yield from nested_kill_texts(texts)
+
+    for text in kill_texts():
         previous = None   # a pipe never reaches across a substitution's edge
         for segment in split_segments(text):
             if not segment.strip():
