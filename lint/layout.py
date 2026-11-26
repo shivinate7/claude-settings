@@ -548,7 +548,7 @@ def page_writer_key(root):
     (`page_writer_is_none` tells that from a missing key). A session id is a claim, not checked past that."""
     found = _repo_keys(root).get(PAGE_WRITER_KEY)
     if (not isinstance(found, str) or not found or found != found.strip() or found in PARENT_TARGETS
-            or found.lower() in PAGE_WRITER_NONE):
+            or found.lower() in PAGE_WRITER_NONE or found.lower() == "null"):
         return None
     return found
 

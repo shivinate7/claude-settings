@@ -1464,6 +1464,7 @@ LANE_REFUSAL = owner_line(
     "a question was asked in a lane session, whose own chat does not reach the owner, and it was not sent to "
     "its parent")
 NO_PAGE_NOTE = "pick not sent: this repo has no waiting page"
+NO_WRITER_NOTE = "question not sent: this repo has no page writer"
 PARENT_TARGETS = set(layout.PARENT_TARGETS)
 # A "?" ends a question unless a word character follows it, so a URL query (a?b=1) never counts. Quoted
 # text, backticked text and a blockquoted line are past words, never a question asked now. A straight
@@ -1801,7 +1802,7 @@ def question_problem(records, turn, text, hook):
     failure of `session_inactive` (`inactive_tool_use_ids`: the writer is gone, the attempt meets the duty); a
     send with no result, any other failed result or a non-delivered one does not. A transcript writer counts on the send alone.
     A repo whose extras key `page-writer` is none or N/A (`layout.page_writer_is_none`) has no writer: with no
-    writer named in the transcript, its question passes with no send. A missing or null key keeps the refusal.
+    writer named in the transcript, its question passes with no send and no page item, and one note says it was not sent. A missing or null key keeps the refusal.
     A read whose result names no writer keeps the refusal's old text. The question box counts
     only in a repo with no waiting page. A send to @parent reaches no one there.
     Lane: a send to the parent or the page writer; a send to @parent counts only in a lane. A session whose own
@@ -1834,8 +1835,8 @@ def question_problem(records, turn, text, hook):
         # The triage session names a parent id in its record but is the page writer: its items write counts too.
     root = repo_root(hook.get("cwd"))
     if not writer and root and layout.page_writer_is_none(root):
-        # The repo has no page writer, so the question owes no send to one.
-        return "", ""
+        # The repo has no page writer, so the question owes no send and no page item; the note shows it was not sent.
+        return "", NO_WRITER_NOTE
     if not writer and root and not page_read_ran(records):
         writer = layout.page_writer_key(root)
         if writer:
