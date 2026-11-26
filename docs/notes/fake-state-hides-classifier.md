@@ -1,0 +1,1 @@
+- fake-state-hides-classifier: merge/test_merge.py:11068-11074: the fake replaces `head_state` with a lambda, so the real classifier never runs in these cases (a skipped-only rollup reads "red: no check ran", not pending). Seen: 2026-11-25 x1
