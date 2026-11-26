@@ -249,6 +249,22 @@ class FreeNames(Proof):
                              guard_x="from guard_core import Y\n\ndef a():\n    return Y\n"),
                         "--changed", "a", lines=["changed (allowed by --changed): def a"])
 
+    def test_a_def_that_stays_and_calls_itself_and_a_sibling_resolves_in_its_own_module(self):
+        """guard.py loses Y to guard_core.py. `walk` stays, calls itself and calls `helper`, which also stays. A def
+        resolves its names in its own module, so `walk` passes with no import of `walk` or `helper`."""
+        self.assertPass(tree(guard="Y = 1\n\ndef helper():\n    return Y\n\ndef walk(n):\n"
+                                   "    return walk(n - 1) if n else helper()\n"),
+                        tree(guard="from guard_core import Y\n\ndef helper():\n    return Y\n\ndef walk(n):\n"
+                                   "    return walk(n - 1) if n else helper()\n", guard_core="Y = 1\n"),
+                        lines=["1 moved module"])
+
+    def test_a_moved_def_that_calls_a_sibling_moved_with_it_resolves_in_its_new_module(self):
+        """`a` and `b` move from guard.py to guard_x.py together, and `a` calls `b`. `b` is defined in guard_x.py too,
+        so `a` passes. `keep` stays in guard.py."""
+        self.assertPass(tree(guard="def a():\n    return b()\n\ndef b():\n    return 1\n\ndef keep():\n    return 2\n"),
+                        tree(guard="def keep():\n    return 2\n", guard_x="def a():\n    return b()\n\ndef b():\n    return 1\n"),
+                        lines=["2 moved module"])
+
 
 class AugAssign(Proof):
     def test_an_aug_assign_joins_the_key_of_its_target(self):
