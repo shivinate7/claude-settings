@@ -125,6 +125,9 @@ push_case("deleting with -d at the default branch denies", "-d origin main", "re
 # history of the default branch"), not the plain push's ("writes the default branch").
 push_case("deleting with -d at the default branch names the delete reason", "-d origin main", "refuse-main",
           says=("may overwrite the history of the default branch",))
+# The long flag `--delete` is the same delete, so it prints the same reason.
+push_case("deleting with --delete at the default branch names the delete reason", "--delete origin main",
+          "refuse-main", says=("may overwrite the history of the default branch",))
 # A dangling origin/HEAD does not hide the default branch (owner's read order 2026-10-16). The three
 # forms below reach main and ask, exactly as they do where origin/HEAD resolves.
 push_case("a dangling origin/HEAD, a forced push to main denies",
