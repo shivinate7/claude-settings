@@ -2829,3 +2829,20 @@ def command_indexes(tokens):
 # The installer swaps the next line for `INSTALL_ID = "<id>"` at copy time; guard.py compares the
 # ids across the modules it loads. In the repo it stays a comment, which counts as a match.
 # INSTALL_ID = "uninstalled"
+
+
+def _unexpanded(path) -> bool:
+    """True when a path holds a variable or a substitution: the shell's value is not this hook's."""
+    return any(mark in path for mark in "$%`")
+
+
+def drive_form_cwd(cwd: str) -> str:
+    """A Git Bash `/c/Users/...` cwd in drive form (`C:/Users/...`) on Windows, else `cwd` as given.
+    Off Windows `/c/` is a real folder. `_expanded` is the one reader of the drive spelling."""
+    return _expanded(cwd, "") if cwd and os.name == "nt" else cwd
+
+
+def write_targets(tool_input: dict) -> list:
+    """Every non-empty string path field of a write call, in a fixed order."""
+    return [v for k in ("file_path", "path", "notebook_path")
+            if isinstance((v := tool_input.get(k)), str) and v]

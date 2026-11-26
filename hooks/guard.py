@@ -864,6 +864,11 @@ while True:
         import guard_cite  # noqa: F401  empty until its family moves
         _loading = "guard_checkout"
         import guard_checkout  # noqa: F401  empty until its family moves
+        from guard_core import (
+            _unexpanded,  # noqa: F401  shared helpers, moved to guard_core: guard.<name> and the calls here keep binding
+            drive_form_cwd,
+            write_targets,
+        )
         _loading = "guard_handoff"
         import guard_handoff  # noqa: F401  empty until its family moves
         _loading = "guard_paths"
@@ -970,11 +975,6 @@ def _git_dir_target(tokens):
         if token == "--git-dir":
             return options[at + 1] if at + 1 < len(options) else None
     return None
-
-
-def _unexpanded(path) -> bool:
-    """True when a path holds a variable or a substitution: the shell's value is not this hook's."""
-    return any(mark in path for mark in "$%`")
 
 
 # The writes that change the work tree as well as the repository. `commit`, `tag` and a `fetch`
@@ -2429,12 +2429,6 @@ def designer_path_ok(rel: str) -> bool:
     if folder is None or ".." in parts:
         return False
     return "/".join(parts).startswith(folder + "/")
-
-
-def drive_form_cwd(cwd: str) -> str:
-    """A Git Bash `/c/Users/...` cwd in drive form (`C:/Users/...`) on Windows, else `cwd` as given.
-    Off Windows `/c/` is a real folder. `_expanded` is the one reader of the drive spelling."""
-    return _expanded(cwd, "") if cwd and os.name == "nt" else cwd
 
 
 def repo_rel(path: str, cwd: str, outside: bool = True):
@@ -8575,12 +8569,6 @@ def browser_launch_write_hit(tool, tool_input, target, cwd) -> str:
         return browser_write_hit(path, old, tool_input["content"])
     result = write_result_texts(tool_input, path)
     return browser_write_hit(path, result[0], result[1]) if result else ""
-
-
-def write_targets(tool_input: dict) -> list:
-    """Every non-empty string path field of a write call, in a fixed order."""
-    return [v for k in ("file_path", "path", "notebook_path")
-            if isinstance((v := tool_input.get(k)), str) and v]
 
 
 def main() -> None:
