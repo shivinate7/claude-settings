@@ -315,7 +315,9 @@ def judge_work(command, cwd):
     counts = {"reads": 0, "rewrites": 0}
 
     def prepare(guard):
-        read_real = guard._segment_with_vars
+        # The reader is looked up in the checkout module's globals, not on guard, so the wrap goes there.
+        checkout = guard.hand_made_worktree_hit.__globals__
+        read_real = checkout["_segment_with_vars"]
         scope = guard.rm_var_hits.__globals__
         rewrite_real = scope["_rm_var_rewrite"]
 
@@ -328,7 +330,7 @@ def judge_work(command, cwd):
             counts["rewrites"] += 1
             return rewrite_real(word, ctx)
 
-        guard._segment_with_vars = read
+        checkout["_segment_with_vars"] = read
         scope["_rm_var_rewrite"] = rewrite
 
     got, reason, _ = judge_in_process(command, cwd, prepare)
