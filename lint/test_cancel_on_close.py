@@ -10,8 +10,10 @@ main counts the runs it skips for naming only another PR, main reads the PR befo
 named by GITHUB_RUN_ID, and main cancels nothing when GITHUB_RUN_ID is not numeric. ParserControl and ScannerTraps test
 the readers in this file on text that exists on main, so a red WorkflowShape case points at the workflow, not at the
 reader. ScriptMain also proves an open ready PR cancels nothing, and an open draft PR cancels no lane-touched-tests run
-and no run on another PR's head, and reports unknown when its run list cannot be read. WorkflowShape proves the workflow
-fires on converted_to_draft as well as closed.
+and no run on another PR's head, and reports unknown when its run list cannot be read. On the draft path, main cancels
+the checks runs created before the newest converted_to_draft event, keeps the ones created at or after it, reads the
+events once, and reports unknown when the events read fails or holds no converted_to_draft event. WorkflowShape proves
+the workflow fires on converted_to_draft as well as closed.
 
 Run with:  python3 lint/test_cancel_on_close.py -v
 """
@@ -45,6 +47,13 @@ HEAD_REF = "feature"
 HEAD_SHA = "3f1c0a9d2b7e4c6f8a0b1d2e3f4a5b6c7d8e9f01"
 OLD_SHA = "9b8a7f6e5d4c3b2a1f0e9d8c7b6a5f4e3d2c1b0a"
 ACTIVE = ("queued", "in_progress", "waiting", "pending", "requested")
+# Fixed UTC times in GitHub's created_at form. The cut-off is DRAFT_AT, the newest converted_to_draft event.
+FIRST_DRAFT_AT = "2026-11-25T12:00:00Z"
+READY_AT = "2026-11-25T12:30:00Z"
+BETWEEN_DRAFTS = "2026-11-25T13:00:00Z"
+BEFORE_DRAFT = "2026-11-25T14:00:00Z"
+DRAFT_AT = "2026-11-25T15:00:00Z"
+AFTER_DRAFT = "2026-11-25T16:00:00Z"
 
 
 def read_text(path):
@@ -396,6 +405,7 @@ def without(run, key):
 
 PULLS_ROUTE = f"repos/{REPO_FULL}/pulls/{PR}"
 PULLS_LIST_ROUTE = f"repos/{REPO_FULL}/pulls"
+EVENTS_ROUTE = f"repos/{REPO_FULL}/issues/{PR}/events"
 REPO_ROUTE = f"repos/{REPO_FULL}"
 RUNS_ROUTE = f"repos/{REPO_FULL}/actions/runs"
 CANCEL_RE = re.compile(rf"repos/{re.escape(REPO_FULL)}/actions/runs/(\d+)/cancel")
@@ -454,12 +464,13 @@ class FakeGh:
     would then cancel nothing, and a case would fail for a cause other than its own."""
 
     def __init__(self, runs=(), states=("closed",), pr=None, open_prs=(), pr_read_fails=False, open_read_fails=False,
-                 runs_read_fails=False):
+                 runs_read_fails=False, events=(), events_read_fails=False):
         self.runs, self.states = list(runs), list(states)
         self.pr = pr_dict() if pr is None else pr
         self.open_prs = list(open_prs)
         self.pr_read_fails, self.open_read_fails = pr_read_fails, open_read_fails
         self.runs_read_fails = runs_read_fails
+        self.events, self.events_read_fails = list(events), events_read_fails
         self.reads, self.calls = 0, []
 
     def __call__(self, argv, *args, **kwargs):
@@ -482,6 +493,10 @@ class FakeGh:
                 return done(argv, 1, "", "fake gh: the run list failed")
             status = params.get("status")
             return served(argv, {"workflow_runs": [run for run in self.runs if status is None or run.get("status") == status]}, jq)
+        if path == EVENTS_ROUTE:
+            if self.events_read_fails:
+                return done(argv, 1, "", "fake gh: the events read failed")
+            return served(argv, self.events, jq)
         if path and CANCEL_RE.fullmatch(path):
             return done(argv, 0, "")
         return done(argv, 1, "", "fake gh: no case names this endpoint: " + " ".join(argv))
@@ -505,6 +520,15 @@ def cancelled_ids(calls):
 
 def has_get(argv):
     return any(argv[i:i + 2] == ["-X", "GET"] for i in range(len(argv)))
+
+
+def events_calls(calls):
+    return [argv for argv in calls if path_of(argv) == EVENTS_ROUTE]
+
+
+def event_of(name, created_at):
+    """An entry of GET repos/R/issues/N/events, cut to the keys the script reads."""
+    return {"event": name, "created_at": created_at}
 
 
 class ScriptSelects(ScriptCase):
@@ -741,11 +765,11 @@ class ScriptMain(ScriptCase):
     reports the runs it skips for naming only another PR."""
 
     def run_main(self, runs, states=("closed",), github_run_id=None, open_prs=(), pr=None, pr_read_fails=False,
-                 open_read_fails=False, runs_read_fails=False):
+                 open_read_fails=False, runs_read_fails=False, events=(), events_read_fails=False):
         # The env is set per case, so a GITHUB_RUN_ID from the CI runner never reaches a case that does not name one.
         mod = self.module()
         fake = FakeGh(runs, states, pr=pr, open_prs=open_prs, pr_read_fails=pr_read_fails, open_read_fails=open_read_fails,
-                      runs_read_fails=runs_read_fails)
+                      runs_read_fails=runs_read_fails, events=events, events_read_fails=events_read_fails)
         err, out = io.StringIO(), io.StringIO()
         with mock.patch.dict(os.environ), mock.patch.object(mod.subprocess, "run", fake), \
                 contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
@@ -900,6 +924,57 @@ class ScriptMain(ScriptCase):
                                      pr=pr_with_draft(True), runs_read_fails=True)
         self.assertEqual(cancelled_ids(fake.calls), [], "main cancelled a run although the run list could not be read")
         self.assertIn("unknown", err + self.out, "main printed no 'unknown' for a run list it could not read")
+
+    def test_an_open_draft_pr_cancels_its_checks_run_created_before_the_draft_time(self):
+        err, fake, _ = self.run_main([run_of(id=101, created_at=BEFORE_DRAFT, pull_requests=[{"number": PR}])],
+                                     states=("open",), pr=pr_with_draft(True),
+                                     events=[event_of("converted_to_draft", DRAFT_AT)])
+        self.assertTrue(list_calls(fake.calls), "scope: main never listed the runs for an open draft PR")
+        self.assertEqual(cancelled_ids(fake.calls), [101],
+                         "main did not cancel the checks run created before the PR went to draft")
+
+    def test_the_newest_converted_to_draft_time_is_the_cut_off(self):
+        events = [event_of("converted_to_draft", FIRST_DRAFT_AT), event_of("ready_for_review", READY_AT),
+                  event_of("converted_to_draft", DRAFT_AT)]
+        err, fake, _ = self.run_main([run_of(id=101, created_at=BETWEEN_DRAFTS, pull_requests=[{"number": PR}])],
+                                     states=("open",), pr=pr_with_draft(True), events=events)
+        self.assertTrue(list_calls(fake.calls), "scope: main never listed the runs for an open draft PR")
+        self.assertEqual(cancelled_ids(fake.calls), [101],
+                         "main did not cut off at the newest converted_to_draft time")
+
+    def test_a_checks_run_created_at_or_after_the_draft_time_is_kept(self):
+        runs = [run_of(id=102, created_at=DRAFT_AT, pull_requests=[{"number": PR}]),
+                run_of(id=103, created_at=AFTER_DRAFT, pull_requests=[{"number": PR}])]
+        err, fake, _ = self.run_main(runs, states=("open",), pr=pr_with_draft(True),
+                                     events=[event_of("converted_to_draft", DRAFT_AT)])
+        self.assertNotIn(102, cancelled_ids(fake.calls), "a checks run created at the draft time was cancelled")
+        self.assertNotIn(103, cancelled_ids(fake.calls), "a checks run created after the draft time was cancelled")
+
+    def test_a_draft_pr_whose_events_read_fails_cancels_nothing_and_reports_unknown(self):
+        err, fake, _ = self.run_main([run_of(id=101, created_at=BEFORE_DRAFT, pull_requests=[{"number": PR}])],
+                                     states=("open",), pr=pr_with_draft(True), events_read_fails=True)
+        self.assertEqual(cancelled_ids(fake.calls), [], "main cancelled a run although the events could not be read")
+        self.assertIn("unknown", err + self.out, "main printed no 'unknown' for events it could not read")
+
+    def test_a_draft_pr_with_no_converted_to_draft_event_cancels_nothing_and_reports_unknown(self):
+        err, fake, _ = self.run_main([run_of(id=101, created_at=BEFORE_DRAFT, pull_requests=[{"number": PR}])],
+                                     states=("open",), pr=pr_with_draft(True),
+                                     events=[event_of("ready_for_review", READY_AT)])
+        self.assertEqual(cancelled_ids(fake.calls), [],
+                         "main cancelled a run although the PR has no converted_to_draft event")
+        self.assertIn("unknown", err + self.out, "main printed no 'unknown' for a PR with no converted_to_draft event")
+
+    def test_the_draft_path_reads_the_events_once(self):
+        err, fake, _ = self.run_main([run_of(id=101, created_at=BEFORE_DRAFT, pull_requests=[{"number": PR}])],
+                                     states=("open",), pr=pr_with_draft(True),
+                                     events=[event_of("converted_to_draft", DRAFT_AT)])
+        reads = events_calls(fake.calls)
+        self.assertEqual(len(reads), 1, f"the draft path read the PR's events {len(reads)} times, want 1")
+
+    def test_the_closed_path_reads_no_events(self):
+        err, fake, _ = self.run_main([run_of(id=101)], states=("closed",),
+                                     events=[event_of("converted_to_draft", DRAFT_AT)])
+        self.assertEqual(events_calls(fake.calls), [], "the closed path read the PR's events")
 
 
 class ParserControl(unittest.TestCase):
