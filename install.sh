@@ -286,6 +286,9 @@ fi
 # $StampPlaceholder in install.ps1 (sh cannot share that code); an optional CR before the line end is kept.
 INSTALL_ID_VALUE="$(date +%Y%m%d%H%M%S)$$"
 STAMP_PLACEHOLDER='# INSTALL_ID = "uninstalled"'
+# The launcher settings.json runs in place of guard.py. It is no guard module (no guard_ name), yet it carries the
+# stamp, so its landing logs the id. install.ps1 holds the same name ($LauncherName).
+LAUNCHER_NAME='launch_guard.py'
 STAMP_CR="$(printf '\r')"
 INSTALL_FAILED=0
 # mv_retry SRC DEST: mv -f, retried 25 times at 0.1 s (the budget of Move-OverFile in install.ps1), because
@@ -982,13 +985,13 @@ gen_abort() {
 }
 
 # stage_file SRC DEST: DEST is in the stage, which no reader sees yet, so it is written in place. In guard.py and
-# guard_*.py only, the whole placeholder line gets this run's id, the same stamp install.ps1 and its post-merge
+# guard_*.py and the launcher only, the whole placeholder line gets this run's id, the same stamp install.ps1 and its post-merge
 # hook write, so hooks/guard.py can tell a half-installed set from a whole one. No other line is touched.
 # STAMP_PLACEHOLDER is the same literal as $StampPlaceholder in install.ps1 (sh cannot share that code); an
 # optional CR before the line end is kept.
 stage_file() {
   case "$1" in
-    */guard.py|*/guard_*.py)
+    */guard.py|*/guard_*.py|*/"$LAUNCHER_NAME")
       sed "s/^$STAMP_PLACEHOLDER\($STAMP_CR\{0,1\}\)\$/INSTALL_ID = \"$INSTALL_ID_VALUE\"\1/" "$1" > "$2" ;;
     *) cp "$1" "$2" ;;
   esac

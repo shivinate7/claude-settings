@@ -727,7 +727,7 @@ def _print_crash_refuse():
 def _forget_bytecode():
     """Delete the bytecode cache of every .py file in the folders the guard loads from. A cache that is corrupt
     stops the import that reads it, and the retry below would read the same bytes again; the next import then
-    recompiles the source and writes a good one. guard_launch.py keeps these caches even where the host asks for
+    recompiles the source and writes a good one. launch_guard.py keeps these caches even where the host asks for
     none, so a broken one must heal here, not stay until a reinstall."""
     for folder in {_HERE, _SET_DIR}:
         try:

@@ -22,13 +22,13 @@ Fail safe: a stale, timestamp, corrupt or other-version cache is rebuilt, and an
 falls back to compiling guard.py's source here, the plain start. This file never judges a call and never decides to
 allow one.
 
-    python3 hooks/guard_launch.py     (stdin: the hook payload, as for guard.py)
+    python3 hooks/launch_guard.py     (stdin: the hook payload, as for guard.py)
 """
 import os
 import sys
 
 # The installer stamps guard.py and every guard_*.py it copies, this launcher too, and logs each landing with the id
-# the file carries. The launcher judges nothing. main() removes the stamped name before it runs guard.py in this
+# the file carries. The launcher is no guard module and judges nothing. main() removes the stamped name before it runs guard.py in this
 # module's globals, because guard.py reads its own INSTALL_ID from those globals and must not see this file's.
 # INSTALL_ID = "uninstalled"
 
