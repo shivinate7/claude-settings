@@ -24,3 +24,12 @@ The load brake is not one of the three. Locally, an agent's own write may read t
 The doorbell (`mail wait`) is a waiting process beside these three, not one of them. Its record is the doorbell section of decision `session-messages` (ruling 3.15, owner 2026-11-11 13:22 CST). That section names cost test `test_the_decision_states_the_measured_doorbell_cost` in `hooks/test_mail_wait.py`.
 
 A model-call hook is not an exception. Each one is a child inside its own hook budget (decision `haiku-prompt-hooks`).
+
+## Adding a guard rule
+
+Decision `guard-split-by-family` (one module per guard rule family) is the standing rule.
+
+- A new rule goes in its family's module, `hooks/guard_<family>.py`, never in `hooks/guard.py`. `hooks/guard.py` is the dispatcher only.
+- The rule runs from the module's `hit(call)` (every judged call) or `shell_hit(call)` (once for every shell call). It refuses with `guard_core.refuse` and a literal rule id, or returns. The dispatcher calls both, so the rule edits no line of `hooks/guard.py`.
+- A rule with no family gets a new `hooks/guard_<family>.py`, a `FAMILIES` row in `hooks/test_guard.py` and a `GUARD_MODULE_FAMILIES` row in `hooks/mutate_guard.py`.
+- Before you add a rule, search the guard modules for one that already refuses the act. Extend that rule; do not add a second.

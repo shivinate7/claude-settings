@@ -7320,6 +7320,419 @@ class AgentEndOtherWorktreeTests(_AgentEndFixture):
             self.assertKept(lane)
 
 
+class _StageClock(_VirtualClock):
+    """_VirtualClock with the payload log's `at` stamps on the same clock, so a row's time moves only with the
+    synthetic clock. The stamp counts from a fixed EPOCH; no case reads it as a date."""
+
+    EPOCH = 1800000000.0
+
+    def strftime(self, fmt, *args):
+        return time.strftime(fmt, time.gmtime(self.EPOCH + self.now))
+
+
+class AgentEndLeastRecentFirstTests(_AgentEndFixture):
+    """The worktree stage of janitor/agent_end_reap.py resumes each run after the tree the last run judged last.
+
+    The rule: the reaper keeps its place per repo in one small cursor file, in the state folder beside the payload
+    log and named for the repo root. The file holds one tree path, the cursor. A run starts after the cursor's tree
+    in git's list order and wraps round. A cursor that names no queued tree, and a missing or unreadable cursor,
+    mean git's order from the top. The payload log is not read for order. A run writes the cursor at most once, and
+    not at all when it judged no tree.
+
+    Every tree here is dirty and 31 minutes idle, so each stays kept and a later run can judge it again. Git's list
+    order is pinned to `self.orders` (`pinned_listing`), so each case knows the cycle. The stage runs on
+    `_StageClock`: each tree's decision adds COST seconds, and a budget of (k - 0.5) * COST judges k trees per run.
+
+    setUp takes its root from the run folder. `_AgentEndFixture.setUp` takes one from the system temp dir."""
+
+    PAYLOAD_FILES = ("agent-end-payloads.jsonl", "agent-end-drops.jsonl")  # the log, its lock and temp file, and drops
+
+    def setUp(self):
+        run = _test_temp.run_folder()
+        self.addCleanup(shutil.rmtree, run, True)
+        self.root = os.path.join(run, "least-recent")
+        self.orders = {}  # repo root -> the folder names of its agent trees, in git's list order
+        import agent_end_reap
+        self.reap = agent_end_reap
+
+    def new_repo(self, tag, cfg=None):
+        """A repo of its own under the root. CFG is its config folder; by default it gets one of its own."""
+        self.primary = os.path.join(self.root, tag)
+        self.cfg = cfg or os.path.join(self.root, tag + "-cfg")
+        make_repo(self.primary, {"f.txt": "base\n", ".gitignore": ".claude/\n"})
+        give_remote(self.primary)
+
+    def tree(self, name):
+        """An agent tree on a lane branch, at the end of this repo's git order."""
+        path = self.add(name)
+        self.orders.setdefault(self.primary, []).append(os.path.basename(path))
+        return path
+
+    def dirty_tree(self, name):
+        """An agent tree with an uncommitted change, 31 minutes idle."""
+        path = self.tree(name)
+        self.dirty(path)
+        _age_admin_files(path, 31 * 60)
+        return path
+
+    def stage(self, count, tag="stage", cfg=None):
+        """A repo of COUNT dirty trees, t000 up, and an ending agent's tree. Returns (ender, queue): the tree paths
+        the stage queues, in the cycle's order."""
+        self.new_repo(tag, cfg)
+        ender = self.add("ender")
+        for n in range(count):
+            self.dirty_tree("t%03d" % n)
+        return ender, self.queue()
+
+    def queue(self):
+        """The tree paths this repo's stage queues, in git's list order."""
+        return [_norm_path(os.path.join(self.primary, ".claude", "worktrees", name))
+                for name in self.orders[self.primary]]
+
+    def pinned_listing(self):
+        """`git worktree list` as the stage reads it, with each repo's agent trees in the order `self.orders` names.
+        Entries the order does not name keep their place, in front."""
+        real = sweep.parse_worktree_list
+        orders = {_norm_path(root): names for root, names in self.orders.items()}
+
+        def listing(where):
+            entries = real(where)
+            names = orders.get(_norm_path(where))
+            if entries is None or names is None:
+                return entries
+            rank = {name: i for i, name in enumerate(names)}
+            named = sorted((e for e in entries if os.path.basename(e["path"]) in rank),
+                           key=lambda e: rank[os.path.basename(e["path"])])
+            return [e for e in entries if os.path.basename(e["path"]) not in rank] + named
+
+        return mock.patch.object(sweep, "parse_worktree_list", new=listing)
+
+    def log_file(self):
+        return os.path.join(self.cfg, "state", "agent-end-payloads.jsonl")
+
+    @staticmethod
+    def judged_row(paths, run):
+        """A payload-log row shaped as `main` writes one: one keep verdict per tree in PATHS."""
+        return {"run": run, "state": "done",
+                "worktrees": [{"path": p, "action": "keep", "reason": "dirty"} for p in paths]}
+
+    @staticmethod
+    def judged_rows(rows, ender):
+        """The rows of trees a run judged. The ending agent's own row, and the budget row, are not trees."""
+        own = _norm_path(ender)
+        return [r for r in rows if "path" in r and _norm_path(r["path"]) != own]
+
+    def reached(self, rows, ender):
+        """The tree paths a run judged, in the order it judged them."""
+        return [_norm_path(r["path"]) for r in self.judged_rows(rows, ender)]
+
+    @staticmethod
+    def short(paths):
+        return [os.path.basename(p) for p in paths]
+
+    @contextlib.contextmanager
+    def on_clock(self, clock, cost=0.0, budget=None):
+        """The reaper runs on CLOCK, with this repo's config folder and git's pinned order. Each tree's decision adds
+        COST seconds to the clock. BUDGET, when given, is the stage budget. The ender holds no process, so none is read."""
+        real = sweep.decide_agent_end_worktree
+
+        def costly(*args, **kwargs):
+            decision = real(*args, **kwargs)
+            clock.now += cost
+            return decision
+
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": self.cfg}))
+            os.environ.pop("CLAUDE_PID", None)
+            stack.enter_context(self.pinned_listing())
+            stack.enter_context(mock.patch.object(self.reap, "time", clock))
+            stack.enter_context(mock.patch.object(self.reap, "_decide", return_value=(None, [])))
+            stack.enter_context(mock.patch.object(self.reap, "all_cwds", return_value=[]))
+            stack.enter_context(mock.patch.object(sweep, "decide_agent_end_worktree", new=costly))
+            if budget is not None:
+                stack.enter_context(mock.patch.object(self.reap, "WORKTREE_SECONDS", budget))
+            yield
+
+    def payload(self, ender):
+        """The SubagentStop payload that names ENDER's agent: its agent_id is the tree name after `agent-`."""
+        return json.dumps({"hook_event_name": "SubagentStop", "agent_id": os.path.basename(ender)[len("agent-"):],
+                           "cwd": ender, "session_id": "least-recent-cases"})
+
+    def hook_run(self, ender, clock, budget, cost=1.0):
+        """One run through `main`, as the harness runs it, so its row reaches the payload log. Returns the run's
+        tree rows, read back from the log."""
+        with self.on_clock(clock, cost, budget), \
+                mock.patch.object(sys, "stdin", io.StringIO(self.payload(ender))), \
+                contextlib.redirect_stdout(io.StringIO()):
+            code = self.reap.main()
+        self.assertEqual(code, 0, "the hook exited %d" % code)
+        row = self.last_row()
+        self.assertIn("worktrees", row, "the run wrote no tree rows: the stage read no target")
+        return row["worktrees"]
+
+    def last_row(self):
+        return _read_run_log(self.log_file())[-1]
+
+    def state_files(self):
+        """The state folder's files other than the payload log's own, as {name: bytes}. A cursor file, if the
+        stage wrote one, is among them."""
+        folder = os.path.dirname(self.log_file())
+        found = {}
+        if os.path.isdir(folder):
+            for name in os.listdir(folder):
+                path = os.path.join(folder, name)
+                if os.path.isfile(path) and not name.startswith(self.PAYLOAD_FILES):
+                    with open(path, "rb") as handle:
+                        found[name] = handle.read()
+        return found
+
+    def run_and_diff(self, ender, clock, budget, cost=1.0):
+        """One run through `main`. Returns (rows, written, after): the run's tree rows, the names of the state files
+        it created or changed, and every state file after it."""
+        before = self.state_files()
+        rows = self.hook_run(ender, clock, budget, cost)
+        after = self.state_files()
+        written = sorted(name for name in after if before.get(name) != after[name])
+        return rows, written, after
+
+    def flood(self, clock, run):
+        """Another repo's 200 rows, written to the shared payload log at the clock's time, before a run."""
+        with self.on_clock(clock):
+            for n in range(200):
+                self.reap.log(self.judged_row(["/other-repo/.claude/worktrees/agent-%03d-%03d" % (run, n)],
+                                              "other-%03d-%03d" % (run, n)))
+
+    def test_second_run_starts_past_first_runs_trees(self):
+        ender, queue = self.stage(6)
+        clock = _StageClock()
+        first = self.reached(self.hook_run(ender, clock, budget=1.5), ender)
+        self.assertEqual(self.short(first), self.short(queue[0:2]),
+                         "control: run 1 did not judge the first two trees in git's order")
+        second_rows = self.hook_run(ender, clock, budget=1.5)
+        second = self.reached(second_rows, ender)
+        self.assertEqual(self.short(second), self.short(queue[2:4]),
+                         "run 2 judged %s, not the trees after run 1's cursor" % self.short(second))
+        self.assertEqual({r["action"] for r in self.judged_rows(second_rows, ender)}, {"keep"},
+                         "a tree judged in run 2 was not kept")
+
+    def test_every_tree_judged_within_ceil_runs(self):
+        count, per_run = 80, 4
+        ender, queue = self.stage(count, tag="many")
+        clock = _StageClock()
+        runs = -(-count // per_run)  # ceil(80 / 4) = 20
+        judged = set()
+        for _ in range(runs):
+            now = self.reached(self.hook_run(ender, clock, budget=per_run - 0.5), ender)
+            self.assertEqual(len(now), per_run,
+                             "control: a run judged %d trees, the budget fits %d" % (len(now), per_run))
+            judged.update(now)
+        unjudged = [p for p in queue if p not in judged]
+        self.assertEqual(len(unjudged), 0, "%d of %d trees had no judged row after %d runs of %d"
+                         % (len(unjudged), count, runs, per_run))
+
+    def test_new_tree_added_after_the_cursor_is_reached_within_one_cycle(self):
+        ender, queue = self.stage(4, tag="added")
+        clock = _StageClock()
+        first = self.reached(self.hook_run(ender, clock, budget=1.5), ender)
+        self.assertEqual(self.short(first), self.short(queue[0:2]),
+                         "control: run 1 did not judge the first two trees in git's order")
+        added = _norm_path(self.dirty_tree("t_new"))  # last in git's order, so after the cursor's tree
+        cycle = -(-len(self.orders[self.primary]) // 2)  # ceil(5 / 2) runs
+        seen = set()
+        for _ in range(cycle):
+            seen.update(self.reached(self.hook_run(ender, clock, budget=1.5), ender))
+        self.assertIn(added, seen, "the tree added after the cursor was not reached within one cycle of %d runs"
+                      % cycle)
+
+    def test_starvation_every_tree_judged_within_20_runs_under_log_flood(self):
+        """80 trees, 4 judged per run, and another repo's 200 rows written to the shared log before every run. The
+        order does not read the log, so every tree is judged within 20 runs."""
+        count, per_run = 80, 4
+        ender, queue = self.stage(count, tag="flood")
+        clock = _StageClock()
+        runs = -(-count // per_run)  # ceil(80 / 4) = 20
+        judged = set()
+        for run in range(runs):
+            self.flood(clock, run)
+            now = self.reached(self.hook_run(ender, clock, budget=per_run - 0.5), ender)
+            self.assertEqual(len(now), per_run,
+                             "control: run %d judged %d trees, the budget fits %d" % (run + 1, len(now), per_run))
+            judged.update(now)
+        unjudged = [p for p in queue if p not in judged]
+        self.assertEqual(len(unjudged), 0, "%d of %d trees had no judged row after %d runs under the log flood"
+                         % (len(unjudged), count, runs))
+
+    def test_unreadable_or_missing_cursor_keeps_git_order_and_is_rewritten(self):
+        for damage in ("missing", "unreadable"):
+            with self.subTest(cursor=damage):
+                ender, queue = self.stage(6, tag="cursor-" + damage)
+                clock = _StageClock()
+                _, written, _ = self.run_and_diff(ender, clock, budget=1.5)
+                state = os.path.dirname(self.log_file())
+                for name in written:  # run 1's cursor: remove it, or leave bytes no cursor reads as one
+                    if damage == "missing":
+                        os.remove(os.path.join(state, name))
+                    else:
+                        write(os.path.join(state, name), "\x00 not a cursor {")
+                rows, written, _ = self.run_and_diff(ender, clock, budget=1.5)
+                self.assertEqual(self.short(self.reached(rows, ender)), self.short(queue[0:2]),
+                                 "with the %s cursor the stage did not start from git's first tree" % damage)
+                self.assertEqual(len(written), 1, "run 2 wrote %d cursor files after the %s cursor, want one fresh one"
+                                 % (len(written), damage))
+                rows, _, _ = self.run_and_diff(ender, clock, budget=1.5)
+                self.assertEqual(self.short(self.reached(rows, ender)), self.short(queue[2:4]),
+                                 "the fresh cursor after the %s cursor does not resume past run 2" % damage)
+
+    def test_a_run_writes_at_most_one_cursor_file_of_bounded_size(self):
+        ender, queue = self.stage(6, tag="cost")
+        clock = _StageClock()
+        bound = 160 * len(queue) + 256  # slack over one path: a cursor that grew a line each run would pass it
+        for run in range(12):  # two cycles: a cursor that grew a line a run would pass the bound
+            _, written, after = self.run_and_diff(ender, clock, budget=1.5)
+            self.assertEqual(len(written), 1, "run %d wrote %d cursor files, want one" % (run + 1, len(written)))
+            size = len(after[written[0]])
+            self.assertLessEqual(size, bound, "run %d left a cursor of %d bytes, over %d for %d trees"
+                                 % (run + 1, size, bound, len(queue)))
+        rows, written, _ = self.run_and_diff(ender, clock, budget=-1.0)
+        self.assertEqual(self.judged_rows(rows, ender), [], "control: a run with no budget judged a tree")
+        self.assertEqual(written, [], "a run that judged no tree wrote %s" % written)
+
+    def test_two_repos_keep_separate_cursors(self):
+        """Two repos share one state folder. Each repo's run resumes after its own cursor, whatever the other ran."""
+        shared = os.path.join(self.root, "shared-cfg")
+        clock = _StageClock()
+        a_ender, a_queue = self.stage(4, tag="repo-a", cfg=shared)
+        b_ender, b_queue = self.stage(4, tag="repo-b", cfg=shared)
+        a1 = self.reached(self.hook_run(a_ender, clock, budget=1.5), a_ender)
+        self.assertEqual(self.short(a1), self.short(a_queue[0:2]), "control: repo A's run 1")
+        b1 = self.reached(self.hook_run(b_ender, clock, budget=1.5), b_ender)
+        self.assertEqual(self.short(b1), self.short(b_queue[0:2]), "control: repo B's run 1")
+        a2 = self.reached(self.hook_run(a_ender, clock, budget=1.5), a_ender)
+        self.assertEqual(self.short(a2), self.short(a_queue[2:4]),
+                         "repo A's run 2 did not resume after its own cursor, after repo B ran")
+        b2 = self.reached(self.hook_run(b_ender, clock, budget=1.5), b_ender)
+        self.assertEqual(self.short(b2), self.short(b_queue[2:4]), "repo B's run 2 did not resume after its own cursor")
+
+    def test_cursor_naming_a_removed_tree_restarts_from_the_top(self):
+        ender, queue = self.stage(4, tag="removed")
+        clock = _StageClock()
+        rows, written, _ = self.run_and_diff(ender, clock, budget=1.5)
+        self.assertEqual(self.short(self.reached(rows, ender)), self.short(queue[0:2]),
+                         "control: run 1 did not judge the first two trees in git's order")
+        gone = queue[1]  # run 1 judged this tree last, so its cursor names it
+        require(run_vcs(self.primary, "worktree", "remove", "--force", gone).returncode == 0,
+                "removing %s failed" % gone)
+        self.orders[self.primary].remove(os.path.basename(gone))
+        rows = self.hook_run(ender, clock, budget=1.5)  # no error: hook_run asserts the run wrote its tree rows
+        self.assertEqual(self.short(self.reached(rows, ender)), self.short([queue[0], queue[2]]),
+                         "a cursor naming a removed tree did not restart from git's top")
+        self.assertEqual(len(written), 1, "run 1 wrote no cursor, so no cursor named the removed tree")
+
+    def test_a_run_that_removed_every_tree_it_judged_resumes_past_them(self):
+        """Two kept trees, a clean pair the run removes, then two kept trees; a budget of two trees a run. Run 2 judges
+        and removes the clean pair, so the cursor it leaves names a tree that is gone. Run 3 still resumes past that
+        pair, at the trees after it, and does not go back to git's top."""
+        self.new_repo("gone-pair")
+        ender = self.add("ender")
+        self.dirty_tree("d0")
+        self.dirty_tree("d1")
+        _age_admin_files(self.tree("c0"), 31 * 60)
+        _age_admin_files(self.tree("c1"), 31 * 60)
+        self.dirty_tree("d2")
+        self.dirty_tree("d3")
+        clock = _StageClock()
+        six = ["agent-d0", "agent-d1", "agent-c0", "agent-c1", "agent-d2", "agent-d3"]
+        self.assertEqual(self.short(self.queue()), six, "scope: the stage did not queue the six trees in git's order")
+        rows = self.hook_run(ender, clock, budget=1.5)
+        self.assertEqual(self.short(self.reached(rows, ender)), six[0:2],
+                         "control: run 1 did not judge the first two trees in git's order")
+        rows = self.hook_run(ender, clock, budget=1.5)
+        self.assertEqual(self.short(self.reached(rows, ender)), six[2:4], "control: run 2 did not judge the clean pair")
+        self.assertEqual([r["action"] for r in self.judged_rows(rows, ender)], ["reap", "reap"],
+                         "control: run 2 did not remove the clean pair")
+        rows = self.hook_run(ender, clock, budget=1.5)
+        self.assertEqual(self.short(self.reached(rows, ender)), six[4:6],
+                         "after run 2 removed every tree it judged, run 3 went back to git's top")
+
+    def test_a_run_whose_removals_failed_leaves_a_cursor_past_them(self):
+        """Two clean trees whose `git worktree remove` is refused, then two dirty trees; a budget of two trees a run.
+        A refused removal leaves its tree on disk, and the stage counts that tree as kept, so the cursor moves past it.
+        Run 1 writes a cursor at its last refused tree, and run 2 starts after the refused pair and judges the two dirty
+        trees.
+        The refusal is simulated: each remove of a clean tree returns git's failure, and every other git call runs for
+        real."""
+        self.new_repo("failed-pair")
+        ender = self.add("ender")
+        clean = [self.tree("c0"), self.tree("c1")]
+        for path in clean:
+            _age_admin_files(path, 31 * 60)
+        self.dirty_tree("d0")
+        self.dirty_tree("d1")
+        queue = self.queue()
+        self.assertEqual(self.short(queue), ["agent-c0", "agent-c1", "agent-d0", "agent-d1"],
+                         "scope: the stage did not queue the two clean trees, then the two dirty ones")
+        refused = {_norm_path(p) for p in clean}
+        real_run = subprocess.run
+
+        def refuse_clean_removal(argv, *args, **kwargs):
+            if (isinstance(argv, list) and argv[3:5] == ["worktree", "remove"]
+                    and any(_norm_path(str(part)) in refused for part in argv)):
+                return subprocess.CompletedProcess(argv, 1, stdout="", stderr="fault: removal refused")
+            return real_run(argv, *args, **kwargs)
+
+        clock = _StageClock()
+        with mock.patch.object(subprocess, "run", new=refuse_clean_removal):
+            first_rows = self.hook_run(ender, clock, budget=1.5)
+            second_rows = self.hook_run(ender, clock, budget=1.5)
+        with self.subTest(precondition="run 1 judged the two clean trees and each removal was refused"):
+            self.assertEqual(self.short(self.reached(first_rows, ender)), self.short(queue[0:2]),
+                             "control: run 1 did not judge the first two trees in git's order")
+            judged = self.judged_rows(first_rows, ender)
+            self.assertTrue(all(r["action"] == "reap" and r.get("error") for r in judged),
+                            "control: run 1's removals were not refused: %s" % [(r["action"], r.get("error")) for r in judged])
+            self.assertTrue(all(os.path.isdir(p) for p in clean), "control: a refused tree was removed")
+        with self.subTest(arm="run 2 judges the two dirty trees after the failed ones"):
+            self.assertEqual(self.short(self.reached(second_rows, ender)), self.short(queue[2:4]),
+                             "run 2 judged %s, not the two trees after run 1: a refused removal counts as kept, "
+                             "so the cursor should move past the refused pair and run 2 should start after it"
+                             % self.short(self.reached(second_rows, ender)))
+
+    def test_order_changes_no_decision(self):
+        """The same mixed set, judged in git's order and in its reverse, gives each tree the same verdict. The
+        reverse run is checked to judge in that order, so the control really changed the order."""
+        results = {}
+        for tag, reverse in (("forward", False), ("reverse", True)):
+            ender, trees = self.mixed_stage(tag)
+            if reverse:
+                self.orders[self.primary].reverse()
+            queue = self.queue()
+            rows = self.hook_run(ender, _StageClock(), budget=1000.0, cost=0.0)
+            self.assertEqual(self.reached(rows, ender), queue,
+                             "control: the %s run did not judge in the order git's list gave" % tag)
+            names = {_norm_path(p): name for name, p in trees.items()}
+            results[tag] = {names[_norm_path(r["path"])]: r["action"] for r in self.judged_rows(rows, ender)}
+        self.assertEqual(results["forward"],
+                         {"dirty": "keep", "unpushed": "keep", "clean": "reap", "live": "keep"},
+                         "control: the mixed set's verdicts are not the expected ones")
+        self.assertEqual(results["reverse"], results["forward"], "the judging order changed a verdict")
+
+    def mixed_stage(self, tag):
+        """One repo holding a dirty tree, an unpushed one, a clean pushed one, and one under a live lock, each 31
+        minutes idle. Returns (ender, {name: path})."""
+        self.new_repo(tag)
+        ender = self.add("ender")
+        trees = {"dirty": self.dirty_tree("dirty")}
+        trees["unpushed"] = self.tree("unpushed")
+        self.unpushed(trees["unpushed"])
+        _age_admin_files(trees["unpushed"], 31 * 60)
+        trees["clean"] = self.tree("clean")
+        _age_admin_files(trees["clean"], 31 * 60)
+        trees["live"] = self.tree("live")
+        self.lock(trees["live"], self.live_lock_reason("live"))
+        _age_admin_files(trees["live"], 31 * 60)
+        return ender, trees
+
+
 class AgentEndRulingTests(_AgentEndFixture):
     """Edge cases of the agent-end stage. Most cases run the hook in a subprocess (`fire`,
     `fire_under_host`). A fault that must land inside the stage (a faked cwd read, a lock taken

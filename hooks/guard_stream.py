@@ -1459,8 +1459,61 @@ def _fg_tokens_hit(tokens, depth: int) -> str:
     return next((hit for seg in split_segments(script) if (hit := fg_long_segment(seg, depth + 1))), "") if script else ""
 
 
+# The short merge tool options, named from MERGE_OPTIONS (hooks/merge_options.py, the one home of the tool's option
+# names; importing merge/merge.py for its parser would load the whole tool on each long-capable call). Whether an
+# option takes a value is read from build_parser() in merge/merge.py: -C/--repo-dir, --session and --head do;
+# --ready, --confirm and --express do not. A renamed option drops out of these sets, so the call is refused, never exempt.
+FG_MERGE_EXEMPT_FLAGS = frozenset(name for name in MERGE_OPTIONS if name in ("--ready", "--confirm", "--express"))
+FG_MERGE_EXEMPT_VALUE_FLAGS = frozenset(name for name in MERGE_OPTIONS if name in ("--repo-dir", "--session", "--head")) | {"-C"}
+
+
+def _fg_merge_exempt(segment: str) -> bool:
+    """True when the segment runs a short merge tool call: one PR number, with `--ready`, `--confirm`, `--express`,
+    `--head SHA`, `--session NAME` and `-C PATH` (or `--repo-dir PATH`) in any order. guard_merge's one reader says which
+    segment runs the merge tool (a git merge, or merge text in a string or heredoc, is not one). Any other option, such as
+    `--lane-lint` (a long local test run), or a value that is missing or starts with `-`, is not exempt."""
+    import guard_merge  # Lazy: only a call that can run long pays to load the merge tool reader.
+    args = guard_merge.merge_tool_args(segment)
+    if not args:
+        return False
+    number, at = None, 0
+    while at < len(args):
+        arg = args[at]
+        name, equals, value = arg.partition("=")
+        if arg in FG_MERGE_EXEMPT_FLAGS:
+            pass
+        elif equals and name.startswith("--") and name in FG_MERGE_EXEMPT_VALUE_FLAGS:
+            if not value or value.startswith("-"):
+                return False
+        elif arg in FG_MERGE_EXEMPT_VALUE_FLAGS:
+            at += 1
+            if at >= len(args) or args[at].startswith("-"):
+                return False
+        elif arg.startswith("-"):
+            return False
+        elif number is None and arg.isdigit():
+            number = arg
+        # Any other word is a value split off a substitution (`$(git rev-parse HEAD)`); _fg_merge_inner_hit judges what it runs.
+        at += 1
+    return number is not None
+
+
+def _fg_merge_inner_hit(segment: str, depth: int) -> str:
+    """The matched text when a command substitution, backtick or process substitution inside a merge tool
+    segment runs a long command, else ''. The segment's own words stay exempt; the long part does not.
+    A cut too deep to read is judged as a refusal."""
+    found, too_deep = _substitutions(segment)
+    if too_deep:
+        return "merge nested substitution"
+    return next((hit for text, _in_message in found[:-1] for part in split_segments(text)
+                 if (hit := fg_long_segment(part, depth + 1))), "")
+
+
 def fg_long_segment(segment: str, depth: int = 0) -> str:
-    """The matched text when one segment can run long, else ''."""
+    """The matched text when one segment can run long, else ''. A short merge tool call is exempt, but a long
+    command inside it is not; the other segments of the same call are still judged."""
+    if _fg_merge_exempt(segment):
+        return _fg_merge_inner_hit(segment, depth)
     tokens = segment_tokens(segment)
     return _fg_tokens_hit(tokens, depth) if tokens else ""
 
