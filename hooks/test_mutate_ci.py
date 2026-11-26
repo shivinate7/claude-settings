@@ -1999,6 +1999,12 @@ class GuardModuleFamilyTests(unittest.TestCase):
         self.assertIn("impeccable", families, "hooks/guard_impeccable.py needs a GUARD_MODULE_FAMILIES row that names the "
                                               "impeccable family, the family of its review-only rule")
 
+    def test_guard_readonly_has_a_row_that_names_the_readonly_shell_write_family(self):
+        """The readonly family moved to hooks/guard_readonly.py, so its mutants meet the readonly-shell-write section from its own row."""
+        families = guard_table().get("hooks/guard_readonly.py") or []
+        self.assertIn("readonly-shell-write", families, "hooks/guard_readonly.py needs a GUARD_MODULE_FAMILIES row that names "
+                                                        "the readonly-shell-write family, the family of its read-only write rule")
+
     def test_guard_workflow_args_has_a_row_that_names_the_workflow_args_family(self):
         """The workflow-args family moved to hooks/guard_workflow_args.py, so its mutants meet the Workflow args section from its own row."""
         families = guard_table().get("hooks/guard_workflow_args.py") or []
