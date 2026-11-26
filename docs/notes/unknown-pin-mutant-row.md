@@ -1,0 +1,1 @@
+- unknown-pin-mutant-row: the unknown-pin mutant row sits in the literal table of hooks/mutate_guard.py (lines 2299-2301). Open pull request 3935 moves that table to per-rule files, so move the row with it when 3935 lands. Review finding F6. Seen: 2026-11-25 x1

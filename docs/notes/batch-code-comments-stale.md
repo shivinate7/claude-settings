@@ -1,0 +1,1 @@
+- batch-code-comments-stale: code comments and docstrings still say only a batch runner owns a batch and credit the count of 10 to the Nov 20 ruling: merge/merge.py lines 47-48, 194, 3205, 3247-3248 and 3276, and merge/combine_train.py line 12. The batch verdict slice changes them. Seen: 2026-11-25 x1

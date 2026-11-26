@@ -12,6 +12,8 @@ Owner, 2026-11-25 19:06 CST, relayed by the coordinating session (Sim Manager), 
 
 Owner, 2026-11-25 19:09 CST, same relay, refusing a size budget and a growth check: "if we're principled then we should just never see this kind of bloat, the gap/miss here was good practices ... the guards should've just been better split files"
 
+Owner, 2026-11-25 20:53 CST, relayed by the coordinating session (Sim Manager), on merging four pairs of overlapping rules (records-page-ready into ready-mcp-mark-guard, verdict-pipe into check-tail, push-main into force-push, ask-alone into agent-model-cap): "Approved"
+
 ## What it means
 
 The lane reads the rulings this way; the owner's words are quoted above.
@@ -30,6 +32,7 @@ The lane reads the rulings this way; the owner's words are quoted above.
 ## State
 
 - Built: the Oct split (16 `guard_*.py` modules), and the `hit` and `shell_hit` calls.
+- Merged: push-main into force-push.
 - In progress: lane `guard-split` moves the families still in `guard.py` into their modules, one PR per family.
 - Not covered by `hit`: a rule that no override lifts still adds its test to `never_lifted`, and a SubagentStop rule still edits `judge_stop`.
 
