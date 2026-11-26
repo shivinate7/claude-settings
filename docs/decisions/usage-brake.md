@@ -59,7 +59,7 @@ The code home is open with question 14.Q2. The first lane names it after the mea
 
 Rulings go to a tracked home at once (decision `precompact-handoff`, item 5). This record is the tracked home for the usage brake ruling.
 
-No guard on main refuses a ruling kept only in a handoff. The nearest guards, `handoff-sections` and `handoff-checked-stamp` in `hooks/guard.py`, check section names and premise stamps.
+No guard on main refuses a ruling kept only in a handoff. The nearest guards, `handoff-sections` and `handoff-checked-stamp` in `hooks/guard.py`, check section names and premise stamps. <!-- glossary-ok: the guard's fixed rule id, as hooks/guard.py names it -->
 
 ## When this record changes
 
