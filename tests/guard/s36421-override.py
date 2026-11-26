@@ -640,7 +640,7 @@ def op_log_check():
 
 
 for _label, _check in (
-    ("opus override: `opus 2h` lets an Opus spawn through, an agent's too, until it ends", op_timed_check),
+    ("opus override: a held Opus lifts an Opus spawn through, an agent's too, until it ends", op_timed_check),
     ("opus override: `opus 15m` lasts fifteen minutes and `opus off` ends it", op_minutes_check),
     ("opus override: `opus builders 2h` lifts only builder spawns", op_role_check),
     ("opus override: it covers only the session that typed it", op_scope_check),

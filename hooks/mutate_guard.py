@@ -3085,7 +3085,7 @@ MUTATIONS = [
     ("opus override: the end instant still lifts",
      '    if at >= until or (role is not None',
      '    if at > until or (role is not None',
-     "override", 'opus override: `opus 2h` lets an Opus spawn through'),
+     "override", 'opus override: a held Opus lifts an Opus spawn through'),
     # THE OWNER'S MODEL HOLD (hooks/override.py). Each row names the case that kills it.
     ("owner-model-word: the hold reader drops `end`, so a hold that ends at the report outlives it",
      '"end": data.get("end"),',
@@ -3094,7 +3094,7 @@ MUTATIONS = [
     ("owner-model-word: take() has no `until` check, so a held model lifts a spawn past its 2 h end",
      '    if at >= until or (role is not None and role != str(spawn_role).lower()):',
      '    if role is not None and role != str(spawn_role).lower():',
-     "override", "opus override: `opus 2h` lets an Opus spawn through, an agent's too, until it ends"),
+     "override", "opus override: a held Opus lifts an Opus spawn through, an agent's too, until it ends"),
     ("owner-model-word: take() lets a held sonnet lift the Opus ceiling, since the model check is dropped",
      'if hold["model"] != ("opus" if model is None else _family(model)):',
      'if False:',
