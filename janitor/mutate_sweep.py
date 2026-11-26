@@ -701,9 +701,14 @@ MUTATIONS = [
      "test_second_run_starts_past_first_runs_trees"),
     ("agent-end reap: the cursor is never written, so a run leaves none for the next",
      "agent_end_reap",
-     '        write_cursor(root, last_kept or last_any)',
+     '        write_cursor(root, last_kept)',
      '        pass',
      "test_a_run_writes_at_most_one_cursor_file_of_bounded_size"),
+    ("agent-end reap: a run that removed every tree it judged still rewrites the cursor, to a gone tree",
+     "agent_end_reap",
+     '            rows.append(decision)\n            if decision["action"] != "reap":\n                last_kept = _tree_key(entry["path"])',
+     '            rows.append(decision)\n            last_kept = _tree_key(entry["path"])',
+     "test_a_run_that_removed_every_tree_it_judged_resumes_past_them"),
     # only_on="linux": the proving case is in AgentEndDeadHostLockTests, skipped off Linux (/proc).
     # `_restore_cut_short` reads the finish proof for a locked tree: a cut-short removal under a dead
     # host's lock is written back only when the agent is proven finished. Passing False reads every
