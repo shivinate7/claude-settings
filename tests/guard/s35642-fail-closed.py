@@ -8,7 +8,12 @@ def _guard_siblings(folder):
     return sorted(e[:-3] for e in os.listdir(folder) if e.startswith("guard_") and e.endswith(".py"))
 
 
-FAILCLOSED_MODULES = tuple(_guard_siblings(os.path.dirname(GUARD)))
+# The modules the write-family move adds (decision guard-split-by-family). This section is their one home: the
+# fail-closed, order, load and stamp checks below read this list. Each one is a guard_*.py that guard.py imports.
+FAMILY_MOVE_MODULES = ("guard_write", "guard_readonly", "guard_model_cap", "guard_cite", "guard_checkout",
+                       "guard_handoff", "guard_paths", "guard_scratchpad_owner", "guard_pages",
+                       "guard_impeccable", "guard_simulator", "guard_workflow_args", "guard_ci_wait")
+FAILCLOSED_MODULES = tuple(sorted(set(_guard_siblings(os.path.dirname(GUARD))) | set(FAMILY_MOVE_MODULES)))
 FAILCLOSED_REMEDY = ("install.sh", "install.ps1")
 FAILCLOSED_CALL = "ls"                # harmless: a refusal can only come from the missing module
 FAILCLOSED_CONTROL = "pkill -f node"  # an intact copy denies it, so its exit code is the deny's
@@ -282,7 +287,7 @@ PLACEHOLDER_LINE = '# INSTALL_ID = "uninstalled"'
 def _every_loaded_module_carries_the_placeholder():
     """guard.py and each module of its load list hold the placeholder line, so an install stamps every one."""
     folder = os.path.dirname(GUARD)
-    names = ("guard",) + _guard_family_constant(GUARD)
+    names = tuple(sorted(set(("guard",) + _guard_family_constant(GUARD) + FAMILY_MOVE_MODULES)))
     bare = []
     for name in names:
         try:
@@ -293,7 +298,7 @@ def _every_loaded_module_carries_the_placeholder():
         if PLACEHOLDER_LINE not in lines:
             bare.append(name)
     if bare:
-        return False, "no placeholder line in %s: an installed copy leaves them unstamped" % ", ".join(sorted(bare))
+        return False, "no placeholder line, or no file, in %s: an installed copy leaves them unstamped" % ", ".join(sorted(bare))
     return True, "guard.py and the %d modules it loads each carry the placeholder line" % (len(names) - 1)
 
 
@@ -328,3 +333,41 @@ LOG_CHECKS_EXTRA.append(("install-stamp: every module the guard loads carries th
                          _every_loaded_module_carries_the_placeholder))
 LOG_CHECKS_EXTRA.append(("install-stamp: a stamped copy allows the plain call, not guard-crash",
                          stamped_install_check))
+
+
+def _moved_modules_load_in_list_order():
+    """The moved modules sit in guard._FAMILY_MODULES, in FAMILY_MOVE_MODULES' order, just before guard_mask_script.
+    The tuple still ends guard_mask_script, guard_wsl: the tail the list pin above reads."""
+    order = _guard_family_constant(GUARD)[1:]
+    absent = [name for name in FAMILY_MOVE_MODULES if name not in order]
+    if absent:
+        return False, "not in guard._FAMILY_MODULES: %s" % ", ".join(absent)
+    stop = order.index("guard_mask_script")
+    if order[stop - len(FAMILY_MOVE_MODULES):stop] != FAMILY_MOVE_MODULES:
+        return False, "not directly before guard_mask_script, in list order"
+    if order[-2:] != ("guard_mask_script", "guard_wsl"):
+        return False, "the tuple no longer ends guard_mask_script, guard_wsl"
+    return True, "the %d moved modules sit just before guard_mask_script, in list order" % len(FAMILY_MOVE_MODULES)
+
+
+def _loader_imports_moved_modules():
+    """guard.py's module-level retry loop imports each moved module by name. A load that misses one retries and fails closed."""
+    with open(GUARD, encoding="utf-8") as handle:
+        tree = ast.parse(handle.read(), filename=GUARD)
+    imported = set()
+    for loop in (node for node in tree.body if isinstance(node, ast.While)):
+        for node in ast.walk(loop):
+            if isinstance(node, ast.Import):
+                imported.update(alias.name for alias in node.names)
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                imported.add(node.module)
+    absent = [name for name in FAMILY_MOVE_MODULES if name not in imported]
+    if absent:
+        return False, "the loader's retry loop does not import %s" % ", ".join(absent)
+    return True, "the loader's retry loop imports each of the %d moved modules" % len(FAMILY_MOVE_MODULES)
+
+
+LOG_CHECKS_EXTRA.append(("write family move: the moved modules sit in _FAMILY_MODULES in list order, before guard_mask_script",
+                         _moved_modules_load_in_list_order))
+LOG_CHECKS_EXTRA.append(("write family move: the retry loop imports each moved module by name",
+                         _loader_imports_moved_modules))

@@ -36,7 +36,8 @@ RerunCache: a rerun at the same key runs no passing step and prints PASS (cached
   variable, a changed tool file that ci-job runs, an edited action file a remote uses: step runs from the install or the pointer
   checkout, a changed tree a step before it wrote into, an amend with the same tree, a moved base, and a saved pass seven days old
   from its save (a hit does not refresh it) each miss too. The same commit in another worktree hits, a volatile variable does not
-  change the key, and past 300 saved passes the oldest are pruned.
+  change the key. Past 300 fresh saves every one still hits: only the seven-day age removes a save, and an 8-day-old save goes on
+  the next save (the Cost line names that bound, and its size).
 ScopeLint: --lint with a base reads each needs.scope.outputs flag from the repo's .github/scripts/ci-scope.sh, the script CI's scope
   job runs, on the diff to the base. A step gated on a false flag is skipped. A flag the script does not give, or a script that
   fails, leaves its step to run, and the log says UNKNOWN scope.
@@ -3860,7 +3861,7 @@ class RerunCache(unittest.TestCase):
     the message misses, and a new lane lint merge of one pushed head hits. It holds the base commit, so a moved base misses. It
     does not hold the checkout's path, so the same commit in another worktree hits. A volatile variable never changes the key.
     An action file that a remote uses: step runs from the install or the pointer checkout, so an edit to that file misses.
-    Past 300 saved passes, the oldest are pruned.
+    The store has no count cap: past 300 fresh saves each still hits, and only the seven-day age removes a save.
     Each case runs bin/ci-job, or a copied install of it, in a fresh repo under RUN_FOLDER."""
 
     install = CodeCheckFromCopiedInstall.install  # the copied install: this class calls it, it does not copy it
@@ -4292,25 +4293,72 @@ class RerunCache(unittest.TestCase):
                          "so a step's head.sha reads a pass saved for a different head\n%s" % out)
         self.assertEqual(rc, 0, out)
 
-    def test_past_three_hundred_saved_passes_the_oldest_are_pruned(self):
+    def test_three_hundred_one_fresh_saves_keep_every_pass_and_each_still_hits(self):
+        self.fixture()
+        cache = os.path.join(self.home, "cache", "claude-settings", "ci-job-pass")
+        steps = (rerun_step("check-a"), rerun_step("check-b"), rerun_step("check-c"))
+        before = self.files()
+        _, _, first, out = self.lane_run(*steps)
+        self.assertEqual(sorted(first), ["check-a", "check-b", "check-c"], "scope: the first run should run every step, got %r\n%s" % (first, out))
+        real = [self.saved_entry(name, before) for name in ("check-a", "check-b", "check-c")]
+        now = time.time()  # the planted ages are offsets from this, so no verdict reads the date
+        for path in real:  # older than every planted save below, so a count cap would prune these first; well inside seven days
+            os.utime(path, (now - 400 * 60, now - 400 * 60))
+        for k in range(1, 302):  # 301 fresh saves that no step keys on: plant k is k minutes old
+            self.plant_pass(cache, "%064x" % k, now - 60 * k)
+        self.assertEqual(len(os.listdir(cache)), 304, "scope: the planted store does not hold 301 fresh saves beside the three real passes")
+        _, _, ran, out = self.lane_run(rerun_step("check-new", script="check_a"), *steps)
+        self.assertIn("check-new", ran, "scope: check-new did not run, so no save ran and nothing could be pruned\n%s" % out)
+        for name in ("check-a", "check-b", "check-c"):
+            self.assertNotIn(name, ran, "%s ran again after 301 fresh saves: the store pruned its fresh pass by count, not by age\n%s" % (name, out))
+        left = len(os.listdir(cache))
+        self.assertEqual(left, 305, "a save past 300 fresh passes pruned %d of them: the store has no count cap" % (305 - left))
+
+    def test_a_save_removes_a_pass_older_than_seven_days_and_keeps_a_fresh_one(self):  # control: the age cap is kept, with a small store
         self.fixture()
         cache = os.path.join(self.home, "cache", "claude-settings", "ci-job-pass")
         os.makedirs(cache)
         now = time.time()  # the planted ages are offsets from this, so no verdict reads the date
-        planted = {"%064x" % k for k in range(1, 306)}  # plant k is k minutes old: plant 1 is the newest
-        for k in range(1, 306):
-            self.plant_pass(cache, "%064x" % k, now - 60 * k)
-        old = "%064x" % 0xABCDEF
+        old, fresh = "%064x" % 0xABCDEF, "%064x" % 0x123456
         self.plant_pass(cache, old, now - 8 * self.DAY)
-        self.assertEqual(len(os.listdir(cache)), 306, "scope: the planted store holds 306 files")
+        self.plant_pass(cache, fresh, now - 6 * self.DAY)
+        self.assertEqual(len(os.listdir(cache)), 2, "scope: the planted store does not hold the two planted passes")
         _, _, ran, out = self.lane_run(rerun_step("check-a"))
         self.assertEqual(ran, ["check-a"], "scope: check-a did not run, so no pass was saved\n%s" % out)
         left = set(os.listdir(cache))
-        self.assertEqual(len(left - planted - {old}), 1, "scope: the save kept no new pass of its own")
-        self.assertEqual(len(left), 300, "a save past 300 saved passes left %d files, not 300" % len(left))
-        self.assertEqual(left & planted, {"%064x" % k for k in range(1, 300)},
-                         "the save did not keep the 299 newest planted passes and prune the oldest")
+        self.assertEqual(len(left - {old, fresh}), 1, "scope: the save kept no new pass of its own")
         self.assertNotIn(old, left, "a pass 8 days old survived a save: the store does not age out past passes")
+        self.assertIn(fresh, left, "a pass 6 days old was removed by a save: the age cap is seven days, not less")
+
+    def cost_line(self):
+        """The Cost line of the rerun cache's comment block in bin/ci-job: from `Cost:` to the block's end, as one line."""
+        with open(CI_JOB, encoding="utf-8") as f:
+            lines = f.read().splitlines()
+        start = next((i for i, ln in enumerate(lines) if ln.startswith("# Rerun cache:")), None)
+        self.assertIsNotNone(start, "scope: bin/ci-job has no `# Rerun cache:` comment block")
+        block = []
+        for ln in lines[start:]:
+            if not ln.startswith("#"):
+                break
+            block.append(ln[1:].strip())
+        text = " ".join(block)
+        self.assertIn("Cost:", text, "scope: the rerun cache's comment block has no Cost line")
+        return text[text.index("Cost:"):]
+
+    def test_the_cost_line_names_the_seven_day_age_and_no_count_cap(self):
+        cost = self.cost_line()
+        self.assertIn("7 days", cost, "the Cost line does not name the seven-day age cap:\n%s" % cost)
+        self.assertNotRegex(cost, r"\b\d+ files?\b", "the Cost line still names a count cap of files, which the store no longer has:\n%s" % cost)
+
+    def test_the_cost_line_names_a_file_size_that_a_real_saved_pass_fits_in(self):
+        match = re.search(r"(\d+) bytes", self.cost_line())
+        self.assertIsNotNone(match, "the Cost line names no file size in bytes: it should state the measured size of a saved pass")
+        self.fixture()
+        before = self.files()
+        _, _, first, out = self.lane_run(rerun_step("check-a"))
+        self.assertEqual(first, ["check-a"], "scope: check-a did not run, so no pass was saved\n%s" % out)
+        size = os.path.getsize(self.saved_entry("check-a", before))
+        self.assertLessEqual(size, int(match.group(1)), "a saved pass is %d bytes, more than the Cost line's %s bytes" % (size, match.group(1)))
 
     def plant_pass(self, folder, name, when):
         """A saved pass planted under `name`, its mtime set to `when`: a file the store reads only by its age."""
