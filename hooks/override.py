@@ -58,12 +58,16 @@ odd answer writes nothing. The rules of the words:
     - A model whose every mention is negated (model_mentions: `Do not use opus`) is no choice: nothing is written,
       whatever the judge says. The judge's answer must name a model the words name.
     - The roles the ask names are held, two or more as a list, only when a plain list joins them (PLAIN_LIST: commas,
-      and, or, &, plus); any other words between two roles: no hold. A role word with a NEGATIONS word (not, no, don't,
-      never, except, without, or an exclusion word such as skip or instead) within three words before or after it, or
-      earlier in its own clause, is left out of the hold, never granted; an ask whose only roles are left out: no hold.
-      A role word is MODEL_ROLES: its name, its plural, or `explorer(s)`.
-    - A prompt that names Opus beside a lower model in one sentence, neither negated, holds Opus whichever model the
-      judge answered (_two_model_pick); `use sonnet, not opus` holds sonnet.
+      and, or, &, plus, the); any other words between two roles: no hold. A role word with a NEGATIONS word (not, no,
+      don't, never, except, without, or an exclusion word such as skip or instead) within three words before it, or
+      after it in its own clause, or earlier in its own clause, is left out of the hold, never granted. A negation in a
+      later clause that has a role of its own ("use opus for builders, don't use it for reviewers") reaches that role
+      only. A role that follows a left-out role in its sentence is left out too, unless a use verb stands between them
+      (USE_VERBS). An ask whose only roles are left out: no hold. A refusal word that governs another verb
+      (`don't hesitate`, `don't forget`, `don't be afraid`, `never worry`, `do not mind`: NEGATION_GOVERNED) negates
+      nothing. A role word is MODEL_ROLES: its name, its plural, or `explorer(s)`.
+    - A prompt that names two models in one sentence, neither negated (`use sonnet or even opus`), holds nothing: the
+      agents run their role's model (_names_two_models, decision agent-model-cap). `use sonnet, not opus` holds sonnet.
     - An ask for Opus or Fable that names no role takes its roles from the owner's earlier typed prompts (decision
       owner-override: scope from context, fall back to every role), before the ask only. _context_prompts reads them from
       the one tail read (_tail_prompts), through the one owner-turn test (_owner_text), each through _strip_blocks,
@@ -156,7 +160,12 @@ MODEL_NEGATION_PAIRS = {("instead", "of"), ("rather", "than")}  # negate only wh
 MODEL_SPAN_BREAKS = {"and", "but"}
 MODEL_CLAUSE_BREAK = re.compile(r"[.;,!?:\n\u2013\u2014]+")  # a negation reaches only to the end of its own clause
 NEGATION_SPAN = 3  # a negation within this many words before or after a role word negates it
-PLAIN_LIST = re.compile(r"(?:[\s,&]|\b(?:and|or|plus)\b)*", re.I)  # the only text that may join two role words
+# A refusal word before one of these governs that verb, not the ask: "Don't hesitate to use opus", "Never forget to use opus",
+# "don't be afraid to use opus". A `not` counts as one only after `do`, so "opus should not be used" still negates.
+NEGATION_GOVERNED = {"hesitate", "forget", "be", "worry", "mind"}
+NEGATION_DO_FORMS = {"dont", "don't", "don\u2019t", "never"}
+USE_VERBS = {"use", "using", "run", "running", "put", "set", "switch", "take", "try", "give", "go"}  # a word that starts a fresh ask for a role
+PLAIN_LIST = re.compile(r"(?:[\s,&]|\b(?:and|or|plus|the)\b)*", re.I)  # the only text that may join two role words
 SPELLED_UNIT = r"h(?:ours?|rs?)|m(?:ins?|inutes?)"
 ASK_LENGTH = re.compile(r"(?<![\w-])(\d+)(?:([mh])|\s?(%s))(?![\w-])" % SPELLED_UNIT, re.I)
 # A decimal length (`0.5h`, `1.5 hours`) or a compound one (`1h30m`): no clear length.
@@ -304,6 +313,14 @@ def _strip_blocks(prompt):
     return BLOCKS.sub("[pasted text]", prompt)
 
 
+def _governs_verb(words, at):
+    """True when the refusal word words[at] governs the verb after it, not the ask (NEGATION_GOVERNED): `don't hesitate`,
+    `never forget`, `do not be afraid`. `words` are lower case."""
+    if at + 1 >= len(words) or words[at + 1] not in NEGATION_GOVERNED:
+        return False
+    return words[at] in NEGATION_DO_FORMS or (words[at] == "not" and at > 0 and words[at - 1] == "do")
+
+
 def model_mentions(text, family):
     """(named, negated) for the whole words of `text` that hold the model family `family` (also inside claude-haiku-4-5 and
     haiku-4.5), read after the pasted and machine blocks are cut (_strip_blocks): `named` is true for a mention no negation
@@ -324,7 +341,8 @@ def model_mentions(text, family):
             for i in range(at - 1, -1, -1):
                 if hit or words[i] in MODEL_SPAN_BREAKS:
                     break
-                hit = words[i] in MODEL_NEGATIONS or words[i].endswith(("n't", "n\u2019t"))
+                hit = ((words[i] in MODEL_NEGATIONS or words[i].endswith(("n't", "n\u2019t")))
+                       and not _governs_verb(words, i))
             named, negated = named or not hit, negated or hit
     return named, negated
 
@@ -337,21 +355,15 @@ def _negates(text, family):
 
 
 SENTENCE_BREAK = re.compile(r"[;!?\n]+|\.(?=\s|$)")  # the end of a sentence, as the owner types it
-TWO_MODEL_PICK = "opus"  # the model main holds for a sentence that names it beside a lower model (ruling pending)
 
 
-def _two_model_pick(text, family):
-    """The model a yes for `family` holds. TWO_MODEL_PICK when `family` is below it and one sentence of `text` names both
-    with no negation reaching either ("just use sonnet agents throughout or even opus"): main's Opus hold for that
-    sentence, whichever model the judge named first. Else `family`. "use sonnet, not opus" negates Opus, so it holds
-    sonnet. A mention in another sentence ("use sonnet. The opus run was fine.") lifts nothing."""
-    order = MODEL_FAMILIES.index
-    if family not in MODEL_FAMILIES or order(family) >= order(TWO_MODEL_PICK):
-        return family
-    for sentence in SENTENCE_BREAK.split(text):
-        if model_mentions(sentence, family)[0] and model_mentions(sentence, TWO_MODEL_PICK)[0]:
-            return TWO_MODEL_PICK
-    return family
+def _names_two_models(text):
+    """True when one sentence of `text` names two models of MODEL_FAMILIES and no negation reaches either ("just use sonnet
+    agents throughout or even opus"): he gave no one model, so grant_model_ask holds nothing and the agents run their role's
+    model (decision agent-model-cap). "use sonnet, not opus" negates Opus, so it names one model. A mention in
+    another sentence ("use sonnet. The opus run was fine.") counts for nothing."""
+    return any(sum(model_mentions(sentence, family)[0] for family in MODEL_FAMILIES) > 1
+               for sentence in SENTENCE_BREAK.split(text))
 
 
 def _strip_quotes(text):
@@ -396,12 +408,39 @@ def model_role(word):
 
 def _clause_negated(text, matches, at):
     """True when a negation word stands earlier in the clause (MODEL_CLAUSE_BREAK) of the word matches[at] of `text`: a
-    NEGATIONS word or one ending n't. A negation reaches the rest of its own clause, however many words lie between."""
+    NEGATIONS word or one ending n't, unless it governs another verb (_governs_verb). A negation reaches the rest of its
+    own clause, however many words lie between."""
+    words = [m.group().lower() for m in matches]
     for i in range(at - 1, -1, -1):
         if MODEL_CLAUSE_BREAK.search(text, matches[i].end(), matches[at].start()):
             return False
-        word = matches[i].group().lower()
-        if word in NEGATIONS or word.endswith(("n't", "n\u2019t")):
+        if (words[i] in NEGATIONS or words[i].endswith(("n't", "n\u2019t"))) and not _governs_verb(words, i):
+            return True
+    return False
+
+
+def _follows_excluded(text, matches, at, excluded_end):
+    """True when the role word matches[at] follows an excluded role word that ended at `excluded_end`, in the same sentence,
+    with no verb of USE_VERBS between them: "don't use it for reviewers, nor builders" leaves both out, and "don't use it
+    for reviewers, use it for builders" leaves builders in."""
+    if excluded_end is None:
+        return False
+    between = text[excluded_end:matches[at].start()]
+    return not SENTENCE_BREAK.search(between) and not any(w.lower() in USE_VERBS for w in ROLE_WORDS.findall(between))
+
+
+def _negated_after(text, matches, at, resolve, allowed):
+    """True when a NEGATIONS word within NEGATION_SPAN words after the role word matches[at] reaches it. A negation in a later
+    clause that has a role word of its own after it ("use opus for builders, don't use it for reviewers") negates that role
+    and reaches back to no earlier one. A negation that governs another verb (_governs_verb) reaches nothing."""
+    words = [m.group().lower() for m in matches]
+    for j in range(at + 1, min(at + 1 + NEGATION_SPAN, len(words))):
+        if words[j] not in NEGATIONS or _governs_verb(words, j):
+            continue
+        if not MODEL_CLAUSE_BREAK.search(text, matches[at].end(), matches[j].start()):
+            return True
+        own = [m.group() for m in matches[j + 1:] if not MODEL_CLAUSE_BREAK.search(text, matches[j].end(), m.start())]
+        if not any(resolve(w) in allowed for w in own):
             return True
     return False
 
@@ -419,13 +458,15 @@ def _ask_scope(text, resolve=model_role, allowed=MODEL_ROLES):
         return None
     matches = list(ROLE_WORDS.finditer(text))
     words = [m.group() for m in matches]
-    roles, excluded, last_end = set(), set(), None
+    roles, excluded, last_end, excluded_end = set(), set(), None, None
     for at, word in enumerate(words):
         role = resolve(word)
         if role not in allowed:
             continue
-        if _near_negation(words, at, NEGATIONS) or _clause_negated(text, matches, at):
+        if (_near_negation(words[:at + 1], at, NEGATIONS) or _negated_after(text, matches, at, resolve, allowed)
+                or _clause_negated(text, matches, at) or _follows_excluded(text, matches, at, excluded_end)):
             excluded.add(role)
+            excluded_end = matches[at].end()
             continue
         if last_end is not None and not PLAIN_LIST.fullmatch(text, last_end, matches[at].start()):
             return None
@@ -723,9 +764,8 @@ def grant_model_ask(session_id, prompt, at, judge=None, transcript=None, source=
         ends = isinstance(hold, dict) and hold["judged"] and _negates(text, hold["model"])
         return _end_hold(session_id, path, hold["model"], "the owner's turn negates it") if ends else None
     scope = _ask_scope(text)
-    if scope is None:
+    if scope is None or _names_two_models(text):
         return None
-    family = _two_model_pick(text, family)
     length, roles = scope
     said = " ".join(text.split())
     end = None if _ask_lengths(text) else HOLD_END_REPORT  # a length he states is his; with none, the report ends it
