@@ -3435,6 +3435,29 @@ class SessionStartMainRefTests(SessionStartAgentWorktreeNoticeTests):
         self.assertEqual(len(found), 1, "expected one main-ref line for exit 3, got %r" % found)
         self.assertIn(err.splitlines()[0], found[0], "the line does not carry the installer's own text: %r" % found[0])
 
+    def test_a_list_line_over_400_characters_is_cut_to_400_and_the_remedy_prints_whole(self):
+        """The installer's stderr: one list line over 400 characters, then a Remedy line. The 400-character cap is on the list
+        part only, so the printed line is the list's first 400 characters, one space, and the whole Remedy line."""
+        list_text = "main-ref copy is behind main: " + " ".join("item-%03d" % number for number in range(120))
+        remedy = "Remedy: sh githooks/main-ref/install.sh"
+        self.assertGreater(len(list_text), 400, "scope: the list line is not over 400 characters")
+        installer = os.path.join(self.root, "long-list-install.sh")
+        self.put(installer, "#!/bin/sh\n# main-ref-check: 1\necho '%s' >&2\necho '%s' >&2\nexit 1\n" % (list_text, remedy))
+        where = self.make_repo("long-list")
+        self.ship(where, installer=installer)
+        code, _, err = self.check(where)
+        self.assertEqual(code, 1, "scope: the fixture should exit 1, exit %d: %r" % (code, err))
+        self.assertEqual(err.splitlines(), [list_text, remedy], "scope: the fixture did not print its list and Remedy lines: %r" % err)
+        code, text = self.session(where)
+        self.assertEqual(code, 0, "the hook exited %d" % code)
+        self.assertEqual(self.last_stderr, "", "the hook wrote to stderr: %r" % self.last_stderr)
+        found = [line for line in self.normal(text, where).splitlines() if "main-ref" in line]
+        self.assertEqual(len(found), 1, "expected one main-ref line for the long list, got %r" % found)
+        line = found[0]
+        self.assertTrue(line.endswith(" " + remedy), "the Remedy line is not printed whole after the list: %r" % line)
+        listed = line[:-len(" " + remedy)]
+        self.assertEqual(listed, list_text[:400], "the list part is %d characters, want its first 400: %r" % (len(listed), listed))
+
     @unittest.skipIf(DASH is None, DASH_SKIP)
     def test_the_hook_run_by_dash_prints_what_the_sh_run_prints_and_no_stderr(self):
         """Under dash, bounded_run's `set -m` has no tty to act on and prints a line to stderr on each call. The hook and its
