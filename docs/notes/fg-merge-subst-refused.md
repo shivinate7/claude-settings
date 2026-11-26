@@ -1,0 +1,1 @@
+- fg-merge-subst-refused: A flag inside an unquoted substitution, such as `--head $(git rev-parse --verify HEAD)`, is still refused though harmless (hooks/guard_stream.py:1483-1494). Seen: 2026-11-25 x1
