@@ -7136,6 +7136,47 @@ class AgentEndLeastRecentFirstTests(_AgentEndFixture):
         self.assertEqual(self.short(self.reached(rows, ender)), six[4:6],
                          "after run 2 removed every tree it judged, run 3 went back to git's top")
 
+    def test_a_run_whose_removals_failed_leaves_a_cursor_past_them(self):
+        """Two clean trees whose `git worktree remove` is refused, then two dirty trees; a budget of two trees a run.
+        A refused removal leaves its tree on disk, and the stage still reads it as judged. The stage writes a cursor
+        only for a kept tree, so run 1 writes none, and run 2 starts at git's top and judges the same two trees again.
+        The refusal is simulated: each remove of a clean tree returns git's failure, and every other git call runs for
+        real."""
+        self.new_repo("failed-pair")
+        ender = self.add("ender")
+        clean = [self.tree("c0"), self.tree("c1")]
+        for path in clean:
+            _age_admin_files(path, 31 * 60)
+        self.dirty_tree("d0")
+        self.dirty_tree("d1")
+        queue = self.queue()
+        self.assertEqual(self.short(queue), ["agent-c0", "agent-c1", "agent-d0", "agent-d1"],
+                         "scope: the stage did not queue the two clean trees, then the two dirty ones")
+        refused = {_norm_path(p) for p in clean}
+        real_run = subprocess.run
+
+        def refuse_clean_removal(argv, *args, **kwargs):
+            if (isinstance(argv, list) and argv[3:5] == ["worktree", "remove"]
+                    and any(_norm_path(str(part)) in refused for part in argv)):
+                return subprocess.CompletedProcess(argv, 1, stdout="", stderr="fault: removal refused")
+            return real_run(argv, *args, **kwargs)
+
+        clock = _StageClock()
+        with mock.patch.object(subprocess, "run", new=refuse_clean_removal):
+            first_rows = self.hook_run(ender, clock, budget=1.5)
+            second_rows = self.hook_run(ender, clock, budget=1.5)
+        with self.subTest(precondition="run 1 judged the two clean trees and each removal was refused"):
+            self.assertEqual(self.short(self.reached(first_rows, ender)), self.short(queue[0:2]),
+                             "control: run 1 did not judge the first two trees in git's order")
+            judged = self.judged_rows(first_rows, ender)
+            self.assertTrue(all(r["action"] == "reap" and r.get("error") for r in judged),
+                            "control: run 1's removals were not refused: %s" % [(r["action"], r.get("error")) for r in judged])
+            self.assertTrue(all(os.path.isdir(p) for p in clean), "control: a refused tree was removed")
+        with self.subTest(arm="run 2 judges the two dirty trees after the failed ones"):
+            self.assertEqual(self.short(self.reached(second_rows, ender)), self.short(queue[2:4]),
+                             "run 2 judged %s, not the two trees after run 1: the refused removals wrote no cursor, "
+                             "so run 2 started at git's top" % self.short(self.reached(second_rows, ender)))
+
     def test_order_changes_no_decision(self):
         """The same mixed set, judged in git's order and in its reverse, gives each tree the same verdict. The
         reverse run is checked to judge in that order, so the control really changed the order."""
