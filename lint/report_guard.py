@@ -1800,6 +1800,8 @@ def question_problem(records, turn, text, hook):
     The key's writer counts only for a send whose own result shows delivery (`delivered_tool_use_ids`) or a
     failure of `session_inactive` (`inactive_tool_use_ids`: the writer is gone, the attempt meets the duty); a
     send with no result, any other failed result or a non-delivered one does not. A transcript writer counts on the send alone.
+    A repo whose extras key `page-writer` is none or N/A (`layout.page_writer_is_none`) has no writer: with no
+    writer named in the transcript, its question passes with no send. A missing or null key keeps the refusal.
     A read whose result names no writer keeps the refusal's old text. The question box counts
     only in a repo with no waiting page. A send to @parent reaches no one there.
     Lane: a send to the parent or the page writer; a send to @parent counts only in a lane. A session whose own
@@ -1831,6 +1833,9 @@ def question_problem(records, turn, text, hook):
             return LANE_REFUSAL, ""
         # The triage session names a parent id in its record but is the page writer: its items write counts too.
     root = repo_root(hook.get("cwd"))
+    if not writer and root and layout.page_writer_is_none(root):
+        # The repo has no page writer, so the question owes no send to one.
+        return "", ""
     if not writer and root and not page_read_ran(records):
         writer = layout.page_writer_key(root)
         if writer:

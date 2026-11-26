@@ -12,7 +12,8 @@ The registry entry whose role is "waiting-page" holds the repo's waiting page: i
 The old "waiting-page" key holds the URL of that page for a repo with no such entry, or an entry with no links;
 "waiting-page-colour" (#rrggbb) and "waiting-page-icon" (an .svg or .png path in the repo) are its
 branding (`waiting_page_colour()`, `waiting_page_icon()`, read by lint/repo_colour.py). "page-writer" is the session id
-of the page's writer (`page_writer_key()`, read by the pick guard in lint/report_guard.py). The "record-branch" key
+of the page's writer (`page_writer_key()`, read by the pick guard in lint/report_guard.py); "none" or "N/A" says the repo
+has no page writer (`page_writer_is_none()`). The "record-branch" key
 names the branch of the record in a fork worktree (`record_branch()`); with no key it is "roadmap".
 `set_waiting_page()` writes one labelled link on the waiting-page entry, for triage, or the old key once when there is no entry; it never writes "rolled-out".
 
@@ -530,12 +531,24 @@ PAGE_WRITER_KEY = "page-writer"  # the extras key: the session id of the page's 
 PARENT_TARGETS = frozenset({"@parent", "parent"})  # send targets that name the parent, never a session id
 
 
+PAGE_WRITER_NONE = frozenset({"none", "n/a"})  # the key values, compared lowercased, that say the repo has no page writer
+
+
+def page_writer_is_none(root):
+    """True when the extras file of `root` sets the "page-writer" key to an explicit not-applicable value
+    (PAGE_WRITER_NONE, any case): the repo has no page writer. False for a missing or null key, which means the
+    writer is unknown, and for any other value."""
+    found = _repo_keys(root).get(PAGE_WRITER_KEY)
+    return isinstance(found, str) and found.lower() in PAGE_WRITER_NONE
+
+
 def page_writer_key(root):
     """The session id of the waiting page's writer from the extras file of `root`; None when the key is missing,
-    null, not a string, blank, padded with whitespace or a parent alias (PARENT_TARGETS). A session id is a
-    claim, not checked past that."""
+    null, not a string, blank, padded with whitespace, a parent alias (PARENT_TARGETS) or a not-applicable value
+    (`page_writer_is_none` tells that from a missing key). A session id is a claim, not checked past that."""
     found = _repo_keys(root).get(PAGE_WRITER_KEY)
-    if not isinstance(found, str) or not found or found != found.strip() or found in PARENT_TARGETS:
+    if (not isinstance(found, str) or not found or found != found.strip() or found in PARENT_TARGETS
+            or found.lower() in PAGE_WRITER_NONE):
         return None
     return found
 
