@@ -1999,6 +1999,11 @@ def case_past_rulings_caps_and_ranks():
           "closed page items" in str(unknown), str(unknown)[:200])
 
 
+# The debt cases ask about a debt: the word "debt" is in the debt record's What line and in the notes file's line, so
+# the record is scored by a shared word (the word filter keeps only records that share one with the question).
+DEBT_QUESTION = tcj.APPS_GOAL + " Is the debt still open?"
+
+
 def case_past_rulings_reads_debts():
     import question_form  # the one form check (hooks/question_form.py)
     fn = getattr(question_form, "past_rulings", None)
@@ -2008,7 +2013,7 @@ def case_past_rulings_reads_debts():
     repo = tcj.make_repo("past-debts", decisions={tcj.APPS_SLUG: tcj.APPS_RULING},
                          steps={tcj.CI_STEP_ID: tcj.CI_STEP_SENTENCE},
                          debts={tcj.DEBT_SLUG: tcj.DEBT_WHAT})
-    candidates, _ = fn(tcj.APPS_GOAL, repo)
+    candidates, _ = fn(DEBT_QUESTION, repo)
     text = str(candidates)
     check("past rulings debts: a docs/debts record's slug and What line reach the candidates",
           tcj.DEBT_SLUG in text and tcj.DEBT_WHAT in text, text[:200])
@@ -2075,7 +2080,7 @@ def case_past_rulings_skips_the_debt_notes_file():
     notes_mark = "notes-4b2c"
     repo = tcj.make_repo("past-notes-file", debts={"notes": "a note line, not a debt. Marker " + notes_mark + ".",
                                                    tcj.DEBT_SLUG: tcj.DEBT_WHAT})
-    candidates, _ = fn(tcj.APPS_GOAL, repo)
+    candidates, _ = fn(DEBT_QUESTION, repo)
     text = str(candidates)
     check("past rulings notes: a real debt record still reaches the candidates", tcj.DEBT_WHAT in text, text[:200])
     check("past rulings notes: docs/debts/notes.md is not a record and never reaches the candidates",
@@ -2117,11 +2122,11 @@ def _record_text(candidates, record_id):
     return " ".join(line[len(prefix):] for line in _record_lines(candidates, record_id))
 
 
-def _past_cap_candidates(name, section, fn):
+def _past_cap_candidates(name, section, fn, question=PAST_CAP_QUESTION):
     """(record id, candidates) for one decision whose `## The ruling` section is `section`, from past_rulings."""
     repo = tcj.make_repo(name, decisions={PAST_CAP_SLUG: section})
     with mock.patch(POINTER_CHECKOUT, return_value=repo):
-        candidates, _unknown = fn(PAST_CAP_QUESTION, repo)
+        candidates, _unknown = fn(question, repo)
     return "decisions/" + PAST_CAP_SLUG, candidates
 
 
@@ -2214,6 +2219,11 @@ def case_past_ruling_owner_sentences_added_text_is_capped():
 TABLE_FILLER_ROWS = 90  # joined, these rows run well past one record's whole ruling budget
 
 
+# The owner row's "keep" is the one word of the record that the question shares: a word the record holds, so the word
+# filter keeps the record. The table's other words are stop words or fewer than four letters.
+PAST_CAP_TABLE_QUESTION = PAST_CAP_QUESTION + " Keep it?"
+
+
 def case_past_ruling_owner_row_after_a_long_table_reaches_the_line():
     import question_form  # the one form check (hooks/question_form.py)
     fn = getattr(question_form, "past_rulings", None)
@@ -2223,7 +2233,7 @@ def case_past_ruling_owner_row_after_a_long_table_reaches_the_line():
     rows = ["| a%d | b | c |" % i for i in range(TABLE_FILLER_ROWS)]
     rows.append("| last | owner ruling 2026-11-17 19:45 CST | keep | ... |")
     section = "B" * 790 + ". \n" + "\n".join(rows)
-    record_id, candidates = _past_cap_candidates("past-owner-table-row", section, fn)
+    record_id, candidates = _past_cap_candidates("past-owner-table-row", section, fn, question=PAST_CAP_TABLE_QUESTION)
     lines = _record_lines(candidates, record_id)
     check("past rulings table: the decision record is a candidate (scope)", bool(lines), str(candidates)[:200])
     if not lines:
