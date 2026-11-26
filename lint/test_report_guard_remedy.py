@@ -557,6 +557,38 @@ class RemedyReasons(trg.SameTurnWriter, unittest.TestCase):
                          ["no step line under 'Recovered guard'"])
         self.assertEqual(record_problems(emptied, ["Unvetted guard"]), ["no step heading for 'Unvetted guard'"])
 
+    def unstarted_file_step(self):
+        """The record's step for UNSTARTED_FILE_REASON: from its Text line to the next heading."""
+        with open(RECORD, encoding="utf-8") as handle:
+            record = handle.read()
+        start = record.find("Text: `UNSTARTED_FILE_REASON`")
+        self.assertNotEqual(start, -1, "3 the record holds no step for UNSTARTED_FILE_REASON")
+        end = SECTION_END.search(record, start)
+        return record[start:end.start() if end else len(record)]
+
+    def test_3_unstarted_file_step_starts_the_lane_now_and_settles_at_merge_of_main(self):
+        # The remedy for a file-only wait: start the lane now, and settle a conflict at its merge of main.
+        step = self.unstarted_file_step()
+        self.assertIsNotNone(re.search(r"start[^.\n]*\bnow\b", step, re.I),
+                             "3 the UNSTARTED_FILE_REASON step does not say to start the lane now: %r" % step)
+        self.assertIn("merge of main", step, "3 the UNSTARTED_FILE_REASON step names no merge of main")
+
+    def test_3_unstarted_file_step_no_longer_asks_for_the_file(self):
+        # Naming the shared file is no longer a way to pass the guard, so the step must not ask for it.
+        step = self.unstarted_file_step()
+        self.assertNotIn("Name the file the two lanes share", step,
+                         "3 the UNSTARTED_FILE_REASON step still asks the session to name the shared file")
+
+    def test_3_unstarted_file_step_names_each_accepted_wording(self):
+        # Each accepted wording is written in the step, so a session can write one that the guard accepts.
+        step = self.unstarted_file_step()
+        for cause, word in (("a code need", "needs PR"), ("a measured conflict", "measured"),
+                            ("a merge-tree result", "merge-tree"), ("the owner's grant", "grant"),
+                            ("a test only the owner can run", "only the owner can run"),
+                            ("the load brake", "load brake"), ("a lane not briefed yet", "not briefed yet")):
+            with self.subTest(cause=cause):
+                self.assertIn(word, step, "3 the UNSTARTED_FILE_REASON step names no wording for %s" % cause)
+
 
 def _case_1a(name):
     def test(self):
