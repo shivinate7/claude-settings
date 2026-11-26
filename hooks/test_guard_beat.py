@@ -217,7 +217,8 @@ def reap_namespace(pids, starts, cap=5.0):
     recorded. The os, subprocess and clock are real. The signal module is a stand-in, since the reap's TERM handling
     would otherwise change this test process. HOLDER_WAIT is `cap`, a hang cap. The names the file has are run:
     stop_holders and holder_ended always, and the newer helpers when the file has them."""
-    fake_signal = types.SimpleNamespace(SIGTERM=signal.SIGTERM, SIG_IGN=signal.SIG_IGN, signal=lambda *args: None)
+    fake_signal = types.SimpleNamespace(SIGTERM=signal.SIGTERM, SIGINT=signal.SIGINT, SIG_IGN=signal.SIG_IGN,
+                                        signal=lambda *args: None)
     return Defs(["stop_holders", "holder_ended"], optional=["reap_holders", "holder_start"],
                 extra={"os": os, "subprocess": subprocess, "signal": fake_signal, "time": time,
                        "OWNED": NoOwned(), "ORPHAN_PIDS": list(pids), "HOLDER_STARTS": dict(starts),
@@ -281,6 +282,17 @@ class KillRun:
             if time.monotonic() >= deadline or self.child.poll() is not None:
                 return False
             time.sleep(0.05)
+
+    def wait_for_record(self, cap):
+        """True once the run has written its holder record, which its reap writes first. False when `cap` seconds pass
+        first, or the run ends first. A hang cap, never a pause: it polls the record file."""
+        deadline = time.monotonic() + cap
+        while True:
+            if read_pids(self.record):
+                return True
+            if time.monotonic() >= deadline or self.child.poll() is not None:
+                return False
+            time.sleep(0.02)
 
     def holders_alive(self):
         """The holders of this run still alive: the pids its record lists, its process group, and the processes its
@@ -652,6 +664,39 @@ class HoldersEndAtTheTimeoutPath(unittest.TestCase):
                          % (len(self.left), self.left))
 
 
+@unittest.skipIf(os.name == "nt", "SIGTERM and SIGINT to the runner, and the holders, are POSIX")
+class HoldersEndWhenInterruptedDuringTheReap(unittest.TestCase):
+    """A run sent SIGTERM stops its holders in a reap. A SIGINT that lands while that reap runs must not cut it short, so
+    the holders still end. The reap writes the holder record first, so the test sends the SIGINT once the record exists:
+    the run is then up and reaping, and the SIGINT lands in the reap."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.kill_run = KillRun("interrupt-mid-reap")
+        cls.reached = cls.kill_run.wait_for_output(CASE_START, cap=300)
+        cls.reaping = False
+        cls.up_at_interrupt = False
+        if cls.reached:
+            os.kill(cls.kill_run.child.pid, signal.SIGTERM)  # the runner alone: its group is not signalled
+            cls.reaping = cls.kill_run.wait_for_record(cap=TIMEOUT)
+            cls.up_at_interrupt = cls.kill_run.child.poll() is None
+            os.kill(cls.kill_run.child.pid, signal.SIGINT)  # the runner alone, while its reap runs
+        cls.left = cls.kill_run.finish()
+
+    def test_the_run_reached_a_case_before_the_signal(self):
+        self.assertTrue(self.reached, "the run printed no case line within 300 s, so it was never sent SIGTERM mid-run")
+
+    def test_the_reap_wrote_its_record_before_the_interrupt(self):
+        self.assertTrue(self.reaping, "the reap wrote no holder record, so the SIGINT was not sent into a reap")
+
+    def test_the_run_was_up_when_the_interrupt_came(self):
+        self.assertTrue(self.up_at_interrupt, "the run had ended before the SIGINT was sent, so it did not land in the reap")
+
+    def test_no_holder_is_alive_after_an_interrupt_during_the_reap(self):
+        self.assertEqual(self.left, [], "%d holder(s) of the run are alive after a SIGINT during the reap: pids %s"
+                         % (len(self.left), self.left))
+
+
 class StopHoldersChecksStartTime(unittest.TestCase):
     """The reap signals a holder only while ps still gives the start time recorded when it started. A pid that a later
     process took has another start time, so the reap leaves it alone. Real sleeps, in the reap's own namespace."""
@@ -700,6 +745,30 @@ class StopHoldersNamesAHolderLeftAlive(unittest.TestCase):
             holder.kill()
             holder.wait()
             holder.stdout.close()
+
+
+class NoteHolderReadsTheStartTimeFirst(unittest.TestCase):
+    """A holder is recorded only with its start time. An interrupt during the start-time read must leave no pid in the
+    record with no start time, since the reap then cannot tell that holder from a reused pid."""
+
+    def test_an_interrupt_during_the_start_time_read_records_no_pid(self):
+        orphans = []
+
+        def interrupted(pid):
+            raise KeyboardInterrupt  # a SIGINT that lands during the read
+
+        defs = Defs(["note_holder"], extra={"ORPHAN_PIDS": orphans, "HOLDER_STARTS": {}, "holder_start": interrupted})
+        with self.assertRaises(KeyboardInterrupt):
+            defs.call("note_holder", 4242)
+        self.assertEqual(orphans, [], "the pid was recorded before its start time was read: %r" % orphans)
+
+    def test_a_started_holder_is_recorded_with_its_start_time(self):
+        orphans, starts = [], {}
+        defs = Defs(["note_holder"], extra={"ORPHAN_PIDS": orphans, "HOLDER_STARTS": starts,
+                                            "holder_start": lambda pid: "Mon Jan  1 00:00:00 2001"})
+        defs.call("note_holder", 4242)
+        self.assertEqual(orphans, [4242])
+        self.assertEqual(starts, {4242: "Mon Jan  1 00:00:00 2001"})
 
 
 class SuiteEnvDropsTheCallersKnobs(unittest.TestCase):
