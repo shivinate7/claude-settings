@@ -1134,26 +1134,66 @@ def _red_run_present():
 
 
 def _judge_unsent(check_red_run, where, base, source, exclude, refs, extra):
-    """`check_red_run.judge` for the commits a push sends: the range less every commit a remote-tracking ref of the
-    pushed remote holds (`refs`, from `_remote_refs`). A read that fails with that exclusion is read once more
-    without it, today's wider range, so a failed read of the remote refs never lets a commit through."""
+    """`check_red_run.judge` for the commits a push sends: the range less every commit a remote-tracking ref in
+    `refs` holds (a `--remotes=<name>` option, or '' for none). A read that fails with that exclusion is read once
+    more without it, a wider range, so a failed read of the remote refs never lets a commit through."""
     try:
         return check_red_run.judge(where, base, source, exclude, remotes=refs, **extra)
     except (check_red_run.Unknown, OSError):
+        if not refs:
+            raise
         return check_red_run.judge(where, base, source, exclude, **extra)
 
 
-def _red_run_found(where, source, base, memo, is_test_rel, virtual, remote):
+def _judge_range(check_red_run, where, base, source, refs, extra, memo):
+    """`(found, last)` of `_judge_unsent` over base..source. A push that carries a gap is read again without the
+    commits the default base holds, which are not the lane's: a merge or a rebase brings them in. The default base is
+    read only then, once per push in `memo`. A default base that cannot be read is no hit, for the push would judge
+    main's commits."""
+    found, last = _judge_unsent(check_red_run, where, base, source, "", refs, extra)
+    if found:
+        if "default" not in memo:
+            memo["default"] = resolve_default_base(where) or ""
+        default = memo["default"]
+        if not default:
+            return [], ""
+        if default != base.removeprefix("refs/remotes/"):
+            found, last = _judge_unsent(check_red_run, where, base, source, default, refs, extra)
+    return found, last
+
+
+def _pushed_remote(where, remote):
+    """The configured remote a push names, else ''. A plain word is taken as a configured name, with no read. A word
+    with a `/`, `:`, `\\`, `.` or `~` in it may be a URL or a path: it is a configured name when `remote.<word>.url`
+    exists, else the name of the configured remote whose url it equals, else '' (two `git config` reads at most)."""
+    if not _NOT_A_PLAIN_NAME.search(remote):
+        return remote
+    done = _git(where, "config", "--get", "remote." + remote + ".url")
+    if done is not None and done.returncode == 0:
+        return remote
+    done = _git(where, "config", "--get-regexp", r"^remote\..*\.url$")
+    for line in (done.stdout.splitlines() if done is not None and done.returncode == 0 else []):
+        key, _, url = line.partition(" ")
+        if url == remote:
+            return key[len("remote."):-len(".url")]
+    return ""
+
+
+def _red_run_found(where, source, base, memo, is_test_rel, virtual, remote, tracking=""):
     """`(found, last)` from check_red_run.judge for the commits a push of `source` sends from `base` (the one the
     conflict check accepted), else `([], '')`. `virtual` holds the commits of the same call that have not landed.
-    A commit that a remote-tracking ref of `remote` already holds was sent before, so it is not judged (the range
-    is less `_remote_refs`, as the octopus check reads it). A clone's tracking refs can lag the remote, so on a hit
-    that holds a landed commit, and only then, the tracking refs of a configured remote are refreshed once per
-    push in `memo` (`git_reads.fetch_remote`) and the range is read again. A refresh that fails keeps the hit.
-    A push that carries a gap is read again without the commits the default base holds, which are not the
-    lane's: a merge or a rebase brings them in. The default base is read only then, once per push in `memo`. A
-    default base that cannot be read is no hit, for the push would judge main's commits. So is a failed read in
-    either pass, a message the guard cannot read, and a copy of the hooks with no check_red_run beside it."""
+    A commit that a remote-tracking ref of the pushed remote already holds (`refs/remotes/<name>/*`, and no other
+    remote's) was sent before, so it is not judged. A push by URL or path names that remote only when the URL equals a
+    configured remote's url (`_pushed_remote`); any other URL excludes nothing. The range is read first with no
+    exclusion, so a clean push costs one read. On a hit that holds a landed commit the range is read again less the
+    pushed remote's refs. A clone's tracking refs can lag the remote, or hold a branch the remote deleted, so then
+    the tracking refs of that configured remote are refreshed once per push in `memo`, with a prune
+    (`git_reads.fetch_remote`), and the range is read a third time. A refresh that fails keeps the wide hit when the
+    exclusion alone let the push through, as does a range that cannot be read after the refresh. Before the refresh,
+    `memo[("rewritten", tracking)]` takes `_rewritten` of the destination's `tracking` ref: a refresh can move that ref past `source`
+    with other people's commits, which is no rewrite of the branch.
+    A default base that cannot be read is no hit, so is a failed read before the refresh, a message the guard
+    cannot read, and a copy of the hooks with no check_red_run beside it."""
     if is_test_rel is None or virtual["unreadable"]:
         return [], ""
     try:
@@ -1162,23 +1202,28 @@ def _red_run_found(where, source, base, memo, is_test_rel, virtual, remote):
         return [], ""
     extra = {"is_test_rel": is_test_rel, "tip": virtual["tip"], "pending": virtual["pending"]}
     try:
-        refs = _remote_refs(where, remote)
-        found, last = _judge_unsent(check_red_run, where, base, source, "", refs, extra)
-        if any(row[0] != "new" for row in found) and refs != "--remotes" and ("fetched", remote) not in memo:
+        wide, wide_last = _judge_range(check_red_run, where, base, source, "", extra, memo)
+        name = _pushed_remote(where, remote) if wide else ""
+        if not name or all(row[0] == "new" for row in wide):
+            return wide, wide_last
+        refs = "--remotes=" + name
+        found, last = _judge_range(check_red_run, where, base, source, refs, extra, memo)
+        key = ("fetched", name)
+        first = key not in memo
+        if first:
+            memo[("rewritten", tracking)] = _rewritten(where, tracking, base, source)
             import git_reads  # the one home of a git call and its timeout
-            memo[("fetched", remote)] = git_reads.fetch_remote(where, remote)
-            found, last = _judge_unsent(check_red_run, where, base, source, "", refs, extra)
-        if found:
-            if "default" not in memo:
-                memo["default"] = resolve_default_base(where) or ""
-            default = memo["default"]
-            if not default:
-                return [], ""
-            if default != base.removeprefix("refs/remotes/"):
-                found, last = _judge_unsent(check_red_run, where, base, source, default, refs, extra)
+            memo[key] = git_reads.fetch_remote(where, name, prune=True)
+        if not memo[key]:
+            return (found, last) if found else (wide, wide_last)
+        if first:
+            try:
+                found, last = _judge_range(check_red_run, where, base, source, refs, extra, memo)
+            except (check_red_run.Unknown, OSError):
+                return wide, wide_last
+        return found, last
     except (check_red_run.Unknown, OSError):
         return [], ""
-    return found, last
 
 
 def red_run_reason(matched, commit=False):
@@ -1219,17 +1264,37 @@ def _rewritten(where, tracking, base, source):
     return git_reads.branch_is_ancestor(where, source, base) is False
 
 
+def _red_run_base(where, source, base, remote, memo):
+    """The base of the red-run range. The conflict check accepts the source's upstream as a base when the destination
+    has no tracking ref. An upstream on another remote than the pushed one holds commits this push does not send to
+    the pushed remote, so its tip is no base: the default base stands in for it (one `git rev-parse` more, only when the
+    base is an upstream). An upstream on the pushed remote, a local branch, or no readable default base keeps `base`."""
+    if base != source + "@{upstream}":
+        return base
+    done = _git(where, "rev-parse", "--symbolic-full-name", base)
+    full = done.stdout.strip() if done is not None and done.returncode == 0 else ""
+    if not full.startswith("refs/remotes/"):
+        return base
+    name = _pushed_remote(where, remote)
+    if name and full.startswith("refs/remotes/%s/" % name):
+        return base
+    if "default" not in memo:
+        memo["default"] = resolve_default_base(where) or ""
+    return memo["default"] or base
+
+
 def _push_hit(segment, stripped, cwd, args, is_test_rel=None, virtual=None):
     """Return `("push", file)` for the first file a `git push` would send with all three conflict markers,
     else `("red-run", (found, last, rewritten))` for the first ref that sends a test commit with no valid Red-run trailer
     (`_red_run_found`), else `("", "")`. For each ref the push names, the range is the merge base with the
     destination's remote-tracking tip, else the source's upstream, else the default base, up to the local
     source ref: in the usual case one `git diff --check`, with no read of the top folder, the source or a base
-    first. The red-run check then adds one `git log` over the same base, less the commits a remote-tracking ref of
-    the pushed remote holds (`_remote_refs`; one `git config` more for a remote named by a URL or a path). On a hit that
-    holds a landed commit it runs one `git fetch` of a plain remote name and reads the range again, then one `git rev-parse` of the
-    source (the tip an amend reaches) and one `git merge-base --is-ancestor`, plus one shallow probe when that says
-    no: a destination tracking ref the source no longer holds is a branch rewritten since its push."""
+    first. The red-run check then adds one `git log` over the same base (`_red_run_base`: the source's upstream on another
+    remote is no base), and when it hits, a second less the pushed remote's refs (`_red_run_found`, with `_pushed_remote`:
+    one `git config` more for a remote named by a URL or a path). A hit that holds a landed commit also runs one `git fetch
+    --prune` of the remote and a third read, then one `git rev-parse` of the
+    source (the tip an amend reaches) and, unless that fetch ran, one `git merge-base --is-ancestor`, plus one shallow
+    probe when that says no: a destination tracking ref the source no longer holds is a branch rewritten since its push."""
     virtual = virtual or {"tip": None, "pending": [], "unreadable": False}
     for where, source, _dest, tracking, remote, memo in _push_refs(segment, stripped, cwd, args):
         done, source, base = _checked_range(where, source, tracking, memo)
@@ -1238,11 +1303,16 @@ def _push_hit(segment, stripped, cwd, args, is_test_rel=None, virtual=None):
         name = _triplet_file(_kinds_of(done, where, source))
         if name:
             return "push", name
-        found, last = _red_run_found(where, source, base, memo, is_test_rel, virtual, remote)
+        base = _red_run_base(where, source, base, remote, memo)
+        found, last = _red_run_found(where, source, base, memo, is_test_rel, virtual, remote, tracking)
         if found:
             # `last` is the newest non-merge commit, which a merge at the tip sits above; an amend reaches only the tip.
             tip = last if last == "new" else _ref_sha(where, source)[:7]
-            return "red-run", (found, tip, _rewritten(where, tracking, base, source))
+            # Read before any refresh: a refresh that moves the tracking ref past `source` is not a rewrite.
+            rewritten = memo.get(("rewritten", tracking), None)
+            if rewritten is None:
+                rewritten = _rewritten(where, tracking, base, source)
+            return "red-run", (found, tip, rewritten)
     return "", ""
 
 

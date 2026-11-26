@@ -103,8 +103,8 @@ def commits(root, base, head, exclude, is_test_rel, remotes=""):
     """The non-merge commits of base..head, minus those `exclude` holds, oldest first, as (sha, parent, subject,
     message, test paths it adds). One `git log --numstat` reads the range and each commit's files. Raises Unknown
     when git cannot read it, or when a revision starts with a dash, which git would read as an option.
-    `remotes` is a `--remotes[=<remote>]` option (the guard's `_remote_refs`): the commits those remote-tracking
-    refs hold are left out too, for a push does not send them again."""
+    `remotes` is a `--remotes[=<remote>]` option (the guard passes `--remotes=<pushed remote>`): the commits those
+    remote-tracking refs hold are left out too, for a push does not send them again."""
     revs = [base + ".." + head] + (["^" + exclude] if exclude else [])
     if any(rev.startswith("-") or rev.startswith("^-") for rev in revs) or head.startswith("-"):
         raise Unknown("a revision starts with a dash: " + " ".join(revs))
