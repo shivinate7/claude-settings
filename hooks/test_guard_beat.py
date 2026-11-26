@@ -27,6 +27,7 @@ family of the real suite (LOADER_FAMILY), so a case costs one child run and no c
     python3 hooks/test_guard_beat.py
 """
 import ast
+import concurrent.futures
 import contextlib
 import importlib.util
 import io
@@ -535,6 +536,21 @@ def loader_run(env):
         return Run(done.returncode, out.read().decode("utf-8", "replace"), err.read().decode("utf-8", "replace"))
 
 
+LOADER_WORKERS = min(10, os.cpu_count() or 2)  # child runs at once: each thread only waits on its own child process
+
+
+def run_all(envs):
+    """loader_run on each env, LOADER_WORKERS at a time. -> the Runs, in the order given. Each child gets a config folder
+    of its own, so no two children share a guard log. The caller builds every cache root before the call."""
+    jobs = []
+    for env in envs:
+        env = dict(env)
+        env["CLAUDE_CONFIG_DIR"] = tempfile.mkdtemp(dir=RUN_FOLDER)
+        jobs.append(env)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=LOADER_WORKERS) as pool:
+        return list(pool.map(loader_run, jobs))
+
+
 def cache_file(prefix, source=GUARD):
     """The path Python writes `source`'s bytecode to, with `prefix` as the cache root (None: beside the source)."""
     saved = sys.pycache_prefix
@@ -629,6 +645,15 @@ def empty(data):
     return b""
 
 
+TAMPERS = (  # (name, the change, what the case calls the cache)
+    ("stale", stale, "a stale cache, its recorded source mtime no longer matching"),
+    ("corrupt", corrupt, "a corrupt cache, its header right and its body flipped"),
+    ("truncated", truncated, "a truncated cache, its body cut short"),
+    ("empty", empty, "an empty cache file"),
+    ("other-version", other_version, "a cache written by another version, its magic number wrong"),
+)
+
+
 class GuardLoaderCount(unittest.TestCase):
     """A guard start, through the launcher, compiles the guard and each of its modules once from a cold cache, and
     compiles none of them from a warm one. Under PYTHONDONTWRITEBYTECODE=1 the same holds: the launcher writes its
@@ -645,14 +670,12 @@ class GuardLoaderCount(unittest.TestCase):
         names = ("cold", "warm", "host-cold", "host-warm")
         cls.logs = {name: os.path.join(cls.root, name + ".log") for name in names}
         # The host's own setting: this session's shell sets PYTHONDONTWRITEBYTECODE=1, and the guard starts inherit it.
-        cls.runs = {
-            "cold": loader_run(loader_env(cache=cls.cache, probe=probe, log=cls.logs["cold"])),
-            "warm": loader_run(loader_env(cache=cls.cache, probe=probe, log=cls.logs["warm"])),
-            "host-cold": loader_run(loader_env(cache=host_cache, probe=probe, log=cls.logs["host-cold"],
-                                               dont_write=True)),
-            "host-warm": loader_run(loader_env(cache=host_cache, probe=probe, log=cls.logs["host-warm"],
-                                               dont_write=True)),
-        }
+        # A warm run reads the cache its cold run wrote, so the cold runs go first, side by side, then the warm runs.
+        first = run_all([loader_env(cache=cls.cache, probe=probe, log=cls.logs["cold"]),
+                         loader_env(cache=host_cache, probe=probe, log=cls.logs["host-cold"], dont_write=True)])
+        second = run_all([loader_env(cache=cls.cache, probe=probe, log=cls.logs["warm"]),
+                          loader_env(cache=host_cache, probe=probe, log=cls.logs["host-warm"], dont_write=True)])
+        cls.runs = {"cold": first[0], "host-cold": first[1], "warm": second[0], "host-warm": second[1]}
 
     def assert_cold(self, name, what):
         counts = guard_compiles(self.logs[name])
@@ -716,41 +739,55 @@ class GuardLoaderCache(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        # One warm run writes the guard's cache under a cache root of this class's own. Each case tampers with the warm
-        # bytes, not with the file it left, so no case reads another case's tampered file.
+        # One warm run writes the guard's cache under a cache root of this class's own: the bytes every rebuilt cache must
+        # equal. Each tampered case gets a cache root of its own holding the tampered warm bytes, so no case reads another
+        # case's file, and the cases run side by side.
         cls.root = tempfile.mkdtemp(dir=RUN_FOLDER)
         cls.cache = os.path.join(cls.root, "pyc")
         cls.path = cache_file(cls.cache)
         cls.warm = loader_run(loader_env(cache=cls.cache))
         cls.warm_bytes = read_bytes_or_none(cls.path)
+        cls.cases = {}
+        if cls.warm_bytes is None:
+            return
+        keys, paths, envs = [], [], []
+        for name, tamper, what in TAMPERS:
+            for dont_write in (False, True):
+                cache = os.path.join(cls.root, "%s-%s" % (name, "host" if dont_write else "plain"))
+                path = cache_file(cache)
+                os.makedirs(os.path.dirname(path))
+                write_bytes(path, tamper(cls.warm_bytes))
+                keys.append((name, dont_write, what + (" under PYTHONDONTWRITEBYTECODE=1" if dont_write else "")))
+                paths.append(path)
+                envs.append(loader_env(cache=cache, dont_write=dont_write))
+        for (name, dont_write, label), path, run in zip(keys, paths, run_all(envs)):
+            cls.cases[(name, dont_write)] = (run, read_bytes_or_none(path), label)
 
-    def tampered_run(self, tamper, what):
+    def assert_rebuilt(self, name):
         if self.warm_bytes is None:
             self.fail("no guard cache was written at %s by a guard call, so there is no cache to tamper with (%s)"
-                      % (self.path, what))
+                      % (self.path, name))
         for dont_write in (False, True):
-            label = what + (" under PYTHONDONTWRITEBYTECODE=1" if dont_write else "")
+            run, after, label = self.cases[(name, dont_write)]
             with self.subTest(host_env=dont_write):
-                write_bytes(self.path, tamper(self.warm_bytes))
-                run = loader_run(loader_env(cache=self.cache, dont_write=dont_write))
                 loader_clean(self, run, label)
-                self.assertEqual(read_bytes_or_none(self.path), self.warm_bytes,
+                self.assertEqual(after, self.warm_bytes,
                                  "%s: the cache was not rebuilt to the bytes a warm start writes" % label)
 
     def test_stale_cache_gives_the_uncached_verdicts(self):
-        self.tampered_run(stale, "a stale cache, its recorded source mtime no longer matching")
+        self.assert_rebuilt("stale")
 
     def test_corrupt_cache_gives_the_uncached_verdicts(self):
-        self.tampered_run(corrupt, "a corrupt cache, its header right and its body flipped")
+        self.assert_rebuilt("corrupt")
 
     def test_truncated_cache_gives_the_uncached_verdicts(self):
-        self.tampered_run(truncated, "a truncated cache, its body cut short")
+        self.assert_rebuilt("truncated")
 
     def test_empty_cache_gives_the_uncached_verdicts(self):
-        self.tampered_run(empty, "an empty cache file")
+        self.assert_rebuilt("empty")
 
     def test_other_version_cache_gives_the_uncached_verdicts(self):
-        self.tampered_run(other_version, "a cache written by another version, its magic number wrong")
+        self.assert_rebuilt("other-version")
 
     def test_same_size_edit_in_one_second_gives_the_uncached_verdict(self):
         # A same-size edit of guard.py, its mtime pinned back to the cached one. A cache trusted by mtime and size
@@ -885,32 +922,40 @@ class GuardLauncher(unittest.TestCase):
 class GuardLoaderLocation(unittest.TestCase):
     """The guard's cache lives beside the guard, and a read-only or missing cache folder changes no verdict."""
 
-    def test_guard_cache_is_written_beside_the_guard(self):
-        path = cache_file(None)   # the default: hooks/__pycache__/guard.<tag>.pyc
-        if os.path.isfile(path):
-            os.remove(path)   # a cache, not a source file: removing it makes the run show whether a start writes it
-        run = loader_run(loader_env())
-        loader_clean(self, run, "the default-location run")
-        self.assertTrue(os.path.isfile(path),
-                        "no guard cache at %s after a guard call: the guard's source is compiled on every call" % path)
-
-    def test_read_only_cache_folder_changes_no_verdict(self):
+    @classmethod
+    def setUpClass(cls):
+        # The three runs need no cache of one another, so they run side by side. The default run starts with no cache
+        # beside the guard: removing it makes the run show whether a start writes it.
         root = tempfile.mkdtemp(dir=RUN_FOLDER)
+        cls.default_path = cache_file(None)   # the default: hooks/__pycache__/guard.<tag>.pyc
+        if os.path.isfile(cls.default_path):
+            os.remove(cls.default_path)
         readonly = os.path.join(root, "readonly")
         os.makedirs(readonly)
         os.chmod(readonly, 0o555)
-        try:
-            run = loader_run(loader_env(cache=readonly))
-        finally:
-            os.chmod(readonly, 0o755)
-        loader_clean(self, run, "a read-only cache folder")
-
-    def test_missing_cache_folder_changes_no_verdict(self):
-        root = tempfile.mkdtemp(dir=RUN_FOLDER)
         blocker = os.path.join(root, "not-a-folder")
         write_bytes(blocker, b"")   # a file where the cache folder would sit: the folder cannot be made
-        run = loader_run(loader_env(cache=os.path.join(blocker, "pyc")))
-        loader_clean(self, run, "a missing cache folder")
+        try:
+            cls.default, cls.read_only, cls.missing = run_all([
+                loader_env(),
+                loader_env(cache=readonly),
+                loader_env(cache=os.path.join(blocker, "pyc")),
+            ])
+        finally:
+            os.chmod(readonly, 0o755)
+        cls.default_written = os.path.isfile(cls.default_path)
+
+    def test_guard_cache_is_written_beside_the_guard(self):
+        loader_clean(self, self.default, "the default-location run")
+        self.assertTrue(self.default_written,
+                        "no guard cache at %s after a guard call: the guard's source is compiled on every call"
+                        % self.default_path)
+
+    def test_read_only_cache_folder_changes_no_verdict(self):
+        loader_clean(self, self.read_only, "a read-only cache folder")
+
+    def test_missing_cache_folder_changes_no_verdict(self):
+        loader_clean(self, self.missing, "a missing cache folder")
 
 
 # --- The runner's crash scan (decide, tests/guard/s27664-owner-judge.py) and registration hygiene (add, hooks/test_guard.py).
