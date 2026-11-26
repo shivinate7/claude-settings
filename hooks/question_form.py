@@ -2521,7 +2521,7 @@ def _ruled_candidates(roots, unknown, words):
     return []
 
 
-RECORD_FOLDERS = ("decisions/", "debts/")
+RECORD_FOLDERS = ("decisions", "debts")  # the folder part of a record id, `<folder>/<slug>`
 
 
 def _line_words(line) -> set:
@@ -2532,7 +2532,7 @@ def _line_words(line) -> set:
         return _words(line, plurals=True)
     if ident.startswith("ruled:"):
         text = text.rsplit(" (owner ", 1)[0]
-    elif ident.startswith(RECORD_FOLDERS):
+    elif "/" in ident and ident.split("/", 1)[0] in RECORD_FOLDERS:
         text += " " + ident.rsplit("/", 1)[-1].replace("-", " ")
     return _words(text, plurals=True)
 
