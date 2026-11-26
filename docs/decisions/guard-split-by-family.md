@@ -6,7 +6,7 @@ Owner, 2026-10-12 and 2026-10-13:
 
 - Use flat files beside `guard.py`: `guard_core.py` and one `guard_<family>.py` for each family in `hooks/test_guard.py` `FAMILIES`. Why: the installers copy files, not folders.
 - `guard.py` stays the only entry point. Every name another file imports from `guard` keeps resolving through it.
-- Each split PR is proven by the full suite and the mutation harness in CI. The case list and the kill count must not drop.
+- Each split PR is proven by the full suite and the mutation test in CI. The case list and the kill count must not drop.
 
 Owner, 2026-11-25 19:06 CST, relayed by the coordinating session (Sim Manager), on moving families out of `guard.py`: "is a great idea, and should be mechanizable rather than just a one time thing (also prob deduplication of guards?)"
 
