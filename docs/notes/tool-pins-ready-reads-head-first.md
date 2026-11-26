@@ -1,0 +1,1 @@
+- tool-pins-ready-reads-head-first: The ready run reads the head's pin file before main is merged in, so a pin that main moved since is not read at that ready. Untraced. Seen: 2026-11-25 x1

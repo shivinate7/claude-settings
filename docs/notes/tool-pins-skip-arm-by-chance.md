@@ -1,0 +1,1 @@
+- tool-pins-skip-arm-by-chance: The skip arm at hooks/session_start.sh:550 is reached by chance. The slow-step case sleeps 7 s and reaches the skip only when the whole-second clock reads 8. It passed 2 of 4 runs with the skip forced. A 9 s sleep makes it certain. Seen: 2026-11-25 x1

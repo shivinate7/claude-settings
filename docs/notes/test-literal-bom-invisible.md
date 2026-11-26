@@ -1,0 +1,1 @@
+- test-literal-bom-invisible: lint/test_check_tool_pins.py:508 and merge/test_merge.py:28383 hold a literal U+FEFF. An editor that strips it leaves the case with no BOM, so the case no longer tests the BOM. Seen: 2026-11-25 x1
