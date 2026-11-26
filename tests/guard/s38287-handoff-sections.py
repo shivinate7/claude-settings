@@ -911,7 +911,7 @@ hbw_refuse("handoff-sections: a Bash cp of a scratch file that drops the tail to
 # ------------------------------------------------- an excused segment and a real write in one call
 # A segment that is one rm, chmod, touch or mv of the session handoff puts no text on it, so the guard excuses that
 # segment. The excuse covers that segment alone: a real write onto the handoff in another segment of the same call is
-# judged as it is judged alone. The four refusals below are pins that pass at the head. The tee reads its source
+# judged as it is judged alone. The four refusals below are pins of current behaviour. The tee reads its source
 # through `<`, which the guard does not read as a file copy, so its text is unknown and it is refused under
 # handoff-shell-write. The last call is the control: the same excused segment, with a complete handoff copied in, passes.
 hbw_refuse("handoff-sections: a Bash rm of the session handoff, then a cp of a scratch file that drops the tail onto it, "
