@@ -1,0 +1,1 @@
+- unknown-pin-remedy-typo: the unknown-pin refusal (MERGE_CHECK_UNKNOWN_PIN_REASON, hooks/guard_merge.py) offers only two steps: wait for a tool that pins the string, or land its reader. A mistyped string in the repo's own stamp is also a cause, and no step names it. Review finding F10. Seen: 2026-11-25 x1
