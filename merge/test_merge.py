@@ -2530,6 +2530,7 @@ class Guards(Env):
 
 SCOPE_SCRIPT = os.path.join(HERE, "..", ".github", "scripts", "ci-scope.sh")  # the real script: the one home of which jobs read which paths
 GUARD_INPUTS = os.path.join(HERE, "..", ".github", "guard-inputs.txt")  # the real list ci-scope.sh reads for windows_guard; an empty or missing list turns it on
+GUARD_SET = os.path.join(HERE, "..", "hooks", "guard-set.txt")  # the real list ci-scope.sh's guard arm reads; an empty or missing list turns every flag on
 def scope_line(name):
     """The words of ci-scope.sh's `NAME="..."` line (JOBS, LINTS, ALL). A fixture that fakes the script's flags takes its names here, so it cannot drift from the script."""
     with open(SCOPE_SCRIPT, encoding="utf-8") as f:
@@ -2578,6 +2579,9 @@ class ScopedRepo:
                 put_lf(os.path.join(o, ".github/guard-inputs.txt"), f.read())
         put(os.path.join(o, ".github/workflows", name), workflow)
         put(os.path.join(o, "landed-dirs.txt"), "hooks\n")
+        if os.path.isfile(GUARD_SET):  # the list ci-scope.sh's guard arm reads; without it every flag is on
+            with open(GUARD_SET, encoding="utf-8") as f:
+                put_lf(os.path.join(o, "hooks/guard-set.txt"), f.read())
         put(os.path.join(o, "lint/check_slugs.py"), SLUG_LINT)
         put(os.path.join(o, "hooks/test_reads_guide.py"), DOC_SUITE)
         put(os.path.join(o, "hooks/x.py"), "X = 1\n")
@@ -4319,10 +4323,13 @@ def ref(name):
     return ""
 def feat_head(): return ref("refs/heads/" + S.get("head_ref", "feat"))  # the pull request's head branch: feat, or the case's head_ref (a batch integration PR's batch-x, whose claim commit moves it)
 RUN_FIELDS = ("databaseId", "name", "workflowName", "workflowDatabaseId", "status", "conclusion", "headSha", "headBranch", "event", "createdAt", "url")
-def next_runs():
+def next_runs(sha=None):
     """The next answer to a workflow-run read: runs_seq, one entry a read, the last one again. An entry is (name, status, conclusion[, databaseId[, workflowDatabaseId]]).
+    sha_runs: {sha: entries}, the same entries on every read of that sha, as sha_checks gives check rows. A sha in it takes no step of runs_seq,
+    so a case can keep one head's run pending while the sequence answers the other reads in order.
     Without an id a run gets 9000 plus its place; without a workflow id, one derived from its name, so runs of one name share one workflow."""
-    seq = S.get("runs_seq") or [[]]; cur = seq.pop(0) if len(seq) > 1 else seq[0]; save()
+    own = (S.get("sha_runs") or {}).get(sha)
+    seq = S.get("runs_seq") or [[]]; cur = own if own is not None else (seq.pop(0) if len(seq) > 1 else seq[0]); save()
     return [(r[0], r[1], r[2], r[3] if len(r) > 3 else 9000 + i, r[4] if len(r) > 4 else sum(map(ord, r[0]))) for i, r in enumerate(cur)]
 def run_list_json(runs, sha, argv):
     """`gh run list --json F,...` as gh prints it: only the fields asked for. A field the fake does not know is gh's refusal. Every run's createdAt is one hour before FAKE_NOW (S runs_created sets it), the same for each run."""
@@ -4377,7 +4384,7 @@ if a[:1] != ["api"]:
         commit = a[a.index("--commit") + 1] if "--commit" in a else ""
         if commit and commit in {r[1] for r in S.get("open_prs", [])} and commit != feat_head():  # another open pull request's head, read by the batch brake: its own runs, and the head's script is not used
             print(json.dumps([{"name": n, "status": st, "conclusion": c} for n, st, c in S.get("other_runs", {}).get(commit, [])])); sys.exit(0)
-        print(run_list_json(next_runs(), commit or feat_head(), a))
+        print(run_list_json(next_runs(commit or feat_head()), commit or feat_head(), a))
         sys.exit(0)
     if a[:2] == ["run", "watch"]:
         sys.exit(0)
@@ -4587,7 +4594,7 @@ try:
                 raise Refused(S["runs_fail"])
             runs = [{"id": rid, "name": n, "status": st, "conclusion": c or None, "head_sha": params["head_sha"], "head_branch": "feat",
                      "workflow_id": wf, "event": "pull_request", "html_url": "https://github.com/o/r/actions/runs/%d" % rid}
-                    for n, st, c, rid, wf in next_runs()]
+                    for n, st, c, rid, wf in next_runs(params["head_sha"])]
             finish(one({"total_count": len(runs), "workflow_runs": runs}, jq), 0, include)
         runs = S.get("base_runs", [])
         finish(one({"total_count": len(runs), "workflow_runs": runs}, jq), 0, include)
@@ -6119,10 +6126,11 @@ class GhHalf(Env):
 
     def test_a_pending_run_of_the_workflow_that_defines_the_required_job_refuses_at_once(self):
         # The folder defines the required job `checks`, so its pending run makes the head pending: refused at once, the later complete run is never read.
+        # The head's own run is pending too (sha_runs): a green own run of the head would prove it, which this case does not test.
         push_base(self, {".github/workflows/checks.yml": workflow_text("checks", "checks")})
         before = self.head()
         self.proven_parent()  # the head is a clean merge of main: its proof is read on the parent the fake gh must know
-        self.set(runs_seq=[[("checks", "in_progress", "")], [("checks", "completed", "success")]])
+        self.set(runs_seq=[[("checks", "in_progress", "")], [("checks", "completed", "success")]], sha_runs={before: [("checks", "in_progress", "")]})
         rc, out = self.go()
         self.assertEqual(rc, 1, out)
         self.assertIn("a check is pending: workflow checks", out)
@@ -6133,10 +6141,12 @@ class GhHalf(Env):
 
     def assert_pending_run_refused_at_once(self, runs_name, required=("checks",)):
         """A pending run that no workflow file shows to be outside the required names makes the head pending: refused at once, with no pause,
-        and nothing claimed or pushed. The required names pass, so only the run holds the head."""
+        and nothing claimed or pushed. The required names pass, so only the run holds the head. The head's own run is pending too (sha_runs), so the
+        head has no green run of its own to prove it."""
         before = self.head()
         self.proven_parent()  # the head is a clean merge of main (the tool's base merge): its proof is read on the parent
-        self.set(checks_seq=[[(n, "pass", "") for n in required]], runs_seq=[[(runs_name, "in_progress", "")], [(runs_name, "completed", "success")]])
+        self.set(checks_seq=[[(n, "pass", "") for n in required]], runs_seq=[[(runs_name, "in_progress", "")], [(runs_name, "completed", "success")]],
+                 sha_runs={before: [(runs_name, "in_progress", "")]})
         rc, out = self.go(required=required)
         self.assertEqual(self.paused, [], f"the pending run {runs_name!r} waited before it refused")
         self.assertEqual(rc, 1, out)
@@ -11406,6 +11416,103 @@ class RecordsRebuild(RecordsEnv):
         rc, out = self.run_merge_once("7", "--confirm")
         self.assertEqual(rc, 0, "one clean main merge above a green head did not merge on its parent's proof:\n" + out)
         self.assertTrue(getattr(self.host, "merged", False), out)
+
+    def merge_and_page_over_a_draft_head(self):
+        """A draft head H whose page is current, then the tool's heal as `merge --ready` pushes it: main merged in, and the page rebuilt on that
+        merge. -> (H, the live head L, main's tip). The heal's two commits are the tool's own, so the walk from L reaches H."""
+        self.set_required(["all-jobs-passed"])
+        self.drop_pending_record()
+        self.on("feat", {"docs/records.md": page()})  # current for the head's own debts
+        draft = self.head()
+        self.on("main", {"debts/gap-one.md": DEBT_TEXT}, "untooled push")  # a record the head lacks: the page goes stale on the merge
+        main_tip = self.head("main")
+        page_sha = self.merge_and_page_pushed_on()
+        live = self.head()
+        self.assertEqual(live, page_sha, "fixture: the live head is not the page commit the tool pushed")
+        merged = self.rev(f"{page_sha}^")
+        self.assert_merge_shape(merged, draft, main_tip, clean=True)
+        self.assert_page_scope(page_sha, merged)
+        return draft, live, main_tip
+
+    def test_a_green_live_run_over_a_draft_head_with_a_skipped_rollup_merges(self):
+        # The draft head's rollup is skipped, and head_state reads a skipped all-jobs-passed as pending. The live head's own run is green, and under a
+        # named list that run proves the live head, so no check of the draft is needed.
+        draft, live, main_tip = self.merge_and_page_over_a_draft_head()
+        self.rollup_reads(draft, "pending: all-jobs-passed", states={live: "green"})
+        rc, out = self.run_merge_once("7", "--confirm")
+        self.assertEqual(rc, 0, "a live head with its own green run did not merge over a draft head whose rollup is skipped:\n" + out)
+        self.assertTrue(getattr(self.host, "merged", False), out)
+        self.assertEqual(self.host.waits, [], "waited on a run instead of merging on the live head's own green run:\n" + out)
+        self.assert_healed_merge(out, main_tip, draft)
+
+    def test_a_red_live_run_over_a_draft_head_with_a_skipped_rollup_refuses(self):
+        # The live head's own run finished red. The pending rollup under it must not hide that: the refusal names the live head's red run.
+        draft, live, main_tip = self.merge_and_page_over_a_draft_head()
+        self.rollup_reads(draft, "pending: all-jobs-passed", states={live: "red: all-jobs-passed: fail"})
+        refs_before = self.refs()
+        rc, out = self.run_merge_once("7", "--confirm")
+        self.assertFalse(getattr(self.host, "merged", False), "merged a live head whose own run finished red:\n" + out)
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(self.refs(), refs_before, "pushed over a live head whose own run finished red:\n" + out)
+        self.assertIn("red: all-jobs-passed", out, "the refusal does not name the red own run of the live head:\n" + out)
+
+    def test_a_pending_live_run_over_a_green_draft_head_still_merges_control(self):
+        # Control, passes on today's code: the green head under the heal proves the merge while the live head's own run is still pending.
+        draft, live, main_tip = self.merge_and_page_over_a_draft_head()
+        self.rollup_reads(draft, "green", states={live: "pending: all-jobs-passed"})
+        rc, out = self.run_merge_once("7", "--confirm")
+        self.assertEqual(rc, 0, "a pending live run did not merge on the green proven head under the heal:\n" + out)
+        self.assertTrue(getattr(self.host, "merged", False), out)
+        self.assertEqual(self.host.waits, [], "waited on the live head's own pending run:\n" + out)
+
+    def test_an_unread_live_run_over_a_green_draft_head_refuses_control(self):
+        # Control, passes on today's code: an unread own run of the live head is never a green proof, whatever the head under it reads.
+        draft, live, main_tip = self.merge_and_page_over_a_draft_head()
+        self.rollup_reads(draft, "green", states={live: "unknown (the read of the head's checks failed: HTTP 500)"})
+        refs_before = self.refs()
+        rc, out = self.run_merge_once("7", "--confirm")
+        self.assertFalse(getattr(self.host, "merged", False), "merged a live head whose own run was unread, on the green head under it:\n" + out)
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(self.refs(), refs_before, "pushed over a live head whose own run was unread:\n" + out)
+        self.assertIn("unknown", out, "the refusal does not name the unread own run of the live head:\n" + out)
+
+    def test_a_skipped_live_run_over_a_skipped_draft_head_refuses_control(self):
+        # Control, passes on today's code: with both rollups skipped, neither head is proven, so the merge is refused and nothing waits.
+        draft, live, main_tip = self.merge_and_page_over_a_draft_head()
+        self.rollup_reads(draft, "pending: all-jobs-passed", states={live: "pending: all-jobs-passed"})
+        refs_before = self.refs()
+        rc, out = self.run_merge_once("7", "--confirm")
+        self.assertFalse(getattr(self.host, "merged", False), "merged with both rollups skipped:\n" + out)
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(self.refs(), refs_before, "pushed with both rollups skipped:\n" + out)
+        self.assertEqual(self.host.waits, [], "waited on a skipped run instead of refusing:\n" + out)
+        self.assertIn("pending: all-jobs-passed", out, "the refusal does not name the skipped rollup:\n" + out)
+
+    def test_a_hand_commit_over_a_heal_merges_on_its_own_green_run_control(self):
+        # Control, today's rule: a commit a person pushed on top ends the walk, so the heal under it is not carried. The commit's own green run proves the merge.
+        draft, live, main_tip = self.merge_and_page_over_a_draft_head()
+        self.on("feat", {"lane-note.txt": "a lane commit above the heal\n"}, "lane commit")
+        hand = self.head()
+        self.assertNotEqual(hand, live, "fixture: the lane commit did not move the branch off the heal")
+        self.rollup_reads(hand, "green")
+        rc, out = self.run_merge_once("7", "--confirm")
+        self.assertEqual(rc, 0, "a hand commit with its own green run did not merge:\n" + out)
+        self.assertTrue(getattr(self.host, "merged", False), out)
+        self.assertEqual(self.host.waits, [], "waited on a run instead of merging on the hand commit's own green run:\n" + out)
+
+    def test_a_hand_commit_over_a_heal_with_its_own_run_pending_refuses_control(self):
+        # Control, today's rule: the green head under the heal does not carry over a commit a person pushed on top, whose own run is pending.
+        draft, live, main_tip = self.merge_and_page_over_a_draft_head()
+        self.on("feat", {"lane-note.txt": "a lane commit above the heal\n"}, "lane commit")
+        hand = self.head()
+        self.assertNotEqual(hand, live, "fixture: the lane commit did not move the branch off the heal")
+        self.rollup_reads(draft, "green", states={hand: "pending: all-jobs-passed"})
+        refs_before = self.refs()
+        rc, out = self.run_merge_once("7", "--confirm")
+        self.assertFalse(getattr(self.host, "merged", False), "merged a hand commit whose own run is pending, on the green head under it:\n" + out)
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(self.refs(), refs_before, "pushed over a hand commit whose own run is pending:\n" + out)
+        self.assertIn("pending: all-jobs-passed", out, "the refusal does not name the pending own run of the hand commit:\n" + out)
 
     # Ruling (owner, 15:36 CST Nov 23, 2026, option a): no cap on stacked clean merges of main above a proven head, on either path. A busy main
     # never forces a second full CI run: main's own run after the merge is the net. The live head's own run decides only when it is red or unread.
@@ -29832,12 +29939,32 @@ class StaleMergeTrees(unittest.TestCase):
         processes = unittest.mock.patch.object(sweep, "processes_in", return_value=([], []))
         self.fake_processes_in = processes.start()
         self.addCleanup(processes.stop)
+        self.dropped_by_case = set()  # the folders a case dropped or removed itself: make_tree's cleanup drops those a second time
 
     def read_real_processes(self):
         """Put the real process reader back for this case."""
         restore = unittest.mock.patch.object(sweep, "processes_in", self.real_processes_in)
         restore.start()
         self.addCleanup(restore.stop)
+
+    def read_own_processes(self, own):
+        """Put the real process reader back, reporting only the pids in OWN. The runner's other pids are no part of the case: an
+        unreadable one under an ended ancestor would keep a tree for a reason the case does not test. -> the list of what the real
+        reader answered, one entry per read, so a case can see that it read a process table."""
+        reads = []
+        real = self.real_processes_in
+
+        def scoped(path):
+            inside, unreadable = real(path)
+            reads.append(inside)
+            if inside is None:  # the enumeration failed: pass that through, so the case sees it
+                return inside, unreadable
+            return [p for p in inside if p in own], [p for p in unreadable if p in own]
+
+        patch = unittest.mock.patch.object(sweep, "processes_in", side_effect=scoped)
+        patch.start()
+        self.addCleanup(patch.stop)
+        return reads
 
     def make_tree(self, name, reason, root=None, prefix="merge-wt-"):
         """A <prefix><name> folder with a locked worktree in it, as the merge tool makes one (prefix merge-wt- or merge-fresh-),
@@ -29846,7 +29973,7 @@ class StaleMergeTrees(unittest.TestCase):
         wt = os.path.join(tmp, "tree")
         os.makedirs(tmp)
         sh(self.repo, "git", "worktree", "add", "-q", "--detach", "--lock", "--reason", reason, wt, self.head)
-        self.addCleanup(merge.drop_worktree, self.repo, tmp, wt)
+        self.addCleanup(self.drop_at_exit, tmp, wt)
         return tmp, wt
 
     def locked_trees(self):
@@ -29882,6 +30009,20 @@ class StaleMergeTrees(unittest.TestCase):
         self.assertTrue(os.path.isdir(live_tmp), "a merge-wt tree whose merge pid is alive must stay")
         self.assertIn(os.path.realpath(live_wt), self.locked_trees(), "the live tree must stay registered")
         self.assertTrue(os.path.isdir(tmp), "add_worktree must return the tree it made")
+
+    @unittest.skipUnless(os.name == "nt", "the real process reader and pid_alive's kernel32 branch are Windows's: this case runs in the Windows CI job")
+    def test_a_real_exited_merge_pid_on_windows_has_its_tree_removed(self):
+        """No fake reader: a real child that ran and exited, named by a tree's lock reason, must not keep the tree on Windows. The hold
+        check reads the runner's live processes here, scoped to this case's own pid, so an unrelated unreadable pid on the runner
+        cannot keep the tree."""
+        dead = reaped_child_pid()
+        reads = self.read_own_processes({dead})
+        stale_tmp, stale_wt = self.make_tree("stale", "merge tool, pid %d" % dead)
+        tmp, wt = merge.add_worktree(self.repo, self.head)
+        self.addCleanup(merge.drop_worktree, self.repo, tmp, wt)
+        self.assertTrue(reads and reads[0] is not None, "scope: the hold check must read the real process table, or the case proves nothing about the reader")
+        self.assertFalse(os.path.exists(stale_tmp),
+                         "a merge-wt tree whose merge pid %d is a real exited process must be removed on Windows" % dead)
 
     def test_a_locked_tree_whose_reason_names_no_merge_pid_stays(self):
         dead = reaped_child_pid()
@@ -30033,6 +30174,131 @@ class StaleMergeTrees(unittest.TestCase):
                 self.assertFalse(os.path.exists(control[kind]), "control: a dead %s folder with no process in it must be removed" % kind)
             with self.subTest(kind=kind, part="held"):
                 self.assertTrue(os.path.isdir(held[kind]), "a %s folder whose pid %d is dead must stay while a live child runs in it" % (kind, dead))
+
+    # A read-only folder stops a removal on POSIX only, and root removes it anyway: the cases that need one run as a POSIX user.
+    BLOCKABLE = os.name != "nt" and not (hasattr(os, "geteuid") and os.geteuid() == 0)
+    BLOCKABLE_WHY = "a read-only folder stops a removal on POSIX only, and root removes it anyway"
+
+    def blocked_tree(self, name, where="tree"):
+        """A locked merge-wt tree from make_tree, with a read-only folder that git cannot empty: `stuck` in the worktree (where "tree") or in
+        the merge-wt folder beside it (where "folder"). -> (tmp, wt, stuck)."""
+        tmp, wt = self.make_tree(name, "merge tool, pid %d" % os.getpid())
+        stuck = os.path.join(wt if where == "tree" else tmp, "stuck")
+        os.makedirs(stuck)
+        with open(os.path.join(stuck, "held.txt"), "w", encoding="utf-8") as handle:
+            handle.write("held\n")
+        os.chmod(stuck, 0o500)
+        self.addCleanup(os.chmod, stuck, 0o700)  # registered after make_tree's cleanup, so it runs first: the drop can empty the folder
+        return tmp, wt, stuck
+
+    def drop_printed(self, tmp, wt):
+        """drop_worktree of one tree, with what it prints on either stream. -> (its return value, the non-blank lines it printed)."""
+        self.dropped_by_case.add(tmp)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(out):
+            ret = merge.drop_worktree(self.repo, tmp, wt)
+        return ret, [line for line in out.getvalue().splitlines() if line.strip()]
+
+    def drop_at_exit(self, tmp, wt):
+        """make_tree's cleanup. A folder the case already dropped or removed gets a second drop here, and that drop's output is no claim
+        of the case, so it stays off the run's output. Any other folder's drop prints as usual."""
+        if tmp not in self.dropped_by_case:
+            merge.drop_worktree(self.repo, tmp, wt)
+            return
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            merge.drop_worktree(self.repo, tmp, wt)
+
+    def refused_removal(self, name):
+        """A blocked tree, and a twin in the same state. The twin's removal runs through git alone, so the expected exit code and first
+        stderr line come from git, with the twin's tree path swapped for the blocked tree's. -> (tmp, wt, the twin's exit code, that line)."""
+        tmp, wt, _ = self.blocked_tree(name)
+        twin_tmp, twin_wt, _ = self.blocked_tree(name + "-twin")
+        merge.git(self.repo, "worktree", "unlock", twin_wt)
+        code, out = merge.git(self.repo, "worktree", "remove", "--force", twin_wt)
+        self.dropped_by_case.add(twin_tmp)  # the case ran the twin's removal itself, so the twin's cleanup is a second drop
+        first = out.splitlines()[0] if out.strip() else ""
+        return tmp, wt, code, first.replace(twin_wt, wt)
+
+    @unittest.skipUnless(BLOCKABLE, BLOCKABLE_WHY)
+    def test_a_refused_worktree_removal_prints_one_line(self):
+        """`git worktree remove` exits non-zero on a tree it cannot empty: drop_worktree prints one line for that tree, and no more."""
+        tmp, wt, stuck = self.blocked_tree("refused")
+        self.assertFalse(os.access(stuck, os.W_OK), "scope: the blocked folder must be read-only, or the removal is not refused")
+        _, printed = self.drop_printed(tmp, wt)
+        self.assertEqual(len(printed), 1, "a removal git refuses prints one line for the tree; printed %r" % (printed,))
+
+    @unittest.skipUnless(BLOCKABLE, BLOCKABLE_WHY)
+    def test_the_line_for_a_refused_removal_names_the_tree(self):
+        tmp, wt, stuck = self.blocked_tree("refused")
+        self.assertFalse(os.access(stuck, os.W_OK), "scope: the blocked folder must be read-only, or the removal is not refused")
+        _, printed = self.drop_printed(tmp, wt)
+        self.assertTrue(any(os.path.basename(tmp) in line for line in printed),
+                        "the line for a refused removal names the merge-wt folder %s; printed %r" % (os.path.basename(tmp), printed))
+
+    @unittest.skipUnless(BLOCKABLE, BLOCKABLE_WHY)
+    def test_the_line_for_a_refused_removal_carries_the_exit_code(self):
+        tmp, wt, code, first = self.refused_removal("refused")
+        self.assertNotEqual(code, 0, "scope: the twin's removal must be refused by git, or the case proves nothing")
+        _, printed = self.drop_printed(tmp, wt)
+        # the path and git's own text hold digits: strip them, so only the tool's exit code can match
+        rest = [line.replace(first, "").replace(wt, "").replace(tmp, "") for line in printed]
+        self.assertTrue(any(re.search(r"\b%d\b" % code, line) for line in rest),
+                        "the line for a refused removal carries git's exit code %d; printed %r" % (code, printed))
+
+    @unittest.skipUnless(BLOCKABLE, BLOCKABLE_WHY)
+    def test_the_line_for_a_refused_removal_carries_the_first_stderr_line(self):
+        tmp, wt, code, first = self.refused_removal("refused")
+        self.assertNotEqual(code, 0, "scope: the twin's removal must be refused by git, or the case proves nothing")
+        self.assertTrue(first, "scope: git must print a stderr line for the refused twin, or the case proves nothing")
+        _, printed = self.drop_printed(tmp, wt)
+        self.assertTrue(any(first in line for line in printed),
+                        "the line for a refused removal carries git's first stderr line %r; printed %r" % (first, printed))
+
+    @unittest.skipUnless(BLOCKABLE, BLOCKABLE_WHY)
+    def test_a_refused_worktree_removal_returns_false(self):
+        tmp, wt, stuck = self.blocked_tree("refused")
+        self.assertFalse(os.access(stuck, os.W_OK), "scope: the blocked folder must be read-only, or the removal is not refused")
+        ret, _ = self.drop_printed(tmp, wt)
+        self.assertIs(ret, False, "drop_worktree returns False for a tree it did not remove, so the caller reads it as kept; returned %r" % (ret,))
+
+    @unittest.skipUnless(BLOCKABLE, BLOCKABLE_WHY)
+    def test_a_folder_left_after_a_removal_prints_one_line(self):
+        """The tree is removed, but the merge-wt folder beside it cannot be emptied: the folder stays, and drop_worktree says so once."""
+        tmp, wt, stuck = self.blocked_tree("left", where="folder")
+        self.assertFalse(os.access(stuck, os.W_OK), "scope: the folder beside the tree must be read-only, or the folder does not stay")
+        _, printed = self.drop_printed(tmp, wt)
+        self.assertEqual(len(printed), 1, "a merge-wt folder that stays after the removal prints one line for the tree; printed %r" % (printed,))
+
+    @unittest.skipUnless(BLOCKABLE, BLOCKABLE_WHY)
+    def test_a_folder_left_after_a_removal_returns_false(self):
+        tmp, wt, stuck = self.blocked_tree("left", where="folder")
+        self.assertFalse(os.access(stuck, os.W_OK), "scope: the folder beside the tree must be read-only, or the folder does not stay")
+        ret, _ = self.drop_printed(tmp, wt)
+        self.assertIs(ret, False, "drop_worktree returns False when the merge-wt folder stays, so the caller reads the tree as kept; returned %r" % (ret,))
+
+    def test_a_removal_that_succeeds_prints_no_line(self):
+        """Control: a tree git removes and the folder empties, so there is nothing to report."""
+        tmp, wt = self.make_tree("clean", "merge tool, pid %d" % os.getpid())
+        self.assertTrue(os.path.isdir(tmp), "scope: the tree must exist before the drop, or the case proves nothing")
+        _, printed = self.drop_printed(tmp, wt)
+        self.assertEqual(printed, [], "a removal that succeeds prints no line; printed %r" % (printed,))
+
+    def test_a_removal_that_succeeds_returns_true(self):
+        tmp, wt = self.make_tree("clean", "merge tool, pid %d" % os.getpid())
+        self.assertTrue(os.path.isdir(tmp), "scope: the tree must exist before the drop, or the case proves nothing")
+        ret, _ = self.drop_printed(tmp, wt)
+        self.assertIs(ret, True, "drop_worktree returns True for a tree it removed; returned %r" % (ret,))
+
+    def test_dropping_a_tree_that_is_already_gone_prints_no_line_and_returns_true(self):
+        """A tree the first drop removed is gone. git refuses a removal of a gone tree, and that is no failure: the second drop prints
+        nothing and returns True."""
+        tmp, wt = self.make_tree("twice", "merge tool, pid %d" % os.getpid())
+        first_ret, _ = self.drop_printed(tmp, wt)
+        self.assertIs(first_ret, True, "scope: the first drop of a clean tree must return True, or the second drop proves nothing; returned %r" % (first_ret,))
+        self.assertFalse(os.path.exists(tmp), "scope: the first drop must remove the folder, or the second drop is not a drop of a gone tree")
+        ret, printed = self.drop_printed(tmp, wt)
+        self.assertEqual(printed, [], "a drop of a tree that is already gone prints no line; printed %r" % (printed,))
+        self.assertIs(ret, True, "a drop of a tree that is already gone returns True; returned %r" % (ret,))
 
 
 class ProducerFolderNames(unittest.TestCase):
