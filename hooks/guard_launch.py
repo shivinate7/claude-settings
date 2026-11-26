@@ -27,6 +27,10 @@ allow one.
 import os
 import sys
 
+# The installer stamps guard.py and every guard_*.py it copies, this launcher too, and logs each landing with the id
+# the file carries. The launcher judges nothing and guard.py does not read this id; the line only keeps its landing's log line whole.
+# INSTALL_ID = "uninstalled"
+
 
 def own_file(path, root):
     """True for a source file of this repo: under `root`, or in a guard.d set folder (an installed set may sit in a
