@@ -197,7 +197,9 @@ def fh_earlier_refusal_wins_check():
     got, reason, rows, _ = fh_run("earlier-refusal", "Bash", {"command": "pkill -f node"}, attach)
     if got != "deny":
         return False, "pkill -f node: decision %s, want the earlier rule's deny: %s" % (got, reason[:100])
-    if printed_rule(reason) == "family-hit-fake" or rows:
+    if printed_rule(reason) != "machine-wide-kill":
+        return False, "pkill -f node: the printed rule is %r, want machine-wide-kill" % (printed_rule(reason),)
+    if rows:
         return False, "shell_hit ran for a call an earlier rule refuses: %r" % (fh_trail(rows),)
     got, reason, _, _ = fh_run("sibling-refused", "Bash", {"command": "echo family-hit"}, attach)
     if got != "deny" or printed_rule(reason) != "family-hit-fake":
@@ -220,6 +222,44 @@ def fh_raising_hit_fails_open_check():
     return True, "the call is allowed, and one guard-crash line names the raise"
 
 
+def fh_hit_for_skill_check():
+    """hit runs for a Skill call before judge's Skill tail, so a Skill no rule names is allowed after hit ran, and a hit
+    refusal on a Skill call is the hook's deny."""
+    attach = [("guard_wsl", "hit", "record")]
+    got, reason, rows, _ = fh_run("hit-skill", "Skill", {"skill": "family-hit"}, attach)
+    if got != "allow":
+        return False, "decision %s, want allow for a Skill no rule names: %s" % (got, reason[:100])
+    want = [("guard_wsl", "hit", "Skill")]
+    if fh_trail(rows) != want:
+        return False, "hit calls for a Skill call were %r, want %r" % (fh_trail(rows), want)
+    got, reason, _, _ = fh_run("hit-skill-refused", "Skill", {"skill": "family-hit"}, [("guard_wsl", "hit", "refuse")])
+    if got != "deny" or printed_rule(reason) != "family-hit-fake":
+        return False, "a hit refusal on a Skill call: decision %s, rule %r, want the hit's deny (family-hit-fake)" % (
+            got, printed_rule(reason))
+    return True, "hit runs for a Skill call before its tail, and a hit refusal on it is the hook's deny"
+
+
+FH_CAP_WRITE = "echo CLAUDE_CODE_SUBAGENT_MODEL=claude-opus-5 > settings.local.json"  # a settings write: holds an agent-model-cap ask
+
+
+def fh_shell_hit_beats_held_ask_check():
+    """A settings write holds the agent-model-cap ask until the other rules have run. shell_hit runs before settle_ask, so
+    its refusal is the deny and the ask is never printed. The control beside it, with shell_hit passing, still asks."""
+    got, reason, _, _ = fh_run("shell-ask-control", "Bash", {"command": FH_CAP_WRITE},
+                               [("guard_wsl", "shell_hit", "record")])
+    if got != "ask" or printed_rule(reason) != "agent-model-cap":
+        return False, "control: decision %s, rule %r, want the held ask agent-model-cap" % (got, printed_rule(reason))
+    got, reason, rows, _ = fh_run("shell-ask-refused", "Bash", {"command": FH_CAP_WRITE},
+                                  [("guard_wsl", "shell_hit", "refuse")])
+    if got != "deny" or printed_rule(reason) != "family-hit-fake":
+        return False, "decision %s, rule %r, want shell_hit's deny (family-hit-fake) over the held ask" % (
+            got, printed_rule(reason))
+    want = [("guard_wsl", "shell_hit", "Bash")]
+    if fh_trail(rows) != want:
+        return False, "shell_hit calls were %r, want %r" % (fh_trail(rows), want)
+    return True, "shell_hit's refusal beats the held agent-model-cap ask, and the same call asks when shell_hit passes"
+
+
 FH_CHECKS = (
     ("family-hit: hit runs once for a Write and once for a Bash call, in that order", fh_hit_for_write_and_bash_check),
     ("family-hit: a hit refusal is the hook's deny, with the hit's rule", fh_hit_refusal_is_output_check),
@@ -233,6 +273,10 @@ FH_CHECKS = (
     ("family-hit: an earlier refusal wins over shell_hit, and shell_hit refuses a call no earlier rule refuses",
      fh_earlier_refusal_wins_check),
     ("family-hit: a raising hit fails open with one guard-crash line", fh_raising_hit_fails_open_check),
+    ("family-hit: hit runs for a Skill call before its tail, and a hit refusal on it is the deny",
+     fh_hit_for_skill_check),
+    ("family-hit: shell_hit's refusal beats a held settings-write ask, and the ask stays when shell_hit passes",
+     fh_shell_hit_beats_held_ask_check),
 )
 for _label, _check in FH_CHECKS:
     LOG_CHECKS = LOG_CHECKS + ((_label, _check),)
