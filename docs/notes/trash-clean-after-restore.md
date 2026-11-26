@@ -1,0 +1,1 @@
+- trash-clean-after-restore: A tracked file moved into a trash folder with edits, then put back at its original path from the index, leaves the trash folder reading clean. Beside a gone session record, main keeps that folder and this change deletes it. Read from code; not run. Seen: 2026-11-25 x1

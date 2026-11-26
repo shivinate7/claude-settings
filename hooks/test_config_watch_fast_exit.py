@@ -29,6 +29,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
 import test_config_watch as base  # noqa: E402  (fixtures: Project, WATCH, LIFT, SONNET, KEY)
+import case_runner_test  # noqa: E402  the one zero-case check for a hand runner (hooks/case_runner_test.py)
 
 # Runs the hook file as __main__, then writes the guard-family module names and every module
 # loaded beyond a bare interpreter to a side file. The hook's own stdout and exit code pass through.
@@ -384,6 +385,8 @@ def fault_imports_guard(project):
 
 
 def main() -> int:
+    if case_runner_test.no_cases_exit(CASES, "test_config_watch_fast_exit"):
+        return 1
     print("config_watch fast-exit cases, %d in all" % len(CASES))
     failed = 0
     for name, run in CASES:

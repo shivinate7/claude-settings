@@ -1,1 +1,0 @@
-- audit-parse-every-backtick: parse_audit (hooks/reread_check.py, about :335) takes every backticked span under MISSING as a required token, but the audit brief asks for exactly one backticked token per item (hooks/precompact_handoff.py, the reply rule). A second span in one item becomes a required token too. Seen: 2026-11-24 x1

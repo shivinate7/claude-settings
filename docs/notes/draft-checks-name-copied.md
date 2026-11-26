@@ -1,0 +1,1 @@
+- draft-checks-name-copied: Nit, round 1 review of branch cancel-run-on-back-to-draft (PASS). `.github/scripts/cancel_closed_pr_runs.py` copies checks.yml's `name:` as `CHECKS_WORKFLOW = "checks"`, and no test reads checks.yml. A rename makes the draft path cancel nothing, with no red. Seen: 2026-11-25 x1

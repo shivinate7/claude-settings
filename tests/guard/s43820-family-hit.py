@@ -63,8 +63,10 @@ def fh_run(name, tool, tool_input, attach, event=None):
     shutil.rmtree(run, ignore_errors=True)
     os.makedirs(run)
     side = os.path.join(run, "calls.json")
+    # A "raise" attach mode raises on purpose, so its one guard-crash line is expected: only such a run declares crash.
+    raises = any(mode == "raise" for _, _, mode in attach)
     case = {"raw": None, "tool": tool, "tool_input": tool_input, "cwd": FH_PLAIN, "session": None,
-            "env_path": None, "config": run, "event": event, "guard": FH_PROBE,
+            "env_path": None, "config": run, "event": event, "guard": FH_PROBE, "crash": raises,
             "env": {"FH_SIDE": side, "FH_ATTACH": json.dumps(attach)}}
     got, reason = decide(case)
     rows = []

@@ -18,6 +18,8 @@ export const HERE = dirname(fileURLToPath(import.meta.url));
 export const SKILL = join(HERE, '..'); // skills/plain-english-map
 export const ROOT = join(SKILL, '..', '..'); // the claude-settings root
 export const FIXTURE = join(HERE, 'fixture');
+// The typescript version the repo states, read from lint/code_check_standard.json. Tests read it here; none copies it.
+export const TS_STANDARD = JSON.parse(readFileSync(join(ROOT, 'lint', 'code_check_standard.json'), 'utf8')).tools.typescript;
 
 /** Fail with the missing path, so a case that needs a skill file goes red for that reason and no other. */
 export const needFile = (rel) => assert.ok(existsSync(join(SKILL, rel)), `skills/plain-english-map/${rel} is missing`);

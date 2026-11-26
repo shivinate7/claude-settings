@@ -443,17 +443,17 @@ MUTATIONS = [
      'refuse(tool, verdict, "force-push", PUSH_REASON, "git push " + " ".join(args))',
      'refuse(tool, verdict, "force-push", PUSH_ASK_REASON, "git push " + " ".join(args))',
      "guard", 'the long force flag'),
-    # push-main and push-stray-branch (owner rulings 207 a and 206 a).
-    ("push-main: a colon-less main is not a destination",
+    # force-push and push-stray-branch (owner rulings 207 a and 206 a).
+    ("force-push: a colon-less main is not a destination",
      '            elif source.removeprefix("refs/heads/") in DEFAULT_BRANCH_FALLBACK:\n                # A local origin makes main() empty; the other refspecs are still read for agent.\n                if main():\n                    to_main = True',
      '            elif False:\n                if main():\n                    to_main = True', "guard", 'a push of main from a feature branch denies'),
-    ("push-main: a refspec target of main is not a destination",
+    ("force-push: a refspec target of main is not a destination",
      '                if target.removeprefix("refs/heads/") in DEFAULT_BRANCH_FALLBACK and main():\n                    to_main = True',
      '                if False:\n                    to_main = True', "guard", 'HEAD:main from a feature branch denies'),
-    ("push-main: a main refspec ends the read on a local origin",
+    ("force-push: a main refspec ends the read on a local origin",
      '                if main():\n                    to_main = True\n            elif source in ("HEAD", "@")',
      '                return main()\n            elif source in ("HEAD", "@")', "guard", 'push: local origin, main then the agent name asks the agent rule'),
-    ("push-main: a main refspec before an agent name asks push-main",
+    ("force-push: a main refspec before an agent name asks force-push",
      'if not agent and (to_main or',
      'if (to_main or', "guard", 'network origin, main then the agent name asks the agent rule'),
     ("push-all-main: --all no longer refuses",
@@ -509,30 +509,30 @@ MUTATIONS = [
      'refuse(tool, "deny", "push-all-main", PUSH_ALL_REASON,',
      'refuse(tool, "deny", "push-all-main", PUSH_AGENT_REASON,', "guard",
      '--all from a main checkout, local main ahead of origin/main, refuses'),
-    ("push-main: a bare push that writes main no longer asks",
+    ("force-push: a bare push that writes main no longer asks",
      '        if dest in DEFAULT_BRANCH_FALLBACK:\n            return main()',
      '        if False:\n            return main()', "guard", 'main tracking origin/main, a bare push denies'),
-    ("push-main: HEAD on main no longer asks",
+    ("force-push: HEAD on main no longer asks",
      '(to_main or (implied and current() in DEFAULT_BRANCH_FALLBACK and main())):',
      '(to_main or False):', "guard", 'main tracking origin/main, HEAD denies'),
-    ("push-main: push.default upstream is not read for a bare push",
+    ("force-push: push.default upstream is not read for a bare push",
      '            dest = merge or None',
      '            dest = None', "guard", 'a branch tracking main denies'),
-    ("push-main: a bare push under simple ignores git's own refusal",
+    ("force-push: a bare push under simple ignores git's own refusal",
      '            dest = cur if merge == cur or (not merge and auto.lower() in ("true", "yes", "on", "1")) else None',
      '            dest = cur', "guard", 'a bare push on main with no upstream is git'),
-    ("push-main: a remote with no URL no longer stays silent",
+    ("force-push: a remote with no URL no longer stays silent",
      '    if not url:\n        return False\n    if _is_local_path(url):',
      '    if not url:\n        return True\n    if _is_local_path(url):', "guard",
      'main, no remote in the repo is silent'),
-    ("push-main: a local path or file URL no longer stays silent",
+    ("force-push: a local path or file URL no longer stays silent",
      '    if _is_local_path(url):\n        return False',
      '    if False:\n        return False', "guard", 'main, a file URL named as the remote is silent'),
-    ("push-main: a remote the shell has not expanded reads as no remote, so it no longer asks",
+    ("force-push: a remote the shell has not expanded reads as no remote, so it no longer asks",
      '    if _PUSH_SHELL_EXPANSION.search(remote):\n        return True',
      '    if False:\n        return True', "guard",
-     'main, a double-quoted shell variable as the remote denies push-main'),
-    ("push-main: an scp-like remote no longer asks",
+     'main, a double-quoted shell variable as the remote denies force-push'),
+    ("force-push: an scp-like remote no longer asks",
      'return bool(_PUSH_URL_SCHEME.match(url) or _PUSH_URL_SCP.match(url))',
      'return bool(_PUSH_URL_SCHEME.match(url))', "guard", 'main, an scp-form origin denies'),
     ("push-agent-branch: @ is not an implied destination",
@@ -2283,8 +2283,8 @@ MUTATIONS = [
      'repo, "")\n        if verdict != "green":\n            refuse(tool, "deny", "merge-checks", merge_check_reason(verdict, detail),\n                   "merge tool "',
      "guard", 'merge-checks: the host merge tool reads the repo of the call'),
     ("merge-checks: the read gets no folder",
-     'host = module.Host(required=pinned_required(where) or "protection", repo=repo or None, cwd=where or None)',
-     'host = module.Host(required=pinned_required(where) or "protection", repo=repo or None)', "guard",
+     'host = module.Host(required=pinned or "protection", repo=repo or None, cwd=where or None)',
+     'host = module.Host(required=pinned or "protection", repo=repo or None)', "guard",
      'merge-checks: a cd names the repo the read runs in'),
     ("merge-checks: help is guarded like a merge",
      '    if "-h" in args or "--help" in args:\n        return None   # help merges nothing',
@@ -2293,9 +2293,12 @@ MUTATIONS = [
      'return "unknown", "the merge tool\'s check reader could not be loaded"',
      'return "green", ""', "guard", 'merge-checks: a merge tool that cannot load'),
     ("merge-checks: the repo is never passed to the read",
-     'host = module.Host(required=pinned_required(where) or "protection", repo=repo or None, cwd=where or None)',
-     'host = module.Host(required=pinned_required(where) or "protection", cwd=where or None)', "guard",
+     'host = module.Host(required=pinned or "protection", repo=repo or None, cwd=where or None)',
+     'host = module.Host(required=pinned or "protection", cwd=where or None)', "guard",
      'merge-checks: the pull request and repo of the call are the ones read'),
+    ("merge-checks: an unknown requiredChecks string reads as no pin",
+     'else UnknownPin(names)', 'else None', "guard",
+     'a stamp requiredChecks string the merge tool does not pin is refused unknown'),
     ("merge-checks: the pull request is never passed to the read",
      'return host.head_read(selector, nothing_is_green',
      'return host.head_read("", nothing_is_green', "guard",
@@ -3047,7 +3050,7 @@ MUTATIONS = [
     ("hand-made-worktree: the early exit is dropped, so every segment re-resolves its variables",
      '    if "worktree" not in segments[number]:\n        return ""',
      '    if False:\n        return ""',
-     "guard", "rm-var: 4000 bindings and 4000 flagged deletes scale linearly in CPU"),
+     "guard", "rm-var: counted segment reads and rewrites for 50 and 100 bindings grow at most 3x"),
     ("hand-made-worktree: the help flag no longer ends the read",
      '        elif arg in ("-h", "--help"):\n            return None\n',
      '        elif arg in ("-hh",):\n            return None\n',
@@ -3493,17 +3496,17 @@ MUTATIONS = [
      "lease: an MCP launch naming the shut-down device in lowercase is refused by the lease"),
     # The lease allow (ruling 5): one mutant per arm of guard.sim_lease_holds and of bin/sim-lease's read.
     ("simulator-boot-lease: the lease's session is not compared",
-     '                if session == e.get("session") and e.get("slot") in lease.SLOT_UDID}',
-     '                if e.get("slot") in lease.SLOT_UDID}', "guard",
+     '                if session == e.get("session") and isinstance(e.get("udid"), str)}',
+     '                if isinstance(e.get("udid"), str)}', "guard",
      "lease: another session's live slot 1 lease on Duo 1 does not allow this session", "posix"),
     ("simulator-boot-lease: an empty session may match an empty lease session",
      '    if not session or not udids:\n        return False',
      '    if not udids:\n        return False', "guard",
      "lease: a lease with an empty session does not match a payload with no session", "posix"),
     ("simulator-boot-lease: every slot maps to Duo 1",
-     'held = {lease.SLOT_UDID[e["slot"]].casefold()',
-     'held = {lease.SLOT_UDID["1"].casefold()', "guard",
-     "lease allow: this session's live slot 2 lease", "posix"),
+     '        name = SLOT_NAME[slot]',
+     '        name = SLOT_NAME["1"]', "simlease",
+     "lease names: a duo take resolves slot 1 and slot 2 each to its own device's udid", "posix"),
     ("simulator-boot-lease: any held device allows a launch of any device",
      '    return all(u.casefold() in held for u in udids)',
      '    return bool(held)', "guard",
@@ -3534,9 +3537,13 @@ MUTATIONS = [
      '    return [e for e in data["leases"] if isinstance(e, dict) and is_live(e)]', "simlease",
      "the lease read writes nothing", "posix"),
     ("sim-lease: the pro slot maps to another device",
-     '"pro": "86F9268A-A905-4B82-9BC0-D7EBB682D341",',
-     '"pro": "86F9268A-A905-4B82-9BC0-D7EBB682D342",', "simlease",
-     "lease allow: this session's live pro lease", "posix"),
+     '"pro": "iPhone 18 Pro"}',
+     '"pro": "iPhone Duo"}', "simlease",
+     "lease names: the pro take resolves to the iPhone 18 Pro's udid, not another device's", "posix"),
+    ("sim-lease: resolve() takes the first of two devices with one name",
+     '        if len(hits) == 1:',
+     '        if hits:', "simlease",
+     "lease names: a name with two devices refuses the take, it does not take the first", "posix"),
     # ---- handoff-unread (decision precompact-handoff, item 9): one mutant per arm. The anchors sit in
     # guard.py and in reread_check.py; a "guard" mutant lands in whichever module holds the anchor.
     ("handoff-unread: the refusal is never printed",
@@ -3551,7 +3558,8 @@ MUTATIONS = [
      '                "unread_note": staticmethod(lambda payload: ""), "too_big_estimate": staticmethod(lambda result, path: 0),\n'
      '                "agent_rewrite": staticmethod(lambda payload: None),\n'
      '                "HANDOFF_MAX_TOKENS": 10000, "READ_CAP_TOKENS": 25000, "READ_MAX_LINES": 2000,\n'
-     '                "AUDIT_OWED": "", "AUDIT_REMEDY": ""})\n',
+     '                "AUDIT_OWED": "", "AUDIT_REMEDY": "", "AUDIT_HELPER_HEAD": "",\n'
+     '                "audit_helper_command": staticmethod(lambda payload: "")})\n',
      "guard", "a guard copy without reread_check.py refuses as guard-crash"),
     ("handoff-unread: a reread_check without its precompact_handoff sibling is let load again",
      '        if reread_check.ph is None:',
@@ -3585,9 +3593,17 @@ MUTATIONS = [
     # ---- compaction-audit (decision precompact-handoff, item 16): one mutant per arm the rule needs. Each is
     # judged by test_handoff_wave2.py part 4 (target "audit"), so its required name is one of that suite's checks.
     ("compaction-audit: the refusal is never printed",
-     '            refuse(tool, "deny", "compaction-audit", COMPACTION_AUDIT_REASON % pending, pending)',
+     '            refuse(tool, "deny", "compaction-audit", COMPACTION_AUDIT_REASON % pending + note, pending)',
      '            pass',
      "audit", "after the read, a Bash call is refused by compaction-audit"),
+    ("compaction-audit: the audit helper allows any command that names the helper, so a chained or copied call passes",
+     '    return tool == "Bash" and isinstance(command, str) and command == reread_check.audit_helper_command(handoff)',
+     '    return tool == "Bash" and isinstance(command, str) and "precompact_handoff.py" in command',
+     "audit", "the helper command with a chained rm stays refused"),
+    ("compaction-audit: the refusal drops the session's transcript path, so an Audit: brief cannot name it",
+     "COMPACTION_AUDIT_REASON % pending + note",
+     "COMPACTION_AUDIT_REASON % pending",
+     "audit", "the refusal holds the session's transcript path"),
     ("compaction-audit: the Audit: spawn does not clear the audit flag",
      "        judge(payload)\n        audit_flag_clear_after_allow(payload)",
      "        judge(payload)\n        pass",
@@ -4072,6 +4088,8 @@ GUARD_MODULE_FAMILIES = {
     "hooks/guard_browser.py": ["browser-keychain"],
     # hooks/guard_write.py holds the silent-write family moved out of guard.py. Its mutants meet the write section.
     "hooks/guard_write.py": ["write"],
+    # hooks/guard_cite.py holds the cite family moved out of guard.py. Its mutants meet the cite and scratchpad-message sections.
+    "hooks/guard_cite.py": ["cite", "scratchpad-message"],
     # hooks/guard.py holds the rules that no guard_<x>.py module owns. A mutant of it meets six families that read those rules.
     "hooks/guard.py": ["write", "paths", "diff", "model-cap", "cite", "hook-bypass"],
 }
@@ -4090,7 +4108,6 @@ GUARD_MODULE_EXEMPT = {
     "hooks/guard_core.py": "shared by every family, so a mutant of it needs the whole test_guard.py, which takes minutes",
     "hooks/guard_readonly.py": EMPTY_MOVE_REASON,
     "hooks/guard_model_cap.py": EMPTY_MOVE_REASON,
-    "hooks/guard_cite.py": EMPTY_MOVE_REASON,
     "hooks/guard_checkout.py": EMPTY_MOVE_REASON,
     "hooks/guard_handoff.py": EMPTY_MOVE_REASON,
     "hooks/guard_paths.py": EMPTY_MOVE_REASON,
@@ -5149,6 +5166,13 @@ def control_case(target: str, entries) -> str:
         if entry_target == target and required and not mutate_shared.skip_reason(only_on):
             return required
     raise ValueError("no mutation of target %s has a required case to run here" % target)
+
+
+# The mutant folder (decision mutants-one-file-per-rule): each hooks/mutants/<rule-slug>.py adds its rows after the table.
+# The literal above takes deletes only. MUTATIONS is the one list every reader gets. The slice assignment fills that same
+# list in place: the name keeps one top-level binding, and no reader sees the bare table.
+MUTANT_FOLDER = os.path.join(HERE, "mutants")
+MUTATIONS[:] = mutate_shared.assemble_mutations(MUTATIONS, MUTANT_FOLDER)
 
 
 def run_control(sources, work: str, target: str, entries=None):

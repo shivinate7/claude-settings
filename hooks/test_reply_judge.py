@@ -39,6 +39,7 @@ sys.path.insert(0, os.path.join(REPO_ROOT, "lint"))
 sys.path.insert(0, os.path.join(HERE, "..", "testing"))
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per test run (lint/_test_temp.py)
 import cost_probe  # noqa: E402  the shared cost counters (testing/cost_probe.py)
+import case_runner_test  # noqa: E402  the one zero-case check for a hand runner (hooks/case_runner_test.py)
 sys.path.insert(0, HERE)
 from shared_names import SETTINGS_REPO  # noqa: E402  the one home of the settings repo's name (hooks/shared_names.py)
 
@@ -2709,6 +2710,8 @@ class CostTests(unittest.TestCase):
 
 
 def main():
+    if case_runner_test.no_cases_exit(CASES, "test_reply_judge"):
+        return 1
     _write_stub()
     try:
         for case in CASES:
