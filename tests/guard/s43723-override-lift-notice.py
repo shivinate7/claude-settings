@@ -16,13 +16,14 @@ OVL_NEVER_RULE = "frozen-path"  # the rule that refuses a Write of the override 
 def ovl_call(tool, tool_input, cwd, config, session, seconds):
     """One guard call through ov_call. Returns (decision, reason, stdout, stderr lines), where stdout is the guard run's
     stdout, stripped, and the stderr lines are its non-empty lines. A spy on subprocess.run keeps the run whose command
-    ends in the guard, so the one decide() call is read once."""
+    is the launch command guard_start() gives (the launcher, which runs the guard), so the one decide() call is read once."""
     runs = []
     real_run = subprocess.run
+    launch = guard_start()
 
     def spy(command, *args, **kwargs):
         result = real_run(command, *args, **kwargs)
-        if isinstance(command, (list, tuple)) and command and command[-1] == GUARD:
+        if isinstance(command, (list, tuple)) and list(command) == launch:
             runs.append(result)
         return result
 

@@ -4104,6 +4104,7 @@ EMPTY_MOVE_REASON = ("empty in the write-family move (decision guard-split-by-fa
                      "move, and the module takes its row with its first rule")
 GUARD_MODULE_EXEMPT = {
     "hooks/guard_core.py": "shared by every family, so a mutant of it needs the whole test_guard.py, which takes minutes",
+    "hooks/guard_launch.py": "the launcher runs guard.py from its bytecode cache, never judges a call, and no family reaches it",
     "hooks/guard_readonly.py": EMPTY_MOVE_REASON,
     "hooks/guard_model_cap.py": EMPTY_MOVE_REASON,
     "hooks/guard_cite.py": EMPTY_MOVE_REASON,

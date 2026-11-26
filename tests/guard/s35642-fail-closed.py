@@ -3,9 +3,11 @@ FAMILY = "fail-closed"
 
 
 def _guard_siblings(folder):
-    """The guard_* modules in `folder`, by name: every guard_*.py, so a new module cannot be missed.
+    """The guard_* modules in `folder`, by name: every guard_*.py, so a new module cannot be missed, but guard_launch.py.
+    That file starts guard.py from its bytecode cache and judges no call, so the guard loads no list entry for it.
     Test files start with test_, so they are never listed. _guard_copy copies these and every other module in the folder."""
-    return sorted(e[:-3] for e in os.listdir(folder) if e.startswith("guard_") and e.endswith(".py"))
+    return sorted(e[:-3] for e in os.listdir(folder)
+                  if e.startswith("guard_") and e.endswith(".py") and e != "guard_launch.py")
 
 
 # The modules the write-family move adds (decision guard-split-by-family). This section is their one home: the
