@@ -1,0 +1,1 @@
+- roster-term-in-child-tests: lint/test_children.py calls the child list "roster" (roster_fields, class RealRoster, some test names); the file and the reader say "children"; GLOSSARY.md has neither term. Seen: 2026-11-25 x1
