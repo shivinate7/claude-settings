@@ -2,7 +2,7 @@
 
 ## The ruling
 
-Owner, 2026-10-26: a session with a question brings it to the owner. The question names what the session does meanwhile, or that it waits. The session keeps working on what does not depend on the answer.
+Owner, 2026-10-26: a session with a question brings it to the owner. Rule `questions-go-to-owner` requires each question to name what the session does meanwhile, or that it waits. The session keeps on with whatever does not depend on the answer.
 
 - **Owner ruling `own-goal-dont-wait-on-me`** (owner, 2026-11-14 20:18 CST): "Nothing can’t be undone don’t wait on me". The text came by a relayed message. The owner confirmed these words on 2026-11-25 10:02 CST: "that is what i typed". Before a session takes a pick itself that it would otherwise bring to the owner, it asks the consultant when one is reachable, else a refuter, and then takes the pick. Practice, not ruled: the report names who was asked and what that one said, so the owner can see the consult happened. Nothing here lifts a wait another rule makes, such as an act that cannot be undone or a merge.
 - **Limits that still wait for the owner.** An act that cannot be undone, a change to the owner's goal, and work in another repo still wait for the owner (rule `parallelism-keep-going`). A question that asks to update a past ruling is asked (decision `guard-remedy-not-to-owner`).
