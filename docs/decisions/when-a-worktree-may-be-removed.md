@@ -53,6 +53,16 @@ Owner rulings, 2026-10-15 and 2026-10-16 (including the 30 min wait, 00:47 CDT).
 
 At each SubagentStop, the reaper (`janitor/agent_end_reap.py`) removes each finished agent's worktree that is idle 30 min or more. The ending agent's own worktree is not removed at its own end. It waits the same idle limit as the others, and so do its build folders (`build-dirs-reaped-at-agent-end`). A later agent end, or the session-end sweep, removes it. Reason: the hook cannot remove the tree its own shells stand in, so a tree is removed only from a later hook, whose cwd is in another tree. The wait also keeps follow-ups working: a message to a finished agent resumes it in its own worktree, and a removed worktree makes the agent stop (`an-agent-outside-its-home-tree-must-stop`).
 
+**Order.** The reaper judges the least recently judged tree first, by rotation, not by a per-tree time. Each run takes git's list of worktrees and starts just past the tree the repo's cursor names, then wraps to the top. The cursor is one line in `state/agent-end-cursor-<key>.txt`, beside the payload log; `<key>` is a hash of the repo's real path. The cursor names the newest tree the run judged that it kept. When the run kept none, it names the newest tree judged, which a reap removed. A missing or unreadable cursor, or one that names no listed tree, gives git's order from the top. A run that judged no tree writes no cursor. The order changes no tree's keep-or-remove verdict (`test_order_changes_no_decision`).
+
+Owner ruling, 2026-11-25 19:11 CST, in the consultant's chat (chat inbox item `fb-1911-1`): the owner typed "approved" on this option: "(a) Yes, merge it after review (recommended). Gain: every tree gets judged; about 28 to 34 GB freed. Lose: a live lane's tree could be hit by the known debt (a tree removed with no record of who did it) more often."
+
+Measure behind the ruling: 44 of 80 trees were never judged under git's order. Cost, per run that judges a tree: at most one read of the cursor, then at most one write of it through a temp file and a rename. The write holds one path of at most 4096 characters and a newline. No process start, no timer. The next run reads the cursor. The test `test_a_run_writes_at_most_one_cursor_file_of_bounded_size` in `janitor/test_sweep.py` proves one cursor file per judging run and a size under 160 bytes a tree plus 256 on its fixture. The 4096 cap is `CURSOR_MAX_CHARS` in the code; that test checks a looser bound.
+
+Accepted risk: debt `live-lane-tree-removed-untraced` (a live lane's tree removed under it, with no record of the remover). The owner's approval accepts it.
+
+Unmeasured: the "about 28 to 34 GB freed" in the option. One read on 2026-11-25 found `.claude/worktrees` at 2.9 GB, 2.54 GB of it in 56 agent trees. The 28 to 34 GB figure is not confirmed.
+
 Owner ruling, 2026-10-15 19:43 CDT: remove the tree even when it holds git-ignored files, such as build output, packages or `.env.local`. The same ruling wants the agent's own shells stopped first. That half is built, gated by a per-agent process marker: see "A finished agent's tree" below.
 
 A worktree is removed only when all of these hold. A read that cannot tell keeps it.
@@ -90,7 +100,7 @@ Cost, at a later agent end, per finished tree with a process inside: an environm
 
 The live lock reads `claude agent agent-<id> (pid N start S)`, where S is clock ticks since boot, field 22 of `/proc/<N>/stat` (measured: host 159, start 181). On Linux the host proof matches S against that field: a match is the live host. A mismatch or a dead pid names no live host, so no process can be ruled out as the agent's. The tree is kept unless the finish proof above holds (coordinator pick, 2026-11-07 15:05 CST, confirmed 2026-11-12 07:51 CST; the owner may overturn it). The date-form lock `(pid N start <date>)` with a dead pid is still a stale lock on its own. A platform that cannot read it (macOS, Windows, where the unit is unmeasured) leaves the host unproven: the lock stays and the tree is kept. The lock is re-read and lifted just before the removal; a failed re-read or unlock keeps the tree. An unlocked tree keeps the rule above.
 
-Code: `janitor/agent_end_reap.py` (`stopped_agents`, `agent_finished`, `stop_and_settle`), `janitor/sweep.py` (`decide_worktree` and its parameter `finished_host_lock`, `decide_agent_end_worktree`, `host_child_stops`, `agent_mark`).
+Code: `janitor/agent_end_reap.py` (`stopped_agents`, `agent_finished`, `stop_and_settle`, `reap_worktrees`, `cursor_path`, `read_cursor`, `write_cursor`, `resume_after_cursor`), `janitor/sweep.py` (`decide_worktree` and its parameter `finished_host_lock`, `decide_agent_end_worktree`, `host_child_stops`, `agent_mark`).
 
 Session start warns when more than 50 agent worktrees exist. An agent leaves its worktree clean, and a later agent end removes it once its commits are pushed. The builder agent definition says so. The test-author commits and pushes to the branch its brief names.
 
