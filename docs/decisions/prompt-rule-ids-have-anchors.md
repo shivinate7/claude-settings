@@ -4,7 +4,7 @@
 
 Question: does every rule id that a judge prompt names have a home anchor? Ruling: yes, and CI checks it. `lint/check_prompt_rule_ids.py` fails a prompt that names an id that no home declares: no `<!-- rule:<id> -->` anchor in the rule files, no guard rule name, no decision record slug.
 
-- It reads each non-test `hooks/*.py` with `ast` and `tokenize`, in two places. A prompt constant in its `PROMPT_CONSTANTS` table, with a name it is built from in the same module. A table row whose file is missing, or whose file does not define the row's constant, is reported as a problem, so a reader that sees less never prints ok. And the string a function returns, when the function's name has `prompt` in it (a plain, f-string, implicitly joined or plus-joined string, or a local name that it assigns and returns). A comment, a docstring or any other string is not read.
+- It reads each non-test `hooks/*.py` with `ast` and `tokenize`, in two places. A prompt constant in its `PROMPT_CONSTANTS` table, with a name it is built from in the same module. A table row whose file is missing, or whose file does not define the row's constant, fails the lint. And the string a function returns, when the function's name has `prompt` in it (a plain, f-string, implicitly joined or plus-joined string, or a local name that it assigns and returns). A comment, a docstring or any other string is not read.
 - An id is read only from an id position, never from free prose, and its first word may be any word. The positions: an item of an id list (`JUDGED_RULES` in `hooks/reply_judge.py`), where the whole item is the id; a rule-list line, an id that opens a string piece or follows a newline in one, then a colon; the word "rule", an optional colon, then the id; and a backticked id. The pieces come from the tokenizer, because implicit joining merges them in `ast`.
 - An id in an id position passes when a home declares it. Each home is read at run time, never copied into the lint:
   - a rule anchor: `lint/rule_audit.py` `RULE_FILES` (`CLAUDE.md` and `output-styles/shiv-stylisms.md`), read through `ANCHOR_RE`.
@@ -21,7 +21,7 @@ Harm: a judge cites a rule that does not exist, or keeps judging against a stale
 
 The owner (owner, 2026-11-25, 16:14 to 16:36 CST). On the judges' own rule copies: "how does it have its own saved copy of rules, and those dont update?!?!?!" On the fix: "yeah this shd be fixed i believe". On the order, this lint first and then judges read their rules' home sentences at run time: "approved".
 
-Cost: it runs in CI and in the ready checks. It parses every hook source file that is not a test file, the rule files, and each decision record once (through `compliance_probes.decision_records`). It starts no child process and writes no log, file, hook or timer. Not pinned beyond `lint/test_check_prompt_rule_ids.py`.
+Cost: it runs in CI and in the ready checks. It parses each non-test hook file more than once per run, and the PROMPT_CONSTANTS files a third time. It reads the rule files and each decision record once (through `compliance_probes.decision_records`). It starts no child process and writes no log, file, hook or timer. Not pinned beyond `lint/test_check_prompt_rule_ids.py`.
 
 Reader: the CI step "Prompt rule-id lint", and its row in the ready checks.
 
@@ -29,8 +29,9 @@ Reader: the CI step "Prompt rule-id lint", and its row in the ready checks.
 
 - The lint checks that an id has an anchor. It does not check that a prompt's wording matches the id's home sentence, so a judge can still judge an old wording of a live id. The next piece of work, not built here, is that judges read their rules' home sentences at run time, in the order the owner approved above.
 - It does not read a prompt constant that is missing from `PROMPT_CONSTANTS`, a prompt assembled across functions or files, a prompt function whose name lacks `prompt`, or an id in free prose. A model that is told an id only inside a sentence is not checked.
+- A table constant that exists but is no longer a plain string is read only through its string literals. One assigned from a call with no string literal is read as naming no id, and the lint passes.
 - A prompt kept in a file, such as `hooks/precompact_handoff_prompt.md`, is not read.
-- There is no opt-out: a prompt that writes "rule" before a hyphenated word that is not an id must be reworded.
+- There is no opt-out: a prompt must reword a hyphenated word that is not an id when it follows "rule", when it is backticked, or when it starts a line followed by a colon.
 - `lint/rule_audit.py` `RULE_FILES` omits `.claude/rules/*.md`, so an anchor moved there would not be found, and the lint would flag its id.
 
 Kind: process
