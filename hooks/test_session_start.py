@@ -3093,11 +3093,27 @@ class SessionStartRolePickTests(unittest.TestCase):
 MAIN_REF_SRC = os.path.join(HERE, "..", "githooks", "main-ref")
 # The installer from before --check. Run with --check it would arm the copy, so session start must never run it. Read from its home.
 OLD_INSTALLER = os.path.join(HERE, "..", "githooks", "test_fixtures", "main-ref-install-no-check.sh")
+# The pre-commit hook, which arms a copy on any line that holds its marker text as a substring.
+PRE_COMMIT = os.path.join(HERE, "..", "githooks", "pre-commit", "pre-commit")
+# The hang guard for a hung installer. The hook's bound is one second, so a run that ends has ended well inside this.
+HANG_GUARD = 20
+# A fixed old modification time for a fixture's files, so no tracked file shares a second with git's index.
+OLD_MTIME = 1000000000
+
+
+def pre_commit_marker():
+    """The marker text the pre-commit hook matches, read from its file so no copy of it is kept here."""
+    with open(PRE_COMMIT, encoding="utf-8") as handle:
+        found = re.findall(r'^MAIN_REF_MARKER = "(.*)"$', handle.read(), re.MULTILINE)
+    if len(found) != 1:
+        sys.exit("fixture setup failed: expected one MAIN_REF_MARKER in %s, found %d" % (PRE_COMMIT, len(found)))
+    return found[0]
 
 
 class SessionStartMainRefTests(SessionStartAgentWorktreeNoticeTests):
     """Session start prints one line when the main-ref installer's --check finds the armed copy missing or behind main.
-    The words come from --check itself. A healthy copy prints nothing, and a repo with no installer prints nothing."""
+    It also prints one line with the installer's own text when --check says unknown or exits some other way. The words
+    come from --check itself. A healthy copy prints nothing, and a repo with no installer prints nothing."""
 
     def setUp(self):
         super().setUp()
@@ -3106,11 +3122,11 @@ class SessionStartMainRefTests(SessionStartAgentWorktreeNoticeTests):
         open(self.empty_global, "w", encoding="utf-8").close()
         self.pinned_env = {"GIT_CONFIG_GLOBAL": self.empty_global, "GIT_CONFIG_NOSYSTEM": "1"}
 
-    def make_repo(self, name):
-        """A checkout on main, made as the base setUp makes its own. The installer is not shipped yet."""
+    def make_repo(self, name, branch="main"):
+        """A checkout on `branch` (main, as the base setUp makes its own), with no remote. The installer is not shipped yet."""
         where = os.path.join(self.root, name)
         os.makedirs(where)
-        vcs(where, "init", "-q", "-b", "main", ".")
+        vcs(where, "init", "-q", "-b", branch, ".")
         self.put(os.path.join(where, ".gitignore"), ".claude/\n")
         self.put(os.path.join(where, "f.txt"), "base\n")
         vcs(where, "add", "-A")
@@ -3187,10 +3203,39 @@ class SessionStartMainRefTests(SessionStartAgentWorktreeNoticeTests):
         """How many calls to the installer the shim logged; 0 when no log exists because nothing ran."""
         return len([line for line in log_lines(log) if "main-ref/install.sh" in line])
 
-    def test_a_missing_copy_prints_one_line_that_names_the_hook_and_the_remedy(self):
-        control = self.control()
-        where = self.make_repo("missing")
-        self.ship(where)
+    def snapshot(self, *folders):
+        """Every file path under the folders with its modification time, so a case proves a file was not added, removed or touched."""
+        return {path: os.stat(path).st_mtime_ns for path in self.files_under(*folders)}
+
+    def settle_index(self, where):
+        """One unshimmed session, after every file in the checkout gets one old fixed mtime. A git read rewrites an index whose
+        entries share its second (racily clean), which a later session would show as a touched .git/index. An old mtime keeps
+        every entry out of that race, so the one write the index can get lands here, before a snapshot."""
+        for dirpath, dirnames, names in os.walk(where):
+            dirnames[:] = [name for name in dirnames if name != ".git"]
+            for name in names:
+                os.utime(os.path.join(dirpath, name), (OLD_MTIME, OLD_MTIME))
+        self.session(where)
+
+    def kill_group(self, proc):
+        """Kills the process group a case started with start_new_session, so no shim sleep outlives the case."""
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+
+    def heredoc_installer(self, name, marker_line):
+        """The old installer with a no-op heredoc at its end whose body is `marker_line`. The file has no marker line of its own."""
+        with open(OLD_INSTALLER, encoding="utf-8") as handle:
+            base = handle.read()
+        self.assertNotIn("main-ref-check:", base, "scope: the old installer already carries a marker line")
+        path = os.path.join(self.root, name)
+        self.put(path, base + "\n: <<'NOTE'\n%s\nNOTE\n" % marker_line)
+        return path
+
+    def assert_one_missing_copy_line(self, where, control):
+        """The missing-copy assertions: one main-ref line that names the remedy --check gives and the hook, the rest unchanged.
+        `where` is a repo that carries an installer --check finds unarmed, and `control` is the output with nothing to report."""
         code, _, err = self.check(where)
         self.assertEqual(code, 1, "--check should report the missing copy, exit %d: %r" % (code, err))
         err_lines = err.splitlines()
@@ -3208,6 +3253,25 @@ class SessionStartMainRefTests(SessionStartAgentWorktreeNoticeTests):
         self.assertIn(remedy[0], extra[0], "the line does not name the remedy --check gives: %r" % extra[0])
         self.assertIn(hook, extra[0], "the line does not name the missing hook %r: %r" % (hook, extra[0]))
         self.assertEqual(self.last_stderr, "", "the hook wrote to stderr: %r" % self.last_stderr)
+
+    def assert_installer_is_not_run(self, label, installer):
+        """Session start, in a repo that ships `installer`, starts no installer and writes no file."""
+        where = self.make_repo(label)
+        self.ship(where, installer=installer)
+        folder, log = self.sh_shim(label)
+        watched = (self.config, self.primary, where)
+        before = self.files_under(*watched)
+        code, _ = self.session(where, path_dir=folder)
+        self.assertEqual(code, 0, "the hook exited %d" % code)
+        self.assertEqual(self.installer_starts(log), 0, "session start ran the installer in case %s, which it must not run" % label)
+        self.assertEqual(self.files_under(*watched) - before, set(),
+                         "session start wrote a file for the installer in case %s, which it must not run" % label)
+
+    def test_a_missing_copy_prints_one_line_that_names_the_hook_and_the_remedy(self):
+        control = self.control()
+        where = self.make_repo("missing")
+        self.ship(where)
+        self.assert_one_missing_copy_line(where, control)
 
     def test_a_copy_in_place_prints_no_main_ref_line_and_nothing_else_changes(self):
         control = self.control()
@@ -3243,15 +3307,7 @@ class SessionStartMainRefTests(SessionStartAgentWorktreeNoticeTests):
         self.assertEqual([line for line in lines if "main-ref" in line], [], "a main-ref line printed with no installer")
 
     def test_an_installer_from_before_check_is_never_run(self):
-        where = self.make_repo("old")
-        self.ship(where, installer=OLD_INSTALLER)
-        folder, log = self.sh_shim("old")
-        watched = (self.config, self.primary, where)
-        before = self.files_under(*watched)
-        code, _ = self.session(where, path_dir=folder)
-        self.assertEqual(code, 0, "the hook exited %d" % code)
-        self.assertEqual(self.installer_starts(log), 0, "session start ran an installer that has no --check")
-        self.assertEqual(self.files_under(*watched) - before, set(), "session start wrote a file for an installer with no --check")
+        self.assert_installer_is_not_run("old", OLD_INSTALLER)
 
     def test_the_check_starts_once_and_writes_no_file(self):
         control = self.control()
@@ -3263,18 +3319,98 @@ class SessionStartMainRefTests(SessionStartAgentWorktreeNoticeTests):
                     self.arm(where)
                 folder, log = self.sh_shim(state)
                 watched = (self.config, self.primary, where)
-                before = self.files_under(*watched)
-                armed_copy = os.path.join(where, ".git", "hooks", "reference-transaction")
-                copy_mtime = os.stat(armed_copy).st_mtime_ns if state == "armed" else None
+                self.settle_index(where)
+                before = self.snapshot(*watched)
                 code, text = self.session(where, path_dir=folder)
                 self.assertEqual(code, 0, "the hook exited %d" % code)
-                self.assertEqual(self.files_under(*watched) - before, set(), "session start wrote a file in the %s state" % state)
-                if state == "armed":  # an install over the armed copy adds no path, so its timestamp is the witness
-                    self.assertEqual(os.stat(armed_copy).st_mtime_ns, copy_mtime, "session start rewrote the armed copy")
+                after = self.snapshot(*watched)
+                changed = sorted(path for path in set(before) | set(after) if before.get(path) != after.get(path))
+                self.assertEqual(changed, [], "session start added, removed or touched a file in the %s state: %r" % (state, changed))
                 self.assertEqual(self.installer_starts(log), 1,
                                  "expected one start of the installer's --check, got %d" % self.installer_starts(log))
                 if state == "armed":
                     self.assertEqual(self.normal(text, where), control, "the other output changed for a healthy copy")
+
+    def test_an_unknown_check_prints_one_line_with_the_installers_own_text(self):
+        """A repo whose default branch is not main: --check has no main to compare with, so it exits 2 and says unknown."""
+        where = self.make_repo("no-main", branch="master")
+        self.ship(where)
+        code, _, err = self.check(where)
+        self.assertEqual(code, 2, "scope: --check should exit 2 with no main to compare, exit %d: %r" % (code, err))
+        unknown = [line for line in err.splitlines() if line.startswith("main-ref check: unknown:")]
+        self.assertEqual(len(unknown), 1, "scope: --check printed no unknown line: %r" % err)
+        code, text = self.session(where)
+        self.assertEqual(code, 0, "the hook exited %d" % code)
+        self.assertEqual(self.last_stderr, "", "the hook wrote to stderr: %r" % self.last_stderr)
+        found = [line for line in self.normal(text, where).splitlines() if "main-ref" in line]
+        self.assertEqual(len(found), 1, "expected one main-ref line for an unknown check, got %r" % found)
+        self.assertIn(unknown[0], found[0], "the line does not carry the installer's unknown text: %r" % found[0])
+
+    def test_an_installer_that_exits_three_prints_one_line_with_its_text(self):
+        """A marked installer whose --check exits 3, which is neither a finding (1) nor an unknown (2)."""
+        installer = os.path.join(self.root, "exit-three-install.sh")
+        self.put(installer, "#!/bin/sh\n# main-ref-check: 1\n"
+                            "echo 'main-ref check: unknown: the fixture read failed' >&2\nexit 3\n")
+        where = self.make_repo("exit-three")
+        self.ship(where, installer=installer)
+        code, _, err = self.check(where)
+        self.assertEqual(code, 3, "scope: the fixture should exit 3, exit %d: %r" % (code, err))
+        self.assertEqual(len(err.splitlines()), 1, "scope: the fixture should print one stderr line: %r" % err)
+        code, text = self.session(where)
+        self.assertEqual(code, 0, "the hook exited %d" % code)
+        self.assertEqual(self.last_stderr, "", "the hook wrote to stderr: %r" % self.last_stderr)
+        found = [line for line in self.normal(text, where).splitlines() if "main-ref" in line]
+        self.assertEqual(len(found), 1, "expected one main-ref line for exit 3, got %r" % found)
+        self.assertIn(err.splitlines()[0], found[0], "the line does not carry the installer's own text: %r" % found[0])
+
+    @unittest.skipIf(os.name == "nt", "the hung installer is a POSIX sh script in its own process group")
+    def test_a_hung_check_does_not_hold_session_start(self):
+        """A marked installer whose --check sleeps past the hang guard. The hook's bound is one second, so it must end the
+        hang and print one line that says the check did not finish; the guard is the assert, not the wait."""
+        installer = os.path.join(self.root, "hung-install.sh")
+        self.put(installer, "#!/bin/sh\n# main-ref-check: 1\nsleep 40\n")
+        where = self.make_repo("hung")
+        self.ship(where, installer=installer)
+        folder, log = self.sh_shim("hung")
+        argv, env, payload, cwd = self.hook_launch(session_cwd=where, path_dir=folder, fetch_timeout="1")
+        proc = subprocess.Popen(argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                env=env, cwd=cwd, start_new_session=True, text=True)
+        self.addCleanup(self.kill_group, proc)
+        try:
+            out, err = proc.communicate(payload, timeout=HANG_GUARD)
+        except subprocess.TimeoutExpired:
+            self.kill_group(proc)
+            proc.communicate()
+            self.fail("session start did not end within %d s of a hung --check; the one-second bound did not end it" % HANG_GUARD)
+        self.assertEqual(proc.returncode, 0, "the hook exited %d: %r" % (proc.returncode, err))
+        self.assertEqual(err, "", "the hook wrote to stderr: %r" % err)
+        self.assertEqual(self.installer_starts(log), 1, "scope: the hung installer never started, so the bound proves nothing")
+        found = [line for line in self.normal(out, where).splitlines() if "main-ref" in line]
+        self.assertEqual(len(found), 1, "expected one line that says the check did not finish, got %r" % found)
+        self.assertIn("unknown", found[0], "the line does not say unknown: %r" % found[0])
+
+    def test_an_indented_marker_arms_the_check_as_the_pre_commit_hook_does(self):
+        """The pre-commit hook arms on any line that holds its marker text. Session start must arm on the same indented line."""
+        with open(os.path.join(MAIN_REF_SRC, "install.sh"), encoding="utf-8") as handle:
+            indented, count = re.subn(r"^# main-ref-check:", "  # main-ref-check:", handle.read(), flags=re.MULTILINE)
+        self.assertEqual(count, 1, "scope: the installer has %d marker lines, want 1" % count)
+        self.assertIn(pre_commit_marker(), indented, "scope: the pre-commit marker is not in the indented installer")
+        installer = os.path.join(self.root, "indented-install.sh")
+        self.put(installer, indented)
+        control = self.control()
+        where = self.make_repo("indented")
+        self.ship(where, installer=installer)
+        self.assert_one_missing_copy_line(where, control)
+
+    def test_a_marker_in_a_heredoc_of_an_unmarked_installer_does_not_arm_the_check(self):
+        """The marker text at a line start inside a heredoc body does not make the installer marked, so it is never run."""
+        installer = self.heredoc_installer("heredoc-column-zero-install.sh", "# main-ref-check: 1")
+        self.assert_installer_is_not_run("heredoc-column-zero", installer)
+
+    def test_an_indented_marker_in_a_heredoc_of_an_unmarked_installer_does_not_arm_the_check(self):
+        """Control, green on the old commit: the same text indented is not run. A matcher that accepts indented text breaks it."""
+        installer = self.heredoc_installer("heredoc-indented-install.sh", "  # main-ref-check: 1")
+        self.assert_installer_is_not_run("heredoc-indented", installer)
 
 
 if __name__ == "__main__":
