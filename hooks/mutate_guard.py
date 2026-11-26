@@ -3577,6 +3577,11 @@ MUTATIONS = [
     ("agent-no-mcp-tools: the agent MCP call is not judged, so an unlisted MCP tool is allowed",
      'payload.get("agent_id") and tool.startswith("mcp__")', 'False and tool.startswith("mcp__")',
      "guard", "agent-no-mcp-tools: mcp__computer-use__app_click from a general-purpose agent is refused"),
+    # agent-no-mcp-tools, fail closed (hooks/guard.py mcp_allow_entries): when no settings.json yields an allow list, nothing is
+    # covered. The mutant covers every MCP tool then, so an agent's listed call is allowed; the copy case names that call.
+    ("agent-no-mcp-tools: with no readable allow list every MCP tool is covered, so an agent's listed call is allowed",
+     '    return ()\n\n\ndef mcp_allow_covers', '    return ("mcp__*",)\n\n\ndef mcp_allow_covers',
+     "guard", "agent-no-mcp-tools: mcp__Claude_Browser__navigate from a designer agent is refused when settings.json has no permissions key"),
     # ---- compaction-audit (decision precompact-handoff, item 16): one mutant per arm the rule needs. Each is
     # judged by test_handoff_wave2.py part 4 (target "audit"), so its required name is one of that suite's checks.
     ("compaction-audit: the refusal is never printed",
