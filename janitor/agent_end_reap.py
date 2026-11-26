@@ -738,7 +738,7 @@ def reap_worktrees(target: str, deadline: float, payload=None):
                 else:
                     decision["buildDirs"] = reap_build_dirs(entry["path"], cwds, deadline)
             rows.append(decision)
-            if decision["action"] != "reap":
+            if decision["action"] != "reap" or decision.get("error"):  # a failed removal leaves the tree on disk
                 last_kept = _tree_key(entry["path"])
     finally:
         sweep._LIVE_HEADS = None
