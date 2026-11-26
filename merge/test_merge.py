@@ -25102,6 +25102,144 @@ class ReviewGuardKinds(unittest.TestCase):
         self.assertEqual(kind_misfits("docs-only", []), [])
         self.assertEqual(kind_misfits("delete-only", []), [])
 
+def queue_row(number, act="batch"):
+    """A batch row as reviewed_read's ledger gives it (merge.py reviewed_read: number, act, owner, ageHours, red, blockedOn)."""
+    return {"number": number, "act": act, "owner": "batch runner", "ageHours": 1.0, "red": False, "blockedOn": None}
+
+def queue_pull(number, paths, body="", records=None, branch=None):
+    """An open pull request as ready_batch_numbers reads it: the pull list's own fields (number, base, head, body), and two the pull list does
+    not hold: `files`, the (path, status, additions) triples of pulls/<n>/files, and `records`, the text of each changed doc by its path.
+    `branch` is the head branch name; the default is lane-<n>."""
+    return {"number": number, "base": {"ref": "main"}, "head": {"ref": branch or "lane-%d" % number, "sha": format(number, "040x")},
+            "body": body, "files": [(p, "modified", 1) for p in paths], "records": dict(records or {})}
+
+class StandingReads:
+    """The two Host reads standing_refusal makes before it reads the head's checks: the pull request's changed files, and its head's check state."""
+
+    def __init__(self, files, state):
+        self.files, self.state = files, state
+
+    def pr_files(self, n, changed):
+        return list(self.files)
+
+    def head_state(self, n, head):
+        return self.state
+
+class ProseFirstInBatch(unittest.TestCase):
+    """merge.ready_batch_numbers: a prose-only pull request leads its batch, ahead of the code pull requests with a lower number. Prose-only means
+    every changed file passes merge.is_doc, the one home of a doc. It keeps its number order when its body or a changed record cites an open pull
+    request's number or head branch, or a changed record names a file that an open pull request changes: it describes work not merged yet, so it
+    waits (a peer's pick, which can be undone). A pull request with one file that is not a doc is code, whatever else it holds. Prose pull requests
+    keep number order among themselves, and code pull requests among themselves. A control case holds before the change too and pins what must stay. The check reads what a
+    batch row does not hold, so each pull is a queue_pull dict with `files` and `records`; the batch row is queue_row."""
+
+    def order(self, rows, pulls):
+        return review_fn(self, "ready_batch_numbers")(rows, pulls)
+
+    def assert_prose(self, pull):
+        """Scope before subject (P7): every changed file of the pull request passes merge.is_doc, and it changes at least one."""
+        paths = [p for p, _, _ in pull["files"]]
+        self.assertTrue(paths and all(merge.is_doc(p) for p in paths), "the fixture for #%d is not prose-only: %r" % (pull["number"], paths))
+
+    def assert_code(self, pull):
+        paths = [p for p, _, _ in pull["files"]]
+        self.assertTrue(any(not merge.is_doc(p) for p in paths), "the fixture for #%d holds no code file: %r" % (pull["number"], paths))
+
+    def test_a_prose_only_pr_leads_a_lower_numbered_code_pr(self):
+        code = queue_pull(10, ["hooks/alpha.py"])
+        prose = queue_pull(11, ["docs/notes/alpha.md"], records={"docs/notes/alpha.md": "The alpha change, described."})
+        self.assert_code(code)
+        self.assert_prose(prose)
+        got = self.order([queue_row(10), queue_row(11)], [code, prose])
+        self.assertEqual(got, [11, 10], "the prose-only PR #11 does not lead the batch ahead of the code PR #10: the order is %r, want [11, 10]" % (got,))
+
+    def test_a_prose_pr_whose_body_cites_an_open_pr_number_keeps_its_number_order(self):
+        code = queue_pull(10, ["hooks/alpha.py"])
+        prose = queue_pull(11, ["docs/notes/alpha.md"], body="Describes the change in #10, not merged yet.", records={"docs/notes/alpha.md": "The alpha change."})
+        self.assert_code(code)
+        self.assert_prose(prose)
+        got = self.order([queue_row(10), queue_row(11)], [code, prose])
+        self.assertEqual(got, [10, 11], "the prose-only PR #11 jumps ahead of #10 though its body cites #10, an open PR: the order is %r, want [10, 11]" % (got,))
+
+    def test_a_prose_pr_whose_record_cites_an_open_pr_head_branch_keeps_its_number_order(self):
+        code = queue_pull(10, ["hooks/alpha.py"], branch="lane-alpha-fix")
+        prose = queue_pull(11, ["docs/notes/alpha.md"], records={"docs/notes/alpha.md": "The alpha change ships on `lane-alpha-fix`."})
+        self.assert_code(code)
+        self.assert_prose(prose)
+        got = self.order([queue_row(10), queue_row(11)], [code, prose])
+        self.assertEqual(got, [10, 11], "the prose-only PR #11 jumps ahead of #10 though its changed record cites #10's head branch lane-alpha-fix: the order is %r, want [10, 11]" % (got,))
+
+    def test_a_prose_pr_whose_record_names_a_file_an_open_pr_changes_keeps_its_number_order(self):
+        code = queue_pull(10, ["hooks/alpha.py"])
+        prose = queue_pull(11, ["docs/notes/alpha.md"], records={"docs/notes/alpha.md": "The gate it describes is `hooks/guard.py`."})
+        open_pr = queue_pull(12, ["hooks/guard.py"])
+        self.assert_code(code)
+        self.assert_prose(prose)
+        self.assertIn("hooks/guard.py", [p for p, _, _ in open_pr["files"]], "the open PR #12 does not change the file the record names")
+        got = self.order([queue_row(10), queue_row(11), queue_row(12, "lane lint")], [code, prose, open_pr])
+        self.assertEqual(got, [10, 11], "the prose-only PR #11 jumps ahead of #10 though its record names hooks/guard.py, which the open PR #12 changes: the order is %r, want [10, 11]" % (got,))
+
+    def test_a_prose_pr_whose_record_names_only_files_no_open_pr_changes_still_leads(self):
+        code = queue_pull(10, ["hooks/alpha.py"])
+        prose = queue_pull(11, ["docs/notes/alpha.md"], records={"docs/notes/alpha.md": "The gate it describes is `hooks/other.py`."})
+        open_pr = queue_pull(12, ["hooks/guard.py"])
+        self.assert_code(code)
+        self.assert_prose(prose)
+        open_files = [p for pr in (code, open_pr) for p, _, _ in pr["files"]]
+        self.assertNotIn("hooks/other.py", open_files, "the fixture has an open PR that changes the file the record names")
+        got = self.order([queue_row(10), queue_row(11), queue_row(12, "lane lint")], [code, prose, open_pr])
+        self.assertEqual(got, [11, 10], "the prose-only PR #11 waits behind #10 though its record names hooks/other.py, which no open PR changes: the order is %r, want [11, 10]" % (got,))
+
+    def test_prose_prs_lead_in_number_order_and_code_prs_follow_in_number_order(self):
+        pulls = [queue_pull(20, ["hooks/a.py"]), queue_pull(21, ["docs/notes/a.md"], records={"docs/notes/a.md": "Prose."}),
+                 queue_pull(22, ["hooks/b.py"]), queue_pull(23, ["docs/notes/b.md"], records={"docs/notes/b.md": "Prose."})]
+        for pr in pulls:
+            (self.assert_prose if pr["number"] in (21, 23) else self.assert_code)(pr)
+        got = self.order([queue_row(n) for n in (20, 21, 22, 23)], pulls)
+        self.assertEqual(got, [21, 23, 20, 22], "the batch order is %r, want [21, 23, 20, 22]: the prose-only PRs #21 and #23 lead in number order, then the code PRs #20 and #22 in number order" % (got,))
+
+    def test_a_code_only_batch_keeps_number_order(self):
+        pulls = [queue_pull(20, ["hooks/a.py"]), queue_pull(22, ["hooks/b.py"]), queue_pull(24, ["lint/c.py"])]
+        got = self.order([queue_row(n) for n in (20, 22, 24)], pulls)
+        self.assertEqual(got, [20, 22, 24], "a code-only batch is not in number order: %r, want [20, 22, 24]" % (got,))
+
+    def test_a_doc_plus_one_code_file_is_code_whatever_else_it_holds(self):
+        code = queue_pull(30, ["hooks/a.py"])
+        mixed = queue_pull(31, ["docs/notes/a.md", "hooks/guard.py"], records={"docs/notes/a.md": "Prose."})
+        self.assert_code(mixed)
+        got = self.order([queue_row(30), queue_row(31)], [code, mixed])
+        self.assertEqual(got, [30, 31], "the PR #31 with a doc and one code file sorts ahead of #30 as prose: the order is %r, want [30, 31]" % (got,))
+
+    def test_a_md_outside_docs_is_code_not_prose(self):
+        code = queue_pull(30, ["hooks/a.py"])
+        mixed = queue_pull(31, ["docs/notes/b.md", "lint/rules.md"], records={"docs/notes/b.md": "Prose."})
+        self.assert_code(mixed)
+        got = self.order([queue_row(30), queue_row(31)], [code, mixed])
+        self.assertEqual(got, [30, 31], "the PR #31 with a .md outside docs/ sorts ahead of #30 as prose: the order is %r, want [30, 31]" % (got,))
+
+    def test_a_pr_with_no_changed_file_is_not_prose(self):
+        code = queue_pull(10, ["hooks/alpha.py"])
+        empty = queue_pull(11, [])
+        got = self.order([queue_row(10), queue_row(11)], [code, empty])
+        self.assertEqual(got, [10, 11], "the PR #11 with no changed file sorts ahead of #10 as prose, though an empty diff is no prose-only diff: the order is %r, want [10, 11]" % (got,))
+
+    def test_a_red_prose_pr_is_refused_with_the_same_text(self):
+        """Control: the merge checks are per pull request, so the batch order changes none of them. A prose-only PR whose own
+        run is red still gets the refusal standing_refusal gives any head with a red check, with the same text as today."""
+        sha = format(11, "040x")
+        host = StandingReads([("docs/notes/alpha.md", "modified", 1)], "red: lint")
+        with unittest.mock.patch.object(merge, "own_session_link", lambda body: True):
+            why = review_fn(self, "standing_refusal")(host, 11, {"body": "", "head": sha, "changed_files": 1}, sha)
+        self.assertEqual(why, "the head's own checks are not green: a check is red: lint.", "the refusal for a red prose-only PR changed: %r" % (why,))
+
+    def test_a_green_prose_pr_gets_no_refusal(self):
+        """Control: a prose-only PR whose own run is green passes standing_refusal, the same as today."""
+        sha = format(11, "040x")
+        host = StandingReads([("docs/notes/alpha.md", "modified", 1)], "green")
+        with unittest.mock.patch.object(merge, "own_session_link", lambda body: True):
+            why = review_fn(self, "standing_refusal")(host, 11, {"body": "", "head": sha, "changed_files": 1}, sha)
+        self.assertEqual(why, "", "a green prose-only PR is refused: %r" % (why,))
+
 class ReviewGuardEnv(ReviewEnv):
     """The guard and kind cases' one home: the record's argv at the feature branch's head (the fake host reports it as live), and the refusal's shape."""
 
