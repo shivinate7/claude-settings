@@ -134,6 +134,7 @@ NO_MD = [
     'Stand-in signature fixture suite',
     'Test temp helper fixture suite',  # reads lint/_test_temp.py and lint/test_test_temp.py only: no .md at run time
     'Tests set config fixture suite',  # reads lint/check_tests_set_config.py and .py test files only: no .md at run time
+    'Merge config layout fixture suite',  # reads .github/stamp.json and its own file only: no .md at run time
     'Tests set config check',  # walks the repo and parses test_*.py files only (no .md read). It names no file, so not NAMES_ONLY
     'Plan refuter fixture suite',
     'Copy finder fixture suite',
@@ -441,6 +442,7 @@ MAIN_STEPS = [
     'Stand-in signature fixture suite',
     'Test temp helper fixture suite',
     'Tests set config fixture suite',
+    'Merge config layout fixture suite',
     'Tests set config check',
     'Record slug fixture suite',
     'Cost line pin fixture suite',
