@@ -18,10 +18,10 @@ from proc_env import holds_session_tag  # the one home of the exec-environment r
 
 from guard_core import (
     QUOTE_MARKS,
-    ASSIGNMENT, CMD_EXE_NAMES, ENV_PATTERN_COMMANDS, PLAYWRIGHT_PS_SHELLS,
+    ASSIGNMENT, CMD_EXE_NAMES, DURATION, ENV_PATTERN_COMMANDS, PLAYWRIGHT_PS_SHELLS,
     POWERSHELL_CALL, PowerShellScript, SILENT_WRITE_REDIRECT, _pwsh_script, _skip_assignments_and_keywords,
-    _split_heredocs, _strip_heredoc_bodies_unconditionally, backgrounding_amp, basename, inline_script,
-    inner_commands, resolve_command, segment_tokens, split_segments, strip_heredoc_bodies,
+    _split_heredocs, _strip_heredoc_bodies_unconditionally, _wrapper_flags, backgrounding_amp_spots, backgrounding_amps, basename,
+    inline_script, inner_commands, resolve_command, segment_tokens, split_segments, strip_heredoc_bodies, walk_quotes,
 )
 from guard_env import substitution_commands
 import own_session  # the one home of the agent transcript folder
@@ -645,26 +645,226 @@ def cmd_start_hit(tokens) -> str:
     return ""
 
 
-def bare_background_hit(cmd: str) -> str:
-    """Return the matched text when ANY segment holds a bare background job (`&` as its own
-    token, after the command word) with no pid captured anywhere in the command, else ''.
+def pid_capture_spots(segment: str):
+    """The index of each `$!` one segment holds as shell code: not one inside single quotes (`'pid $!'`
+    is text that prints `$!`), nor an escaped `\\$!`. A `$!` in double quotes expands, so it counts. A comment
+    and a heredoc body are gone before this reads (`split_segments`, `_strip_heredoc_bodies_unconditionally`)."""
+    return [index for index, char, quote in walk_quotes(segment)
+            if char == "$" and quote not in ("'", "$'") and segment[index + 1:index + 2] == "!"]
 
-    The `&` must come AFTER the command word: a leading `&` is PowerShell's call operator,
-    never a background job. Every heredoc body is dropped first: an `&` there is not a job.
-    """
-    cmd = _strip_heredoc_bodies_unconditionally(cmd)
-    if "$!" in cmd:
-        return ""
+
+LOOP_HEADS = ("while", "until", "for")
+HEAD_PREFIXES = ("{", "(", "do", "then", "else", "elif", "!")   # words that open a block, ahead of its first command
+
+
+def _pid_events(cmd: str):
+    """The events of a command in the order the shell runs them, as [(kind, text)]: "job" (a backgrounding
+    `&`, with its text), "capture" (a `$!`), "open" (a `for`, `while` or `until` head) and "close" (a `done`).
+    A `done` after a job's `&` (`do x & done`) closes its loop. Within a segment the order is the text order."""
+    events = []
     for segment in split_segments(cmd):
         tokens = segment_tokens(segment) if segment.strip() else None
         if not tokens:
             continue
-        matched = backgrounding_amp(segment, tokens, _skip_assignments_and_keywords(tokens))
-        if matched:
-            return matched
+        spots = backgrounding_amp_spots(segment, tokens, _skip_assignments_and_keywords(tokens))
+        starts = [0] + [index + 1 for index, _, _ in spots]
+        ends = [index for index, _, _ in spots] + [len(segment)]
+        marks = [(index, 1, "capture", "") for index in pid_capture_spots(segment)]
+        marks += [(index, 2, "job", text) for index, text, _ in spots]
+        for start, end in zip(starts, ends):
+            words = segment_tokens(type(segment)(segment[start:end])) or []
+            head = 0
+            while head < len(words) and words[head] in HEAD_PREFIXES:
+                head += 1
+            if head < len(words) and words[head] in LOOP_HEADS:
+                marks.append((start, 0, "open", ""))
+            elif head < len(words) and words[head] == "done":
+                marks.append((start, 0, "close", ""))
+        events += [(kind, text) for _, _, kind, text in sorted(marks)]
+    return events
+
+
+def bare_background_hit(cmd: str) -> str:
+    """Return the matched text of the first background job that has no `$!` of its own, else ''. Each
+    `&` job needs a `$!` after it and before the next job: one `$!` names only the last job started,
+    so a second job under it has no pid to stop (decision detached-launch-refused). A job in a loop
+    body needs its `$!` in that same body, since a `$!` after `done` names only the last job. A `$!`
+    before any job names nothing. The `&` must come AFTER the command word: a leading `&` is
+    PowerShell's call operator, never a background job. Every heredoc body is dropped first: an `&`
+    there is not a job.
+    """
+    cmd = _strip_heredoc_bodies_unconditionally(cmd)
+    jobs, captures = [], 0   # every job so far, and how many of the first ones have their `$!`
+    loops, opened, waiting = [], 0, None   # waiting: the loop (0: none) of the job that awaits its `$!`
+    for kind, text in _pid_events(cmd):
+        if kind == "open":
+            opened += 1
+            loops.append(opened)
+        elif kind == "close":
+            closed = loops.pop() if loops else 0
+            if closed and waiting == closed:
+                break   # the loop body ended before its job's `$!`
+        elif kind == "capture":
+            if waiting is not None:
+                captures, waiting = captures + 1, None
+        elif waiting is not None:
+            break   # the next job starts before the last one's `$!`
+        else:
+            jobs.append(text)
+            waiting = loops[-1] if loops else 0
+    return jobs[captures] if len(jobs) > captures else ""
+
+
+# A CPU load generator: a word that runs flat out until stopped, and a loop head that never waits.
+# A loop head holds a space (`while true`); a loop is busy when its body holds no `sleep`.
+LOAD_GENERATOR_WORDS = ("yes", "stress", "stress-ng", "while true", "while :")
+JOB_JOIN_ENDS = ("|", "&&", "||")   # what closes a segment that the next one is part of, in one job
+
+
+def _busy_loop_ends(segments):
+    """[(index of the `done` segment)] of each `while true` or `while :` loop in `segments` whose
+    body holds no `sleep`. A `for` or other `while` opens a loop too, so its `done` closes it; a
+    `sleep` anywhere inside marks every loop open around it."""
+    heads = {w for w in LOAD_GENERATOR_WORDS if " " in w}
+    stack, found = [], []
+    for at, segment in enumerate(segments):
+        tokens = segment_tokens(segment) if segment.strip() else None
+        while tokens and tokens[0] in ("{", "("):   # a group opener ahead of the loop head
+            tokens = tokens[1:]
+        if not tokens:
+            continue
+        if tokens[0] in ("while", "until", "for"):
+            stack.append([" ".join(tokens) in heads, False])
+            continue
+        command = resolve_command(tokens)
+        if command is not None and basename(tokens[command]) == "sleep":
+            for loop in stack:
+                loop[1] = True
+        if tokens[0] == "done" and stack:
+            busy, slept = stack.pop()
+            if busy and not slept:
+                found.append(at)
+    return found
+
+
+def _load_stage(tokens) -> str:
+    """The load generator word one command stage runs (`yes`, `stress`, `stress-ng`, or a shell whose
+    `-c` script runs one or holds a busy loop: `_script_load`), else ''. `timeout` and the other
+    wrappers are read past, and so is `setsid` and its flags, which no wrapper list holds."""
+    index = resolve_command(tokens)
+    while index is not None and index < len(tokens) and basename(tokens[index]) == "setsid":
+        index += 1
+        while index < len(tokens) and tokens[index].startswith("-") and tokens[index] != "-":
+            index += 1
+    if index is None or index >= len(tokens):
+        return ""
+    word = basename(tokens[index])
+    if word in LOAD_GENERATOR_WORDS:
+        return word
+    found = _script_load(inline_script(tokens[index:]))
+    return word + " -c (" + found + ")" if found else ""
+
+
+def _script_load(script: str) -> str:
+    """What a shell's `-c` script runs that is a load generator, else ''. The script is one job, read the
+    way a bare command is: a busy loop, or a stage that is a load generator and is not itself under
+    `timeout N setsid`. A nested `sh -c` is read the same way."""
+    if not script:
+        return ""
+    segments = split_segments(_strip_heredoc_bodies_unconditionally(script))
+    if _busy_loop_ends(segments):
+        return "a busy loop"
+    for segment in segments:
+        stage = segment_tokens(segment) if segment.strip() else None
+        found = _load_stage(stage) if stage else ""
+        if found and not _under_limit_and_session(stage):
+            return found
     return ""
 
 
+def _is_time_limit(word: str) -> bool:
+    """Whether `word` is a `timeout` duration that sets a limit: `0`, `0s` and `0.0` set none."""
+    return bool(DURATION.match(word)) and float(word.rstrip("smhd")) > 0
+
+
+def _under_limit_and_session(tokens) -> bool:
+    """Whether a stage starts `timeout [flags] DURATION setsid`: a time limit above zero, then its own session."""
+    index = _skip_assignments_and_keywords(tokens)
+    if index >= len(tokens) or basename(tokens[index]) != "timeout":
+        return False
+    index, _ = _wrapper_flags("timeout", tokens, index + 1)
+    return (index + 1 < len(tokens) and _is_time_limit(tokens[index])
+            and basename(tokens[index + 1]) == "setsid")
+
+
+def _group_moves(segment: str):
+    """The group openers and closers one segment holds, in order, as 'open' or 'close': an unquoted
+    `(` or `)`, and a `{` or `}` that stands alone as a word (`${x}` and `{a,b}` do not)."""
+    moves = []
+    for index, char, quote in walk_quotes(segment):
+        if quote or char not in "(){}":
+            continue
+        if char in "{}":
+            before, after = (segment[index - 1] if index else " "), segment[index + 1:index + 2]
+            if before not in " \t\r\n" or after not in ("", " ", "\t", "\r", "\n", "&"):
+                continue
+        moves.append("open" if char in "({" else "close")
+    return moves
+
+
+def _group_job_hit(segments, first: int, last: int, job_words, busy_done) -> str:
+    """The load generator a `{ ...; } &` or `( ... ) &` group runs, else ''. The group's `&` ends one
+    job whose body spans `segments[first:last]` (the `;`, `&&` and `|` cuts split it) and the
+    job words of segment `last`. Each stage is held to the same `timeout N setsid` form as a plain job."""
+    if any(first <= done <= last for done in busy_done):
+        return "a `while true` or `while :` loop with no sleep, in a group run as a job `&`"
+    body = [segment_tokens(segment) for segment in segments[first:last]] + [job_words]
+    for stage in body:
+        found = _load_stage(stage) if stage else ""
+        if found and not _under_limit_and_session(stage):
+            return found + " in a group run as a job `&` without `timeout N setsid`"
+    return ""
+
+
+def load_generator_hit(cmd: str) -> str:
+    """Return the matched text when a background job runs a CPU load generator (LOAD_GENERATOR_WORDS)
+    without the form `timeout N setsid <cmd> &`, else ''. The job is the `&`-ended piece and every
+    earlier stage joined to it by `|`, `&&` or `||`; a `{ ...; } &` or `( ... ) &` group is one job
+    whose body is every segment from its opener (`_group_job_hit`). The time limit ends it with its
+    lane (decision detached-launch-refused). A foreground load generator starts no job and passes."""
+    cmd = _strip_heredoc_bodies_unconditionally(cmd)
+    ends = []
+    segments = split_segments(cmd, ends)
+    if len(ends) != len(segments):   # a second quote reading added segments: read each alone
+        ends = [""] * len(segments)
+    busy_done = set(_busy_loop_ends(segments))
+    stages = []   # the tokens of the segments before this one that belong to the same job
+    open_groups = []   # the segment index where each group still open began
+    for at, (segment, end) in enumerate(zip(segments, ends)):
+        tokens = segment_tokens(segment) if segment.strip() else None
+        if not tokens:
+            stages = []
+            continue
+        jobs = backgrounding_amps(segment, tokens, _skip_assignments_and_keywords(tokens))
+        closed = None
+        for move in _group_moves(segment):
+            if move == "open":
+                open_groups.append(at)
+            elif open_groups:
+                closed = open_groups.pop()
+        if jobs and closed is not None and closed < at:
+            found = _group_job_hit(segments, closed, at, jobs[0][1], busy_done)
+            if found:
+                return found
+        for number, (text, words) in enumerate(jobs):
+            if number == 0 and at in busy_done:
+                return "a `while true` or `while :` loop with no sleep, as a job `&`"
+            for stage in (stages if number == 0 else []) + [words]:
+                found = _load_stage(stage)
+                if found and not _under_limit_and_session(stage):
+                    return found + " as a job `&` without `timeout N setsid`"
+        stages = stages + [tokens] if end in JOB_JOIN_ENDS and not jobs else []
+    return ""
 
 
 def detached_launch_hit(cmd: str) -> str:
@@ -688,16 +888,18 @@ def detached_launch_hit(cmd: str) -> str:
         if script and detached_launch_hit(script):
             return basename(tokens[resolve_command(tokens)]) + " -c '" + detached_launch_hit(
                 script) + "'"
-    return bare_background_hit(cmd)
+    return bare_background_hit(cmd) or load_generator_hit(cmd)
 
 
 DETACHED_LAUNCH_REASON = (
     "this starts a process and detaches it from the session, so no rule here can later name a "
     "pid to stop it. "
     "Remedy: use the Bash or PowerShell tool's run_in_background so the harness tracks the "
-    "process. Or capture a pid yourself: `cmd & echo $!` in Bash, or `$p = Start-Process ... "
-    "-PassThru` in PowerShell, then stop it later with `kill <pid>` or `Stop-Process -Id "
-    "<id>`. Take a free port, such as port 0 or a random high port, never a port another "
+    "process. Or capture a pid yourself, one `$!` for each `&` job: `cmd & echo $!` in Bash, or "
+    "`$p = Start-Process ... -PassThru` in PowerShell, then stop it later with `kill <pid>` or "
+    "`Stop-Process -Id <id>`. A `$!` in quotes is only text and captures nothing. A CPU load generator "
+    "(`yes`, `stress`, `stress-ng`, a `while true` or `while :` loop with no pause in it) starts in the "
+    "background only as `timeout N setsid <cmd> & echo $!`, with N above zero, so it ends after N seconds or with its process group. Take a free port, such as port 0 or a random high port, never a port another "
     "project may own, such as 8000, 5173, 3000, or 8080. "
     "(decision detached-launch-refused, a detached process is refused so a pid can always be named)"
 )

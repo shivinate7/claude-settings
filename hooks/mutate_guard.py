@@ -785,10 +785,8 @@ MUTATIONS = [
      '        if False:\n            return "& disown"', "guard",
      "detached: disown right after a job whose pid is captured"),
     ("detached-launch: a bare trailing background job no longer denies",
-     '        matched = backgrounding_amp(segment, tokens, _skip_assignments_and_keywords(tokens))\n'
-     '        if matched:\n            return matched',
-     '        matched = backgrounding_amp(segment, tokens, _skip_assignments_and_keywords(tokens))\n'
-     '        if False:\n            return matched', "guard",
+     '    return jobs[captures] if len(jobs) > captures else ""',
+     '    return ""', "guard",
      "detached: a bare trailing background job with no pid captured, "
      "MEASURED zero harmless matches in 16571 local Bash commands"),
     ("detached-launch: a background job before another line no longer denies (last segment only)",
@@ -805,8 +803,8 @@ MUTATIONS = [
      '        script = ""\n        if script and', "guard",
      "detached: a background job inside sh -c"),
     ("detached-launch: an ampersand in a python heredoc body denies again",
-     '    cmd = _strip_heredoc_bodies_unconditionally(cmd)\n    if "$!" in cmd:',
-     '    if "$!" in cmd:', "guard",
+     '    cmd = _strip_heredoc_bodies_unconditionally(cmd)\n    jobs, captures = [], 0',
+     '    jobs, captures = [], 0', "guard",
      "detached: an ampersand in a python heredoc body is Python, MEASURED 6 such local commands"),
     ("detached-launch: Start-Job no longer denies",
      '    if tool == "start-job":\n        return word',

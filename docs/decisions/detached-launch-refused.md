@@ -2,9 +2,10 @@
 
 ## The ruling
 
-The `detached-launch` rule in `hooks/guard.py` refuses a command that starts a process and detaches it from the session. It refuses these three shapes too:
+The `detached-launch` rule in `hooks/guard.py` refuses a command that starts a process and detaches it from the session. It refuses these shapes too:
 
-- A bare `&` job in any segment, unless the command captures the pid with `$!`.
+- A bare `&` job that has no `$!` of its own. Each `&` job needs a `$!` after it and before the next job: one `$!` names only the last job, so twelve jobs under one capture are refused. A job in a `for`, `while` or `until` body needs its `$!` in that same body, since a `$!` after `done` names only the last job. A `$!` before any job captures nothing. A `$!` inside single quotes is text and counts for none; one inside double quotes expands and counts. The guard pairs each job with the `$!` that follows it, in order, with the shell tokenizer (`backgrounding_amp_spots`, `pid_capture_spots`, `bare_background_hit`).
+- A CPU load generator as a background job: `yes`, `stress`, `stress-ng`, or a `while true` or `while :` loop with no `sleep` (`LOAD_GENERATOR_WORDS` in `hooks/guard_kill.py`). It starts in the background only as `timeout N setsid <cmd> &`, with N above zero (`timeout 0` sets no limit), so it ends after N seconds and with its own process group, and the form also wraps a shell (`timeout N setsid sh -c '<script>' &`). A shell's `-c` script (`sh`, `bash`, `zsh`, also after `nohup`) is read for the same words as a bare command. A foreground `yes | head` and a short `sleep 5 &` pass. A lane started twelve `yes` jobs under one `echo $!`, and the load reached 48 to 130 (owner's list keeper picks, 2026-11-26 02:27 and 02:45 CST; reversible).
 - `disown` in command position.
 - The same shapes inside the script of `sh -c` or `bash -c`.
 
