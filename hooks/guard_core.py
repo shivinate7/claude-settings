@@ -2781,10 +2781,14 @@ def inner_commands(tokens, local: bool = False):
     (wrapped_commands), at each command in the segment. The one reader of these wrappers.
     With `local`, a text that runs on another machine or in a container (`ssh`, `docker exec`,
     `kubectl exec`) is left out: a rule about this machine's processes reads the rest."""
-    found = [nested_script(tokens)] + ([] if local else [ssh_remote_script(tokens)])
+    found = [nested_script(tokens), ssh_remote_script(tokens)]
     for at in command_indexes(tokens):
-        if not (local and basename(tokens[at]) in REMOTE_RUNNERS):
-            found.extend(wrapped_commands(tokens, at))
+        found.extend(wrapped_commands(tokens, at))
+    if local:
+        far = [ssh_remote_script(tokens)] + [text for at in command_indexes(tokens)
+                                             if basename(tokens[at]) in REMOTE_RUNNERS
+                                             for text in wrapped_commands(tokens, at)]
+        found = [text for text in found if text not in far]
     return [text for text in found if text]
 
 
