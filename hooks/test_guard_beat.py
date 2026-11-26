@@ -56,7 +56,7 @@ SUMMARY = "test_guard PASS:"  # the last line of a family run that passed
 # Set by a wrapper or an outer run. A child of this test must not read them. PYTHONUNBUFFERED would
 # make stdout unbuffered whatever the runner flushes, so a missing flush could not show.
 INHERITED = ("STALL_WATCH_BEAT", "GUARD_HEARTBEAT", "GUARD_FAMILY", "GUARD_SHARD", "GUARD_TESTS",
-             "MUTATE_ONLY", "GUARD_TIMING", "PYTHONUNBUFFERED")
+             "MUTATE_ONLY", "GUARD_TIMING", "PYTHONUNBUFFERED", "GUARD_SECTION_DIR", "GUARD_HOLDER_RECORD")
 
 Run = namedtuple("Run", "rc out err")
 Watched = namedtuple("Watched", "watch_rc watch_out job_rc job_out")

@@ -135,7 +135,6 @@ REAP_OTHER_SESSION = "reapbatch-other-0002"
 SUBCFG = os.path.join(ROOT, "subcfg")    # a config dir that holds only transcripts
 SUBWT = os.path.join(ROOT, "subwt")
 OWN_ID, OTHER_ID, PLAIN_ID = "a0246dbf02b4a0327", "b1357ecf13c5b1438", "c2468fd024d6c2549"
-ORPHAN_PIDS = []
 
 
 def spawn_orphan(cwd):
@@ -146,7 +145,7 @@ def spawn_orphan(cwd):
         answer = subprocess.run(["sh", "-c", "sleep 300 </dev/null >/dev/null 2>&1 & echo $!"],
                                 cwd=cwd, capture_output=True, text=True, timeout=20)
         pid = int(answer.stdout.strip())
-        ORPHAN_PIDS.append(pid)
+        note_holder(pid)
         parent = subprocess.run(["ps", "-o", "ppid=", "-p", str(pid)], capture_output=True,
                                 text=True, timeout=5).stdout.strip()
     except (OSError, ValueError, subprocess.SubprocessError):
@@ -167,7 +166,8 @@ def spawn_live_parent(cwd):
                          "</dev/null 2>/dev/null &"],
             cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
         child, parent = int(outer.stdout.readline()), int(outer.stdout.readline())
-        ORPHAN_PIDS.extend([child, parent])   # recorded as soon as the inner shell names them, before the wait
+        note_holder(child)   # recorded as soon as the inner shell names them, before the wait
+        note_holder(parent)
         outer.wait(timeout=20)   # the outer shell exits; its background child is reparented
         ps_parent = subprocess.run(["ps", "-o", "ppid=", "-p", str(parent)], capture_output=True,
                                    text=True, timeout=5).stdout.strip()
@@ -238,7 +238,7 @@ def tag_orphan(env_entries=(), argv_extra=(), holder=None):
                                 + list(argv_extra), cwd=TAG_CWD, env=env, capture_output=True,
                                 text=True, timeout=20)
         pid = int(answer.stdout.strip())
-        ORPHAN_PIDS.append(pid)
+        note_holder(pid)
         for _ in range(100):   # setsid runs a moment after the shell exits
             ppid, pgid = subprocess.run(["ps", "-o", "ppid=,pgid=", "-p", str(pid)],
                                         capture_output=True, text=True, timeout=5).stdout.split()
@@ -278,7 +278,7 @@ def child_of(parent):
         for row in rows:
             fields = row.split()
             if len(fields) == 2 and fields[1] == str(parent) and fields[0].isdigit():
-                ORPHAN_PIDS.append(int(fields[0]))
+                note_holder(int(fields[0]))
                 return int(fields[0])
         time.sleep(0.05)
     return None
