@@ -124,7 +124,6 @@ PROMPT = re.compile(
 WORD = re.compile(r"(?:(off)|(\d+)([mh])?)", re.I)  # `off` or a length, as the whole rest
 # The plain ask (grant_model_ask): the whole word, the blocks that are not the owner's words, a word that may name a
 # role, and a length (bounded by non-word characters, so `12 mhz` is none).
-OPUS_WORD = re.compile(r"\bopus\b", re.I)
 _FAMILIES = "|".join(MODEL_FAMILIES) or "(?!)"  # an empty list (a stale helper) matches nothing
 MODEL_WORD = re.compile(r"(?<![A-Za-z])(%s)(?![A-Za-z])" % _FAMILIES, re.I)  # also inside claude-sonnet-5-5
 # His end words for a held model, as the whole prompt: `no sonnet`, `sonnet off`, `opus off`.
@@ -602,9 +601,16 @@ def _owner_ask(prompt, source, transcript, wanted, strip_quotes=False):
 
 
 def _model_wanted(text):
-    """True when the model ask may go to its judge on its words alone: a whole model word, Opus and Fable included, and no
-    whole word `override` outside code spans (the override ask judges that prompt, except one that names Opus)."""
-    return bool(_names_models(text)) and OVERRIDE_WORD.search(_outside_code(text)) is None
+    """True when the model ask may go to its judge on its words alone: a whole model word, Opus and Fable included. A whole
+    word `override` outside code spans keeps the ask from Haiku and Sonnet prompts (the override ask judges those). A prompt
+    that names a model above Sonnet goes to the model ask whatever else it says, unless `override` is its first word: that
+    is the keyword form, which grants an override and no model (_grant_first_word)."""
+    names = _names_models(text)
+    if not names:
+        return False
+    if OVERRIDE_WORD.search(_outside_code(text)) is None:
+        return True
+    return bool(names & set(ABOVE_SONNET)) and PROMPT.match(text) is None
 
 
 def _end_hold(session_id, path, family=None, why=""):
@@ -778,10 +784,11 @@ def _outside_code(text):
 
 def _override_wanted(text):
     """True when the plain override ask may go to the judge on its words alone: the whole word `override` outside code
-    spans with no NEGATIONS word or `off` within NEGATION_SPAN words of it, no `?`, and no whole word `opus`."""
+    spans with no NEGATIONS word or `off` within NEGATION_SPAN words of it, no `?`, and no whole model word above Sonnet (Opus
+    or Fable: the model ask judges those, _model_wanted)."""
     clean = _outside_code(text)
     starts = {m.start() for m in OVERRIDE_WORD.finditer(clean)}
-    if not starts or "?" in text or OPUS_WORD.search(text):
+    if not starts or "?" in text or _names_models(text) & set(ABOVE_SONNET):
         return False
     words = list(ROLE_WORDS.finditer(clean))
     names = [m.group().lower() for m in words]

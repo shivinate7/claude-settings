@@ -5797,14 +5797,27 @@ def audit_disk_cleanup_hit(tool: str, tool_input) -> bool:
 
 
 OPUS_STANDING_ROLES = ("Plan", "designer", "design-reviewer", REFUTER_ROLE)
-MODEL_SPAWN_REASON = (
+MODEL_SPAWN_HEAD = (
     "Rule (configuration): this spawn sets model %s, above its role's model. That model runs only on the owner's own "
-    "typed words that name it for this spawn, or his `override`, except Plan, the designer, the design reviewer, the "
-    "refuter and an Explore whose brief's first line carries the `%s` marker (decision agent-model-cap). A step grant "
-    "lifts the model its words name. Remedy: run this spawn on the role's model now, and do not ask the owner for the "
-    "model. If he named a model for this work, say in your report that his word did not hold. A reviewer's Round 2 or "
-    "Round 3 brief names sonnet. A builder's third try runs Sonnet."
+    "typed words that name it for this spawn, or his `override`"
 )
+# Opus only: Plan, the designer, the design reviewer, the refuter and the Audit: Explore are Opus grants, and none covers Fable.
+MODEL_SPAWN_STANDING = (
+    ", except Plan, the designer, the design reviewer, the refuter and an Explore whose brief's first line carries the "
+    "`%s` marker"
+)
+MODEL_SPAWN_TAIL = (
+    " (decision agent-model-cap). A step grant lifts the model its words name. Remedy: run this spawn on the role's "
+    "model now, and do not ask the owner for the model. If he named a model for this work, say in your report that his "
+    "word did not hold. A reviewer's Round 2 or Round 3 brief names sonnet. A builder's third try runs Sonnet."
+)
+
+
+def model_spawn_reason(model: str) -> str:
+    """The agent-model-cap refusal for a spawn on `model` (Opus or Fable), built from the parts above so the two share one
+    text. Only an Opus spawn names the standing grants and the Audit: marker; no standing grant lifts Fable."""
+    standing = "" if "fable" in model.lower() else MODEL_SPAWN_STANDING % EXPLORE_AUDIT_MARKER
+    return MODEL_SPAWN_HEAD % model + standing + MODEL_SPAWN_TAIL
 
 
 def opus_spawn_hit(tool: str, tool_input) -> tuple:
@@ -8714,7 +8727,7 @@ def judge(payload) -> None:
     opus_model, opus_role, opus_unread = opus_spawn_hit(tool, tool_input)
     if opus_model:
         refuse(tool, "deny", "agent-model-cap",
-               MODEL_SPAWN_REASON % (opus_model, EXPLORE_AUDIT_MARKER)
+               model_spawn_reason(opus_model)
                + (" The scan could not read this brief, so it read no marker: " + BRIEF_LITERAL_REMEDY + "."
                   if opus_unread and role_key(opus_role) != "builder" and "fable" not in opus_model.lower() else ""),
                opus_model,
