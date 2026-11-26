@@ -73,18 +73,18 @@ def lane_from_prompt(tool_input):
     return bool(lines) and guard_merge._BRIEF_MARKER_LINE.match(lines[0]) is not None
 
 
-def lane_opus_without_grant(payload):
-    """True when the calling session holds no Opus grant for a lane start now: neither an Opus override that covers a
-    general-purpose role (override._take_opus, as the guard reads a create_session) nor a live timed override (the one
-    override.take lifts the Opus refusal with). Both are read only, so nothing is spent. A file that cannot be read is
-    no flag."""
+def lane_opus_without_grant(payload, model="opus"):
+    """True when the calling session holds no grant for a lane start on `model` (Opus or Fable) now: neither a held model
+    that covers a general-purpose role on that model (override._take_opus, as the guard reads a create_session) nor a live
+    timed override (the one override.take lifts the refusal with). Both are read only, so nothing is spent. A file that
+    cannot be read is no flag."""
     import override
     sid, at = payload.get("session_id"), override.now()
-    return override._take_opus(sid, "general-purpose", at) is None and not override.timed_live(sid, at)
+    return override._take_opus(sid, "general-purpose", at, model=model) is None and not override.timed_live(sid, at)
 
 
 def reasons(payload):
-    """The flags a start earns, as short phrases: a lane start with no model or with Opus and no owner grant, a role
+    """The flags a start earns, as short phrases: a lane start with no model or with Opus or Fable and no owner grant, a role
     claimed in env, and an unread handoff. Empty for a start that passes."""
     from reread_check import unread_handoff
     found = []
@@ -94,8 +94,11 @@ def reasons(payload):
             model = tool_input.get("model")
             if not (isinstance(model, str) and model.strip()):
                 found.append("it is a lane start that names no model")
-            elif "opus" in model.lower() and lane_opus_without_grant(payload):
-                found.append("it is a lane start that names %s with no owner grant for Opus" % model)
+            else:
+                import override
+                family = override._family(model)
+                if family in override.ABOVE_SONNET and lane_opus_without_grant(payload, model):
+                    found.append("it is a lane start that names %s with no owner grant for %s" % (model, family.capitalize()))
         env = tool_input.get("env")
         if isinstance(env, dict) and ROLE_ENV_KEY in env:
             found.append("its env sets %s, which only bin/claude-role may set" % ROLE_ENV_KEY)

@@ -28,6 +28,12 @@ from git_reads import (  # noqa: F401
     worktree_locked,
 )
 
+# The hooks folder: the one home a family module reads to find a file beside the hooks. It is guard.py's own `_HERE`.
+# An installed guard.py loads this file from <hooks>/guard.d/<id>, one level down, so that folder reads as its parent's
+# parent; the repo copy and a flat install sit in the hooks folder itself.
+HOOKS_HOME = (lambda own: os.path.dirname(os.path.dirname(own)) if os.path.basename(os.path.dirname(own)) == "guard.d"
+              else own)(os.path.dirname(os.path.realpath(__file__)))
+
 
 def is_cloud() -> bool:
     """True in a Claude Code cloud session: CLAUDE_CODE_REMOTE is exactly "true". Read at each call. The one home of the
@@ -2327,14 +2333,16 @@ def _log_unlock(handle) -> None:
 
 _override_who = ("", None)  # (session id, agent id) of the call this process judges
 _override_cwd = ""  # the call's directory, where the step grant is read
+_override_transcript = None  # the session's transcript path, where a model hold that ends at the report is read
 
 
-def set_override_context(session_id, agent_id, cwd=None) -> None:
-    """Name the session and agent whose call this process judges, and its directory, for the owner
+def set_override_context(session_id, agent_id, cwd=None, transcript=None) -> None:
+    """Name the session and agent whose call this process judges, its directory and its transcript, for the owner
     override."""
-    global _override_who, _override_cwd
+    global _override_who, _override_cwd, _override_transcript
     _override_who = (session_id, agent_id or None)
     _override_cwd = cwd if isinstance(cwd, str) else ""
+    _override_transcript = transcript if isinstance(transcript, str) else None
 
 
 def set_override_veto(veto) -> None:
@@ -2368,11 +2376,13 @@ COMPLY_TAIL = "If this refusal looks wrong for your task, comply anyway and say 
 
 
 def refuse(tool: str, decision: str, rule: str, reason: str, matched: str, spawn_role=None, on_lift=None,
-           continue_on_lift: bool = False):
+           continue_on_lift: bool = False, spawn_model=None):
     """Print a deny (an ask only for the agent-model cap write) and exit, unless an owner override lifts it (decision
     owner-override). A lifted act prints one context line and no decision, so the normal permission flow runs. The
     veto runs before the override is taken, so a call that also holds a never-lifted act spends no override.
     spawn_role is set only on the Opus spawn refusal, the one refusal an Opus override may lift.
+    spawn_model is the model of the spawn the refusal is about. Only the Opus spawn refusal passes it (rule 9d); the model
+    floor and the role row pass none, so a held model lifts neither (the guard judges the hold itself).
     on_lift, when set, runs once when an override lifts the act, so a rule may keep state only for an act that lands.
     continue_on_lift makes a lifted act return True instead of exiting, so the caller can judge the next rule of a
     group (the lane start's rules); any other outcome exits as before.
@@ -2382,7 +2392,7 @@ def refuse(tool: str, decision: str, rule: str, reason: str, matched: str, spawn
         try:  # an import or read failure is no override: the refusal stands
             import override
             lifted = override.take(_override_who[0], _override_who[1], override.now(), rule, spawn_role,
-                                   _override_cwd)
+                                   _override_cwd, _override_transcript, spawn_model)
             step = override.step_read() if lifted in (override.STEP_LIFTED, override.STEP_UNREAD) else None
         except Exception:
             lifted = step = None
