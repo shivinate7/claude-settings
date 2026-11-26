@@ -42,6 +42,11 @@
   merge <pr> --confirm --express   go on to the merge only for a prose-only diff (main's ci-scope.sh turns on nothing) whose body has a `Ruling: <id>`
                           line naming an entry in origin/roadmap's rulings; any other case refuses before a push.
   merge <pr> --confirm, after a merge that changes skills/waiting-page/page.html: one report-only line says to republish each live page (UNKNOWN when the changed paths could not be read). The exit code is unchanged.
+  merge <pr> --confirm, and merge <pr> --ready, on a ready pull request (a draft's confirm and a batch integration PR print none): before the lock, one hint line from one read of the
+                          CI queue (`GET actions/runs`, status queued, per_page 1, total_count). An empty queue says the PR goes alone and reads no ready list. A queue that is not empty
+                          reads the ready, reviewed PRs (reviewed_read) and names the set `combine_train.py --build` takes (the ready rows but the front PR, the lowest number), with the queue depth. At 10 or more of them (BUILD_THRESHOLD) a batch
+                          runner gets the `combine_train.py --build` command and any other session is told to hand them to the batch runner; fewer merge alone. A member whose head
+                          clashes with this one (`git merge-tree`) is named. A failed read, a failed fetch of heads for the clash read, or a merge-tree answer of unknown prints one line saying so. A hint only: no verdict and no exit code changes. Cost: one GET, and on a non-empty queue one ready-list read.
   merge --unlock [branch] remove the merge lock on the branch (default: the default branch). Never checks the holder. A cloud run reads the lock first and skips one already released.
   merge <pr> --review-record --head SHA --kind K --guard yes|no [--round N:ROLE:MODEL:VERDICT ...]
                           [--fix-check HEAD:reviewer:MODEL:PASS|FAIL] [--net-value V] [--grant "#PR, item N x, owner, YYYY-MM-DD HH:MM CST|CDT"]
@@ -314,6 +319,13 @@ class Stop(Exception):
 class Liftable(Stop):
     """A refusal that a reason flag lifts. Its message names the flag, so main() does not add the no-override line."""
 
+class ConfigValueStop(Stop):
+    """parse_config refused a value in a stamp. `cause` says who could take it: "newer" (a newer tool may know it), "either" (a newer tool may, or it is a typo),
+    "wrong" (no tool version takes it: a wrong type). head_config_refusal words its remedy by it."""
+    def __init__(self, message, cause="wrong"):
+        super().__init__(message)
+        self.cause = cause
+
 class UnknownStop(Stop):
     """A refusal that reads UNKNOWN: the run could not tell pass from fail. no flag lifts it. It exits 1 like every refusal: exit 2 is argparse's usage code."""
 
@@ -422,6 +434,8 @@ BUDGET_CITE = "(decision gh-api-budget, a bulk read stops below a tenth of the G
 LANE_LINT_CITE = "(decision lanes-run-no-full-ci-job, a lane hands off only a head that passes `merge --lane-lint`)"
 WORKFLOW_READ_CITE = "(decision private-repos-no-ci, the workflow files on the base set the wait, so a file the tool cannot read stops the merge)"
 HEAD_STAMP_CITE = "(decision private-repos-no-ci, a setup PR's own stamp that turns CI off is read and checked in full, so a broken one stops the merge)"
+HEAD_CONFIG_CITE = "(decision config-lands-after-its-reader, a merge config change that needs new tool code lands in a second pull request, after the stable branch holds that code)"
+HEAD_VALUE_CITE = "(decision config-lands-after-its-reader, a head config value that no version of the merge tool takes is fixed in the file and pushed)"
 # The paths a review record's `--guard no` refuses: the rule dirs, then the tool and the hooks, as folder prefixes. GUARD_FILES match a whole path.
 # It reads RULE_DIRS, never a copy.
 GUARD_PATHS = stale_cites.RULE_DIRS + ("merge/", "githooks/")
@@ -1485,6 +1499,13 @@ class Host:
     def open_pulls(self):
         """-> the open pull requests (drafts too), every page, as `GET pulls` lists them. A failed read is a Stop, never an empty list."""
         return self.pages("pulls", fields={"state": "open"})
+
+    def queued_runs(self):
+        """-> the count of the repo's queued CI runs (`GET actions/runs`, status queued, one run a page, reading total_count): one call, the queue depth queue_hint prints. A failed read is a Stop."""
+        c, out = self.api("actions/runs", fields={"status": "queued", "per_page": 1}, memo=False)
+        if c:
+            raise Stop("reading the queued CI runs failed " + READ_CITE + ": " + out)
+        return int(json.loads(out)["total_count"])
 
     def read_pr(self, n):
         """-> the pr() fields of pull request n, one read, with no change to this Host. A failed read is a Stop."""
@@ -2897,7 +2918,7 @@ def load_config(root, base, path, cite="", head=None, branch=None):
     CI off merges under the setup it makes, and a PR never loosens its own gate (decision private-repos-no-ci)."""
     c, out = git(root, "fetch", "-q", "origin", f"+refs/heads/{base}:refs/remotes/origin/{base}")
     if c:
-        raise Stop(f"git fetch origin {base} failed: {out}{cite}")
+        raise Stop(f"git fetch origin {base} failed: {out}{unjudged_config(head, base, path) if head else ''}{cite}")
     setup = head_none_stamp(root, head, path, branch, base)
     if setup is not None:
         parse_config(root, setup, head, f"the head {head[:9]}", path, cite + " " + HEAD_STAMP_CITE, fill=False)
@@ -2933,12 +2954,12 @@ def parse_config(root, cfg, ref, where, path, cite, fill=True):
     m = cfg.setdefault("merge", {})
     unknown = sorted(set(m) - MERGE_FIELDS)
     if unknown:
-        raise Stop(f"{path} on {where} has an unknown field in the merge block: {', '.join(unknown)}{cite}")
+        raise ConfigValueStop(f"{path} on {where} has an unknown field in the merge block: {', '.join(unknown)}{cite}", "newer")
     if not isinstance(m.get("ignoreChecks", []), list):
-        raise Stop(f"{path} on {where}: merge.ignoreChecks must be a list, not {m['ignoreChecks']!r}.{cite}")
+        raise ConfigValueStop(f"{path} on {where}: merge.ignoreChecks must be a list, not {m['ignoreChecks']!r}.{cite}")
     dm = m.get("deadlineMinutes", MERGE_DEFAULTS["deadlineMinutes"])
     if not isinstance(dm, int) or isinstance(dm, bool) or not 1 <= dm <= 360:  # 360: GitHub's longest job run
-        raise Stop(f"{path} on {where}: merge.deadlineMinutes must be a whole number from 1 to 360, not {dm!r}.{cite}")
+        raise ConfigValueStop(f"{path} on {where}: merge.deadlineMinutes must be a whole number from 1 to 360, not {dm!r}.{cite}")
     caps = base_job_caps(root, ref)
     floor = min(max(caps.values(), default=0) + 5, 360)  # clamped: 360 is the most a deadline may be
     if caps and dm < floor:  # the wait must outlast the slowest job's cap, or a job still within its cap reads as a deadline miss
@@ -2961,9 +2982,9 @@ def parse_config(root, cfg, ref, where, path, cite, fill=True):
                   (isinstance(m.get("keepBranches", []), list) and all(map(plain_name, m.get("keepBranches", []))), "keepBranches"),
                   (rc == "protection" or rc in PINNED_STRINGS or isinstance(rc, list) and rc and all(map(ne, rc)), "requiredChecks")):
         if not ok:
-            raise Stop(f"{path} on {where}: merge.{k} is not valid: {m[k]!r}.{cite}")
+            raise ConfigValueStop(f"{path} on {where}: merge.{k} is not valid: {m[k]!r}.{cite}", {"requiredChecks": "newer", "method": "either"}.get(k, "wrong"))
     if "defaultBranch" in cfg and not ne(cfg["defaultBranch"]):
-        raise Stop(f"{path} on {where}: defaultBranch must be a non-empty string, not {cfg['defaultBranch']!r}.{cite}")
+        raise ConfigValueStop(f"{path} on {where}: defaultBranch must be a non-empty string, not {cfg['defaultBranch']!r}.{cite}")
     ignore_checks(cfg)  # refuse a bad entry before the defaults notice, so the refusal is the only line
     if not fill:
         return cfg
@@ -2977,11 +2998,70 @@ def parse_config(root, cfg, ref, where, path, cite, fill=True):
         say(f"merge: {path} on {where} leaves out {', '.join(filled)}. Using the defaults for those.")
     return cfg
 
+def head_config_refusal(root, head, base, path=DEFAULT_CONFIG):
+    """-> the one refusal line for a PR head whose `path` this running tool's parse_config refuses, else None. Only a PR whose diff against origin/`base` touches `path` is
+    judged, so a head that inherits a stamp from an older main is left alone. A file the PR deletes reads as None: the base's stamp decides then (the same reading head_none_stamp takes).
+    A read that could not run (the diff, the file, the workflow caps at the head) raises UnknownStop: the config is unknown, never clear (rule verification-report-unknown-reads).
+    The remedy follows the cause (ConfigValueStop.cause): the stable clause only for a value a newer tool may take; a wrong type has none.
+    The check protects only a run of the older tool (the launcher's `stable`); a run from the PR's own tree passes by construction.
+    Cost: one `git diff --name-status`, and for a touched file one `git show` and one parse_config (the workflow-cap read at the head, git only)."""
+    where = f"{path} on the head {head[:9]}"
+
+    def unknown(why):
+        return UnknownStop(f"{where} could not be read ({' '.join(why.split())[:200]}), so what the merge tool at stable makes of it is unknown, not clear. "
+                           f"Fetch origin/{base} and run again. Nothing was claimed or pushed. {UNKNOWN_CITE}")
+
+    def read(*args):  # a read that timed out is as unknown as one that failed
+        try:
+            return git(root, *args)
+        except subprocess.TimeoutExpired as e:
+            raise unknown(f"timed out after {e.timeout} s")
+
+    c, changed = read("diff", "--name-status", "--no-renames", f"origin/{base}...{head}", "--", path)
+    if c:
+        raise unknown(changed)
+    if not changed.strip() or changed.split()[0] == "D":
+        return None
+    c, text = read("show", f"{head}:{path}")
+    if c:
+        raise unknown(text)
+    try:
+        cfg = json.loads(text)
+    except ValueError as e:
+        return f"{where} is not valid JSON ({e}). Every merge in the repo reads this file from the default branch, so fix it before the PR goes on."
+    if not isinstance(cfg, dict):
+        return f"{where} is not an object: the whole file must be one JSON object. Every merge in the repo reads this file from the default branch, so fix it before the PR goes on."
+    if not isinstance(cfg.get("merge", {}), dict):
+        return f"{where} is not an object in its merge block: merge must be a JSON object. Every merge in the repo reads this file from the default branch, so fix it before the PR goes on."
+    try:
+        with contextlib.redirect_stdout(io.StringIO()):  # parse_config says its defaults and floors; only its refusal is read here
+            parse_config(root, cfg, head, f"the head {head[:9]}", path, " " + HEAD_VALUE_CITE, fill=False)
+    except ConfigValueStop as e:
+        reason = str(e).removesuffix(" " + HEAD_VALUE_CITE)  # a newer tool may take the value, so those causes carry the second-pull-request cite instead
+        cite = " " + HEAD_CONFIG_CITE
+        land = f"land the tool change first, wait until stable holds it, then change {path} in a second PR"
+        if e.cause == "newer":
+            return f"{reason}{cite} The merge tool at stable does not know this value or key yet, so every merge in the repo would be refused once this lands. {land[0].upper() + land[1:]}."
+        if e.cause == "either":
+            return (f"{reason}{cite} Either the merge tool at stable does not know this value yet, so every merge in the repo would be refused once this lands: then {land}. "
+                    f"Or the value is a typo: then fix it in {path} and push.")
+        return f"{e} No version of the merge tool takes this value, so fix it in {path} and push."
+    except Stop as e:  # not a verdict on the value: parse_config could not read the workflows at the head
+        raise unknown(str(e))
+    except subprocess.TimeoutExpired as e:  # the same workflow read, timed out
+        raise unknown(f"timed out after {e.timeout} s")
+    return None
+
 def refuse_bad_pr(info):
     if info["state"] != "OPEN":
         raise Stop(f"the pull request is {info['state']}")
     if info["mergeable"] == "CONFLICTING" or info["merge_state"] == "DIRTY":
         raise Stop("the pull request is CONFLICTING. Merge the base into the branch and run again. Nothing was claimed. " + BASE_CITE)
+
+def unjudged_config(head, base, path=DEFAULT_CONFIG):
+    """The sentence a stop for an unfetched base adds: head_config_refusal diffs the head against origin/<base>, so without it the head's stamp is unknown, not clear.
+    The one home of that sentence; a stop that names a head and a base ends with it."""
+    return f" {path} on the head {head[:9]} could not be read without {base}, so it is unknown, not clear. Fetch {base} and run again."
 
 def fetch_branch(root, branch, cite=""):
     """Fetch origin's `branch` into refs/remotes/origin/. -> its sha. The one home of that fetch. `cite` ends the stop's text: the batch calls pass their own."""
@@ -2997,7 +3077,7 @@ def fetch_pr_head(root, info, base, host=None, n=None):
     for ref in (base, info["branch"]):
         c, out = git(root, "fetch", "-q", "origin", f"+refs/heads/{ref}:refs/remotes/origin/{ref}")
         if c:
-            raise Stop(f"git fetch origin {ref} failed: {out} {UNKNOWN_CITE}")
+            raise Stop(f"git fetch origin {ref} failed: {out}{unjudged_config(info['head'], base) if ref == base else ''} {UNKNOWN_CITE}")
     got = git(root, "rev-parse", f"refs/remotes/origin/{info['branch']}")[1]
     if got != info["head"] and host is not None:
         stale = info["head"]
@@ -3209,30 +3289,88 @@ def ready_batch_numbers(rows, pulls):
 
 
 
-def combine_hint(root, host):
-    """Print one line when another lane lint is running or queued: the ready PRs whose records pass, and the command that builds a train from them, so a lane
+def clashing_members(root, pulls, others, mine):
+    """-> (clashes, unknown, why): the (number, files) of each PR in `others` whose head conflicts, by `git merge-tree`, with the head `mine`; the numbers whose clash
+    read git could not make (a merge-tree answer of unknown, which a head the clone still lacks after a failed fetch gives); and one line of why, the fetch's when it failed,
+    else the first merge-tree's. A PR whose head the clone lacks is fetched once (fetch_branch_heads). An unreadable pair is never a clash and never clean: the caller says
+    the clash read is unknown. Cost: at most one fetch and one merge_tree per member."""
+    heads = {d["number"]: d["head"]["sha"] for d in pulls}
+    why = ""
+    if missing_commits(root, *[heads[m] for m in others if m in heads], mine):
+        code, out = fetch_branch_heads(root)
+        if code:
+            why = f"git fetch exited {code}: {(out.strip().splitlines() or ['no output'])[0][:120]}"
+    clashes, unknown = [], []
+    for m in others:
+        if m in heads:
+            state, files = conflicting_files(root, mine, heads[m])
+            if state == "conflict":
+                clashes.append((m, files))
+            elif state != "clean":
+                unknown.append(m)
+                why = why or f"{(files[:1] or ['no reason'])[0][:120]}"
+    return clashes, unknown, why
+
+def combine_hint(root, host, trigger=None, exclude=None):
+    """Print one line when a batch could skip a wait: the ready PRs whose records pass, and the command that builds a train from them, so a lane
     does not wait on a queue the batch could skip (decision session-tiers, merge alone or combine). The set is the one `combine_train.py --build` takes
-    (batch_rows there): rows whose act is `batch` on a main base, the lowest-numbered one (the front PR, which merges alone) left out. Never stops a lint: a read that fails prints one line saying so."""
-    pids = other_lane_lint_pids(root)
-    if not pids:
-        return
-    who = f"another lane lint is running or queued (pid {', '.join(map(str, sorted(pids)))})"
+    (batch_rows there): the rows whose act is `batch` on a main base (ready_batch_numbers), the lowest number, the front PR, which merges alone, left out. That
+    slice is mirrored in batch_rows, which cannot call a new merge.py name (test_combine_train GIT_WRAPPERS). The count of that set is compared with
+    BUILD_THRESHOLD, and only a set at the threshold gets the build command. Never stops a lint: a read that fails prints one line saying so.
+    `trigger` None: the trigger is another lane lint of this clone, running or queued. Or `trigger` is the caller's own words for why it asks (queue_hint's CI
+    queue depth) and `exclude` is the info row of the pull request under merge: its head is read against every other ready PR, a clash is named, and a clash
+    read git could not make adds one sentence saying the clash read is unknown. At the backlog only a batch runner gets the build command; any other
+    session is handed to the batch runner (decision session-tiers: only the batch runner owns a batch)."""
+    if trigger is None:
+        pids = other_lane_lint_pids(root)
+        if not pids:
+            return
+        who = f"another lane lint is running or queued (pid {', '.join(map(str, sorted(pids)))})"
+    else:
+        who = trigger
     try:
         rows = []
         _lines, pulls, _totals = reviewed_read(host, None, ledger=rows)
-        ready = ready_batch_numbers(rows, pulls)[1:]
+        every = ready_batch_numbers(rows, pulls)
+        ready = every[1:]
+        clashes, unknown, why = clashing_members(root, pulls, [m for m in every if m != exclude["number"]], exclude["head"]) if exclude else ([], [], "")
     except Exception as e:  # a hint is never a verdict: an unreadable list is reported as unknown
         say(f"merge: {who}. The ready PRs with passing records are unknown: the read failed ({type(e).__name__}), so no combine hint. Run `merge --reviewed`.")
         return
     names = ", ".join(f"#{n}" for n in ready) or "none"
+    clash = "".join(f" #{m} clashes with this pull request ({', '.join(files[:3]) or 'no path named'}), so it cannot join a train with it." for m, files in clashes)
+    if unknown:
+        clash += f" The clash read is unknown for {', '.join(f'#{m}' for m in unknown)} ({why}), so a clash with this pull request is not ruled out."
     tool = os.path.join(os.path.dirname(os.path.abspath(__file__)), "combine_train.py")
+    alone = f" PR {exclude['number']} itself goes alone." if exclude else ""
     if not os.path.isfile(tool):
-        say(f"merge: {who}. Ready PRs with passing records: {names}. This checkout has no combine command.")
+        say(f"merge: {who}. Ready PRs with passing records: {names}. This checkout has no combine command.{clash}")
     elif len(ready) < BUILD_THRESHOLD:
-        say(f"merge: {who}. Ready PRs with passing records: {names}, under the backlog of {BUILD_THRESHOLD}, so they merge alone and no train is built.")
+        say(f"merge: {who}. Ready PRs with passing records ({len(ready)}): {names}, under the backlog of {BUILD_THRESHOLD}, so they merge alone and no train is built.{alone}{clash}")
+    elif exclude and read_merge_role() != "batch-runner":
+        say(f"merge: {who}. {len(ready)} ready PRs with passing records ({names}) could merge as one train. Hand them to the batch runner, which builds it.{clash}")
     else:
         say(f"merge: {who}. Combine the {len(ready)} ready PRs with passing records ({names}) instead of linting one by one: "
-            f"python3 {tool} --root {root} --build --name <name>")
+            f"python3 {tool} --root {root} --build --name <name>{clash}")
+
+def queue_hint(root, host, n, info):
+    """Print one line, before the lock, on `merge N --confirm` and `merge N --ready` for a ready pull request: how deep the CI queue is and whether N goes alone or a train
+    is worth building. One read of the queued run count (Host.queued_runs). An empty queue says N goes alone and reads no ready list; any other depth goes through
+    combine_hint with N as `exclude`: N stays in the ready set when it is a batch row (only the front PR is left out), and N is read against the others for a clash. A failed read prints one unknown line. A hint only: no verdict, no exit code. A batch integration PR gets none, and a host that
+    reads no queue (a scripted one) gets none. Under the stamp value "none" no CI is read, so none (decision private-repos-no-ci). Cost: one `actions/runs` GET, then on a queue that is not empty one ready-list read (reviewed_read)."""
+    if is_integration_pr(info) or not hasattr(host, "queued_runs"):
+        return
+    if getattr(host, "required", None) == "none":
+        return  # no CI run is read under the stamp value none (decision private-repos-no-ci)
+    try:
+        depth = host.queued_runs()
+    except Exception as e:
+        say(f"merge: the CI queue depth is unknown: the read failed ({type(e).__name__}), so no batch hint for #{n}.")
+        return
+    if depth <= 0:
+        say(f"merge: the CI queue is empty (0 queued runs), so #{n} goes alone.")
+        return
+    combine_hint(root, host, trigger=f"the CI queue holds {depth} queued run{'s' if depth != 1 else ''}", exclude={"number": n, "head": info["head"]})
 
 
 def drop_worktree(root, tmp, wt):
@@ -4192,6 +4330,9 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_t
         if target.isdigit():
             cross_fails, reports, stop = cross_measure(root, head, int(target), info["body"], host, with_prs, base, fetched, why is None, is_integration_pr(info))
             fails += cross_fails
+            refused = head_config_refusal(root, head, base)
+            if refused:
+                fails.append(refused)
             # one check-runs read: the draft's Windows and macOS runs, which this Linux lint never runs. A batch integration PR has no draft run of its own
             # (a lane's run is the proof), so it reads none. A base with merge.requiredChecks "none" or "first-proof", or a setup head whose own stamp says "none", reads no draft run,
             # and the local lint steps below are the whole proof (decision private-repos-no-ci).
@@ -5728,6 +5869,9 @@ def draft_step(root, cfg, n, host, info, merge_main=False):
     red = head_check_red(host.head_state(n, info["head"]))  # a head that will not merge never goes ready; before any push
     if red:
         raise Stop(f"the head of #{n} has a red check, so it stays a draft and nothing was pushed {GREEN_CITE}: {red}.")
+    refused = head_config_refusal(root, info["head"], base)
+    if refused:
+        raise Stop(f"{refused} #{n} stays a draft and nothing was pushed. {HEAD_CONFIG_CITE}")
     checks = cfg.get("merge", {}).get("readyChecks")
     if not checks:
         say(READY_NO_CHECKS_LINE)
@@ -5776,6 +5920,8 @@ def draft_step(root, cfg, n, host, info, merge_main=False):
     ok, why = host.ready(n)
     if ok:
         say(f"merge: #{n} is ready now. No pull request was merged. When its run is green, run --confirm again to merge.")
+        if merge_main:  # only `--ready`: a draft --confirm is the records step, and prints no queue hint
+            queue_hint(root, host, n, info)
     else:
         say(f"merge: #{n} stays a draft ({' '.join(why.split()) or 'no reason given'}). Mark it ready after its draft run shows, then run --confirm again to merge. No pull request was merged.")
     return 0
@@ -5993,7 +6139,10 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
                 raise Stop(no_express + f". Nothing was claimed or pushed. {EXPRESS_CITE}")
         branch = info["branch"]
         if wt is None:
-            tmp, wt = open_worktree(root, info, base)
+            tmp, wt = open_worktree(root, info, base)  # the fetch that makes the head readable below
+        refused = head_config_refusal(root, info["head"], base)  # a head stamp the running tool cannot read must stop before any claim or push, as on the ready path
+        if refused:
+            raise Stop(f"{refused} #{n} was not claimed or merged. {HEAD_CONFIG_CITE}")
         lane_head = head_under_claims(wt, cfgrel, base, info["head"]) if base == cfg["defaultBranch"] else info["head"]  # the head a cited run and the relayed yes name
         extend_lock(lock, UNDO_CHECK_LOCK_SECONDS)
         record_lift(lifts, UNDO_FLAG, undo_check(wt, base_ref, unknown_ok, info.get("body", ""), lambda url: host.cited_run(url), lane_head))
@@ -8726,12 +8875,15 @@ def main(argv, host=None, lock=None, hosts=None):
                     say(note)
             if not info["draft"]:
                 say(f"merge: #{a.pr} is ready already. Nothing was changed.")
+                queue_hint(root, h, a.pr, info)
                 return 0
             return draft_step(root, cfg, a.pr, h, info, merge_main=True)
         checked = None  # the head the lane-lint PASS names; confirm refuses any other
         if a.confirm and os.environ.get("CLAUDE_CODE_REMOTE") == "true" and isinstance(h, Host) and not info["draft"]:  # a scripted host that is no Host brings its own reads; a draft is the records step, never a join
             lint_check(h, a.pr, info, root, a.config)
             checked = info["head"]
+        if a.confirm and not info["draft"]:  # a hint on the ready pull request, before the lock; a draft's confirm is the records step
+            queue_hint(root, h, a.pr, info)
         if a.confirm:
             with release_on_signals():
                 proof = (lambda live: lint_proves_head(h, a.pr, live, root, a.config)) if hasattr(h, "issue_comments") else None  # read in the cloud and on a computer; a scripted host with no comment read reads no comments
