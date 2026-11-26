@@ -4109,13 +4109,14 @@ ACTION_NOT_RUN = "--step named it, but it did not run (not run locally): an acti
 CODE_CHECK_READY = "Code check"  # the checks-job step that runs code_check.py (uses: $/actions/code-check): ruff, mypy, ShellCheck, tsc and the comment check
 READY_WITH_ACTION = DECLARED_READY + [ACTION_READY]
 REAL_MERGE_CONFIG = os.path.join(os.path.dirname(HERE), ".github", "stamp.json")  # merge.readyChecks lives here
-# The six CI-only checks a draft's ready run must read, so no CI rerun is paid to a cheap check. Each is one step of job checks, found by the script its run: line calls.
+# The CI-only cheap checks a draft's ready run must read, so no CI rerun is paid to a cheap check. Each is one step of job checks, found by the script its run: line calls.
 CHEAP_CHECK_SCRIPTS = ("lint/hook_catalog.py", "lint/test_retired_names.py", "lint/check_silent_undo.py",
-                       "lint/check_ruling_kind.py", "lint/test_check_skill_model_rows.py", "lint/test_check_project_ops_roles.py")
+                       "lint/check_ruling_kind.py", "lint/test_check_skill_model_rows.py", "lint/test_check_project_ops_roles.py",
+                       "lint/check_standin_signatures.py")
 
 
 def cheap_check_steps(script):
-    """The names of job checks' steps whose run: calls `script`, read from checks.yml. The one home of the six's names: the stamp test and the ready cases read it."""
+    """The names of job checks' steps whose run: calls `script`, read from checks.yml. The one home of the cheap checks' names: the stamp test and the ready cases read it."""
     with open(CHECKS_YML, encoding="utf-8") as f:
         block = job_block(f.read(), "checks")
     return [step_key(st, "name") for st in step_blocks(block) if re.search(r"(?m)^\s*python3 %s(\s|$)" % re.escape(script), run_body(st) or "")]
@@ -4996,8 +4997,8 @@ class ReadyChecks(CiJobStub, tm.RecordsEnv):
         self.assertEqual(self.host.posted, [], "the cloud host commented on PR #9, though it did not draft it, so the comment would say it returned to draft: " + out)
         self.assertEqual(self.host.readies, [], "the lane PR #7 went ready past a clash that still counts PR #9: " + out)
 
-    def test_cheap_check_control_six_names_declared_by_the_fixture_pass_and_go_ready(self):
-        """Green control, on head: the fixture declares the six step names itself, each passes, and the draft goes ready. The red cases differ
+    def test_cheap_check_control_names_declared_by_the_fixture_pass_and_go_ready(self):
+        """Green control, on head: the fixture declares the cheap check step names itself, each passes, and the draft goes ready. The red cases differ
         only in whether the real stamp list names the steps, so a red here would mean the harness, not the list, is wrong."""
         names = [name for script in CHEAP_CHECK_SCRIPTS for name in cheap_check_steps(script)]
         self.pre_ready_lane(declared=names)
@@ -5005,7 +5006,7 @@ class ReadyChecks(CiJobStub, tm.RecordsEnv):
         rc, out = self.pre_ready()
         for name in names:
             self.assertTrue(verdict_line(out, "pass", name), "no `pass %s` line for a fixture-declared passing step: %s" % (name, out))
-        self.assertEqual((rc, self.host.readies), (0, [7]), "the fixture's six passing steps did not mark the draft ready: " + out)
+        self.assertEqual((rc, self.host.readies), (0, [7]), "the fixture's passing steps did not mark the draft ready: " + out)
 
     def test_cheap_check_hook_catalog_failing_refuses_the_draft(self):
         """Hook catalog check, a stale docs/catalog.md. Its suite: lint/test_hook_catalog.py test_f18_stale_page_fails."""
@@ -5048,8 +5049,8 @@ class ReadyChecks(CiJobStub, tm.RecordsEnv):
         self.assertEqual(rc, 0, "a branch that only adds a record was refused by the ready run: " + out)
         self.assertEqual(self.host.readies, [7], "a branch that only adds a record did not go ready: " + out)
 
-    def test_six_cheap_checks_share_one_ci_job_start_and_read_no_github(self):
-        """Cost: the six checks run inside the checks job's one ci-job start, which the stub logs as one lint run. Each step's own shell and python
+    def test_cheap_checks_share_one_ci_job_start_and_read_no_github(self):
+        """Cost: the cheap checks run inside the checks job's one ci-job start, which the stub logs as one lint run. Each step's own shell and python
         start sit inside that run (bin/ci-job). No check reads GitHub: the ready run starts no `gh` call."""
         declared = real_ready_checks()
         names = [name for script in CHEAP_CHECK_SCRIPTS for name in cheap_check_steps(script)]
@@ -5066,7 +5067,7 @@ class ReadyChecks(CiJobStub, tm.RecordsEnv):
         with unittest.mock.patch.object(merge, "sh", counting):
             rc, out = self.pre_ready()
         starts = [c for c in self.lint_calls() if c["argv"][:1] == ["checks"]]
-        self.assertEqual(len(starts), 1, "the ready run started the checks job %d times, want one for all six: %s" % (len(starts), out))
+        self.assertEqual(len(starts), 1, "the ready run started the checks job %d times, want one for all the cheap checks: %s" % (len(starts), out))
         for name in names:
             self.assertIn(name, step_names(starts[0]["argv"]), "the checks job's one start does not run %r: %s" % (name, starts[0]["argv"]))
         self.assertEqual(gh_calls, [], "the ready run called gh for the cheap checks: %s" % gh_calls)
@@ -5245,8 +5246,8 @@ class PreReadyDeclared(unittest.TestCase):
         self.assertIn(CODE_CHECK_READY, self.declared(), "merge.readyChecks does not name %r, so the ready run never runs the code check" % CODE_CHECK_READY)
         self.assert_ci_job_reads(CODE_CHECK_READY)
 
-    def test_pre_ready_the_declared_list_names_the_six_cheap_checks_by_their_workflow_step(self):
-        """Each of the six CI-only checks is named in merge.readyChecks under the step name checks.yml gives the step that runs its script, and bin/ci-job reads that name."""
+    def test_pre_ready_the_declared_list_names_the_cheap_checks_by_their_workflow_step(self):
+        """Each of the CI-only cheap checks is named in merge.readyChecks under the step name checks.yml gives the step that runs its script, and bin/ci-job reads that name."""
         declared = self.declared()
         for script in CHEAP_CHECK_SCRIPTS:
             with self.subTest(script=script):
