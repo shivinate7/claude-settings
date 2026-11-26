@@ -1,0 +1,1 @@
+- merge-decision-omits-reread: The standing merge grant (docs/decisions/standing-merge-grant.md:73) does not say main is read a second time, after one NET_PAUSE, before a refusal reverts; merge/merge.py:2190 does. Seen: 2026-11-25 x1
