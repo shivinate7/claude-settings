@@ -4419,7 +4419,12 @@ class SuiteCarry(unittest.TestCase):
             scope = f.read()
         with open(os.path.join(HERE, "..", "landed-dirs.txt"), encoding="utf-8", newline="") as f:
             landed = f.read()
-        self.write({".github/scripts/ci-scope.sh": scope, "landed-dirs.txt": landed, "docs/records.md": "records\n"})
+        files = {".github/scripts/ci-scope.sh": scope, "landed-dirs.txt": landed, "docs/records.md": "records\n"}
+        guard_set = os.path.join(HERE, "..", "hooks", "guard-set.txt")  # the list ci-scope.sh's guard arm reads; without it every flag is on
+        if os.path.isfile(guard_set):
+            with open(guard_set, encoding="utf-8", newline="") as f:
+                files["hooks/guard-set.txt"] = f.read()
+        self.write(files)
         self.commit("base")
         subprocess.run(["git", "branch", "side"], cwd=self.root, check=True, env=ENV)
         self.lane_commit({"hooks/s.py": "V = 1\n", self.SUITE: self.SOURCE}, "lane A")
@@ -4754,9 +4759,15 @@ class ScopeLint(Job):
                 f.write(text)
 
     def commit_base(self, script):
-        """main holds the probe, the two lists the script reads, and the scope script the repo holds (its text)."""
-        self.write({self.PROBE: self.PROBE_SRC, "landed-dirs.txt": "landed-probe-dir\n",
-                    ".github/guard-inputs.txt": "no-such-path/*\n", self.SCOPE: script})
+        """main holds the probe, the two lists the script reads, the guard set's manifest (the list the script's guard arm reads;
+        without it every flag is on), and the scope script the repo holds (its text)."""
+        files = {self.PROBE: self.PROBE_SRC, "landed-dirs.txt": "landed-probe-dir\n",
+                 ".github/guard-inputs.txt": "no-such-path/*\n", self.SCOPE: script}
+        guard_set = os.path.join(HERE, "..", "hooks", "guard-set.txt")
+        if os.path.isfile(guard_set):
+            with open(guard_set, encoding="utf-8", newline="") as f:
+                files["hooks/guard-set.txt"] = f.read()
+        self.write(files)
         self.git("add", "-A")
         self.git("commit", "-qm", "base")
 
