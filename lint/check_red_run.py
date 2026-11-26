@@ -99,13 +99,19 @@ def has_verified(message):
     return any(VERIFIED.match(line.rstrip()) or VERIFIED_NONE.match(line.rstrip()) for line in message.splitlines())
 
 
-def commits(root, base, head, exclude, is_test_rel):
+def commits(root, base, head, exclude, is_test_rel, remotes=""):
     """The non-merge commits of base..head, minus those `exclude` holds, oldest first, as (sha, parent, subject,
     message, test paths it adds). One `git log --numstat` reads the range and each commit's files. Raises Unknown
-    when git cannot read it, or when a revision starts with a dash, which git would read as an option."""
+    when git cannot read it, or when a revision starts with a dash, which git would read as an option.
+    `remotes` is a `--remotes[=<remote>]` option (the guard's `_remote_refs`): the commits those remote-tracking
+    refs hold are left out too, for a push does not send them again."""
     revs = [base + ".." + head] + (["^" + exclude] if exclude else [])
     if any(rev.startswith("-") or rev.startswith("^-") for rev in revs) or head.startswith("-"):
         raise Unknown("a revision starts with a dash: " + " ".join(revs))
+    if remotes:
+        if not remotes.startswith("--remotes"):
+            raise Unknown("not a remote-refs option: " + remotes)
+        revs += ["--not", remotes]
     out = git(root, "log", "--no-merges", "--topo-order", "--reverse", "-z", "--numstat", "--no-renames",
               "--format=" + START + "%H" + FIELD + "%P" + FIELD + "%B", *revs)
     found = []
@@ -162,10 +168,10 @@ def pending_gap(message, paths):
     return ("new", message.strip().split("\n", 1)[0], _shown(paths))
 
 
-def judge(root, base, head="HEAD", exclude="", *, is_test_rel=None, tip=None, pending=(), rows=None):
-    """(found, last) for the commits of base..head, minus those `exclude` holds. `found` is one (short sha,
-    subject, test paths shown) per commit that adds test lines with no valid trailer, and `last` the short sha of
-    the newest commit read. Raises Unknown when git cannot say.
+def judge(root, base, head="HEAD", exclude="", *, is_test_rel=None, tip=None, pending=(), rows=None, remotes=""):
+    """(found, last) for the commits of base..head, minus those `exclude` and `remotes` hold (see `commits`).
+    `found` is one (short sha, subject, test paths shown) per commit that adds test lines with no valid trailer,
+    and `last` the short sha of the newest commit read. Raises Unknown when git cannot say.
 
     `is_test_rel` says what a test path is: the guard passes its own, and a call with none imports the guard's, once.
     The rollout reads head's tree, at the first commit that could be a gap.
@@ -179,7 +185,7 @@ def judge(root, base, head="HEAD", exclude="", *, is_test_rel=None, tip=None, pe
         is_test_rel = guard.is_test_rel
     found, rollout, last = [], None, ""
     tip_sha = git(root, "rev-parse", head + "^{commit}").strip() if tip is not None else ""
-    for sha, parent, subject, message, paths in (rows if rows is not None else commits(root, base, head, exclude, is_test_rel)):
+    for sha, parent, subject, message, paths in (rows if rows is not None else commits(root, base, head, exclude, is_test_rel, remotes)):
         last = sha[:7]
         if sha == tip_sha:
             if tip[0] is not None:
