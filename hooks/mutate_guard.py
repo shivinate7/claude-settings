@@ -3558,8 +3558,9 @@ MUTATIONS = [
      '                "unread_note": staticmethod(lambda payload: ""), "too_big_estimate": staticmethod(lambda result, path: 0),\n'
      '                "agent_rewrite": staticmethod(lambda payload: None),\n'
      '                "HANDOFF_MAX_TOKENS": 10000, "READ_CAP_TOKENS": 25000, "READ_MAX_LINES": 2000,\n'
-     '                "AUDIT_OWED": "", "AUDIT_REMEDY": "", "AUDIT_HELPER_HEAD": "",\n'
-     '                "audit_helper_command": staticmethod(lambda payload: "")})\n',
+     '                "AUDIT_OWED": "", "AUDIT_REMEDY": "", "AUDIT_HELPER_HEAD": "", "AUDIT_HELPER_SCRIPT": "",\n'
+     '                "audit_helper_command": staticmethod(lambda payload: ""),\n'
+     '                "audit_helper_allows": staticmethod(lambda command, handoff: False)})\n',
      "guard", "a guard copy without reread_check.py refuses as guard-crash"),
     ("handoff-unread: a reread_check without its precompact_handoff sibling is let load again",
      '        if reread_check.ph is None:',
@@ -3597,7 +3598,7 @@ MUTATIONS = [
      '            pass',
      "audit", "after the read, a Bash call is refused by compaction-audit"),
     ("compaction-audit: the audit helper allows any command that names the helper, so a chained or copied call passes",
-     '    return tool == "Bash" and isinstance(command, str) and command == reread_check.audit_helper_command(handoff)',
+     '    return tool == "Bash" and isinstance(command, str) and reread_check.audit_helper_allows(command, handoff)',
      '    return tool == "Bash" and isinstance(command, str) and "precompact_handoff.py" in command',
      "audit", "the helper command with a chained rm stays refused"),
     ("compaction-audit: the refusal drops the session's transcript path, so an Audit: brief cannot name it",

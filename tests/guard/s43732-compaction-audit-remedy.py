@@ -254,7 +254,7 @@ def ar_refused_check(name, spell):
     return True, "%s: refused by compaction-audit while the audit is owed" % name
 
 
-# RED on main: each spelling that must be allowed. Main allows only the exact text, so each fails at its first assert.
+# Each spelling of the printed remedy that the rule must allow while the audit is owed. A case fails when its spelling is refused.
 AR_PASS_CASES = (
     ("compaction-audit: the printed remedy with its quotes removed is allowed while the audit is owed",
      "unquoted", ar_unquoted),
