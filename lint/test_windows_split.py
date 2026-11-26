@@ -2516,8 +2516,9 @@ class MacOnceByBatch(unittest.TestCase):
         # Named failure: checks-macos still runs a guard shard, or checks-macos-b still runs a guard step.
         self.assertEqual(macos_slice_problems(self.text), [])
 
-    def test_the_nightly_skip_is_an_ubuntu_job_with_no_job_level_if(self):
-        # Named failure: no skip job, or one with a job-level if, so it is skipped on a pull request and every job behind scope skips.
+    def test_the_nightly_skip_is_an_ubuntu_job_with_no_job_level_if_or_the_draft_guard_alone(self):
+        # Named failure: no skip job, or one whose job-level if is more than the draft guard, so it is skipped on a ready pull request,
+        # a push or a schedule, and every job behind scope skips.
         self.assertEqual(skip_job_problems(self.text), [])
 
     def test_the_nightly_skip_holds_a_timeout_read_only_permissions_and_a_skip_output(self):
@@ -2603,6 +2604,108 @@ class MacOnceByBatch(unittest.TestCase):
         for label, text in scope_bad.items():
             with self.subTest(defect=label):
                 self.assertTrue(scope_waits_on_skip_jobs_problems("jobs:\n" + text + nightly_skip), label)
+
+    def test_the_nightly_skip_takes_the_draft_guard_alone_and_refuses_any_wider_if(self):
+        # Cut 5 (lane draft-run-starts-no-job): the skip job is off on a draft and on nothing else, so its job-level if is the draft guard
+        # alone. Named failure: skip_job_problems refuses the draft guard alone. The controls: no if passes, and each wider form is refused.
+        nightly_skip = ("  nightly-skip:\n    runs-on: ubuntu-latest\n    steps:\n"
+                        "      - id: gate\n        run: echo skip=false >> \"$GITHUB_OUTPUT\"\n")
+
+        def with_if(expr):
+            return nightly_skip.replace("    runs-on:", f"    if: {expr}\n    runs-on:", 1)
+
+        self.assertEqual(skip_job_problems("jobs:\n" + nightly_skip), [], "a skip job with no job-level if is refused")
+        self.assertEqual(skip_job_problems("jobs:\n" + with_if("${{ " + DRAFT_GUARD + " }}")), [],
+                         "the skip job's job-level if is the draft guard alone, and skip_job_problems refuses it")
+        wider = {
+            "a pull request only": "${{ github.event_name != 'pull_request' }}",
+            "the schedule only": "${{ github.event_name == 'schedule' }}",
+            "the draft guard OR'd with a scope flag": "${{ " + DRAFT_GUARD + " || needs.scope.outputs.code == 'true' }}",
+            "the draft guard AND'd with a scope flag": "${{ (" + DRAFT_GUARD + ") && needs.scope.outputs.code == 'true' }}",
+        }
+        for label, expr in wider.items():
+            with self.subTest(defect=label):
+                self.assertTrue(skip_job_problems("jobs:\n" + with_if(expr)), label)
+
+
+STATUS_FUNCTIONS = ("always()", "cancelled()", "failure()", "success()")
+
+
+def draft_run_results(text, draft=True):
+    """{job: "success" or "skipped"} for each job of checks.yml on a pull_request run with the draft state `draft`, read as GitHub
+    reads it. A job with no if needs every job it needs to succeed. A job with an if needs the same, unless its if holds a status
+    function (STATUS_FUNCTIONS): then the if alone decides. Each scope output and each skip output reads unset, as a skipped job
+    leaves it. A job that starts reads as a success."""
+    jobs, results = all_jobs(text), {}
+
+    def result(name):
+        if name not in results:
+            needs = job_needs_of(text, name)
+            for need in needs:
+                result(need)
+            needs_ok = all(results[need] == "success" for need in needs)
+            expr = yaml_scalar(jobs[name]["if"]) if jobs[name]["if"] is not None else None
+            if expr is None:
+                runs = needs_ok
+            elif any(fn in expr for fn in STATUS_FUNCTIONS):
+                runs = bool(eval_value(expr, "pull_request", "", draft=draft, results=results, needs=needs))
+            else:
+                runs = needs_ok and bool(eval_value(expr, "pull_request", "", draft=draft, results=results, needs=needs))
+            results[name] = "success" if runs else "skipped"
+        return results[name]
+
+    for name in jobs:
+        result(name)
+    return results
+
+
+class DraftRunStartsNoJob(unittest.TestCase):
+    """Cut 5 (lane draft-run-starts-no-job): a run on a draft pull request starts no job of checks.yml, and the two skip jobs still start
+    on a ready pull request, a push and a schedule. Each case reads the real file, so it is red until the change lands."""
+
+    def setUp(self):
+        with open(CHECKS, encoding="utf-8") as f:
+            self.text = f.read()
+        self.jobs = all_jobs(self.text)
+
+    def test_every_job_of_checks_yml_is_skipped_on_a_draft_pull_request_run(self):
+        # Named failure: a job starts on a draft run. On the old file nightly-skip and push-skip have no job-level if, so they run.
+        results = draft_run_results(self.text, draft=True)
+        self.assertEqual(sorted(results), sorted(self.jobs), "scope: the draft read names a job set other than checks.yml's")
+        for name in sorted(self.jobs):
+            with self.subTest(job=name):
+                self.assertEqual(results[name], "skipped", f"{name} starts on a draft pull request run")
+
+    def test_the_draft_read_is_not_vacuous_a_ready_run_starts_scope(self):
+        # Control, green on the old file: a ready run starts scope, so the skips the draft read shows come from the draft, not the reader.
+        self.assertEqual(draft_run_results(self.text, draft=False)["scope"], "success")
+
+    def test_the_two_skip_jobs_still_start_on_a_ready_pull_request_a_push_and_a_schedule(self):
+        # Control, green on the old file: the skip jobs leave a ready pull request, a push and a schedule alone.
+        for name in (NIGHTLY_SKIP_JOB, PUSH_SKIP_JOB):
+            for event in ("pull_request", "push", "schedule"):
+                with self.subTest(job=name, event=event):
+                    self.assertTrue(runs_on_event(self.jobs[name]["if"], event, draft=False), f"{name} does not start on {event}")
+
+
+class DraftGuardOnly(unittest.TestCase):
+    """draft_guard_only is the one home of "the draft guard alone", the job-level if a Windows shard or a skip job may keep. It reads no
+    scope flag, so a flag joined to the guard with OR or AND is no draft guard alone."""
+
+    def test_the_draft_guard_alone_is_the_draft_guard_alone(self):
+        # Control, green on the old file.
+        self.assertTrue(draft_guard_only(DRAFT_GUARD))
+        self.assertTrue(draft_guard_only("${{ " + DRAFT_GUARD + " }}"))
+
+    def test_the_draft_guard_joined_with_and_to_a_scope_flag_is_no_draft_guard_alone(self):
+        # Control, green on the old file.
+        self.assertFalse(draft_guard_only("(" + DRAFT_GUARD + ") && needs.scope.outputs.code == 'true'"))
+
+    def test_the_draft_guard_joined_with_or_to_a_scope_flag_is_no_draft_guard_alone(self):
+        # Named failure: an OR on a scope flag ties the answer to the flag, which draft_guard_only says it never reads. Red on the old file.
+        for expr in (DRAFT_GUARD + " || needs.scope.outputs.code == 'true'", "(" + DRAFT_GUARD + ") || needs.scope.outputs.sweep == 'true'"):
+            with self.subTest(expr=expr):
+                self.assertFalse(draft_guard_only(expr), f"draft_guard_only accepts {expr!r}: its answer then reads a scope flag")
 
 
 def runs_on_event(expr, event, draft=False):
