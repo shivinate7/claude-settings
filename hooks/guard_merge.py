@@ -1260,7 +1260,7 @@ def _octopus_hit(segment, stripped, cwd, args):
     hit, and only then, the tracking refs of a configured remote are refreshed once (`git_reads.fetch_remote`, once per
     directory and remote in the call) and the range is read again; the refusal stands only when the hit survives. A
     refresh that fails or times out keeps the refusal, with `stale` True so the reason says so. A destination named
-    like the default branch is skipped before any read: push-main asks about that push, and a deny from here would
+    like the default branch is skipped before any read: force-push refuses that push, and a deny from here would
     win over the ask. One `git rev-list` for each ref, one `git config` more for a remote named by a URL or a path
     (`_remote_refs`), and on a hit one `git fetch` of a plain remote name (a URL or a path has no tracking refs)."""
     refreshed = {}
