@@ -1,0 +1,1 @@
+- head-rows-no-getattr-guard: Host.head_state writes self.head_rows[sha] with no getattr guard (merge/merge.py:2078), unlike ran_job (merge/merge.py:5189), which reads the attribute through getattr. A Host subclass that skips Host.__init__ would raise in head_state. Seen: 2026-11-25 x1

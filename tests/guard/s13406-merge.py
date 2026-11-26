@@ -1184,7 +1184,7 @@ STANDING_ROLE = "standing"
 
 def standing_refuse(name, command, transcript, env=ROLE_ENV, **kw):
     """A `merge --role standing` the guard refuses. The reason names its rule, never the role flag and never the tier word."""
-    sh("merge-role-proof: " + name, command, "deny", rule=ROLE_RULE, lacks=ROLE_FLAG + (STANDING_ROLE,),
+    sh("merge-role-proof: " + name + ", standing tier", command, "deny", rule=ROLE_RULE, lacks=ROLE_FLAG + (STANDING_ROLE,),
        transcript=transcript, env=env, cwd=NOGIT, **kw)
 
 
@@ -1507,7 +1507,7 @@ def record_push_cost_case():
     `git rev-parse --show-toplevel`. A refspec push adds one `git symbolic-ref`. A HEAD push adds two
     `git symbolic-ref`, and reads no push.default. A bare push adds two
     `git symbolic-ref` and two `git config` reads, and reads push.default. A literal main destination
-    (`origin main`, `HEAD:main`) adds one `git config` read, the remote's URL (rule push-main). A literal
+    (`origin main`, `HEAD:main`) adds one `git config` read, the remote's URL (rule force-push). A literal
     `HEAD:<branch>` adds no read. A `--all` push (rule push-all-main) reads that URL the same way, then the current
     branch (`symbolic-ref`, the agent test), one `git for-each-ref` of the tracking refs, and, when those refs show no
     update, one more `git for-each-ref` of the local branches (the all-agent test). A glob refspec reads the URL and

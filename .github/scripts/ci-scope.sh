@@ -57,14 +57,25 @@ else
 fi
 if [ -n "$files" ]; then
   W=checks_windows M=checks_windows_merge R=checks_windows_rest Z=checks_windows_sweep X=checks_macos S=shell_macos P=pointer_windows
+  # The guard set's files come from hooks/guard-set.txt, one name per line (the one list: install.sh and install.ps1 read it too). An
+  # unreadable or empty list turns everything on, as landed-dirs.txt does below.
+  gset=$(tr -d '\r' < hooks/guard-set.txt 2>/dev/null | sed 's/#.*//; s/[[:space:]]//g' | grep -v '^$')
+  [ -n "$gset" ] || on="$on $ALL "
   while IFS= read -r f; do
-    case "$f" in
+    # gk is the path the first case reads: a file the list names reads as hooks/guard.py, so it takes the guard arm's flags.
+    gk=$f
+    while IFS= read -r g; do
+      # shellcheck disable=SC2254  # the list's names are the case patterns
+      case "$f" in hooks/$g) gk=hooks/guard.py; break ;; esac
+    done <<< "$gset"
+    case "$gk" in
       # Fail safe: this script, green-head.sh (its line is GREEN_HEAD), the workflow, and git settings that change every checkout.
       .github/scripts/ci-scope.sh|.github/scripts/green-head.sh|.github/workflows/checks.yml|.gitattributes) on="$on $ALL " ;;
-      # Guard and its installers' inputs: test_guard, the janitor suites and config_watch run guard.py.
+      # Guard and its installers' inputs: test_guard, the janitor suites and config_watch run guard.py. The guard set's other files
+      # are read as hooks/guard.py (gk, from hooks/guard-set.txt, the one list); an edit to that list sets the same flags.
       # guard_<family>.py modules are guard.py; guard_test_* is not (it falls to hooks/* below).
       hooks/guard_test_*) on="$on $R $Z $X code guard " ;;
-      hooks/guard.py|hooks/guard_*.py|hooks/shared_names.py|hooks/git_reads.py|hooks/question_form.py|hooks/own_session.py|hooks/precompact_handoff.py|hooks/merge_options.py|hooks/override.py|hooks/_nowindow.py|hooks/proc_env.py|hooks/reread_check.py|hooks/call_judge.py|hooks/decision_watch.py|hooks/feedback_guard.py|hooks/local_time.py|hooks/ruling_home.py|hooks/route_match.py|hooks/reply_judge.py|hooks/stall_watch.py|hooks/agent_brief.py|hooks/mail.py|hooks/ci_wait_cap.py|hooks/ci_wake.py|hooks/required_check.py|hooks/session_role.py|hooks/answered_claims.py|hooks/ci_wait_cap.json|hooks/route_rows.json|hooks/precompact_handoff_prompt.md|hooks/wait_common.py|hooks/mutate_shared.py) on="$on $W $R $Z $X code guard sweep " ;;
+      hooks/guard.py|hooks/guard_*.py|hooks/guard-set.txt|hooks/mutate_shared.py) on="$on $W $R $Z $X code guard sweep " ;;
       # settings.json: the same jobs, plus merge/test_merge.py (CloudAllow reads it).
       settings.json) on="$on $M $W $R $Z $X code guard sweep " ;;
       landed-dirs.txt) on="$on $W $R $Z $X $S code guard " ;;
@@ -101,9 +112,9 @@ if [ -n "$files" ]; then
       bin/duo-fold|lint/test_duo_fold.sh) on="$on $S code " ;;
       # bin/shoot: its suite installs Playwright and Chromium, so only these paths run it.
       bin/shoot|lint/test_shoot.mjs|testing/skip-locally-fail-in-ci.mjs|testing/page_session_role_sort.test.mjs) on="$on code shoot " ;;
-      # actions/playwright-setup has four callers: checks-shoot and checks-waiting-page (shoot), checks-guard and checks-guard-2 (checks_guard). Both guard jobs also
+      # actions/playwright-setup has seven callers: checks-shoot and checks-waiting-page (shoot), checks-guard, its shards 2 to 4 and checks-fixtureless (checks_guard). Each guard job also
       # install the Playwright that .github/shoot pins (package-dir), so that dir takes this arm too. Set checks_guard
-      # directly: the guard flag would also start the guard suites, which this action does not touch. A .md edit runs none of the four jobs.
+      # directly: the guard flag would also start the guard suites, which this action does not touch. A .md edit runs none of these jobs.
       actions/playwright-setup/*.md) ;;
       actions/playwright-setup/*|.github/shoot/*) on="$on code shoot checks_guard " ;;
       # merge.py: guard.py loads it. layout.json: guard.py reads it; layout.py: ste_lint.py and hook_catalog.py (merge.py) import it.
@@ -124,8 +135,9 @@ if [ -n "$files" ]; then
       .gitignore) on="$on $W $X mods code " ;;
       # bin/rm: the shim imports hooks/guard_rm_var.py (hooks/* above); it runs on posix jobs.
       bin/rm|lint/test_rm_shim.py) on="$on $X code " ;;
-      # The CI alarm's events and clear rule: GUARD_READ_FILES (hooks/mutate_guard.py) lists them, so the guard suite reads them.
-      actions/ci-alarm/events.json|actions/ci-alarm/clear_rule.py) on="$on code guard " ;;
+      # The CI alarm's events and clear rule: GUARD_READ_FILES (hooks/mutate_guard.py) lists them, so the guard suite reads them;
+      # merge/merge.py reads both, and merge/test_merge.py imports it, so it sets checks_windows_merge, which runs that suite.
+      actions/ci-alarm/events.json|actions/ci-alarm/clear_rule.py) on="$on $M code guard " ;;
       # Linux `checks` job only: the lints and opt-in templates.
       actions/*|githooks/*|testing/*|lint/*|.github/dependabot.yml) on="$on code " ;;
       # Map skill .md files: its tests read them, so this arm turns on `mods` before the *.md arm.
@@ -145,7 +157,7 @@ if [ -n "$files" ]; then
     # runs beside the others on its own runner, so it adds billed minutes and no wall time.
     case "$f" in
       hooks/guard_test_*) ;;
-      hooks/guard.py|hooks/guard_*.py|hooks/git_reads.py|hooks/own_session.py|hooks/precompact_handoff.py|hooks/shared_names.py|hooks/question_form.py|hooks/_nowindow.py|lint/report_guard.py|lint/_clause.py|lint/check_red_run.py|lint/layout.py|lint/layout.json|lint/_test_temp.py|skills/waiting-page/SKILL.md|skills/waiting-page/reference/*|skills/waiting-page/export_page.py|hooks/answered_claims.py|hooks/call_judge.py|hooks/ci_wake.py|hooks/required_check.py|hooks/decision_watch.py|hooks/feedback_guard.py|hooks/local_time.py|hooks/override.py|hooks/proc_env.py|hooks/session_role.py|hooks/reply_judge.py|hooks/reread_check.py|hooks/route_match.py|hooks/ruling_home.py|janitor/sweep.py|janitor/temp_sweep.py|lint/_transcript.py|lint/guard_log_report.py|lint/rule_audit.py|lint/ruled_store.py|hooks/mail.py|hooks/merge_options.py|hooks/agent_brief.py|lint/check_record_slugs.py|lint/_guard_sections.py|hooks/stall_watch.py|hooks/ci_wait_cap.py|hooks/ci_wait_cap.json|hooks/wait_common.py) on="$on shoot " ;;
+      hooks/guard.py|hooks/guard_*.py|hooks/git_reads.py|hooks/own_session.py|hooks/precompact_handoff.py|hooks/shared_names.py|hooks/question_form.py|hooks/_nowindow.py|lint/report_guard.py|lint/_clause.py|lint/check_red_run.py|lint/layout.py|lint/layout.json|lint/_test_temp.py|skills/waiting-page/SKILL.md|skills/waiting-page/reference/*|skills/waiting-page/export_page.py|hooks/answered_claims.py|hooks/call_judge.py|hooks/ci_wake.py|hooks/required_check.py|hooks/decision_watch.py|hooks/feedback_guard.py|hooks/local_time.py|hooks/override.py|hooks/proc_env.py|hooks/session_role.py|hooks/reply_judge.py|hooks/reread_check.py|hooks/route_match.py|hooks/ruling_home.py|janitor/sweep.py|janitor/temp_sweep.py|lint/_transcript.py|lint/guard_log_report.py|lint/rule_audit.py|lint/ruled_store.py|hooks/mail.py|hooks/merge_options.py|hooks/agent_brief.py|lint/check_record_slugs.py|lint/_guard_sections.py|hooks/stall_watch.py|hooks/git_bash.py|hooks/stale_install.py|hooks/ci_wait_cap.py|hooks/ci_wait_cap.json|hooks/wait_common.py) on="$on shoot " ;;
     esac
     # The four pull-request lint steps of the `checks` job. This is a third case, so the flags each path sets above stay as
     # they are. A path the table above does not name has set every flag already (the `*)` arm).
@@ -192,6 +204,16 @@ if [ -n "$files" ]; then
           mods/*/*/*.md) ;;
           mods/*/README.md) on="$on doc_other " ;;
         esac ;;
+    esac
+    # The files the guard suite reads under the GUARD_READ_FOLDERS folders (hooks/mutate_guard.py): the import closure of its entry points
+    # plus TRACED_READS. Each sets `guard` and `checks_guard` (a .md file sets no `code`, which the checks_guard line below needs) and keeps the flags the table above gave it, so this is a fifth case, not a rule for the folders:
+    # a folder rule would start the guard suite on files it never opens. The GUARD_READ_FILES entries set `guard` in their own arms above.
+    # The list cannot drift silently: lint/test_guard_inputs.py (guard_read_paths) computes it and fails on a file missing here.
+    case "$f" in
+      # The guard suite reads the real agents folder (hooks/guard.py role_agent_keys): a top-level agents file turns the guard on, so a new one needs no edit here. The empty nested arm comes first because bash's `*` matches `/`.
+      agents/*/*.md) ;;
+      agents/*.md) on="$on guard checks_guard " ;;
+      bin/sim-test|docs/decisions/agent-model-cap.md|merge/install_from_main.sh|janitor/sweep.py|janitor/temp_sweep.py|lint/_guard_sections.py|lint/check_record_slugs.py|lint/check_red_run.py|lint/check_skill_model_rows.py|lint/hook_catalog.py|lint/rule_audit.py|lint/ruled_store.py|lint/stale_cites.py|skills/impeccable/SKILL.md|testing/shallow_clone.py) on="$on guard checks_guard " ;;
     esac
   done <<< "$files"
   # SCOPE_FILES (the header) skips the guard-inputs pass below, which reads every changed path of the range, and keeps the landed-dir read.

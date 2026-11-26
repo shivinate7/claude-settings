@@ -1,0 +1,1 @@
+- waiting-take-zero-read-passes: Review finding F6. `test_a_waiting_take_reads_the_device_list_at_most_once` in `lint/test_sim_lease.py` asserts at most one read, so a mutant that never reads the device list passes it. Seen: 2026-11-25 x1

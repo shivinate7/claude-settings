@@ -7,7 +7,9 @@
 # (default 540, under Bash's 600 s cap; 0 means no cap). 2: a bad argument, pid 0, 1 or -1, or a
 # pid that is not this session's ("not this session", at once, no wait). 3: unknown. The liveness
 # read failed or timed out, so the helper cannot tell whether the pid lives; it is never taken as
-# "ended". (`ps` exit 1 with no output at all is the one "gone" answer on non-Linux.)
+# "ended". (`ps` exit 1 with no output at all is the one "gone" answer on non-Linux.) Also 3 when
+# the environment read that proves ownership is unreadable (macOS hides a system program's): the
+# pid is not taken as this session's, and not as another's.
 # While it waits, print "wait-pid: still waiting for pid N, <s>s" every $WAIT_PID_HEARTBEAT s
 # (default 120), so a quiet background run does not trip the stall watch.
 # A pid reused by another process has a new start time, so a changed start time means it ended.
@@ -44,6 +46,8 @@ def snapshot(pid):
     return None if state.startswith(("Z", "X")) else (state, start)
 def unknown(pid):
     print("wait-pid: pid %d: liveness unknown, the read of its state failed; not taken as ended" % pid, flush=True); return 3
+def environ_unknown(pid):
+    print("wait-pid: pid %d: environ unknown, the read of its environment failed; not waited on" % pid, flush=True); return 3
 def parse(argv):
     text, timeout = wait_common.split_args(PROG, USAGE, argv)
     if text is None or not re.fullmatch(r"-?[0-9]+", text):
@@ -57,7 +61,9 @@ def main(argv):
     if first == UNKNOWN: return unknown(pid)
     if first is None:
         print("wait-pid: pid %d is not running" % pid); return 0
-    if not guard_kill.pid_is_session_job(pid, os.environ.get("CLAUDE_CODE_SESSION_ID", "")):
+    mine = guard_kill.pid_is_session_job(pid, os.environ.get("CLAUDE_CODE_SESSION_ID", ""))
+    if mine is None: return environ_unknown(pid)
+    if not mine:
         print("wait-pid: pid %d is not this session's: not this session, so not waited on" % pid); return 2
     def step(elapsed):
         current = snapshot(pid)

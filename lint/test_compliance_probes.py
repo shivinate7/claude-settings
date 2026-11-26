@@ -63,6 +63,8 @@ class Repo:
         self.root = tempfile.mkdtemp(prefix="probes-", dir=RUN_FOLDER)
         test.addCleanup(shutil.rmtree, self.root, True)
         subprocess.run(["git", "init", "-q", self.root], check=True)
+        # No background gc or maintenance: a commit here can start one, and its lock file then shows in a case's listing.
+        self.git("config", "gc.auto", "0").git("config", "maintenance.auto", "false")
         if origin:
             bare = tempfile.mkdtemp(prefix="origin-", dir=RUN_FOLDER)
             test.addCleanup(shutil.rmtree, bare, True)
@@ -110,6 +112,22 @@ class Repo:
     def run(self, group):
         code, out, _ = self.probe(group)
         return code, out
+
+    def config(self, key):
+        """The value of `key` in this repo's own config (not a global one), "" when it is unset."""
+        done = subprocess.run(["git", "-C", self.root, "config", "--local", "--get", key], capture_output=True, text=True)
+        return done.stdout.strip()
+
+
+class FixtureRepo(unittest.TestCase):
+    """Every fixture repo turns off background gc and maintenance. A commit can start them, and their lock file then shows
+    in a case's listing of the repo: the load-caused false red of AlignedHead."""
+
+    def test_a_fixture_repo_turns_off_auto_gc_and_auto_maintenance(self):
+        repo = Repo(self)
+        self.assertEqual(repo.config("gc.auto"), "0", "the fixture repo's gc.auto is not 0: a commit can start a background gc")
+        self.assertEqual(repo.config("maintenance.auto"), "false",
+                         "the fixture repo's maintenance.auto is not false: a commit can start background maintenance")
 
 
 class Layout(unittest.TestCase):
@@ -3980,6 +3998,141 @@ class AlignedBody(AlignedSteps, unittest.TestCase):
         changed, _ = unit_file(ALIGNED_CITE + " A second sentence.")
         repo = self.pr(base, {"CLAUDE.md": changed, ALIGNED_RECORD: aligned_record(ALIGNED_LINE38_NEW)})
         self.assert_clear(repo, body=None)
+
+
+# The lines mode (brief rules-pr-body-lines-known): `compliance_probes.py lines <root> --base <ref>` prints, one per line, the
+# `Rules checked: <record> — no change` lines that the aligned group demands for base..HEAD, and prints nothing when none is
+# owed. The cases reuse aligned's fixtures and run the CLI in a subprocess. On origin/main the CLI has no lines mode: it prints
+# its usage line and exits 2, which the success-path cases name in their first assert.
+LINES_CHECKED = ALIGNED_RULES_CHECKED  # the one line aligned demands for the record of aligned_record()
+ALIGNED_OTHER_CITE = "- Other rule: decision `%s` holds the other rule." % ALIGNED_OTHER
+TEMPLATE = os.path.join(CHECKOUT, ".github", "pull_request_template.md")  # the PR template a PR body starts from
+TEMPLATE_LINES = re.compile(r"compliance_probes\.py lines")  # the template names the lines command on one line
+
+
+def lines_run(root, base):
+    """(exit code, stdout, stderr) of `compliance_probes.py lines <root> --base <base>`. The PR variables are removed, so a
+    case never passes by reading the CI's base, head or body."""
+    env = dict(os.environ)
+    for key in ("BASE_SHA", "HEAD_SHA", "PR_BODY", "GITHUB_EVENT_PATH"):
+        env.pop(key, None)
+    done = subprocess.run([sys.executable, PROBES, "lines", root, "--base", base], env=env, capture_output=True, text=True)
+    return done.returncode, done.stdout, done.stderr
+
+
+def two_units(first, second):
+    """A rule file of the filler units, with `first` and `second` as two units beside them. Returns its text."""
+    return "\n\n".join(list(ALIGNED_FILLER[:37]) + [first, second] + ALIGNED_FILLER[37:40]) + "\n"
+
+
+class AlignedLines(AlignedSteps, unittest.TestCase):
+    """The lines mode prints the owed lines and nothing else. Each case first checks the fixture's gap, or its clear, through
+    the aligned probe, which runs on origin/main."""
+
+    def preflight(self, repo):
+        """aligned refuses `repo` with an empty body: the fixture holds a gap that no body line clears."""
+        code, out, err = self.probe_pr(repo, body="")
+        self.assertEqual(code, 1, "fixture: aligned does not refuse this PR, so no line is owed: %s%s" % (out, err))
+
+    def printed(self, repo, base):
+        """The stdout of the lines mode on `repo`'s diff from `base`. The usage line and the exit code are asserted first, so
+        a CLI with no lines mode names that cause."""
+        code, out, err = lines_run(repo.root, base)
+        self.assertNotIn("usage:", out + err, "the CLI has no `lines` mode: it printed its usage line")
+        self.assertEqual(code, 0, "the lines mode exits %d, not 0: %s%s" % (code, out, err))
+        return out
+
+    def gap(self):
+        """A PR that changes the record of ALIGNED_ROUND and not its citing sentence: aligned owes one line."""
+        base, _ = self.cited()
+        repo = self.pr(base, {ALIGNED_RECORD: aligned_record(ALIGNED_LINE38_NEW)})
+        self.preflight(repo)
+        return repo
+
+    def test_a_record_gap_prints_exactly_its_rules_checked_line(self):
+        repo = self.gap()
+        self.assertEqual(self.printed(repo, repo.base_sha).splitlines(), [LINES_CHECKED],
+                         "the lines mode does not print the one line aligned demands for this gap")
+
+    def test_the_printed_line_as_a_pr_body_clears_aligned_on_the_same_diff(self):  # round trip, one fixture repo
+        repo = self.gap()
+        out = self.printed(repo, repo.base_sha)
+        self.assertEqual(out.splitlines(), [LINES_CHECKED], "the lines mode does not print the line the round trip needs")
+        self.assert_clear(repo, body=out)
+
+    def test_a_citing_change_without_its_record_prints_the_record_line(self):
+        base, _ = self.cited()
+        changed, _ = unit_file(ALIGNED_CITE + " A second sentence.")
+        repo = self.pr(base, {"CLAUDE.md": changed})
+        self.preflight(repo)
+        self.assertEqual(self.printed(repo, repo.base_sha).splitlines(), [LINES_CHECKED],
+                         "the lines mode does not print the record's line for a citing change with no record change")
+
+    def test_a_gap_the_diff_closes_prints_nothing(self):  # green control in the same fixture shape
+        base, _ = self.cited()
+        changed, _ = unit_file(ALIGNED_CITE + " A second sentence.")
+        repo = self.pr(base, {"CLAUDE.md": changed, ALIGNED_RECORD: aligned_record(ALIGNED_LINE38_NEW)})
+        self.assert_clear(repo)
+        self.assertEqual(self.printed(repo, repo.base_sha), "", "the lines mode prints a line that no gap owes")
+
+    def test_an_empty_diff_prints_nothing(self):
+        base, _ = self.cited()
+        repo = self.pr(base, {ALIGNED_RECORD: aligned_record(ALIGNED_LINE38_NEW)})
+        self.assertEqual(self.printed(repo, commit_sha(repo.root, "HEAD")), "", "the lines mode prints a line for an empty diff")
+
+    def test_only_a_record_with_a_gap_prints_a_line(self):  # scope: the other record is moved and its sentence is not
+        base, _ = para_base(short_paragraph())
+        edited = short_paragraph()
+        edited[2] = ALIGNED_CITE_LINE_EDITED  # the sentence that cites ALIGNED_ROUND changes with its record
+        changed, _ = para_file(edited)
+        repo = self.pr(base, {"CLAUDE.md": changed, ALIGNED_RECORD: aligned_record(ALIGNED_LINE38_NEW),
+                              ALIGNED_OTHER_RECORD: aligned_record(ALIGNED_LINE38_NEW, home="other-home")})
+        self.preflight(repo)
+        self.assertEqual(self.printed(repo, repo.base_sha).splitlines(), [ALIGNED_OTHER_CHECKED],
+                         "the lines mode prints a line for a record whose citing sentence changed with it")
+
+    def test_a_record_cited_from_two_files_prints_one_line(self):
+        unit = unit_file(ALIGNED_CITE)[0]
+        base = {"CLAUDE.md": unit, "docs/rules/review.md": unit, ALIGNED_RECORD: aligned_record(ALIGNED_LINE38)}
+        repo = self.pr(base, {ALIGNED_RECORD: aligned_record(ALIGNED_LINE38_NEW)})
+        self.preflight(repo)
+        self.assertEqual(self.printed(repo, repo.base_sha).splitlines(), [LINES_CHECKED],
+                         "the lines mode prints a record once per citing unit, not once per record")
+
+    def test_an_unreadable_base_exits_non_zero_and_names_it(self):
+        repo = self.gap()
+        code, out, err = lines_run(repo.root, "missing-base")
+        self.assertNotEqual(code, 0, "an unreadable base exits 0: %s%s" % (out, err))
+        self.assertIn("missing-base", out + err, "the output does not name the unreadable base: %s%s" % (out, err))
+        self.assertNotIn("Rules checked:", out, "an unreadable base prints lines a session would paste: %s" % out)
+
+
+class AlignedTemplate(AlignedSteps, unittest.TestCase):
+    """The PR template that a PR body starts from names the lines command on one line, and holds a live `Rules checked:`
+    stub. The stub is a placeholder, so an untouched one clears no record."""
+
+    def template(self):
+        with open(TEMPLATE, encoding="utf-8") as handle:
+            return handle.read()
+
+    def live(self):
+        """The template's lines outside its HTML comments: the lines a PR body keeps when its author leaves them in."""
+        return [line.strip() for line in re.sub(r"<!--.*?-->", "", self.template(), flags=re.S).splitlines()]
+
+    def test_the_template_names_the_lines_command_in_one_line(self):
+        named = [line for line in self.template().splitlines() if TEMPLATE_LINES.search(line)]
+        self.assertEqual(len(named), 1, "the PR template names `compliance_probes.py lines` on %d lines, not one" % len(named))
+
+    def test_the_template_holds_a_live_rules_checked_stub(self):
+        probes = load_probes()
+        stubs = [m.group(1) for m in map(probes.RULES_CHECKED.match, self.live()) if m]
+        self.assertTrue(stubs, "the PR template holds no live `Rules checked: <record> — no change` stub line")
+        self.assertTrue(all(stub.startswith("<") for stub in stubs), "the template's live stub names a real record: %s" % stubs)
+
+    def test_an_untouched_stub_clears_no_gap(self):  # green control: a body that holds the template clears nothing
+        base, where = self.cited()
+        repo = self.pr(base, {ALIGNED_RECORD: aligned_record(ALIGNED_LINE38_NEW)})
+        self.assert_refused(repo, where, ALIGNED_ROUND, "Rules checked:", body=self.template())
 
 
 class ClaudeMdCitesAction(unittest.TestCase):

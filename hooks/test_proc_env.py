@@ -249,5 +249,74 @@ def holds_session_tag_keeps_its_behaviour():
     return problems
 
 
+# The three answers of holds_session_tag: True held, False absent, None unreadable. The macOS reader is faked, so
+# each case names the bytes the OS would give. HIDDEN is the reader's answer for a process whose environment the OS
+# hides (sleep, sh, zsh, env): argv, then the trailing NUL only, so the entries are [b""].
+HIDDEN = [b""]
+ENV_WITHOUT_TAG = [b"HOME=/Users/example", b"PATH=/usr/bin:/bin", b""]
+ENV_WITH_TAG = [b"HOME=/Users/example", (SESSION_TAG + "=" + SESSION_ID).encode(), b""]
+
+
+def with_macos_reader(answer, check):
+    """Run check() with the macOS reader answering `answer` for every pid, and sys.platform set to darwin, so the
+    read's own dispatch to that reader is the one that runs. Both are put back when check() returns or raises."""
+    saved_reader, saved_platform = proc_env._environ_entries_macos, sys.platform
+    proc_env._environ_entries_macos = lambda pid: answer
+    sys.platform = "darwin"
+    try:
+        return check()
+    finally:
+        proc_env._environ_entries_macos = saved_reader
+        sys.platform = saved_platform
+
+
+@case
+def unreadable_environment_answers_none():
+    """U1. the macOS reader gives argv and no environment block: holds_session_tag answers None, not False"""
+    def check():
+        problems = expect(proc_env._environ_entries_macos(os.getpid()) == HIDDEN, "scope: the faked reader is not installed")
+        if problems:
+            return problems
+        got = proc_env.holds_session_tag(os.getpid(), SESSION_ID)
+        return expect(got is None, f"holds_session_tag gives {got!r} for an environment the OS hides, want None (unreadable)")
+    return with_macos_reader(HIDDEN, check)
+
+
+@case
+def failed_sysctl_answers_none():
+    """U2. the macOS reader cannot run (sysctl fails, so it gives None): holds_session_tag answers None, not False"""
+    def check():
+        problems = expect(proc_env._environ_entries_macos(os.getpid()) is None, "scope: the faked reader is not installed")
+        if problems:
+            return problems
+        got = proc_env.holds_session_tag(os.getpid(), SESSION_ID)
+        return expect(got is None, f"holds_session_tag gives {got!r} when the read cannot run, want None (unreadable)")
+    return with_macos_reader(None, check)
+
+
+@case
+def environment_without_the_tag_answers_absent():
+    """U3. green control: a macOS environment block that lacks the session tag answers False (absent)"""
+    def check():
+        problems = expect(proc_env._environ_entries_macos(os.getpid()) == ENV_WITHOUT_TAG, "scope: the faked reader is not installed")
+        if problems:
+            return problems
+        got = proc_env.holds_session_tag(os.getpid(), SESSION_ID)
+        return expect(got is False, f"holds_session_tag gives {got!r} for an environment without the tag, want False (absent)")
+    return with_macos_reader(ENV_WITHOUT_TAG, check)
+
+
+@case
+def environment_with_the_tag_answers_held():
+    """U4. green control: a macOS environment block that holds the session tag answers True (held)"""
+    def check():
+        problems = expect(proc_env._environ_entries_macos(os.getpid()) == ENV_WITH_TAG, "scope: the faked reader is not installed")
+        if problems:
+            return problems
+        got = proc_env.holds_session_tag(os.getpid(), SESSION_ID)
+        return expect(got is True, f"holds_session_tag gives {got!r} for an environment with the tag, want True (held)")
+    return with_macos_reader(ENV_WITH_TAG, check)
+
+
 if __name__ == "__main__":
     sys.exit(run_cases(CASES))

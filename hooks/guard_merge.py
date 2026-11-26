@@ -261,6 +261,7 @@ UNKNOWN_PIN_CAUSE = " is not a string the loaded merge tool pins"  # UnknownPin.
 MERGE_CHECK_UNKNOWN_PIN_REASON = (
     "Rule (Git): this head is not settled: %s. A merge waits for every check and workflow run on "
     "the head, required or not, and a read that could not run counts as not settled. "
+    "A string the merge tool cannot read is refused as unknown (decision stable-branch, the guard section). "
     "Remedy: the merge tool the guard loaded does not know this string yet, so the merge tool refuses it too. "
     "Wait for the installed merge tool to move to a version that pins it, or land the reader for the string first, then retry."
 )
@@ -1308,7 +1309,7 @@ def _octopus_hit(segment, stripped, cwd, args):
     hit, and only then, the tracking refs of a configured remote are refreshed once (`git_reads.fetch_remote`, once per
     directory and remote in the call) and the range is read again; the refusal stands only when the hit survives. A
     refresh that fails or times out keeps the refusal, with `stale` True so the reason says so. A destination named
-    like the default branch is skipped before any read: push-main asks about that push, and a deny from here would
+    like the default branch is skipped before any read: force-push refuses that push, and a deny from here would
     win over the ask. One `git rev-list` for each ref, one `git config` more for a remote named by a URL or a path
     (`_remote_refs`), and on a hit one `git fetch` of a plain remote name (a URL or a path has no tracking refs)."""
     refreshed = {}

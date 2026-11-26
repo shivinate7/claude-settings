@@ -1,0 +1,1 @@
+- mac-runs-on-bare-self-hosted: A bare `self-hosted` value in MAC_RUNS_ON matches every self-hosted runner, so a job could land on a machine other than the Mac. Set the runner's own label, such as claude-settings-mac, instead. Seen: 2026-11-25 x1

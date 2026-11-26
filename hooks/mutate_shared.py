@@ -94,6 +94,54 @@ def module_files(folder: str):
                   if name.endswith(".py") and not name.startswith(("test_", "mutate_", "prove_")))
 
 
+class MutantFileError(Exception):
+    """A file in the mutant folder that cannot supply rows. Its message names the file, so a run that would drop rows ends."""
+
+
+def folder_files(folder: str):
+    """(path, rows) for each *.py file directly in `folder`, in sorted slug order (the name without .py). A missing folder
+    holds none, and a subfolder is not a rule file. Each file is compiled and run from its text, so no bytecode is written
+    beside it. A file that fails to load, has no ROWS list, or holds a row that is not a 5- or 6-field tuple raises
+    MutantFileError naming the file."""
+    if not os.path.isdir(folder):
+        return []
+    names = [name for name in os.listdir(folder)
+             if name.endswith(".py") and os.path.isfile(os.path.join(folder, name))]
+    found = []
+    for name in sorted(names, key=lambda name: name[:-len(".py")]):
+        path = os.path.join(folder, name)
+        namespace = {"__name__": "mutant_rows", "__file__": path}
+        try:
+            with open(path, encoding="utf-8") as handle:
+                exec(compile(handle.read(), path, "exec"), namespace)
+        except Exception as error:  # any load failure ends the run, and the message names the file
+            raise MutantFileError("%s does not load: %s: %s" % (path, type(error).__name__, error)) from error
+        rows = namespace.get("ROWS")
+        if not isinstance(rows, (list, tuple)):
+            raise MutantFileError("%s has no ROWS list" % path)
+        for row in rows:
+            if not isinstance(row, tuple) or len(row) not in (5, 6):
+                raise MutantFileError("%s has a row that is not a 5- or 6-field tuple: %r" % (path, row))
+        found.append((path, list(rows)))
+    return found
+
+
+def assemble_mutations(table, folder: str):
+    """The table, then each folder row in folder_files order. A label is used once: a folder row that repeats a label of
+    the table, or of an earlier file, raises MutantFileError naming the file and where the label already is."""
+    where = {}
+    for row in table:
+        where.setdefault(row[0], "the table")
+    assembled = list(table)
+    for path, rows in folder_files(folder):
+        for row in rows:
+            if row[0] in where:
+                raise MutantFileError("%s repeats the label %r, already in %s" % (path, row[0], where[row[0]]))
+            where[row[0]] = path
+            assembled.append(row)
+    return assembled
+
+
 def guard_tree(dest: str) -> None:
     """Copy every module in HOOKS_DIR (module_files) into `dest`, so a copied guard.py finds its
     siblings beside it, never the real ones, and a module they import cannot be left out."""
@@ -806,7 +854,7 @@ def run_suite_file(folder: str, rel: str, timeout: float, argv=None, classify=No
     narrow its cases."""
     file, family = split_suite(rel)
     env = {k: v for k, v in os.environ.items()
-           if not k.endswith("_UNDER_TEST") and k not in ("MUTATE_ONLY", "MUTATE_SHARD", "GUARD_FAMILY")}
+           if not k.endswith("_UNDER_TEST") and k not in ("MUTATE_ONLY", "MUTATE_SHARD", "GUARD_FAMILY", "CASE_TIMES")}
     if family:
         env["GUARD_FAMILY"] = family
     # No bytecode: a mutant of the same size and second as the clean file would load the clean .pyc.

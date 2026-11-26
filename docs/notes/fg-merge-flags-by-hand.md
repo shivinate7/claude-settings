@@ -1,0 +1,1 @@
+- fg-merge-flags-by-hand: `-C` is hard-coded outside the `MERGE_OPTIONS` filter, and no test ties the two hand-written flag sets to `build_parser()` (hooks/guard_stream.py:1463-1467). Seen: 2026-11-25 x1
