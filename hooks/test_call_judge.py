@@ -2242,7 +2242,7 @@ class CostTests(unittest.TestCase):
 # reason that cites it is a bogus cite (question_form.ruling_cite). The cite ids come from the same call that builds the
 # block (call_judge.past_ruling_context), so the case reads the ids the judge is given.
 CUT_QUESTION = "Merge the pull now?"  # the step rulings share two words with it, the records one, so records are cut first
-CUT_RECORDS = 40  # every record is a candidate (RECORD_TOP keeps forty), and about 820 characters each
+CUT_RECORDS = 40  # every record is a candidate, and about 820 characters each
 CUT_STEPS = 30  # step rulings of about 1,670 characters: with the records, more than CANDIDATES_CAP holds
 
 
@@ -2260,11 +2260,13 @@ def case_past_ruling_cite_of_a_record_cut_from_the_block_is_bogus():
                          i, "stays pinned as recorded " * 65) for i in range(CUT_STEPS)})
     units = [("", CUT_QUESTION)]
     with mock.patch("guard_pointer.pointer_checkout", return_value=repo):
-        block, ids, _unreadable, _candidates = fn({"cwd": repo}, units)
-    shown = {i for i in ids if ("%s: " % i) in block}
-    cut = sorted(i for i in set(ids) - shown if i.startswith("decisions/"))
+        block, ids, _unreadable, candidates = fn({"cwd": repo}, units)
+    # `ids` holds only the shown ids, so the cut ids are the candidates the block does not show.
+    cand_ids = question_form.candidate_ids(candidates)
+    shown = {i for i in cand_ids if ("%s: " % i) in block}
+    cut = sorted(i for i in cand_ids if i.startswith("decisions/") and i not in shown)
     check("past ruling cut cite (scope): the cap cuts some sharing records out of the block",
-          bool(cut), "%d ids, %d shown in the block" % (len(ids), len(shown)))
+          bool(cut), "%d candidates, %d shown in the block" % (len(cand_ids), len(shown)))
     if not cut:
         return
     reason = "%s: the ruling settles it." % cut[0]
