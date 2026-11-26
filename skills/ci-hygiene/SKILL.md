@@ -89,7 +89,7 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    Once a job is red, push the lane drop or the lane fix at once. The push cancels the old run, and
    the new run is the re-run. A lone lane is its own integration PR. When the pull request that replaces a lane PR opens, the lane PR closes as replaced, and its branch stays, unless it is a batch member.
    At `--ready`, a `Replaces #N` or `Carries #N` line closes the pull request it names, when this pull request is not an integration PR.
-   A batch member closes only after its integration PR merges, with a pointer comment. Not built yet: the tool still closes members at `--ready` and at the hand-in. The tool reopens each lane it closed that is marked Dropped
+   A batch member closes only after its integration PR merges, with a pointer comment. The tool closes a batch member after its integration PR merges, and not at `--ready` (`merge/merge.py` `close_members_landed`). The tool reopens each lane it closed that is marked Dropped
    at the next lint pass.
    When the integration run is red, read the failing job. Find the lane whose files it touches.
    Search one lane merge commit at a time: for each lane merge commit `M` on the integration branch,
