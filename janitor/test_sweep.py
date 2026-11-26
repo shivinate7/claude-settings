@@ -6816,10 +6816,10 @@ class AgentEndLeastRecentFirstTests(_AgentEndFixture):
     """The worktree stage of janitor/agent_end_reap.py resumes each run after the tree the last run judged last.
 
     The rule: the reaper keeps its place per repo in one small cursor file, in the state folder beside the payload
-    log and named for the repo root. The file holds the path of the last tree judged, or a short ordered list of
-    judged times. A run starts after the cursor's tree in git's list order and wraps round. A tree not in the list
-    is skipped. A missing or unreadable cursor means git's order from the top. The payload log is not read for
-    order. A run writes the cursor at most once, and not at all when it judged no tree.
+    log and named for the repo root. The file holds one tree path, the cursor. A run starts after the cursor's tree
+    in git's list order and wraps round. A cursor that names no queued tree, and a missing or unreadable cursor,
+    mean git's order from the top. The payload log is not read for order. A run writes the cursor at most once, and
+    not at all when it judged no tree.
 
     Every tree here is dirty and 31 minutes idle, so each stays kept and a later run can judge it again. Git's list
     order is pinned to `self.orders` (`pinned_listing`), so each case knows the cycle. The stage runs on
@@ -7068,7 +7068,7 @@ class AgentEndLeastRecentFirstTests(_AgentEndFixture):
     def test_a_run_writes_at_most_one_cursor_file_of_bounded_size(self):
         ender, queue = self.stage(6, tag="cost")
         clock = _StageClock()
-        bound = 160 * len(queue) + 256  # a cursor lists each tree once, at most 160 bytes a tree
+        bound = 160 * len(queue) + 256  # slack over one path: a cursor that grew a line each run would pass it
         for run in range(12):  # two cycles: a cursor that grew a line a run would pass the bound
             _, written, after = self.run_and_diff(ender, clock, budget=1.5)
             self.assertEqual(len(written), 1, "run %d wrote %d cursor files, want one" % (run + 1, len(written)))
@@ -7109,6 +7109,32 @@ class AgentEndLeastRecentFirstTests(_AgentEndFixture):
         self.assertEqual(self.short(self.reached(rows, ender)), self.short([queue[0], queue[2]]),
                          "a cursor naming a removed tree did not restart from git's top")
         self.assertEqual(len(written), 1, "run 1 wrote no cursor, so no cursor named the removed tree")
+
+    def test_a_run_that_removed_every_tree_it_judged_resumes_past_them(self):
+        """Two kept trees, a clean pair the run removes, then two kept trees; a budget of two trees a run. Run 2 judges
+        and removes the clean pair, so the cursor it leaves names a tree that is gone. Run 3 still resumes past that
+        pair, at the trees after it, and does not go back to git's top."""
+        self.new_repo("gone-pair")
+        ender = self.add("ender")
+        self.dirty_tree("d0")
+        self.dirty_tree("d1")
+        _age_admin_files(self.tree("c0"), 31 * 60)
+        _age_admin_files(self.tree("c1"), 31 * 60)
+        self.dirty_tree("d2")
+        self.dirty_tree("d3")
+        clock = _StageClock()
+        six = ["agent-d0", "agent-d1", "agent-c0", "agent-c1", "agent-d2", "agent-d3"]
+        self.assertEqual(self.short(self.queue()), six, "scope: the stage did not queue the six trees in git's order")
+        rows = self.hook_run(ender, clock, budget=1.5)
+        self.assertEqual(self.short(self.reached(rows, ender)), six[0:2],
+                         "control: run 1 did not judge the first two trees in git's order")
+        rows = self.hook_run(ender, clock, budget=1.5)
+        self.assertEqual(self.short(self.reached(rows, ender)), six[2:4], "control: run 2 did not judge the clean pair")
+        self.assertEqual([r["action"] for r in self.judged_rows(rows, ender)], ["reap", "reap"],
+                         "control: run 2 did not remove the clean pair")
+        rows = self.hook_run(ender, clock, budget=1.5)
+        self.assertEqual(self.short(self.reached(rows, ender)), six[4:6],
+                         "after run 2 removed every tree it judged, run 3 went back to git's top")
 
     def test_order_changes_no_decision(self):
         """The same mixed set, judged in git's order and in its reverse, gives each tree the same verdict. The
