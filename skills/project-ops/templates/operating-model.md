@@ -37,7 +37,7 @@ A spawner is a session that starts its own agents. Each session role is a set of
   commits the JSON body whole, without a code fence, as `plans/runner-state.json` and pushes it, and answers the runner with the commit. On a problem it commits nothing and sends the runner the printed lines (decision `runner-state-on-record`).
   It runs `check_runner_state.py message <file> --first` only when that `git show` fails because the file is absent. On any other read error the state is unknown, and triage commits nothing and tells the runner. A `--first` send passes only as version 1.
   The file also carries `landedPulls`: each pull request closed in the last 14 days whose base is the default
-  branch, with `number`, `branch`, `head` and `merged`, and `replacedBy` on a pull the tool closed as replaced (the number in its newest pointer comment, `Replaced by #N`). The build marks a step landed from it when no `Step:` trailer is on main.
+  branch, with `number`, `branch`, `head`, `merged` and `closedAt` (GitHub's `closed_at`), and `replacedBy` on a pull the tool closed as replaced (the number in its newest pointer comment, `Replaced by #N`). The build marks a step landed from it when no `Step:` trailer is on main.
   At each publish, triage also disposes each `stalled step:` line the build prints (the build exits 1 on one): a
   step with no live lane and no open PR becomes `todo` or `done`, or gets a `paused` field with who decides; an item
   is re-routed or closed. When triage marks a step `done`, its note gets the line

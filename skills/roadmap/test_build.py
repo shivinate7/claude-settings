@@ -674,6 +674,10 @@ class UpkeepFixture(Fixture):
     REPO = "cs-repo:" + SLUG
     # git's empty tree: every repo holds it, so a commit or ref on it needs no file of its own.
     EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+    # The build's clock for the stale cases (test-practices P5). A read 120 minutes before NOW is past STALE_LIVE_MINUTES.
+    NOW = "2026-11-18T19:00:00Z"
+    STALE_READ = "2026-11-18T17:00:00Z"
+    FRESH_READ = "2026-11-18T18:55:00Z"
 
     def setUp(self):
         super().setUp()
@@ -702,6 +706,11 @@ class UpkeepFixture(Fixture):
     def out_with_live(self, expect=(0, None)):
         _, out = self.build_from_main("--live", str(self.live), expect=expect)
         return out
+
+    def clocked_build(self, *extra, expect):
+        """build_from_main with the build's clock fixed at NOW, so a live file's age is exact (test-practices P5)."""
+        with mock.patch.object(build, "datetime", fixed_clock(self.NOW)):
+            return self.build_from_main(*extra, expect=expect)
 
     # argparse's refusal of a flag the build does not know: exit 2, with this text in the output.
     NO_SOURCE_FLAG = "unrecognized arguments"
@@ -1644,8 +1653,9 @@ class StaleInProgress(UpkeepFixture):
 
     def test_read_at_two_hours_old_reads_the_row_unknown(self):
         self.commit_step("c1", status="doing")
-        value = self.publish(sessions=[], read_at=iso_ago(120))
-        page, out = self.build_from_main("--live", str(self.live))
+        value = self.publish(sessions=[], read_at=self.STALE_READ)
+        page, out = self.clocked_build("--live", str(self.live), expect=(0, 1))  # 120 minutes old on the build's clock
+        self.assertEqual(self.code, 1, "c1 is doing and its live file is two hours old: exit 1, not 0")
         count, entries = self.stale(out)
         found = re.fullmatch(r"unknown \(the live file was read (\d+) minutes ago; read it again\)", entries)
         self.assertEqual(count, 1)
@@ -1780,7 +1790,8 @@ class StalledStep(UpkeepFixture):
     stalled until it has a disposition: a valid `paused` field, which triage writes, or status done. A stalled
     step prints `stalled step: <id> (resume, pause or done)`, or `stalled step: <id> (done: landed in #N)` when it
     landed, and the build exits 1 after it writes the page. An unknown live read prints
-    `stalled step: unknown (<why>)`, lists no steps as [], and exits 0."""
+    `stalled step: unknown (<why>)`, lists no steps as [], and exits 0, except a stale live file, which fails a
+    doing step (test_stale_live_file_fails_a_doing_step_and_prints_its_age)."""
 
     PAUSE = {"why": "waits on the owner's call on the batch", "decides": "owner",
              "at": "2026-11-06T11:00:00-06:00", "by": "triage"}
@@ -1884,9 +1895,8 @@ class StalledStep(UpkeepFixture):
 
     def test_unknown_live_read_prints_unknown_with_steps_none_and_exits_0(self):
         self.commit_step("c2", status="doing", order=2)
-        cases = {
+        cases = {  # a stale read is not here: it fails the doing step (test_stale_live_file_fails_a_doing_step_and_prints_its_age)
             "no --live file": None,
-            "readAt two hours old": dict(sessions=[], read_at=iso_ago(120), items=[]),
             "no sessions list": dict(items=[]),
         }
         for name, live in cases.items():
@@ -1900,6 +1910,170 @@ class StalledStep(UpkeepFixture):
                 self.assertIsNone(stalled["steps"], "an unknown read lists no steps, never []")
                 self.assertRegex(out, r"(?m)^stalled step: unknown \(", "the unknown line is missing")
                 self.assertEqual(self.code, 0, "an unknown read exits 0")
+
+    def stale_lines(self, out):
+        """The output lines that say the live file is stale and name its age (120 minutes, or 2 hours)."""
+        return [line for line in out.splitlines()
+                if re.search(r"\bstale\b", line, re.I) and re.search(r"\b(?:120 minutes|2 hours)\b", line)]
+
+    def test_stale_live_file_fails_a_doing_step_and_prints_its_age(self):
+        self.commit_step("c2", status="doing", order=2)
+        self.publish(sessions=[], items=[], read_at=self.STALE_READ)
+        _, out = self.clocked_build("--live", str(self.live), expect=(0, 1))
+        self.assertEqual(self.code, 1, "a stale live file must fail a doing step: exit 1, not 0 with an unknown line")
+        self.assertTrue(self.stale_lines(out), "no line says the live file is stale and names its age (120 minutes):\n%s" % out)
+
+    def test_stale_live_file_never_reads_a_held_doing_step_as_held(self):
+        self.commit_step("c1", status="doing")
+        cases = {
+            "running lane session": dict(sessions=[self.session_in_repo("session_test01", "SESSION_STATUS_RUNNING", "cs-step:c1")]),
+            "open pull on the lane branch": dict(sessions=[], pulls=[self.draft(1001, "lane/c1")]),
+        }
+        for name, live in cases.items():
+            with self.subTest(name):
+                self.publish(items=[], read_at=self.STALE_READ, **live)
+                _, out = self.clocked_build("--live", str(self.live), expect=(0, 1))
+                self.assertEqual(self.code, 1, "a stale live file must not hold c1: exit 1, not 0")
+                self.assertTrue(self.stale_lines(out), "no line says the live file is stale and names its age:\n%s" % out)
+
+    def test_fresh_live_file_holds_the_running_step_and_lists_only_the_other(self):
+        self.commit_step("c1", status="doing")  # control: its live session holds it on a fresh read
+        self.commit_step("c2", status="doing", order=2)
+        self.publish(sessions=[self.session_in_repo("session_test01", "SESSION_STATUS_RUNNING", "cs-step:c1")],
+                     items=[], read_at=self.FRESH_READ)
+        _, out = self.clocked_build("--live", str(self.live), expect=(0, 1))
+        self.assertEqual(self.stalled_lines(out), [self.RESUME], "on a fresh read c1 is held, so c2 is the one stalled line")
+        self.assertEqual(self.code, 1, "a stalled step must exit 1")
+        self.assertEqual(self.stale_lines(out), [], "a fresh read prints no stale line")
+
+    def live_file_stale_lines(self, out):
+        """The printed lines that open with the stale line's text, `live file stale: ...` (build.py's STALE_LINE)."""
+        return [line for line in out.splitlines() if line.startswith("live file stale")]
+
+    def test_two_hour_old_live_file_fails_a_doing_step_and_prints_the_stale_line(self):
+        self.commit_step("c2", status="doing", order=2)
+        self.publish(sessions=[], items=[], read_at=self.STALE_READ)  # 120 minutes old on the build's clock
+        _, out = self.clocked_build("--live", str(self.live), expect=(0, 1))
+        self.assertEqual(self.code, 1, "a live file two hours old fails its doing step: exit 1, not 0")
+        self.assertTrue(self.live_file_stale_lines(out), "no 'live file stale' line for a live file two hours old:\n%s" % out)
+
+    def test_stale_live_file_pause_exception_needs_a_valid_pause(self):
+        cases = {  # name: (paused field, the exit code the stale file gets)
+            "valid pause excepts the step": (self.PAUSE, 0),
+            "bad pause does not except the step": (dict(self.PAUSE, decides="boss"), 1),
+        }
+        for name, (paused, code) in cases.items():
+            with self.subTest(name):
+                git(self.repo, "checkout", "-q", "roadmap")  # a build from main leaves HEAD on main
+                self.commit_step("c2", status="doing", order=2, paused=paused)
+                self.publish(sessions=[], items=[], read_at=self.STALE_READ)
+                _, out = self.clocked_build("--live", str(self.live), expect=(0, 1))
+                self.assertIn("120 minutes", out, "scope: the live file is read as 120 minutes old:\n%s" % out)
+                self.assertEqual(self.code, code, "%s: a stale file exits %d" % (name, code))
+                self.assertEqual(bool(self.live_file_stale_lines(out)), code == 1,
+                                 "%s: the live file stale line prints only when the step is not excepted" % name)
+
+    # Pins a doing step whose PR closed unmerged while its lane session is archived. Its step text cites no PR
+    # number, so only the landedPulls row tells the reader what happened.
+    CLOSED = "ci-linux-windows-once"
+    CLOSED_AT = "2026-11-14T18:00:00Z"  # noon CST, so the date reads the same in UTC and local time
+
+    def closed_line(self, out, step):
+        """The one stalled line for `step`. Fails with a named cause when no line, or more than one, names it."""
+        lines = [line for line in out.splitlines() if line.startswith("stalled step: %s (" % step)]
+        self.assertEqual(len(lines), 1, "expected one stalled line for %s, got %r in:\n%s" % (step, lines, out))
+        return lines[0]
+
+    def publish_closed_pr(self, branch, pulls=(), landed=None):
+        """A live file whose lane session is archived. Its landedPulls are `landed`, else only #3042 closed unmerged on CLOSED_AT."""
+        if landed is None:
+            landed = [self.pull_row(3042, branch, merged=False, closedAt=self.CLOSED_AT)]
+        self.publish(sessions=[self.session_in_repo("session_old01", "SESSION_STATUS_ARCHIVED", "cs-step:" + self.CLOSED)],
+                     items=[], pulls=list(pulls), landed=landed)
+
+    def test_doing_step_whose_pr_closed_unmerged_prints_the_date_and_unmerged(self):
+        self.commit_step(self.CLOSED, status="doing", title="Linux and Windows CI run once", note="Moves CI onto one job.")
+        self.no_trailer_on_main()  # scope: no Step trailer on main, so the step is not read as landed
+        for branch in (self.CLOSED, "lane/" + self.CLOSED):
+            with self.subTest(branch=branch):
+                self.publish_closed_pr(branch)
+                _, out = self.build_from_main("--live", str(self.live), expect=(0, 1))
+                self.assertEqual(self.stalled_ids(out), [self.CLOSED], "scope: the step with no live lane is stalled")
+                self.assertEqual(self.code, 1, "a stalled step must exit 1")
+                line = self.closed_line(out, self.CLOSED)
+                self.assertIn("2026-11-14", line, "the stalled line must print the PR's closed date: %r" % line)
+                self.assertIn("unmerged", line, "the stalled line must say the PR closed unmerged: %r" % line)
+
+    def test_closed_unmerged_pr_with_an_open_successor_holds_the_step(self):
+        self.commit_step(self.CLOSED, status="doing", title="Linux and Windows CI run once", note="Moves CI onto one job.")
+        self.publish_closed_pr(self.CLOSED, pulls=[self.draft(3050, "lane/" + self.CLOSED)])  # control: a successor holds it
+        _, out = self.build_from_main("--live", str(self.live), expect=(0, 1))
+        self.assertEqual(self.stalled_ids(out), [], "an open pull on the lane branch holds the step: no stalled line")
+
+    def test_a_doing_step_with_no_pr_beside_a_closed_one_keeps_the_plain_line(self):
+        self.commit_step(self.CLOSED, status="doing", title="Linux and Windows CI run once", note="Moves CI onto one job.")
+        self.commit_step("c2", status="doing", order=2)  # control: no PR of its own, so its line stays plain
+        self.publish_closed_pr(self.CLOSED)
+        _, out = self.build_from_main("--live", str(self.live), expect=(0, 1))
+        self.assertIn(self.RESUME, out.splitlines(), "a step with no PR prints the plain line, with no date and no reason")
+
+    def test_closed_unmerged_pr_whose_merged_replacement_is_not_printed_as_closed_unmerged(self):
+        # A replacement that merged supersedes the closed PR, as superseded_marks reads it. The step is not a closed-unmerged wait.
+        self.commit_step(self.CLOSED, status="doing", title="Linux and Windows CI run once", note="Moves CI onto one job.")
+        self.no_trailer_on_main()  # scope: no Step trailer on main, so the step is not read as landed
+        for branch in (self.CLOSED, "lane/" + self.CLOSED):
+            with self.subTest(branch=branch):
+                self.publish_closed_pr(branch, landed=[
+                    self.pull_row(3042, branch, merged=False, closedAt=self.CLOSED_AT, replacedBy=3051),
+                    self.pull_row(3051, self.CLOSED + "-v2", merged=True)])  # the replacement merged on its own branch
+                _, out = self.build_from_main("--live", str(self.live), expect=(0, 1))
+                self.assertEqual(self.stalled_ids(out), [self.CLOSED], "scope: the step with no live lane is stalled")
+                self.assertEqual(self.code, 1, "a stalled step must exit 1")
+                line = self.closed_line(out, self.CLOSED)
+                self.assertNotIn("closed unmerged", line, "a PR whose replacement merged is superseded, not closed unmerged: %r" % line)
+
+    def test_closed_unmerged_pr_whose_open_replacement_is_not_printed_as_closed_unmerged(self):
+        # Control: an open successor already hides the closed note on the old build too, so this case stays green.
+        self.commit_step(self.CLOSED, status="doing", title="Linux and Windows CI run once", note="Moves CI onto one job.")
+        self.no_trailer_on_main()  # scope: no Step trailer on main, so the step is not read as landed
+        self.publish_closed_pr(self.CLOSED, pulls=[self.draft(3051, self.CLOSED + "-v2")],
+                               landed=[self.pull_row(3042, self.CLOSED, merged=False, closedAt=self.CLOSED_AT, replacedBy=3051)])
+        _, out = self.build_from_main("--live", str(self.live), expect=(0, 1))
+        self.assertEqual(self.stalled_ids(out), [self.CLOSED], "scope: the step with no live lane is stalled")
+        self.assertNotIn("closed unmerged", self.closed_line(out, self.CLOSED), "an open replacement is a successor, so no closed note")
+
+    def test_closed_unmerged_line_prints_the_pr_number_then_unmerged_then_the_closed_date(self):
+        self.commit_step(self.CLOSED, status="doing", title="Linux and Windows CI run once", note="Moves CI onto one job.")
+        self.no_trailer_on_main()  # scope: no Step trailer on main, so the step is not read as landed
+        self.publish_closed_pr(self.CLOSED)
+        _, out = self.build_from_main("--live", str(self.live), expect=(0, 1))
+        self.assertEqual(self.stalled_ids(out), [self.CLOSED], "scope: the step with no live lane is stalled")
+        self.assertEqual(self.closed_line(out, self.CLOSED),
+                         "stalled step: %s (resume, pause or done; PR #3042 closed unmerged 2026-11-14)" % self.CLOSED,
+                         "the printed text is the PR number, then closed unmerged, then the closed date")
+
+    def test_closed_unmerged_line_prints_the_row_with_the_latest_closed_date_not_the_number_or_place(self):
+        self.commit_step(self.CLOSED, status="doing", title="Linux and Windows CI run once", note="Moves CI onto one job.")
+        self.no_trailer_on_main()  # scope: no Step trailer on main, so the step is not read as landed
+        self.publish_closed_pr(self.CLOSED, landed=[  # the latest closedAt is #3046, the middle number and the middle row
+            self.pull_row(3042, self.CLOSED, merged=False, closedAt="2026-11-10T18:00:00Z"),
+            self.pull_row(3046, self.CLOSED, merged=False, closedAt="2026-11-14T18:00:00Z"),
+            self.pull_row(3050, self.CLOSED, merged=False, closedAt="2026-11-12T18:00:00Z")])
+        _, out = self.build_from_main("--live", str(self.live), expect=(0, 1))
+        self.assertEqual(self.stalled_ids(out), [self.CLOSED], "scope: the step with no live lane is stalled")
+        self.assertEqual(self.closed_line(out, self.CLOSED),
+                         "stalled step: %s (resume, pause or done; PR #3046 closed unmerged 2026-11-14)" % self.CLOSED,
+                         "the printed row is the one with the latest closedAt")
+
+    def test_closed_unmerged_line_says_date_unknown_when_the_row_has_no_closedAt(self):
+        self.commit_step(self.CLOSED, status="doing", title="Linux and Windows CI run once", note="Moves CI onto one job.")
+        self.no_trailer_on_main()  # scope: no Step trailer on main, so the step is not read as landed
+        self.publish_closed_pr(self.CLOSED, landed=[self.pull_row(3042, self.CLOSED, merged=False)])
+        _, out = self.build_from_main("--live", str(self.live), expect=(0, 1))
+        self.assertEqual(self.stalled_ids(out), [self.CLOSED], "scope: the step with no live lane is stalled")
+        self.assertEqual(self.closed_line(out, self.CLOSED),
+                         "stalled step: %s (resume, pause or done; PR #3042 closed unmerged (date unknown))" % self.CLOSED,
+                         "a closed-unmerged row with no closedAt prints the text (date unknown)")
 
     def test_landed_feel_fix_without_a_device_trial_is_not_stalled(self):
         self.commit_step("c2", status="doing", order=2)  # control: a plain lane-less step is still stalled
