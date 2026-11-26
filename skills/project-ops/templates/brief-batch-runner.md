@@ -10,7 +10,7 @@ Run the merge tool (`merge`) for {{repo}}. Each wake, run `merge --reviewed` onc
 of each repo in its `cs-repo` tags.
 
 Until the cutover, it owns the integration batch (decision `all-repos-switch-together`: all repos switch together).
-After the cutover, it merges each PR by the situation, whatever's faster (the owner's 10:23 CST Nov 20 ruling): the first ready item in CI and lint goes alone, and a backlog combines in parallel pairs, 8>4>2>1, when the batch verdict says so (no fixed count; not built yet, lane `merge-tool-picks-batch`). Combining after the cutover is not built yet. After the cutover, it also runs the bisect
+After the cutover, it merges each PR by the situation, whatever's faster (the owner's 10:23 CST Nov 20 ruling): the first ready item in CI and lint goes alone, and a backlog combines in parallel pairs, 8>4>2>1, when the batch verdict says so (no fixed count, owner 15:27 CST Nov 25, relayed; not built yet, lane `merge-tool-picks-batch`; until the verdict is built the tool counts 10, `BUILD_THRESHOLD`). Combining after the cutover is not built yet. After the cutover, it also runs the bisect
 that names the blamed lane of a red run, and the revert PR of a breaking merge.
 
 It owns the CI waits. It runs each `merge <pr> --confirm` in the foreground, never with `run_in_background`
