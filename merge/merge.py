@@ -503,6 +503,14 @@ def merge_dates(wt, *shas):
     date = f"@{when} +0000"
     return {**os.environ, "GIT_AUTHOR_DATE": date, "GIT_COMMITTER_DATE": date}
 
+MAIN_MERGE_WINDOW = 50  # first-parent merges of the base that Host.main_merge_of reads
+
+
+def branch_refspec(branch):
+    """The refspec that fetches origin's `branch` into refs/remotes/origin/<branch>: the home of that string for Host.holds_head and Host.main_merge_of."""
+    return f"+refs/heads/{branch}:refs/remotes/origin/{branch}"
+
+
 def ancestor(cwd, tip, base):
     """True when `tip` is reachable from `base`, False when it is not, None when git could not tell. A shallow clone
     that cut the history reads None, never False. The one home is hooks/git_reads.branch_is_ancestor."""
@@ -1652,7 +1660,7 @@ class Host:
                     refs.append(x)
                     continue
                 if x not in self.branches_fetched:
-                    self.branches_fetched[x] = git(root, "fetch", "-q", "origin", f"+refs/heads/{x}:refs/remotes/origin/{x}")
+                    self.branches_fetched[x] = git(root, "fetch", "-q", "origin", branch_refspec(x))
                 if self.branches_fetched[x][0]:
                     raise Stop(f"{why}: git fetch of {x} failed: {' '.join(self.branches_fetched[x][1].split())[:300]}")
                 refs.append(f"refs/remotes/origin/{x}")
@@ -2185,11 +2193,44 @@ class Host:
         c, out = self.gh(["pr", "ready", str(n), "--undo", *self._repo_args()], self.cwd, idempotent=True)
         return (False, out) if c else (True, "")
 
+    def main_merge_of(self, base, head):
+        """-> the oid of the merge commit on `base` whose second parent is `head` (this run's merge landed), False when `base` holds none, None when the read failed.
+        A full window with no match is None too when main holds the head (or the read cannot tell): the head's merge may lie older than the window. A lost or refused merge reply with the pull request still OPEN may have landed (the Nov 25 2026 outage: HTTP 405 and 502, merge commit on main). The one home of that read.
+        A first read with no merge is read once more after one NET_PAUSE through self.pause: a merge in progress reaches main a moment after the reply, so a single read of main is no proof of a refusal.
+        Cost: one `git fetch` of `base`, then one `git rev-list` of its newest MAIN_MERGE_WINDOW (50) first-parent merges, plus two git reads when the window is full with no match; a read that finds no merge repeats once after the pause. No gh call, once per call; never cached, since `base` moves. A failed fetch or read is None: unknown, never merged."""
+        held = self._read_main_merge(base, head)
+        if held is not False:
+            return held
+        self.pause(NET_PAUSE)
+        return self._read_main_merge(base, head)
+
+    def _read_main_merge(self, base, head):
+        """One read of `base` for main_merge_of: the same three answers."""
+        root = self.cwd or "."
+        ref = f"refs/remotes/origin/{base}"
+        c, out = git(root, "fetch", "-q", "origin", branch_refspec(base))
+        if c:
+            return None
+        c, out = git(root, "rev-list", "--parents", "--merges", "--first-parent", f"--max-count={MAIN_MERGE_WINDOW}", ref)
+        if c:
+            return None
+        lines = out.splitlines()
+        for line in lines:
+            oid, *parents = line.split()
+            if len(parents) > 1 and parents[1] == head:
+                return oid
+        if len(lines) < MAIN_MERGE_WINDOW:
+            return False
+        # A full window may cut off the head's merge. Main cannot hold it when this clone lacks the head, or when the head is no ancestor of main: False. Held or unread: None.
+        if git(root, "cat-file", "-e", f"{head}^{{commit}}")[0] or ancestor(root, head, ref) is False:
+            return False
+        return None
+
     def merge(self, n, method, sha):
         """`PUT pulls/<n>/merge` with `sha`, so GitHub refuses (409) a head that moved. `self.commit_message`, when set, is the merge commit's message. Never --admin, never --delete-branch (cut_branch does that).
         -> (merge commit oid or None, message). The reply is never trusted: after any reply the PR state is read.
-        MERGED at head `sha` is this run's merge. merge_commit_sha proves nothing alone: GitHub sets it on an open pull request too. MERGED at another head is not: Stop, no revert. An unreadable state,
-        or OPEN after a reply lost to the network, is a NetStop (no revert). Only a proven refusal returns None (revert)."""
+        MERGED at head `sha` is this run's merge. merge_commit_sha proves nothing alone: GitHub sets it on an open pull request too. MERGED at another head is not: Stop, no revert. OPEN with a merge commit on the base whose second parent is `sha` is this run's merge too (main_merge_of). An unreadable state,
+        or OPEN after a reply lost to the network, or OPEN with the base unread, is a NetStop (no revert). Only a proven refusal returns None (revert)."""
         say(f"merge: merging #{n} ...")  # the merge call can block
         # The old `gh pr merge` (no --admin) refused a BLOCKED or BEHIND pull request itself. The REST PUT does not: a token that may bypass branch
         # protection merges it. So read the pull request right before the PUT; blocked or behind is a proven refusal, and no PUT is sent. Clean, unstable and the rest go on.
@@ -2201,13 +2242,16 @@ class Host:
         if state_now == "BEHIND" or (state_now == "BLOCKED" and not self.pending_lifted):  # GitHub reads a pending required check as BLOCKED: that one cause goes on to the PUT, and GitHub refuses it or not
             return None, (f"#{n} reads {state_now}: its base rules are not met or its branch is behind the base {GRANT_CITE}. gh's merge refuses it the same way, so no merge call was sent."
                           + (" " + HEAL_BLOCKED if state_now == "BLOCKED" and waits_on_no_check(self.required) else ""))  # under none the tool read no protection, so the text names the cause itself
-        def merged_at_sha():  # a lost reply may still have merged: True when the PR reads merged at this run's head, False when it reads open, None when unread or merged elsewhere
+        def merged_at_sha():  # a lost reply may still have merged: True when the PR reads merged at this run's head or reads open while main holds its merge, False when it reads open and main does not, None when unread or merged elsewhere
             c4, v = self.api(f"pulls/{n}", memo=False)
             try:
                 d = json.loads(v) if not c4 else None
                 if d["merged"]:
                     return True if d["head"]["sha"] == sha else None  # merged at another head is not this run's merge: no resend
-                return False if d["state"].upper() == "OPEN" else None
+                if d["state"].upper() != "OPEN":
+                    return None
+                held = self.main_merge_of(taken, sha)  # the PR reads OPEN, yet the merge may sit on main: resend only when it does not
+                return None if held is None else bool(held)
             except (ValueError, KeyError, TypeError, AttributeError):
                 return None
         lost = False
@@ -2228,6 +2272,13 @@ class Host:
             if head == sha:
                 return oid, ""
             raise Stop(f"#{n} is merged at {str(head)[:9]}, not at the proven head {sha[:9]}: not this run's merge. Nothing was reverted {REFUSED_CITE}.\n{out}")
+        if state == "OPEN":
+            held = self.main_merge_of(taken, sha)
+            if held:
+                return held, ""  # main holds this head's merge though the pull request still reads OPEN: merged, no claim revert
+            if held is None:
+                raise NetStop(f"the merge call of #{n} did not merge it by the pull request's read, and main cannot be read to tell whether the merge landed. Nothing was reverted. Check {taken} for the merge of #{n}: "
+                              f"if it is there, do the after-merge steps by hand; if not, run again {REFUSED_CITE}.\n{out}")
         if lost:
             raise NetStop(f"network error on the merge call of #{n}, and the pull request is not merged. Nothing was reverted. Run again {REFUSED_CITE}.\n{out}")
         if not c:  # exit 0 and still OPEN: not a refusal (a queued merge, or a lagging read). The claim stays.
@@ -6144,6 +6195,11 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
             except (subprocess.TimeoutExpired, OSError):
                 c, names = 1, ""
             rule_files = [x for x in names.split("\0") if x.lower() in RULE_FILES or x.lower().startswith(RULE_PREFIX)] if c == 0 else None
+            try:  # the base tip before the merge call: a read of main after a lost reply, or ff_main's fetch, moves origin/<base> onto the merge and would empty the plan's range. Any failure leaves the base unknown and never holds the merge
+                tip_c, tip = git(wt, "rev-parse", "--verify", "-q", base_ref + "^{commit}")
+            except (subprocess.TimeoutExpired, OSError):
+                tip_c, tip = 1, ""
+            plan_base = tip.strip() if tip_c == 0 and tip.strip() else None
             host.commit_message = lift_message(lifts)
             merging = True
             with timed_phase("merge-call"):
@@ -6167,11 +6223,6 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
             say(f"merge: #{n} UNKNOWN: the changed paths could not be read, so whether {PAGE_FILE} changed is unknown. Republish each live page if it did.")
         elif PAGE_FILE in names.split("\0"):
             say(f'merge: #{n} changes {PAGE_FILE}: republish each live waiting page now (skill waiting-page, "Update a repo\'s pages"), and put "republished: <pages>" or a reason in the report.')
-        try:  # ff_main's fetch moves origin/<base> onto the merge, which would empty the plan's diff; any failure leaves the base unknown and never holds the merge
-            tip_c, tip = git(wt, "rev-parse", "--verify", "-q", base_ref + "^{commit}")
-        except (subprocess.TimeoutExpired, OSError):
-            tip_c, tip = 1, ""
-        plan_base = tip.strip() if tip_c == 0 and tip.strip() else None
         ok = True
         try:
             ff_main(root, base, commit)
