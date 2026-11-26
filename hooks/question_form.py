@@ -2241,9 +2241,12 @@ UNVETTED_LINE = re.compile(r"^[ \t>*+-]*Unvetted:[ \t]*\S", re.I | re.M)
 UNREADABLE = "unreadable"
 CLOSED_ITEMS = "closed page items"
 INDEX_CAP, STEP_TOP, STEP_GIT_TIMEOUT, RULED_TOP = 800, 30, 10, 8
-# The most characters of the candidate block (candidates_block): the judge call has a 60 s limit (call_judge.py), and
-# the unfiltered block of about 475,000 characters timed out. Three 500-600 character questions against the live docs
-# tree gave filtered blocks of 63,862, 65,754 and 64,895 characters; 80,000 leaves about 22% headroom over the largest.
+# The most characters of the candidate block (candidates_block). It bounds one model call, which must finish inside
+# the judge's 60 s limit (call_judge.py): the unfiltered block of about 475,000 characters timed out. It is no budget
+# on the records: it cuts the lowest-ranked lines first, and the text the judge reads says how many records it left
+# out (CUT_NOTE). Measured Nov 25, 2026 on the live docs tree, 9 questions of 27 to 552 characters: 190 to 552
+# candidates, 79 to 102 shown, and the cap cut lines on all 9, so the cap binds on every question. The block ran
+# 79,000 to 80,179 characters with the labelled questions, and one real call took 11.6 s (n=1).
 CANDIDATES_CAP = 80000
 RULING_EXTRA_CAP = 600  # the most a record's ruling section adds past INDEX_CAP, as sentences that state a ruling by the owner
 RULING_HEADING = re.compile(r"^##[ \t]+The ruling[ \t]*$", re.I | re.M)
