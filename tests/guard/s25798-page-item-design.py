@@ -98,9 +98,14 @@ def pd_body(repo, data, action="set"):
                            "data": with_shown(data)}}
 
 
+def pd_folder(name):
+    """The config folder of the run `name`, under ROOT: its guard.log holds that run's rows and no other run's."""
+    return os.path.join(ROOT, "pd", "cfg-" + name)
+
+
 def pd_run(name, body):
     """One guard run on `body`, with a config folder of the case's own. Returns (decision, reason, guard.log rows)."""
-    folder = os.path.join(ROOT, "pd", "cfg-" + name)
+    folder = pd_folder(name)
     os.makedirs(folder, exist_ok=True)
     env = dict(os.environ, CLAUDE_CONFIG_DIR=folder, CLAUDE_GUARD_ROOT_PID=str(os.getpid()))
     env.pop("CLAUDE_CODE_REMOTE", None)

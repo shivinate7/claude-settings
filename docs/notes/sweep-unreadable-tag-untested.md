@@ -1,0 +1,1 @@
+- sweep-unreadable-tag-untested: janitor/session_end_sweep.py:190 keeps an unreadable process (`holds_session_tag` returns None) by testing `is True`, and no test pins that. A mutant `is not False` passes all 6 ScratchpadReap tests, because the tests use readable processes. Seen: 2026-11-25 x1

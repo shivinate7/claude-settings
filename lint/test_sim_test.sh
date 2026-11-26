@@ -13,8 +13,8 @@
 #  - Beside a booted phone: a duo run with the 18 Pro booted, or a pro run with a Duo booted, is allowed (record
 #    sims-load-brake-only). It boots its own device, runs, and shuts down only that device.
 #  - None booted, its own boot: the lease (bin/sim-lease, beside the script) grants the UDID for the role, duo slot 1 or
-#    2 or the pro UDID. The tool boots that UDID, tests, and shuts that same UDID down. The UDIDs are read from SLOT_UDID
-#    in bin/sim-lease, the one home of the device IDs.
+#    2 or the pro UDID. The tool boots that UDID, tests, and shuts that same UDID down. The lease finds each phone by its
+#    name in the device list (`simctl list devices -j`); the cases give it that list from the stub's devices.json.
 #  - A failed boot exits non-zero, runs no xcodebuild, and shuts nothing down.
 #  - At the cap (2 booted devices of any kind, no iPhone among them): no boot, no xcodebuild, exit non-zero, and
 #    the booted devices and the remedy are printed. Under the cap it boots.
@@ -97,16 +97,12 @@ calls=$work/calls; booted_file=$work/booted
 export RUN=$work PATH="$stubs:$PATH"
 OTHER=AAAAAAAA-0000-4000-8000-000000000001
 THIRD=BBBBBBBB-0000-4000-8000-000000000002
-# The device UDIDs are read from SLOT_UDID in bin/sim-lease, the one home. This suite copies none of them.
-UDID_READ='import importlib.machinery, importlib.util, sys
-loader = importlib.machinery.SourceFileLoader("sim_lease", sys.argv[1])
-mod = importlib.util.module_from_spec(importlib.util.spec_from_loader("sim_lease", loader))
-loader.exec_module(mod)
-print(mod.SLOT_UDID["1"], mod.SLOT_UDID["2"], mod.SLOT_UDID["pro"])'
-read -r DUO1 DUO2 PRO <<UDIDS
-$(python3 -I -c "$UDID_READ" "$sim_lease" 2>/dev/null)
-UDIDS
-[[ -n $DUO1 && -n $DUO2 && -n $PRO ]] || { echo "sim-test suite: cannot read SLOT_UDID from $sim_lease" >&2; exit 1; }
+# The fleet: the three phones a take finds by name, with fresh ids that no repo file holds. The stub's device list
+# (fleet_json, below) names them, and bin/sim-lease finds each one there. No case reads an id from bin/sim-lease.
+DUO1=5E7A0001-0000-4000-8000-0000000000A1   # iPhone Duo
+DUO2=5E7A0002-0000-4000-8000-0000000000A2   # iPhone Duo 2
+PRO=5E7A0003-0000-4000-8000-0000000000A3    # iPhone 18 Pro
+TWIN=5E7A0004-0000-4000-8000-0000000000A4   # a second iPhone Duo, for the case of two devices of one name
 export STUB_PRO_UDID=$PRO # the boot stub names the 18 Pro by this UDID, and a Duo by any other
 DEST="xcodebuild test -scheme X -collect-test-diagnostics never -destination platform=iOS Simulator,id="
 crashdir=$work/crash
@@ -169,7 +165,7 @@ held=no; [ -d "$lock" ] && held=yes
 echo "$1 $held" >> "$RUN/lock_simctl"
 case "$1" in
   list) [ -n "${STUB_LIST_RC:-}" ] && exit "$STUB_LIST_RC"; case "$*" in
-    *--json*) cat "$RUN/devices.json" ;;
+    *--json*|*-j*) cat "$RUN/devices.json" ;;
     *) echo "== Devices =="; echo "-- iOS 27.0 --"; cat "$RUN/booted" ;;
   esac ;;
   boot) cp -f "$lease" "$RUN/lease_at_boot" 2>/dev/null
@@ -237,6 +233,20 @@ SH
 chmod +x "$hold_cmd"
 
 booted() { printf '    %s (%s) (Booted) \n' "$1" "$2" >> "$booted_file"; }
+# listing_json BOOTED_UDID ROW...: the device list `simctl list devices -j` prints for ROWS, each "name|udid", on one runtime.
+# The device whose UDID is BOOTED_UDID is Booted, the rest Shutdown. "" names none.
+listing_json() {
+  local booted_udid=$1 row name udid state out=""
+  shift
+  for row in "$@"; do
+    name=${row%%|*}; udid=${row#*|}; state=Shutdown
+    if [[ $udid == "$booted_udid" ]]; then state=Booted; fi
+    out+="${out:+,}{\"udid\":\"$udid\",\"name\":\"$name\",\"state\":\"$state\",\"deviceTypeIdentifier\":\"com.apple.CoreSimulator.SimDeviceType.iPhone-Duo\",\"isAvailable\":true}"
+  done
+  printf '{"devices":{"com.apple.CoreSimulator.SimRuntime.iOS-27-0":[%s]}}\n' "$out"
+}
+# fleet_json [BOOTED_UDID]: the device list for the three phones of the fleet, each under its name.
+fleet_json() { listing_json "${1:-}" "iPhone Duo|$DUO1" "iPhone Duo 2|$DUO2" "iPhone 18 Pro|$PRO"; }
 # fresh: a clean fixture. It removes the lock folder, the crash dir and every observation file, so no lock or report
 # leaks into the next case.
 fresh() {
@@ -249,6 +259,7 @@ fresh() {
     "$work/store_at_boot" "$work/spawn_record" "$work/spawn_started" "$work/bootstatus_started"
   devroot=$devdir; no_devices_seam=
   /bin/mkdir -p "$crashdir" "$work/home"
+  fleet_json > "$work/devices.json"
 }
 # start_tool [VAR=value...]: starts the tool in its own process group, behind a hard timeout. Its stdout and stderr go
 # to run.std and run.err. Defaults: a temp HOME, no CLAUDE_CONFIG_DIR, the crash dir in the run folder, a 1 s poll and
@@ -698,13 +709,8 @@ esac
 SH
   chmod +x "$work/psbin/ps"
 }
-# devices_json UDID [NAME]: the device list after a boot of UDID, one Booted device on one runtime. NAME defaults to a Duo.
-devices_json() {
-  local name=${2:-iPhone Duo}
-  cat > "$work/devices.json" <<JSON
-{"devices":{"com.apple.CoreSimulator.SimRuntime.iOS-27-0":[{"udid":"$1","name":"$name","state":"Booted","deviceTypeIdentifier":"com.apple.CoreSimulator.SimDeviceType.iPhone-Duo","isAvailable":true}]}}
-JSON
-}
+# devices_json UDID: the fleet's device list after a boot of UDID: that phone is Booted, the others Shutdown.
+devices_json() { fleet_json "$1" > "$work/devices.json"; }
 # record_lines: how many sim-boots.jsonl lines the run wrote, 0 when it wrote no file.
 record_lines() { if [[ -e $records ]]; then wc -l < "$records" | tr -d ' '; else echo 0; fi; }
 record_names() { grep -Fq "\"udid\": \"$1\"" "$records" 2>/dev/null; }
@@ -717,7 +723,7 @@ need "one record line" test "$(record_lines)" -eq 1
 need "the line names the Duo's UDID" record_names "$DUO1"
 end_case "51 boot path: the Duo it boots gets one sim-boots.jsonl line"
 
-fresh; ps_stub; devices_json "$DUO2"; booted "iPhone Duo" $DUO2; run PATH="$work/psbin:$PATH"
+fresh; ps_stub; devices_json "$DUO2"; booted "iPhone Duo 2" $DUO2; run PATH="$work/psbin:$PATH"
 need "exit code" rc_is 0
 need "steps are run only" steps_are "run "
 need "no record line" test "$(record_lines)" -eq 0
@@ -1449,6 +1455,23 @@ run
 need "cap: exit 1, no boot, no xcodebuild" refused_clean
 need "cap: the stderr names the cap" grep -Fq "already booted" "$work/run.err"
 end_case "107 a duo run beside a booted 18 Pro and an iPad: refused at the cap, boots and runs nothing, exit 1"
+
+# Case 108: two devices named iPhone Duo. The lease cannot tell which Duo is slot 1, so the own boot is refused before any
+# boot: nothing is booted, no xcodebuild runs, and the run exits 1.
+fresh; ps_stub; listing_json "" "iPhone Duo|$DUO1" "iPhone Duo|$TWIN" "iPhone Duo 2|$DUO2" "iPhone 18 Pro|$PRO" > "$work/devices.json"
+run PATH="$work/psbin:$PATH"
+need "exit code is 1" rc_is 1
+need "no boot" no_boot
+need "no xcodebuild" no_xcodebuild
+end_case "108 duo own boot with two devices named iPhone Duo: refused before any boot, exit 1"
+
+# Case 109: no device named iPhone 18 Pro. The pro own boot is refused before any boot, and runs nothing.
+fresh; ps_stub; listing_json "" "iPhone Duo|$DUO1" "iPhone Duo 2|$DUO2" > "$work/devices.json"
+ARGS=(--device pro -scheme X); run PATH="$work/psbin:$PATH"; ARGS=(-scheme X)
+need "exit code is 1" rc_is 1
+need "no boot" no_boot
+need "no xcodebuild" no_xcodebuild
+end_case "109 pro own boot with no device named iPhone 18 Pro: refused before any boot, exit 1"
 
 echo "sim-test suite: $pass_n passed, $fail_n failed${failed:+: $failed}"
 exit $fail

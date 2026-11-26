@@ -1,0 +1,1 @@
+- walker-quoted-and-ext-misses: `CODE_TOKEN` (:559) glues a variable name onto a path, so `bash "$here/x.sh"` yields `here/x.sh` and quoted forms are not followed. `.github/scripts/ci-scope.sh`'s `python3 ".../lint/comment_only.py"` is not followed. `.ps1`, `.js` and `.cjs` are not followed. `./`-prefixed paths never resolve (:707-713). Seen: 2026-11-25 x1

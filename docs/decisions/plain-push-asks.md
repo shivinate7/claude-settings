@@ -12,7 +12,7 @@ Sources:
 
 | Push | Outcome | Rule id |
 |---|---|---|
-| A destination named `main` or `master` (`main`, `HEAD:main`, `x:refs/heads/main`, a bare push that resolves there), on a network remote | refuse, remedy `git push origin HEAD:<lane-branch>` (no merge tool: `HEAD:<branch>`, named in the report) | `push-main` |
+| A destination named `main` or `master` (`main`, `HEAD:main`, `x:refs/heads/main`, a bare push that resolves there), on a network remote | refuse, remedy `git push origin HEAD:<lane-branch>` (no merge tool: `HEAD:<branch>`, named in the report) | `force-push` |
 | An implied destination (bare push, `HEAD`, `@`, or the current branch's own name) that differs from the branch's upstream, on the upstream's remote | allow | `push-stray-branch` |
 | A destination (implied, a colon-less refspec, or after the colon) named like an agent-worktree branch (`agent-<hex>`, `claude/agent-<hex>`, `worktree-agent-<hex>`), with or without an upstream | refuse, remedy `git push origin HEAD:<lane-branch>` | `push-agent-branch` |
 | A push that names `main` and an agent-worktree branch together (`git push origin main HEAD:agent-<hex>`, `git push origin main agent-<hex>`) | refuse, remedy `git push origin HEAD:<lane-branch>` | `push-agent-branch` |
@@ -20,7 +20,7 @@ Sources:
 | Every branch (`--all`, `--branches`, or a glob refspec such as `refs/heads/*:refs/heads/*`), to a network remote, when it would update main or master there, when a local agent-worktree branch is among the branches it sends, or when a glob or the branch list cannot be read. The agent-checkout `--all` and `--branches` row above takes precedence | refuse, remedy `git push origin HEAD:<lane-branch>` | `push-all-main` (kind `all-agent` for an agent branch sent; a failed read is kind `all`) |
 | Any other plain push | allow | |
 
-- Item 207 a, `push-main`: main moves only by pull request (`git-main-only-by-pr`). The names are
+- Item 207 a, `force-push`: main moves only by pull request (`git-main-only-by-pr`). The names are
   literal, `main` and `master`. The remote's HEAD is not read. It refuses only for a network remote
   (https, http, ssh, git, or `host:path`). A remote with no URL, or a local path or `file://`
   URL, is silent: git refuses the first, and the second is a test fixture, not GitHub. A remote
@@ -41,8 +41,8 @@ Sources:
   unasked is not read here; roadmap step `push-ask-reads-brief` holds it.
 - Combined push, owner ruling, chat, 2026-11-10 14:59 CST, question "Combined push", answer "Refuse it".
   A push that names `main` and an agent-worktree branch is refused as `push-agent-branch`, not as
-  `push-main`. Controls unchanged: `main` alone is refused as `push-main`; `main` with a lane-named branch is refused as
-  `push-main`; a lane branch, `HEAD:<lane-branch>`, `archive/*` and deletes are allowed.
+  `force-push`. Controls unchanged: `main` alone is refused as `force-push`; `main` with a lane-named branch is refused as
+  `force-push`; a lane branch, `HEAD:<lane-branch>`, `archive/*` and deletes are allowed.
 - Every-branch push, `push-all-main`: a plain push of every branch never asks. On a network remote it is
   refused when one of the checks below holds. Otherwise it is allowed.
   - Main. It would update main or master there (owner ruling, page item 502, 2026-11-10 16:08 CST). That

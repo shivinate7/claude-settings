@@ -1,0 +1,1 @@
+- duo-reuse-matches-substring: Review finding F8, pre-existing. `bin/sim-test` reuses the first booted device whose name contains `iPhone Duo`, which also matches `iPhone Duo 2`. Kept as a note: the match only chooses between the two Duos, which the duo role already allows, and the reuse path takes no lease by design. Seen: 2026-11-25 x1

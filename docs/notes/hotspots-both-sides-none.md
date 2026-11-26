@@ -1,0 +1,1 @@
+- hotspots-both-sides-none: lint/conflict_hotspots.py both_sides returns None on any merge-base failure (git merge-base exit other than 0), not only when the parents share no merge base, so --exposure drops that merge's exposure with no line. The return is at :169. Seen: 2026-11-25 x1

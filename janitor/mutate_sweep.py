@@ -328,13 +328,14 @@ MUTATIONS = [
      '            if False:\n'
      '                under = False\n',
      "test_clean_merged_tree_is_reaped_beside_a_record_whose_folder_is_gone"),
-    # The default of the opt-in. Defaulting it to True lets the orphan reap and trash_verdict, which have no
-    # dirty check and must keep a folder beside such a record, read the removed folder as out and act.
+    # The default of the opt-in. Defaulting it to True lets the husk read, the husk verdict and the branch-cut
+    # holder reads, which pass no flag, read a removed record's folder as out and act. The killer is the case that
+    # reads a flagless call beside such a record and expects unknown.
     ("liveness: worktree_live_session defaults the absent_is_out opt-in to True",
      "git_reads",
      'def worktree_live_session(target: str, absent_is_out: bool = False):',
      'def worktree_live_session(target: str, absent_is_out: bool = True):',
-     "test_orphaned_listener_stays_kept_beside_such_a_record"),
+     "test_a_read_with_no_flag_beside_a_gone_record_answers_unknown"),
     # only_on="linux": AgentEndDeadHostLockTests is skipped off Linux (the live lock's start ticks are
     # read from /proc), so this suite's case cannot prove this mutant on Windows or macOS.
     # The finish gate on a live-form lock whose host is dead (decision when-a-worktree-may-be-removed,
@@ -694,6 +695,26 @@ MUTATIONS = [
      'AGENT_ID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")',
      'AGENT_ID = re.compile(r"^.{1,64}$")',
      "test_an_unsafe_or_unknown_agent_id_names_nothing"),
+    ("agent-end reap: the queue is not rotated past the cursor, so each run restarts at git's top",
+     "agent_end_reap",
+     '    queue = resume_after_cursor(queue, read_cursor(root))',
+     '    queue = resume_after_cursor(queue, None)',
+     "test_second_run_starts_past_first_runs_trees"),
+    ("agent-end reap: the cursor is never written, so a run leaves none for the next",
+     "agent_end_reap",
+     '        write_cursor(root, last_kept)',
+     '        pass',
+     "test_a_run_writes_at_most_one_cursor_file_of_bounded_size"),
+    ("agent-end reap: a run that removed every tree it judged still rewrites the cursor, to a gone tree",
+     "agent_end_reap",
+     '            rows.append(decision)\n            if decision["action"] != "reap" or decision.get("error"):  # a failed removal leaves the tree on disk\n                last_kept = _tree_key(entry["path"])',
+     '            rows.append(decision)\n            last_kept = _tree_key(entry["path"])',
+     "test_a_run_that_removed_every_tree_it_judged_resumes_past_them"),
+    ("agent-end reap: a failed removal does not move the cursor (the error is no longer read as kept)",
+     "agent_end_reap",
+     '            if decision["action"] != "reap" or decision.get("error"):  # a failed removal leaves the tree on disk',
+     '            if decision["action"] != "reap":  # a failed removal leaves the tree on disk',
+     "test_a_run_whose_removals_failed_leaves_a_cursor_past_them"),
     # only_on="linux": the proving case is in AgentEndDeadHostLockTests, skipped off Linux (/proc).
     # `_restore_cut_short` reads the finish proof for a locked tree: a cut-short removal under a dead
     # host's lock is written back only when the agent is proven finished. Passing False reads every
@@ -729,6 +750,33 @@ MUTATIONS = [
      '    if False:\n'
      '        return {**base, "action": "keep", "reason": "not-current-user"}',
      "test_owner_mismatch_is_kept"),
+    # The listener's dirty, process and own-pid checks, and a failed dirty read (decide_listener in janitor/sweep.py).
+    # Each mutant is killed by the case that keeps the listener for exactly that reason.
+    ("listener dirty: a checkout with uncommitted work no longer keeps its listener",
+     "sweep",
+     '    if dirty:\n        return {**base, "action": "keep", "reason": "dirty"}',
+     '    if False:\n        return {**base, "action": "keep", "reason": "dirty"}',
+     "test_orphaned_listener_is_kept_for_uncommitted_work_beside_such_a_record"),
+    ("listener process: another process inside the checkout no longer keeps its listener",
+     "sweep",
+     '    if others:\n        return {**base, "action": "keep", "reason": process_inside_reason(others)}',
+     '    if False:\n        return {**base, "action": "keep", "reason": process_inside_reason(others)}',
+     "test_orphaned_listener_is_kept_for_a_process_inside_beside_such_a_record"),
+    ("listener own pid: the listener's own process counts as a process inside its checkout",
+     "sweep",
+     '    others = _pids_but_listener(inside, pid)\n',
+     '    others = list(inside)\n',
+     "test_orphaned_listener_is_reaped_beside_such_a_record_when_its_checkout_is_clean"),
+    ("listener descendant: a process under the listener counts as a process inside its checkout",
+     "sweep",
+     ' and not _descends_from(p, listener_pid)]',
+     ']',
+     "test_orphaned_listener_is_reaped_beside_its_own_descendant_when_its_checkout_is_clean"),
+    ("listener failed read: a failed dirty read of the checkout reads as clean",
+     "sweep",
+     '    dirty = read_dirty(entry["checkout"])\n    if dirty is None:\n',
+     '    dirty = bool(read_dirty(entry["checkout"]))\n    if False:\n',
+     "test_orphaned_listener_is_kept_unreadable_when_the_dirty_read_returns_none"),
 
     ("dead-rooted: a script missing from a live directory is judged dead, and reaps",
      "sweep",
@@ -962,10 +1010,57 @@ MUTATIONS = [
 
     ('build dirs: the janitor deletes a trash name with a process inside',
      'sweep',
-     '    if inside:\n        return False, "process-inside: pid %s" % ", ".join(str(p) for p in sorted(inside))\n    return True, "leftover trash"',
+     '    if inside:\n        return False, process_inside_reason(inside)\n    return True, "leftover trash"',
      '    return True, "leftover trash"',
      'test_the_janitor_deletes_a_leftover_trash_name_and_keeps_one_with_a_live_process',
      "posix"),
+
+    # The trash sweep's dirty check and its failed read (trash_verdict in janitor/sweep.py). A trash name holding
+    # tracked or staged work must keep; a failed read of that work must keep too.
+    ('build dirs trash dirty: the janitor deletes a trash name that holds moved tracked work',
+     'sweep',
+     '    if dirty:\n        return False, "dirty"',
+     '    if False:\n        return False, "dirty"',
+     'test_trash_folder_is_kept_for_uncommitted_work_beside_such_a_record'),
+    ('build dirs trash failed read: a failed dirty read of a trash name reads as clean',
+     'sweep',
+     '    if dirty is None or live is None or inside is None:\n        return False, "unreadable-subject"\n    if dirty:',
+     '    if live is None or inside is None:\n        return False, "unreadable-subject"\n    if dirty:',
+     'test_trash_folder_is_kept_unreadable_when_the_dirty_read_returns_none'),
+
+    # The trash sweep's nested-repo walk (has_nested_git) and the status-line placement (_own_trash_lines).
+    ('build dirs trash nested git: has_nested_git never finds a .git, so a nested repo reads clean',
+     'sweep',
+     '            return True\n    return None if unreadable else False',
+     '            pass\n    return None if unreadable else False',
+     'test_trash_folder_is_kept_for_a_nested_repo_with_uncommitted_work_beside_such_a_record'),
+    ('build dirs trash nested git: has_nested_git never finds a bare repo, so a bare repo reads clean',
+     'sweep',
+     '".git" in filenames\n                or ("HEAD" in filenames and "objects" in dirnames and "refs" in dirnames)):',
+     '".git" in filenames):',
+     'test_trash_folder_is_kept_as_dirty_for_a_bare_repo_directory_inside_it_beside_such_a_record'),
+    ('build dirs trash nested git: the walk follows a symlink out of the folder',
+     'sweep',
+     'os.walk(path, followlinks=False, onerror=unreadable.append)',
+     'os.walk(path, followlinks=True, onerror=unreadable.append)',
+     'test_trash_folder_with_a_link_to_an_outside_repo_is_deleted_beside_such_a_record',
+     "posix"),
+    ('build dirs trash nested git: an unreadable folder in the walk reads as clean',
+     'sweep',
+     '    return None if unreadable else False',
+     '    return False',
+     'test_trash_folder_is_kept_unreadable_when_a_folder_under_it_cannot_be_read',
+     "posix"),
+    ('build dirs trash lines: a deletion at the original name that a sibling holds counts for this folder',
+     'sweep',
+     '        if not any(os.path.lexists(os.path.join(parent, n, rel)) for n in siblings):\n            mine.append(line)',
+     '        if True:\n            mine.append(line)',
+     'test_a_trash_folder_is_judged_on_its_own_lines_beside_a_sibling_from_the_same_name'),
+    ('build dirs trash lines: a line that cannot be placed is skipped instead of kept',
+     'sweep',
+     '        text = line[3:]\n',
+     '        text = line[3:]\n        if text.startswith(\'"\') or " -> " in text:\n            continue\n',
+     'test_trash_folder_is_kept_for_a_quoted_path_it_cannot_place_beside_such_a_record'),
 
     ('build dirs: the hook deletes in its own process before it returns',
      'agent_end_reap',
@@ -1007,8 +1102,10 @@ MUTATIONS = [
     # only_on="posix": the sleep fixture is POSIX only.
     ("husks: a process inside no longer keeps the husk",
      "sweep",
-     '    if inside:\n        return {"path": path, "action": "keep", "reason": "process-inside',
-     '    if False:\n        return {"path": path, "action": "keep", "reason": "process-inside',
+     '    if inside:\n        return {"path": path, "action": "keep", "reason": process_inside_reason(inside)}\n'
+     '    return {"path": path, "action": "husk"',
+     '    if False:\n        return {"path": path, "action": "keep", "reason": process_inside_reason(inside)}\n'
+     '    return {"path": path, "action": "husk"',
      "test_a_process_inside_keeps_the_husk",
      "posix"),
 
@@ -1016,11 +1113,11 @@ MUTATIONS = [
     ("pre-check: a process sitting inside the worktree no longer keeps it",
      "sweep",
      '    if inside:\n'
-     '        return {"path": path, "action": "keep",\n'
-     '                "reason": "process-inside: pid %s" % ", ".join(str(p) for p in sorted(inside))}',
+     '        return {"path": path, "action": "keep", "reason": process_inside_reason(inside)}\n'
+     '    if host_lock:\n',
      '    if False:\n'
-     '        return {"path": path, "action": "keep",\n'
-     '                "reason": "process-inside: pid %s" % ", ".join(str(p) for p in sorted(inside))}',
+     '        return {"path": path, "action": "keep", "reason": process_inside_reason(inside)}\n'
+     '    if host_lock:\n',
      "test_a_process_inside_the_worktree_keeps_it_and_names_the_pid"),
 
     # ---- the stale agent lock (a dead or reused pid frees a clean, fully pushed worktree) ----

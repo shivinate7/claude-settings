@@ -1,0 +1,1 @@
+- draft-cut-same-second-untested: Gap, round 1 review of branch cancel-run-on-back-to-draft (PASS). No test checks GitHub's real converted_to_draft event time against a run's created_at. A run created in the same second as the event is kept, since the cut is strict. A live test needs a real PR returned to draft mid-run. Seen: 2026-11-25 x1
