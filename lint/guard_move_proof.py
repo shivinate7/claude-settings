@@ -19,8 +19,8 @@ The guard modules are hooks/guard.py and each hooks/guard_*.py (guard_core.py to
 2. No name is defined in two guard modules at HEAD, because guard.py's `__getattr__` returns the first module
    that holds a name. A name that sat in the same modules at BASE is listed and does not fail: the move did not
    make it.
-3. Free names: each unit that changed module reads only global names its new module defines, imports or gets
-   from builtins. A function's own locals, parameters and enclosing names are not global; Python's `symtable`
+3. Free names: each unit that changed module (an edited one too), and each unit of a module that lost a name,
+   reads only global names its module defines, imports or gets from builtins. A function's own locals, parameters and enclosing names are not global; Python's `symtable`
    decides, not a text match.
 4. `--importtime` runs `python3 -X importtime -c "import guard"` in hooks/ of a `git archive` copy of each ref
    (one warm-up, then five runs, PYTHONPYCACHEPREFIX and CLAUDE_CONFIG_DIR in a temp folder) and compares the
@@ -30,8 +30,9 @@ Without `--importtime` the script starts no process beyond git. Cost with it: 12
 reads, files only under a temp folder it removes.
 
 Limits: a unit nested in a top-level `if` or `try` is part of that statement, never a named unit, and rule 2 does not
-see it. A comment-only change is invisible to `ast` and passes. Rule 3 checks the moved units; a unit that stayed
-behind and reads a name that moved is not checked here (a call through a module attribute resolves at run time).
+see it. A comment-only change is invisible to `ast` and passes. Rule 3 checks the moved units (an edited one too)
+and every unit of a module that lost a name; a unit in an untouched module is not checked. A name read through a
+module attribute (`guard_core.Y`) or a module `__getattr__` resolves at run time and is not seen.
 
 Exit 0 on PASS, 1 on FAIL, 2 when a ref or a guard file cannot be read (printed as `unknown: ...`, never as a verdict).
 Python 3.9 floor (lint/check_python_floor.py).
@@ -195,6 +196,9 @@ def check_units(base_units, head_units, allowed_new, allowed_changed):
         shown = olds[0]
         if lost and not news:
             problems.append("lost: %s (was %s), not in any guard module at head" % (shown.label(), shown.where()))
+        elif lost and not added:
+            problems.append("lost: %s (was %s), a copy is gone from head (--changed does not excuse a drop)" % (
+                shown.label(), shown.where()))
         elif lost:
             gone = [u for u in olds if u.dump in lost][0]
             now = [u for u in news if u.dump in added]
@@ -224,7 +228,7 @@ def check_units(base_units, head_units, allowed_new, allowed_changed):
 def definers(units):
     table = collections.defaultdict(set)
     for unit in units:
-        if unit.kind != "statement":
+        if unit.kind != "statement" and not isinstance(unit.node, ast.AugAssign):  # `X += ...` reads X, never defines it
             for name in unit.names:
                 table[name].add(unit.module)
     return table
@@ -245,22 +249,54 @@ def check_duplicates(base_units, head_units):
     return problems, notes
 
 
+class ModuleScopeAugAssign(ast.NodeVisitor):
+    """The `X += ...` statements that run in a unit's own scope (not inside a def, class or lambda)."""
+
+    def __init__(self):
+        self.found = []
+
+    def visit_AugAssign(self, node):
+        self.found.append(node)
+        self.generic_visit(node)
+
+    def visit_FunctionDef(self, node):
+        pass
+
+    visit_AsyncFunctionDef = visit_ClassDef = visit_Lambda = visit_FunctionDef
+
+
+class DropAugAssign(ast.NodeTransformer):
+    """Replaces each module-scope `X += v` with its value, so symtable does not count X as bound by it."""
+
+    def visit_AugAssign(self, node):
+        return ast.copy_location(ast.Expr(value=node.value), node)
+
+    def visit_FunctionDef(self, node):
+        return node  # an augmented assignment inside a def, class or lambda is that scope's, not the module's
+
+    visit_AsyncFunctionDef = visit_ClassDef = visit_Lambda = visit_FunctionDef
+
+
 def module_names(text):
-    """Names a module binds at its top level: assigned, imported, def, class, or set by a `global` statement."""
-    table = symtable.symtable(text, "<module>", "exec")
-    names = {sym.get_name() for sym in table.get_symbols()
-             if sym.is_assigned() or sym.is_imported() or sym.is_namespace()}
+    """Names a module binds at its top level: assigned, imported, def, class, or set by a `global` statement.
+    An augmented assignment binds nothing it did not already have."""
+    tree = ast.parse(text)
+    names = set()
     star = False
-    for node in ast.walk(ast.parse(text)):
+    for node in ast.walk(tree):
         if isinstance(node, ast.Global):
             names.update(node.names)
         elif isinstance(node, ast.ImportFrom) and any(alias.name == "*" for alias in node.names):
             star = True
+    table = symtable.symtable(ast.unparse(ast.fix_missing_locations(DropAugAssign().visit(tree))),
+                              "<module>", "exec")
+    names.update(sym.get_name() for sym in table.get_symbols()
+                 if sym.is_assigned() or sym.is_imported() or sym.is_namespace())
     return names, star
 
 
 def global_reads(source):
-    """Global names that `source` (one unit) reads."""
+    """Global names that `source` (one unit) reads. An augmented assignment reads its target."""
     out = set()
 
     def walk(table, top):
@@ -276,38 +312,54 @@ def global_reads(source):
             walk(child, False)
 
     walk(symtable.symtable(source, "<unit>", "exec"), True)
+    scoped = ModuleScopeAugAssign()
+    scoped.visit(ast.parse(source))
+    for node in scoped.found:
+        if isinstance(node.target, ast.Name):
+            out.add(node.target.id)
     return out
 
 
 def moved_units(base_units, head_units):
-    """The head units that sit in a module where base held no identical copy, while base held one elsewhere."""
-    base_places = collections.defaultdict(collections.Counter)
-    for unit in base_units:
-        base_places[(unit.key, unit.dump)][unit.module] += 1
-    head_places = collections.defaultdict(collections.Counter)
-    for unit in head_units:
-        head_places[(unit.key, unit.dump)][unit.module] += 1
-    moved = []
-    for unit in head_units:
-        key = (unit.key, unit.dump)
-        if key in base_places and head_places[key][unit.module] > base_places[key][unit.module]:
-            moved.append(unit)
-    return moved
+    """The head units that sit in a module where base held no unit with their key, while base held one elsewhere.
+    A unit edited on the way (--changed) is moved too: its dump differs, its key does not."""
+    base_places = {(unit.module, unit.key) for unit in base_units}
+    base_keys = {unit.key for unit in base_units}
+    return [unit for unit in head_units if (unit.module, unit.key) not in base_places and unit.key in base_keys]
 
 
-def check_free_names(moved, head_sources):
-    """Rule 3."""
-    problems, known = [], {}
+def units_to_check(base_units, head_units, moved):
+    """Rule 3 reads the moved units and every head unit of a module that lost a name, since a unit that stayed
+    behind can read a name that moved out."""
+    head_places = {(unit.module, unit.key) for unit in head_units}
+    losers = {unit.module for unit in base_units
+              if unit.names and (unit.module, unit.key) not in head_places}
+    checked = list(moved)
+    seen = {id(unit) for unit in moved}
+    for unit in head_units:
+        if unit.module in losers and id(unit) not in seen:
+            checked.append(unit)
+    return checked
+
+
+def check_free_names(checked, head_sources, elsewhere):
+    """Rule 3. `elsewhere` is {name: modules that define it at head}, to say where an unresolved name went."""
+    problems, known, starred = [], {}, set()
     builtin_names = set(dir(builtins)) | MODULE_DUNDERS
-    for unit in moved:
+    for unit in checked:
         if unit.module not in known:
             known[unit.module] = module_names(head_sources[unit.module])
         defined, star = known[unit.module]
         if star:
-            problems.append("%s has a star import: free names of %s cannot be checked" % (unit.module, unit.label()))
+            if unit.module not in starred:
+                starred.add(unit.module)
+                problems.append("%s has a star import: free names of %s cannot be checked" % (
+                    unit.module, unit.label()))
             continue
         for name in sorted(global_reads(ast.unparse(unit.node)) - defined - builtin_names):
-            problems.append("unresolved name `%s` in %s, now in %s" % (name, unit.label(), unit.where()))
+            homes = sorted(elsewhere.get(name, ()))
+            hint = " (`%s` is defined in %s: import it)" % (name, ", ".join(homes)) if homes else ""
+            problems.append("unresolved name `%s` in %s, now in %s%s" % (name, unit.label(), unit.where(), hint))
     return problems
 
 
@@ -315,19 +367,23 @@ def extract_hooks(root, ref, dest):
     """Writes the regular files of `git archive REF hooks` under `dest`, with no tar process."""
     proc = subprocess.Popen(["git", "-C", root, "archive", ref, "hooks"], stdout=subprocess.PIPE,
                             stderr=subprocess.PIPE)
-    with tarfile.open(fileobj=proc.stdout, mode="r|") as archive:
-        for member in archive:
-            if not member.isfile():
-                continue
-            target = os.path.normpath(os.path.join(dest, member.name))
-            if not target.startswith(dest + os.sep):
-                continue
-            os.makedirs(os.path.dirname(target), exist_ok=True)
-            with open(target, "wb") as handle:
-                handle.write(archive.extractfile(member).read())
-    proc.stdout.close()
-    if proc.wait() != 0:
-        raise Unreadable("git archive %s hooks: %s" % (ref, proc.stderr.read().decode("utf-8", "replace").strip()))
+    try:
+        with tarfile.open(fileobj=proc.stdout, mode="r|") as archive:
+            for member in archive:
+                if not member.isfile():
+                    continue
+                target = os.path.normpath(os.path.join(dest, member.name))
+                if not target.startswith(dest + os.sep):
+                    continue
+                os.makedirs(os.path.dirname(target), exist_ok=True)
+                with open(target, "wb") as handle:
+                    handle.write(archive.extractfile(member).read())
+        proc.stdout.close()
+        if proc.wait() != 0:
+            raise Unreadable("git archive %s hooks: %s" % (ref, proc.stderr.read().decode("utf-8", "replace").strip()))
+    finally:
+        proc.stdout.close()
+        proc.stderr.close()
 
 
 def import_microseconds(hooks_dir, scratch):
@@ -399,7 +455,8 @@ def main(argv=None):
             problems += found
             notes += listed
             moved = moved_units(base_units, head_units)
-            problems += check_free_names(moved, head_sources)
+            problems += check_free_names(units_to_check(base_units, head_units, moved), head_sources,
+                                         definers(head_units))
             notes.append("%d units at base, %d moved module" % (len(base_units), len(moved)))
         if args.importtime and not (base_bad or head_bad):
             found, listed = check_importtime(args.root, args.base, args.head)
