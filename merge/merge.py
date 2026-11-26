@@ -2084,19 +2084,20 @@ class Host:
         return s + (" (ignored: " + "; ".join(ignored) + ")" if ignored else "")
 
     def batch_member_runs(self, members, heads):
-        """-> (kept, left): `members` split by the runs of each one's own head `heads[n]`. The one home of that decision: `combine_train.py --build` (no queue file) and combine_hint both call it.
-        left is [(n, line, unknown)] in member order. A member whose head has a failed job leaves, named by that job's entry ("name: fail link"). A cancelled job is not named, and a head whose only
+        """-> (kept, left): `members` split by the runs of the queued head `heads[n]` of each one (the head the review list read; no live pull is re-read). The one home of that decision: `combine_train.py --build` (with or without a queue file) and combine_hint both call it.
+        left is [(n, line, unknown)] in member order. A member whose head has a failed job leaves, named by that job's entry ("name: fail link"). A job that merge.ignoreChecks names is no failure, the reading `merge` itself makes (ignore_checks). A cancelled job is not named, and a head whose only
         red is cancels stays in, as head_check_failed reads a head. A head with green, pending or no runs stays. A failed read of a head's runs leaves it too, as unknown (`unknown` True), never green or red.
-        Under merge.requiredChecks "none" or "first-proof", read from the base's stamp in self.cwd, no run is read and no member leaves (decision private-repos-no-ci). A stamp that cannot be read raises Stop.
+        Under merge.requiredChecks "none", read from the base's stamp in self.cwd, no run is read and no member leaves (decision private-repos-no-ci). "first-proof" has CI live on the base, so its members' runs are read (decision merge-needs-current-base). A stamp that cannot be read raises Stop.
         Cost: one fetch of the base (load_config); then per member the reads of `checks`: two gh calls (the head's check runs and its commit statuses, one page each), and one more (gh run list) when its rows link more than one workflow run. Nothing is kept."""
-        with contextlib.redirect_stdout(io.StringIO()):  # load_config says its defaults; only requiredChecks is read here
-            required = load_config(self.cwd, self.base, DEFAULT_CONFIG, " " + BATCH_CITE)["merge"].get("requiredChecks")
-        if waits_on_no_check(required):
+        with contextlib.redirect_stdout(io.StringIO()):  # load_config says its defaults; only requiredChecks and ignoreChecks are read here
+            cfg = load_config(self.cwd, self.base, DEFAULT_CONFIG, " " + BATCH_CITE)
+        if cfg["merge"].get("requiredChecks") == "none":  # not waits_on_no_check: "first-proof" has CI live, so its members' runs are read
             return list(members), []
+        ignore = ignore_checks(cfg)  # the config's own list, as the merge tool reads it: the build's Host is made with none
         kept, left = [], []
         for n in members:
             try:
-                red, _pending, _ignored = self.classify(self.checks(n, warn=False, sha=heads[n]), [], self.ignore, self.branch)
+                red, _pending, _ignored = self.classify(self.checks(n, warn=False, sha=heads[n]), [], ignore, self.branch)
             except (Stop, subprocess.TimeoutExpired, OSError) as e:
                 left.append((n, f"unknown (the runs of its head {heads[n][:9]} could not be read: {' '.join(str(e).split())[:120]})", True))
                 continue
@@ -3234,21 +3235,23 @@ def ready_batch_numbers(rows, pulls):
 def combine_hint(root, host):
     """Print one line when another lane lint is running or queued: the ready PRs whose records pass, and the command that builds a train from them, so a lane
     does not wait on a queue the batch could skip (decision session-tiers, merge alone or combine). The set is the one `combine_train.py --build` takes
-    (batch_rows there): rows whose act is `batch` on a main base, the lowest-numbered one (the front PR, which merges alone) left out, then at a backlog the members whose own head has a failed job or
-    unreadable runs (Host.batch_member_runs, the build's call). Never stops a lint: a read that fails prints one line saying so. Cost, when another lane lint runs and the backlog is at the threshold: Host.batch_member_runs per ready member."""
+    (batch_rows there): rows whose act is `batch` on a main base, the lowest-numbered one (the front PR, which merges alone) left out, then at a backlog the members whose queued head has a failed job or
+    unreadable runs (Host.batch_member_runs, the build's call), each named on a line of its own before the names line. Never stops a lint: a read that fails prints one line saying so. Cost, when another lane lint runs and the backlog is at the threshold: Host.batch_member_runs per ready member."""
     pids = other_lane_lint_pids(root)
     if not pids:
         return
     who = f"another lane lint is running or queued (pid {', '.join(map(str, sorted(pids)))})"
     try:
-        rows = []
+        rows, left_out = [], []
         _lines, pulls, _totals = reviewed_read(host, None, ledger=rows)
         ready = ready_batch_numbers(rows, pulls)[1:]
         if len(ready) >= BUILD_THRESHOLD:  # under the backlog no train is built, so no run is read; the build drops a member by the same call
-            ready = host.batch_member_runs(ready, {d["number"]: d["head"]["sha"] for d in pulls})[0]
+            ready, left_out = host.batch_member_runs(ready, {d["number"]: d["head"]["sha"] for d in pulls})
     except Exception as e:  # a hint is never a verdict: an unreadable list is reported as unknown
         say(f"merge: {who}. The ready PRs with passing records are unknown: the read failed ({type(e).__name__}), so no combine hint. Run `merge --reviewed`.")
         return
+    for n, detail, _unknown in left_out:  # the build names each of these too; a reader who sees #N missing from the names line learns why
+        say(f"merge: {who}. #{n} is left out of the combine: {detail}")
     names = ", ".join(f"#{n}" for n in ready) or "none"
     tool = os.path.join(os.path.dirname(os.path.abspath(__file__)), "combine_train.py")
     if not os.path.isfile(tool):

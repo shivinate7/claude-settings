@@ -12,8 +12,8 @@ Its writes are git objects (`git merge-tree`, `git commit-tree`) in the checkout
 --build (roadmap step combine-train-build; ruling 10:23 CST Nov 20: a backlog of 10 or more ready drafts combines, and the front PR stays alone):
   with --queue, the queued batches' members are the ready backlog. With no --queue, the members are merge.reviewed_read's rows whose act is `batch`, in
   number order, each at the head its row reads. A row whose pull's base ref is not main drops first (the base filter); the lowest-numbered `batch` row left is
-  the front PR (session reading, 11:41 CST Nov 20), which merges alone and is never a member. A row of any other act stays out. With no --queue, a member whose own head has a failed job, or whose runs cannot be read
-  (named unknown), leaves by name before the count is judged again (owner word, 15:14 CST Nov 25: drop a failing member; merge.Host.batch_member_runs, which reads no run under stamp requiredChecks none).
+  the front PR (session reading, 11:41 CST Nov 20), which merges alone and is never a member. A row of any other act stays out. With or without --queue, a member whose queued head has a failed job, or whose runs cannot be read
+  (named unknown), leaves by name before the count is judged again (owner word, 15:14 CST Nov 25: drop a failing member; merge.Host.batch_member_runs, which reads no run under stamp requiredChecks none and skips a job merge.ignoreChecks names).
   Under BUILD_THRESHOLD members the run prints `merge alone`, builds nothing and exits 3. At the threshold
   or over, it builds the local branch merge.integration_branch(NAME) from the newest origin/main (one fetch): one no-ff merge commit per kept member,
   in queue order, so the first-parent chain is the build order and each second parent is a member head. A member's live head is read at
@@ -43,7 +43,7 @@ The clash rate is the members a pair clash left out, over the pairs tried (a gro
 A number the tool did not measure prints `unknown` or `n/a (reason)`, never 0 and never a guess.
 Exit: 0 ok, 1 a member left out or a check failed, 2 something unknown or a run that could not start (a git that is not on PATH included), 3 --build merges alone (under the backlog).
 Cost: per fold, one `git merge-tree` start per member (against main) and per pair tried and one `git commit-tree` start per merge; per round, one ci-job run per job of the checks when they have a home;
-with --lint, one more ci-job run per batch. --build adds two fetches (origin/main, then refs/pull/N/head of the members), one `git ls-remote`, and the gh reads of merge.reviewed_read when it has no --queue; with no --queue it adds one more fetch of main and,
+with --lint, one more ci-job run per batch. --build adds two fetches (origin/main, then refs/pull/N/head of the members), one `git ls-remote`, and the gh reads of merge.reviewed_read when it has no --queue; with or without --queue it adds one more fetch of main (load_config in Host.batch_member_runs; fetch_main fetches it again, which this tool leaves as two) and,
 per member at the threshold or over, the two gh calls of Host.checks (check runs, statuses; one more `gh run list` when the rows link several runs), none under requiredChecks none. One temporary worktree per batch. Nothing is logged or left running.
 """
 import argparse
@@ -486,20 +486,6 @@ def build(args, heads, members):
         print(f"unknown (the queue file's prs hold no head for {tag(gone)})")
         return 2
     members_in = len(members)
-    runs_left, unknown = [], False  # (member, detail): members whose own head's runs leave them out, before the count is judged again
-    if not args.queue:  # the queue-file build keeps its members as given
-        try:
-            members, runs_left = merge.Host(cwd=args.root).batch_member_runs(members, heads)
-        except Exception as e:  # merge.py's Stop (an unreadable stamp) is not in the tool's allowed merge.py names; any failed read is unknown, never a build
-            print(f"unknown: the runs of the members' heads could not be judged: {' '.join(str(e).split())[:200]}")
-            return 2
-        unknown = any(u for _m, _d, u in runs_left)
-        runs_left = [(m, d) for m, d, _u in runs_left]
-        if len(members) < BUILD_THRESHOLD:
-            for m, detail in sorted(runs_left):
-                print(f"left out #{m}: {detail}")
-            print(f"merge alone: {len(members)} ready members left after {len(runs_left)} left out for their runs, under the backlog of {BUILD_THRESHOLD}; no integration branch built")
-            return 2 if unknown else 3
     branch = merge.integration_branch(args.name)
     if not git(args.root, "rev-parse", "--verify", "-q", f"refs/heads/{branch}")[0]:
         print(f"unknown: the branch {branch} already exists in {args.root}; this run replaces no branch. Pick another --name")
@@ -508,6 +494,18 @@ def build(args, heads, members):
     if why:
         print(f"unknown: {why}")
         return 2
+    try:  # after the branch check and the fetch of main, so a refused name or a failed fetch reads no run and names itself; a queued build judges its members the same way a list build does
+        members, runs_left = merge.Host(cwd=args.root).batch_member_runs(members, heads)
+    except Exception as e:  # merge.py's Stop (an unreadable stamp) is not in the tool's allowed merge.py names; any failed read is unknown, never a build
+        print(f"unknown: the runs of the members' heads could not be judged: {' '.join(str(e).split())[:200]}")
+        return 2
+    unknown = any(u for _m, _d, u in runs_left)  # (member, detail, unknown): the members whose own head's runs leave them out, before the count is judged again
+    runs_left = [(m, d) for m, d, _u in runs_left]
+    if len(members) < BUILD_THRESHOLD:
+        for m, detail in sorted(runs_left):
+            print(f"left out #{m}: {detail}")
+        print(f"merge alone: {len(members)} ready members left after {len(runs_left)} left out for their runs, under the backlog of {BUILD_THRESHOLD}; no integration branch built")
+        return 2 if unknown else 3
     live, why = live_heads(args.root, members)
     if why:
         print(f"unknown: {why}")
