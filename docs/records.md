@@ -475,6 +475,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `hang-macos-false-hang` | On macOS the hang check cannot read a reaped child's CPU. | [`docs/debts/hang-macos-false-hang.md`](../docs/debts/hang-macos-false-hang.md) |
 | `heredoc-written-run-false-alarm` | The guard keeps a heredoc body in view when the file the body writes shares a pipeline with any runner word, even as a plain argument. | [`docs/debts/heredoc-written-run-false-alarm.md`](../docs/debts/heredoc-written-run-false-alarm.md) |
 | `hooks-to-mods-judges` | Plan step E has four parts. | [`docs/debts/hooks-to-mods-judges.md`](../docs/debts/hooks-to-mods-judges.md) |
+| `hotspots-count-test-merges` | The replay counts GitHub test-merge commits (refs such as `origin/pr3911m`). | [`docs/debts/hotspots-count-test-merges.md`](../docs/debts/hotspots-count-test-merges.md) |
 | `idle-cloud-mcp-draft-silent` | On a cloud session the merge tool cannot draft an idle red PR. | [`docs/debts/idle-cloud-mcp-draft-silent.md`](../docs/debts/idle-cloud-mcp-draft-silent.md) |
 | `inbox-saves-other-notices` | The feedback inbox saves some prompts the owner did not type. | [`docs/debts/inbox-saves-other-notices.md`](../docs/debts/inbox-saves-other-notices.md) |
 | `inbox-send-window-unbounded` | The feedback Stop guard accepts any matching send after the owner's message, in any later turn. | [`docs/debts/inbox-send-window-unbounded.md`](../docs/debts/inbox-send-window-unbounded.md) |
