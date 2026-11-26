@@ -142,7 +142,11 @@ def decide(case):
     # A crash row this run appended to its config's guard.log is a failure, unless the case declares one (`crash=True`).
     # Both writers log one under rule `guard-crash`: the fail-open write (decision `crash`) and the fail-closed refusal
     # (decision `deny`). crash_reason reads either by that rule. The log is read only where this run wrote.
-    log = os.path.join(env["CLAUDE_CONFIG_DIR"], "guard.log")
+    # A case that unsets CLAUDE_CONFIG_DIR (None above) leaves no key in `env`, so the folder is the guard's own
+    # default, read from the case's HOME as hooks/guard.py does: $CLAUDE_CONFIG_DIR, else ~/.claude. shared_names
+    # config_dir() reads the runner's environment, not this case's, so it cannot stand in here.
+    config = env.get("CLAUDE_CONFIG_DIR") or os.path.join(env.get("HOME") or os.path.expanduser("~"), ".claude")
+    log = os.path.join(config, "guard.log")
     before = _log_size(log)
     got, reason = _judged(case, command, payload, env)
     crashed = _crash_reason_since(log, before)

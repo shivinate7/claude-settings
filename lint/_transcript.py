@@ -116,6 +116,17 @@ def owner_text(rec, notice_tags=(), app_notes=None):
     return text
 
 
+# The text a refused Stop hook's feedback record starts with. The harness writes it as a user record after a refused
+# report; it is the hook's order to the session, not an owner message.
+STOP_FEEDBACK_PREFIX = "Stop hook feedback:"
+
+
+def is_stop_feedback(rec):
+    """True for the user record that carries a refused Stop hook's feedback."""
+    text = owner_text(rec)
+    return text is not None and text.lstrip().startswith(STOP_FEEDBACK_PREFIX)
+
+
 # A resumed session stores `api-request-blob` records: copies of earlier requests, with no timestamp. Their
 # calls and results are not this turn's, so neither reader yields from one.
 BLOB_TYPE = "api-request-blob"

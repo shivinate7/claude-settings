@@ -303,6 +303,8 @@ FORBIDDEN_IN_A_REASON = (ENV, ROOT, slash(ROOT),"settings.json", "CLAUDE.md", "g
 # rule 8's reason too.
 REASON_MAY_NAME = {
     "agent-model-cap": (ROOT, slash(ROOT), "settings.json", ".claude"),
+    # The role row names the owner's held haiku ceiling: haiku is the remedy here, not the forbidden target.
+    "agent-role-model": ("haiku",),
     # The refusal names the handoff the session must read: under the config folder, which is ROOT here
     # and ~/.claude in a session. That path is the remedy, so the rule may name its folder.
     "handoff-unread": (ROOT, slash(ROOT), ".claude"),

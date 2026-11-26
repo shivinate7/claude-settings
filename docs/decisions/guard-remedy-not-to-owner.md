@@ -47,6 +47,21 @@ Text: `MODELS_REASON`, with two detail forms in its brackets.
 - For "no model named for <role>": name that role's model in the Done item.
 - For "'<role> <model>' matches no <role> spawn, which ran <models>": name a model that the spawn ran on.
 
+What the check reads (`done_models_problem`, `lint/report_guard.py`):
+
+- A spawn's model is its `model`, else its agent file's pin, else `CLAUDE_CODE_SUBAGENT_MODEL` (`spawn_models`). `''` means unresolved, not running: `spawn_models` keeps running spawns apart in `finished`. A `<plugin>:` prefix on a role is dropped first, so `cs-build:builder` counts as a builder.
+- The "no model named" check reads this turn's spawns (`spawned`, from `spawn_models(after)`). A role with a finished spawn this turn, or one Done mentions, must have a model named in Done.
+- A model Done names for a role must be one that role ran in the turn or anywhere in the transcript (`every`, a compaction included).
+- When every window spawn of a role has a model, at least one model Done names for that role must be one of them. The window is the spawns since the session's last report, else the whole transcript (`records_since_report`). A role with no window spawn skips this check. In a turn with a spawn, the transcript check still applies to it. In a turn with no spawn, Done's roles are first cut to those with a window spawn, so a role without one skips both checks.
+- An unresolved spawn never refuses a name. In the turn it lets any name pass for its role, in the window it skips that role's check, and earlier it is dropped.
+- A compaction is no cut: `read_transcript` in `lint/_transcript.py` reads the whole file, and `records_since_report` cuts only at a report that `_refused` does not mark.
+- A report the Stop hook refused does not cut the window. `_refused` in `lint/report_guard.py` walks forward. The first Stop feedback record (`is_stop_feedback` in `lint/_transcript.py`) means refused. The first assistant reply or incoming message (`is_incoming`) means not refused. It skips every other record. That includes a user record with `isMeta` and string content, which `is_incoming` would otherwise count.
+- After a wrong-name refusal, `main` writes `NAMES_MARKER` (`write_marker`), and `rewrite_problems` judges the correction for the wrong name alone (`WRONG_NAME_MARK`). After "no model named", no marker is written, so the correction is not judged for models.
+
+Mistake it stops: a Done item names a model no agent of that role ran, or names only an old run's model for work this window's agents did. Harm: the owner reads a wrong model for work he pays for.
+
+Limit: a transcript with only peer messages and no human record skips the model check. `main` takes its unlanded-turn branch when `last_human_idx` is None (`is_last_human` skips peer records), and that branch runs no model check. Note `done-models-peer-only-skip` holds the fixture.
+
 ### Unstarted guard (landed turns)
 
 Text: `UNSTARTED_REASON`. It applies when the turn ran a builder.

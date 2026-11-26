@@ -99,8 +99,7 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        A call from an agent (valid `agent_id`) is refused inside that folder
                        too, unless the tree is its own home or its own red-run folder.
                        (lanes-start-in-tool-worktrees)
-  impeccable-review-only  deny. A build or settings-writer command of the impeccable skill.
-                       (design-skills)
+  impeccable-review-only  deny. Text: hooks/guard_impeccable.py
   cite-by-id          deny. Text: hooks/guard_cite.py
   lane-by-slug         deny. Text: hooks/guard_cite.py
   scratchpad-commit-msg-owner  deny. Text: hooks/guard_cite.py
@@ -348,8 +347,9 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        (agent-model-cap)
                        deny. An Agent or Task spawn that sets model opus, unless Plan, designer,
                        design-reviewer, refuter or an Explore's `Audit:` marker
-                       covers it. The owner's model name lifts agent-model-floor only (owner_names_model), never this ceiling. The general override, `opus [role] <time>` or a step grant lifts the
-                       spawn refusal; none lifts the settings-write ask.
+                       covers it, or sets model fable (no standing role covers Fable). The owner's typed model name lifts agent-model-floor only (owner_names_model). The general override,
+                       the owner's held model on the spawn's own model, or a step grant whose words name that model lifts the refusal of an Opus or a Fable spawn
+                       (override.take); none lifts the settings-write ask.
   ask-alone            deny. The one remaining ask (the agent-model cap write) chained with other commands. (ask-commands-run-alone)
   guard-crash          crash. The guard itself raised. The call is allowed and the log shows it.
 
@@ -507,12 +507,7 @@ Other tools, in `judge` order:
                        `cs-build:` tag; the coordinator, triage and the batch runner are never braked on their own
                        calls. The transcript is read only at full. A cloud session skips it. An override lifts it.
                        (machine-load-brake)
-  workflow-args-shape-check
-                       deny. A Workflow call whose `args` is, or holds as an array item or object value (one
-                       level down), a placeholder: the whole value is an all-caps word with an underscore
-                       (`FACT_CLOSE_PLACEHOLDER`, `PR_NUMBER`) or a `__X__` word. A sentence that holds one, a
-                       short all-caps word, no args and empty args pass. A bare env var name as the whole value
-                       is refused too; an override lifts it for a real one. (workflow-args-shape-check)
+  workflow-args-shape-check  deny. Text: hooks/guard_workflow_args.py
   brief-checks-answered-claims-match-page
                        deny. A claude-code-remote send_message or create_session, or a SendMessage, whose text
                        (`message`, or `prompt` for create_session) has a sentence that holds an item reference (`item <n>`,
@@ -522,16 +517,7 @@ Other tools, in `judge` order:
                        it: no answers file and no lastAnswer. A sentence ending in `?`, text in a fence or inline code,
                        and a claim by an id slug alone pass. A number not in the store, an absent ref or registry, a git
                        error or a timeout passes with one stderr line. An override lifts it. (answered-claims-match-page)
-  ci-wait-cap
-                       deny. A claude-code-remote send_later whose message says it waits on CI (the whole word CI,
-                       checks, pipeline, check run, PR run(s), workflow run(s) or GitHub Actions, in any case,
-                       anywhere in the message) and whose wait is more than cap_minutes() in hooks/ci_wait_cap.py:
-                       delay_minutes (a number or a string of digits) over it, or an `at` (ISO-8601; with no offset it
-                       reads in the clock's offset) more than that many minutes after the clock (local_time.clock).
-                       The limit is inclusive. A call with no CI word, or with no delay or `at`, passes. An agent's
-                       call is refused first (agent-no-remote-tools). The reason names send_later, delay_minutes and
-                       the cap. A missing cap file crashes the rule, which fails open and logs. An override lifts it.
-                       (ci-wait-cap-guard)
+  ci-wait-cap          deny. Text: hooks/guard_ci_wait.py
   merge-checks, draft-pr, impeccable-review-only
                        deny. The MCP merge, pull request and Skill forms of the rules above.
   simulator-boot-bypass
@@ -570,6 +556,9 @@ Other tools, in `judge` order:
                        from a handoff that holds it now; an edit that cannot
                        be applied, an unreadable file, a prompt with no marker or one that cannot be read,
                        and a failed import allow. Another file, a repo's own HANDOFF.md included, passes.
+                       A Bash call that puts content on the session handoff is judged too, as a Write of that
+                       content (the `handoff-shell-write` entry below): a rewrite agent put a handoff there with
+                       `cp`, and these rules ran on Write and Edit only.
                        An override lifts it. Cost: reads on demand inside this call, one small read of the
                        prompt file and, for an edit, of the handoff; no new log, hook, file or process start.
                        (precompact-handoff, item 14)
@@ -577,8 +566,9 @@ Other tools, in `judge` order:
                        estimates over HANDOFF_MAX_TOKENS (reread_check.py; ceil(UTF-8 bytes / 3.5)), unless the result is
                        smaller than the file on disk. The reason gives the estimate, the limit and the cut order
                        (history, then past review rounds, then mid-run CI reads). An edit that cannot be applied allows.
-                       An override lifts it. Cost: a path compare for any other file; the handoff on disk is read for an
-                       Edit (as handoff-sections does) and statted for a Write whose text is over the limit.
+                       A Bash call that puts content on the session handoff is judged too (see handoff-sections).
+                       An override lifts it. Cost: a path compare for any other file; the handoff on
+                       disk is read for an Edit (as handoff-sections does) and statted for a Write whose text is over the limit.
                        (precompact-handoff, "Every handoff and compaction check", rule 1)
   handoff-checked-stamp
                        deny. A Write, Edit or MultiEdit to a session handoff (as handoff-sections judges it)
@@ -596,7 +586,18 @@ Other tools, in `judge` order:
                        transcript, handoff or prompt, and a failed import allow. An override lifts it. Cost:
                        reads on demand inside this call, the transcript once and only when a stamp changed,
                        one more small read of the prompt, and for a Write the handoff on disk; no new log,
-                       hook, file or process start. (precompact-handoff, item 15)
+                       hook, file or process start. A Bash call that puts content on the session handoff is judged
+                       too (see handoff-sections). (precompact-handoff, item 15)
+  handoff-shell-write
+                       deny. A Bash or PowerShell call that writes a session handoff whose text the guard cannot
+                       read before the command runs (a pipe, computed text, `perl -pi -e`, `sed -i`, a python
+                       script with no literal text or path). A write it can read (`cp`, `mv`, `rsync`, `ditto`,
+                       `dd`, `cat FILE > PATH`, `tee` or `cat >` with a heredoc, `python3 -c` with literal text)
+                       is judged by the three rules above; `>>` and `tee -a` add to the file on disk. The readers
+                       are `handoff_shell_writes` and `_handoff_segment_writes`. The reason names the Write tool.
+                       An override lifts it. Cost: a substring test for a call that never says `handoffs`; for one
+                       that does, the readers' parse and a read of the source file.
+                       (precompact-handoff, "a Bash write onto the handoff is judged too")
   env-file, frozen-path, config-edit, agent-model-cap
                        the write-tool forms of the rules above. Every deny runs over all path
                        fields of a call before any ask.
@@ -629,8 +630,9 @@ The matched text goes to the log, so a person can still see what fired.
 
 Only the agent-model cap write still asks: that decision puts the answer in the owner's hands. The one lift is the owner override
 (decision owner-override): the owner types `override` as a whole prompt, and refuse() lets the
-next refused act through, or every refused act for a time. The narrower Opus override (`opus 2h`) lifts
-only the Opus spawn refusal, and so does a step grant on the lane's roadmap step (decision agent-model-cap).
+next refused act through, or every refused act for a time. The narrower lift, the owner's typed words that name the
+model for a spawn (a held model), lifts only the refusal of a spawn on that model, and so does a step grant on the lane's
+roadmap step whose words name it (decision agent-model-cap).
 No override lifts `frozen-path`, `git-env-set`, a kill of pid 0, 1 or -1, the
 role and model guards (the settings-write ask of `agent-model-cap`,
 the no-model refusal of `agent-role-model`, `roles-third-round-steps-up`, `builder-test-edit` and the other role guards),
@@ -752,12 +754,12 @@ while True:
         _loading = "guard_core"
         import guard_core
         from guard_core import (
-            AUTHOR_ROLE, BUILDER_ROLE, DESIGNER_ROLE, GIT_WORK_TREE_RE, REPLAY_MARKS, POWERSHELL_CALL, READ_ONLY_TOOLS, REDIRECTION, REFUTER_ROLE, SHELL_TOOLS,
+            AUTHOR_ROLE, BUILDER_ROLE, DESIGNER_ROLE, GIT_WORK_TREE_RE, REPLAY_MARKS, heredoc_heads, POWERSHELL_CALL, READ_ONLY_TOOLS, REDIRECTION, REFUTER_ROLE, SHELL_TOOLS,
             SILENT_WRITE_REDIRECT, WRITER_ROLE, WRITE_TOOLS, _absolute, _expanded, _force_utf8_streams,
-            _resolved, _run_dir, _segment_git_c_target, _split_heredocs, agent_role, basename, cap_safe,
-            clone_checkouts, command_indexes, command_root, git_calls, git_common_dir, inline_script, is_cloud, is_move_into, is_worktree, log_path_and_text,
+            _resolved, _run_dir, _segment_git_c_target, agent_role, basename, cap_safe,
+            clone_checkouts, command_indexes, command_root, git_calls, git_common_dir, is_cloud, is_move_into, is_worktree, log_path_and_text,
             inner_commands, nested_script, norm,
-            _segment_cd_target, _strip_heredoc_bodies_unconditionally, _RUNNER,
+            _segment_cd_target, _split_heredocs, _strip_heredoc_bodies_unconditionally, _RUNNER,
             path_is_inside, primary_checkout, record, refuse, resolve_command,
             resolve_default_base,  # noqa: F401  re-exported: janitor/test_sweep.py calls guard.resolve_default_base
             segment_tokens, split_segments, strip_heredoc_bodies,
@@ -808,7 +810,7 @@ while True:
         _loading = "guard_frozen"
         from guard_frozen import (
             FROZEN_REASON, MUTATING_COMMAND, PROTECTED_MUTATING_COMMAND, _holds_frozen, _resolve_vars, _shell_write_hit, interpreter_may_write,
-            interpreter_write_hit, is_frozen, is_project_config, project_config_shell_hit, shell_write_hit,
+            interpreter_scripts, interpreter_write_hit, is_frozen, is_project_config, project_config_shell_hit, shell_write_hit,
             is_protected, protected_reason, protected_shell_hit,
             PROJECT_FROZEN_FILES,  # noqa: F401  re-export: test_shared_names and test_wrappers read guard.PROJECT_FROZEN_FILES
         )
@@ -822,7 +824,7 @@ while True:
             DETACHED_LAUNCH_REASON, GIT_ENV_REASON, KILL_PID_REASON, KILL_PID_UNKNOWN_REASON, KILL_REASON,
             PLAYWRIGHT_INSTALL_REASON, PLAYWRIGHT_PATH_REASON, detached_launch_hit, foreign_pid_kill, pid_tag_unreadable,
             git_env_command_hit, kill_fed_by_name, kill_fed_by_pipe, kill_hit, kills_group_pid,
-            lsof_pids_reach_kill, playwright_command_hit, playwright_install_hit,
+            lsof_pids_reach_kill, nested_kill_texts, playwright_command_hit, playwright_install_hit,
         )
         _loading = "guard_argv"
         from guard_argv import PROCESS_ARGS_REASON, process_args_hit
@@ -921,13 +923,45 @@ while True:
         _loading = "guard_pages"
         import guard_pages  # noqa: F401  empty until its family moves
         _loading = "guard_impeccable"
-        import guard_impeccable  # noqa: F401  empty until its family moves
+        import guard_impeccable  # noqa: F401  its names come in by the from-import below
+        from guard_impeccable import (
+            IMPECCABLE_REASON,
+            IMPECCABLE_SKILLS,  # noqa: F401  re-export: guard.<name> and its cites keep binding
+            IMPECCABLE_REVIEWS,  # noqa: F401  re-export: guard.<name> and its cites keep binding
+            IMPECCABLE_CHAIN,  # noqa: F401  re-export: guard.<name> and its cites keep binding
+            IMPECCABLE_JOINERS,  # noqa: F401  re-export: guard.<name> and its cites keep binding
+            IMPECCABLE_SKILL_FILE,  # noqa: F401  re-export: guard.<name> and its cites keep binding
+            IMPECCABLE_VERB_ROW,  # noqa: F401  re-export: guard.<name> and its cites keep binding
+            RUNNER_WORDS,  # noqa: F401  re-export: guard.<name> and its cites keep binding
+            PACKAGE_FLAGS,  # noqa: F401  re-export: guard.<name> and its cites keep binding
+            impeccable_name,  # noqa: F401  re-export: guard.<name> and its cites keep binding
+            impeccable_command_verbs,  # noqa: F401  re-export: guard.<name> and its cites keep binding
+            impeccable_skill_hit,
+            impeccable_shell_hit,  # noqa: F401  re-export: guard.<name> and its cites keep binding
+            _HERE_STRING,  # noqa: F401  re-export: guard.<name> and its cites keep binding
+            impeccable_command_hit,
+        )
         _loading = "guard_simulator"
         import guard_simulator  # noqa: F401  empty until its family moves
         _loading = "guard_workflow_args"
-        import guard_workflow_args  # noqa: F401  empty until its family moves
+        import guard_workflow_args  # noqa: F401  its names come in by the from-import below
+        from guard_workflow_args import (
+            WORKFLOW_ARGS_CAPS,  # noqa: F401  re-export: guard.<name> and its cites keep binding
+            WORKFLOW_ARGS_DUNDER,  # noqa: F401  re-export: guard.<name> and its cites keep binding
+            WORKFLOW_ARGS_REASON,
+            workflow_args_placeholder,  # noqa: F401  re-export: guard.<name> and its cites keep binding
+            workflow_args_hit,
+        )
         _loading = "guard_ci_wait"
-        import guard_ci_wait  # noqa: F401  empty until its family moves
+        import guard_ci_wait  # noqa: F401  its names come in by the from-import below
+        from guard_ci_wait import (
+            CI_WAIT_TOOL,  # noqa: F401  re-export: guard.<name> and its cites keep binding
+            CI_WAIT_WORDS,  # noqa: F401  re-export: guard.<name> and its cites keep binding
+            CI_WAIT_DIGITS,  # noqa: F401  re-export: guard.<name> and its cites keep binding
+            CI_WAIT_REASON,  # noqa: F401  re-export: guard.<name> and its cites keep binding
+            ci_wait_minutes,  # noqa: F401  re-export: guard.<name> and its cites keep binding
+            ci_wait_hit,
+        )
         # Flat modules the guard reads on every call. A failed import takes this same wait-then-refuse
         # path (decision install-hooks-whole), never a fallback that judges with the read missing.
         # guard_kill imports proc_env above, so its failure surfaces under guard_kill's name.
@@ -941,9 +975,9 @@ while True:
             raise ImportError("reread_check has no unread_handoff")
         # The rest of what judge() and main() take from it: a stale copy that lacks one would raise mid-judge, and main()
         # fails open on a raise, so the refusal it was loaded for would turn into an allow.
-        _missing = [_name for _name in ("unread_note", "too_big_estimate", "agent_rewrite", "audit_helper_command") if not callable(getattr(reread_check, _name, None))]
+        _missing = [_name for _name in ("unread_note", "too_big_estimate", "agent_rewrite", "audit_helper_command", "audit_helper_allows") if not callable(getattr(reread_check, _name, None))]
         _missing += [_name for _name in ("HANDOFF_MAX_TOKENS", "READ_CAP_TOKENS", "READ_MAX_LINES") if not isinstance(getattr(reread_check, _name, None), int)]
-        _missing += [_name for _name in ("AUDIT_OWED", "AUDIT_REMEDY", "AUDIT_HELPER_HEAD") if not isinstance(getattr(reread_check, _name, None), str)]
+        _missing += [_name for _name in ("AUDIT_OWED", "AUDIT_REMEDY", "AUDIT_HELPER_HEAD", "AUDIT_HELPER_SCRIPT") if not isinstance(getattr(reread_check, _name, None), str)]
         if _missing:
             raise ImportError("reread_check lacks %s" % ", ".join(_missing))
 
@@ -1289,10 +1323,11 @@ COMPACTION_AUDIT_TRANSCRIPT = " This session's transcript path, which the brief 
 
 
 def audit_helper_hit(tool: str, tool_input, handoff: str) -> bool:
-    """True when the call is the audit helper command the compaction-audit remedy prints, in that exact text: the
-    helper under its own path, the handoff path filled in, nothing chained, piped or added."""
+    """True when the call is the audit helper command the compaction-audit remedy prints: that exact text, or the same
+    words in other quotes or through a symlink to the helper (reread_check.audit_helper_allows). Nothing chained,
+    piped, substituted or added."""
     command = tool_input.get("command") if isinstance(tool_input, dict) else None
-    return tool == "Bash" and isinstance(command, str) and command == reread_check.audit_helper_command(handoff)
+    return tool == "Bash" and isinstance(command, str) and reread_check.audit_helper_allows(command, handoff)
 
 
 HANDOFF_SECTIONS_REASON = (
@@ -1304,25 +1339,39 @@ HANDOFF_SECTIONS_REASON = (
 )
 
 
-def handoff_sections_result(tool, tool_input, target, cwd):
-    """(before, after): the text a Write, Edit or MultiEdit would leave in a session handoff file, and the
-    text the file holds now (None for a Write, which is judged on its own text). None when the target
-    is not a session handoff (`<config dir>/handoffs/<session id>.md`, the path
-    precompact_handoff.handoff_path builds; `<id>.inbox.md` and any other file there are not) or the
-    result cannot be worked out (an edit whose old text is absent, an unreadable file): the tool fails on
-    its own then, and the rule allows. Reads the target only for an Edit or MultiEdit, once."""
-    if tool not in ("Write", "Edit", "MultiEdit") or not target.lower().endswith(".md"):
-        return None
+def session_handoff_path(target, cwd, shell=False):
+    """The absolute path of `target` when it is a session handoff (`<config dir>/handoffs/<session id>.md`, the path
+    precompact_handoff.handoff_path builds; `<id>.inbox.md` and any other file there are not), else ''. A path a shell
+    command names (`shell`) has its quotes dropped and its `$VAR` expanded too. A folder named `handoffs` in any letter
+    case is also compared as a file, so a spelling the volume reads as the same folder counts (`HANDOFFS` on a
+    case-insensitive one). A path compare and, for that name only, three stats: it reads no file."""
+    if shell:
+        target = target.strip("'\"")
+    if not target.lower().endswith(".md"):
+        return ""
     path = os.path.expanduser(target)
+    path = os.path.expandvars(path) if shell else path
     path = path if os.path.isabs(path) else os.path.join(cwd or "", path)
     folder = os.path.join(guard_core.config_dir(), "handoffs")
     here = os.path.dirname(path)
     same = (os.path.normcase(os.path.normpath(here)) == os.path.normcase(os.path.normpath(folder))
-            or os.path.normcase(os.path.realpath(here)) == os.path.normcase(os.path.realpath(folder)))
-    if not same:
-        return None
+            or os.path.normcase(os.path.realpath(here)) == os.path.normcase(os.path.realpath(folder))
+            or (os.path.basename(here).lower() == "handoffs" and os.path.isdir(here) and os.path.isdir(folder)
+                and os.path.samefile(here, folder)))
     stem = os.path.basename(path)[:-3]
-    if not stem or "." in stem:
+    return path if same and stem and "." not in stem else ""
+
+
+def handoff_sections_result(tool, tool_input, target, cwd):
+    """(before, after): the text a Write, Edit or MultiEdit would leave in a session handoff file, and the
+    text the file holds now (None for a Write, which is judged on its own text). None when the target
+    is not a session handoff (`session_handoff_path`) or the
+    result cannot be worked out (an edit whose old text is absent, an unreadable file): the tool fails on
+    its own then, and the rule allows. Reads the target only for an Edit or MultiEdit, once."""
+    if tool not in ("Write", "Edit", "MultiEdit"):
+        return None
+    path = session_handoff_path(target, cwd)
+    if not path:
         return None
     if tool == "Write":
         content = tool_input.get("content")
@@ -1417,6 +1466,361 @@ def handoff_stamp_hit(tool, tool_input, target, cwd, transcript, result):
     lines = ["  %s: %s." % (pid, "read or run " + " or ".join(tokens[:3]) if tokens else "any read")
              for pid, tokens in unbacked]
     return "\n".join(lines), ", ".join(pid for pid, _tokens in unbacked)
+
+
+def judge_handoff_write(tool, tool_input, target, cwd, transcript, result=False):
+    """Refuse a write to a session handoff that the three handoff rules refuse, in their order: a missing section
+    (handoff-sections), a size over the limit (handoff-too-big), an unbacked restamp (handoff-checked-stamp). `result` is
+    the (before, after) pair of texts the write leaves, as handoff_sections_result gives it; False asks that function
+    (a Write, Edit or MultiEdit), and a Bash write passes the pair it built (`handoff_shell_judge`). Cost: a path
+    compare for any other file; the stat of the handoff on disk only for a Write whose text is over the limit."""
+    if result is False:
+        result = handoff_sections_result(tool, tool_input, target, cwd)
+    dropped = handoff_sections_hit(tool, tool_input, target, cwd, result)
+    if dropped:
+        refuse(tool, "deny", "handoff-sections", HANDOFF_SECTIONS_REASON % dropped, dropped)
+    if result:
+        oversize = reread_check.too_big_estimate(result, handoff_target_path(target, cwd))
+        if oversize:
+            refuse(tool, "deny", "handoff-too-big", HANDOFF_TOO_BIG_REASON % (oversize, reread_check.HANDOFF_MAX_TOKENS),
+                   "%d estimated tokens" % oversize)
+    stamped = handoff_stamp_hit(tool, tool_input, target, cwd, transcript, result)  # glossary-ok: main's name for the rule, moved unchanged
+    if stamped:
+        refuse(tool, "deny", "handoff-checked-stamp", HANDOFF_STAMP_REASON % stamped[0], stamped[1])  # glossary-ok: the rule's fixed id and its reason, moved unchanged
+
+
+HANDOFF_SHELL_WRITE_REASON = (
+    "Rule (handoff-shell-write): this command puts content on the session handoff that the guard cannot read before "
+    "the command runs (a pipe from a program, computed text, or a file the command makes itself), so the handoff "
+    "rules cannot judge it. "
+    "Remedy: write the handoff with the Write tool, then repeat the call. "
+    "(decision precompact-handoff, a Bash write onto the handoff is judged too)"
+)
+
+HANDOFF_FOLDER_NAME = re.compile(r"handoffs", re.IGNORECASE)   # the pre-check: a command that never says it cannot name the folder
+HANDOFF_READ_CAP = 1 << 20   # a source file is read to this many bytes: a handoff that long is over the limit anyway
+
+
+def _read_text(path):
+    """The text of a file, up to HANDOFF_READ_CAP bytes, or None when it is missing, a folder or unreadable. A line end
+    reads as LF, as a text-mode read gives it (the Edit reader here reads so), so one file gives one estimate on every
+    host: a CRLF file read as it is would count a byte more a line on Windows."""
+    try:
+        with open(path, "rb") as handle:
+            text = handle.read(HANDOFF_READ_CAP + 1).decode("utf-8", "replace")
+        return text.replace("\r\n", "\n").replace("\r", "\n")
+    except OSError:
+        return None
+
+
+def _handoff_heredoc_texts(segments, bodies):
+    """{segment number: heredoc text} for each segment that owns exactly one heredoc: the body and the newline that ends
+    its last line, as the shell hands it on. The body of an unquoted delimiter is left out when it holds `$` or a
+    backtick, which the shell expands. A segment with a `<<-` or `<<<`, or two heredocs, and a count of headers that
+    does not match the bodies, are left out too."""
+    heads = [len(heredoc_heads(segment)[0]) for segment in segments]
+    if sum(heads) != len(bodies):
+        return {}
+    texts, used = {}, 0
+    for number, count in enumerate(heads):
+        quote, body = (bodies[used][0], bodies[used][1]) if count == 1 else ("", None)
+        used += count
+        if body is None or "<<-" in segments[number] or "<<<" in segments[number]:
+            continue
+        if not quote and ("$" in body or "`" in body):
+            continue
+        texts[number] = body + "\n"
+    return texts
+
+
+HANDOFF_COPY_VERBS = ("cp", "mv", "rsync", "ditto")   # copy a file onto a destination: the source's text lands there
+HANDOFF_DD_KEYS = ("if", "of", "bs", "status")   # a `dd` with any other key (`seek=`, `count=`, `conv=`) writes a part or a change of its input
+HANDOFF_IN_PLACE = re.compile(r"-(?![MIe])[A-Za-z0-9]*i|--in-place\b")   # `perl -pi -e`, `sed -i`: a program's text rewrites the file
+
+
+def _handoff_redirect_text(verb, args, where, heredoc, read=_read_text):
+    """The text a `> PATH` redirect puts on its target, as the command in front of it makes it: nothing for a bare
+    redirect, `:` or `true`; the heredoc for `cat`; the files `cat` names (read through `read`); else None (not told
+    before it runs)."""
+    if verb in ("", ":", "true") and not args:
+        return ""
+    if verb != "cat" or any(arg.startswith("-") or "$" in arg or "`" in arg for arg in args):
+        return None
+    if not args:
+        return heredoc
+    texts = [read(shell_abs(arg, where) or "") for arg in args]
+    return None if None in texts else "".join(texts)
+
+
+def _handoff_named(target, where):
+    """The absolute path of `target` when it is a session handoff, else '': the default target filter of
+    `_handoff_segment_writes`."""
+    return session_handoff_path(target, where, True)
+
+
+def _handoff_segment_writes(segment, where, heredoc, sources=None, named=_handoff_named):
+    """[(path, text, append)] for each write one shell segment makes onto a session handoff, `text` None when the guard
+    cannot tell it before the command runs; [] for a segment that writes none, or one it cannot read. Only this reads a
+    segment's write forms for the handoff rules, over the redirect, `tee` and copy readers the other rules use
+    (`_redirect_writes`, `_verb_written_paths`, `scratchpad_copies`). `sources`, a list, takes the normalised path of
+    each file whose text a write copies. `named(target, where)` picks the targets that count: a handoff by default,
+    or a given set of files, so the same reader finds the writes to a source:
+    - a redirect (`>`, `>>`, `>|`), the text of the command in front of it;
+    - `tee PATH`, the heredoc of the segment;
+    - `cp`, `mv`, `rsync` and `ditto` of a readable file, onto the handoff or into the handoffs folder (the copy takes
+      the source's name), the source's text;
+    - `dd if=FILE of=PATH`, the file's text; `dd` with another key, and stdin, are unknown;
+    - `perl -pi -e` and `sed -i` on the handoff, unknown."""
+    tokens = segment_tokens(strip_redirections(segment))
+    starts = command_indexes(tokens) if tokens else []
+    one = tokens is not None and len(starts) <= 1
+    verb = basename(tokens[starts[0]]).lower() if one and starts else ""
+    args = tokens[starts[0] + 1:] if one and starts else []
+
+    def read(path):
+        if sources is not None and path:
+            sources.append(os.path.normcase(os.path.normpath(path)))
+        return _read_text(path)
+
+    out = []
+    for target, append in _redirect_writes(segment):
+        path = named(target, where)
+        if path:
+            out.append((path, _handoff_redirect_text(verb, args, where, heredoc, read) if one else None, append))
+    if not one:
+        return out
+    if verb == "tee":
+        append = any(arg == "--append" or (arg.startswith("-") and not arg.startswith("--") and "a" in arg) for arg in args)
+        for target in _verb_written_paths("tee", args):
+            path = named(target, where)
+            if path:
+                out.append((path, heredoc, append))
+    elif verb in HANDOFF_COPY_VERBS:
+        for _verb, source, dest, _into in scratchpad_copies(segment, where, HANDOFF_COPY_VERBS):
+            path = named(dest, where)
+            if path:
+                out.append((path, read(source), False))
+    elif verb == "dd":
+        keys = {arg.partition("=")[0]: arg.partition("=")[2] for arg in args if "=" in arg and not arg.startswith("-")}
+        path = named(keys.get("of", ""), where) if keys.get("of") else ""
+        if path:
+            plain = len(keys) == len(args) and set(keys) <= set(HANDOFF_DD_KEYS)
+            out.append((path, read(shell_abs(keys["if"], where) or "") if plain and keys.get("if") else None, False))
+    elif verb in ("perl", "sed") and any(HANDOFF_IN_PLACE.match(arg) for arg in args):
+        out += [(path, None, False) for path in (named(arg, where) for arg in args) if path]
+    return out
+
+
+def _py_handoff_writes(script, where):
+    """[(path, text, append)] for the writes a python script makes onto a session handoff, each read only when it is
+    `open(PATH, MODE).write(TEXT)`, `with open(PATH, MODE) as f:` holding only `f.write(TEXT)` calls, or
+    `Path(PATH).write_text(TEXT)`, with PATH, MODE and TEXT string literals and the call run once. A write of another
+    shape, a script that does not parse and a write to a path that is no literal are ('', None, False): unknown."""
+    import ast
+    import textwrap
+    unknown = ("", None, False)
+    try:
+        tree = ast.parse(textwrap.dedent(script))
+    except (SyntaxError, ValueError):
+        return [unknown]
+    parents = {child: node for node in ast.walk(tree) for child in ast.iter_child_nodes(node)}
+    branching = (ast.For, ast.AsyncFor, ast.While, ast.If, ast.Try, ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda,
+                 ast.comprehension, ast.IfExp)
+
+    def literal(node):
+        return node.value if isinstance(node, ast.Constant) and isinstance(node.value, str) else None
+
+    def argument(call, index, name):
+        if len(call.args) > index:
+            return call.args[index]
+        return next((each.value for each in call.keywords if each.arg == name), None)
+
+    def runs_once(node):
+        while node in parents:
+            node = parents[node]
+            if isinstance(node, branching):
+                return False
+        return True
+
+    def with_text(item):
+        variable = item.optional_vars.id if isinstance(item.optional_vars, ast.Name) else None
+        body = parents[item].body if variable else []
+        nodes = [n for statement in body for n in ast.walk(statement)]
+        names = [n for n in nodes if isinstance(n, ast.Name) and n.id == variable]
+        calls = [n for n in nodes if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+                 and isinstance(n.func.value, ast.Name) and n.func.value.id == variable]
+        if not variable or any(isinstance(n, branching) for n in nodes):
+            return None
+        texts = [literal(call.args[0]) if call.func.attr == "write" and len(call.args) == 1 else None for call in calls]
+        if len(names) != len(calls) or None in texts:
+            return None
+        order = sorted(zip(calls, texts), key=lambda pair: (pair[0].lineno, pair[0].col_offset))
+        return "".join(text for _call, text in order)
+
+    out = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        if isinstance(func, ast.Name) and func.id == "open":
+            mode_node = argument(node, 1, "mode")
+            mode = "r" if mode_node is None else literal(mode_node)
+            if mode is not None and not set(mode) & set("wax+"):
+                continue   # a read
+            named = literal(argument(node, 0, "file"))
+            path = session_handoff_path(named, where, True) if named is not None else ""
+            if mode is None or named is None:
+                out.append(unknown)
+            elif path:
+                up = parents.get(node)
+                call = parents.get(up)
+                if isinstance(up, ast.Attribute) and up.attr == "write" and isinstance(call, ast.Call) \
+                        and call.func is up and len(call.args) == 1:
+                    text = literal(call.args[0]) if runs_once(call) else None
+                elif isinstance(up, ast.withitem):
+                    text = with_text(up) if runs_once(parents[up]) else None
+                else:
+                    text = None
+                out.append((path, text, "a" in mode) if text is not None else unknown)
+        elif isinstance(func, ast.Attribute) and func.attr == "write_text":
+            owner = func.value
+            made = (isinstance(owner, ast.Call) and len(owner.args) == 1
+                    and (isinstance(owner.func, ast.Name) and owner.func.id == "Path"
+                         or isinstance(owner.func, ast.Attribute) and owner.func.attr == "Path"))
+            named = literal(owner.args[0]) if made else None
+            path = session_handoff_path(named, where, True) if named is not None else ""
+            text = literal(argument(node, 0, "data")) if runs_once(node) else None
+            if named is None or (path and text is None):
+                out.append(unknown)
+            elif path:
+                out.append((path, text, False))
+    return out
+
+
+HANDOFF_CONFIG_VAR = re.compile(r"\$\{CLAUDE_CONFIG_DIR(?:(:?)-([^{}]*))?\}|\$CLAUDE_CONFIG_DIR\b")
+HANDOFF_NO_CONTENT = ("rm", "unlink", "rmdir", "chmod", "chown", "chgrp", "touch", "mv")   # name a handoff and put no text on it (a `mv` whose destination is no handoff)
+
+
+def _expand_config_dir(text):
+    """`text` with `$CLAUDE_CONFIG_DIR` and `${CLAUDE_CONFIG_DIR}` read as the value the guard's own environment holds,
+    the one the session's tools run with, and `${CLAUDE_CONFIG_DIR:-DEFAULT}` as that value, else DEFAULT (`-` without the
+    colon takes DEFAULT only when the variable is unset). An unset variable stays as written in the plain forms: it
+    names no folder."""
+    if "CLAUDE_CONFIG_DIR" not in text:
+        return text
+    value = os.environ.get("CLAUDE_CONFIG_DIR")
+
+    def read(found):
+        colon, default = found.group(1), found.group(2)
+        if value:
+            return value
+        if default is None:
+            return found.group()
+        return "" if value == "" and colon == "" else default.strip("'\"")
+
+    return HANDOFF_CONFIG_VAR.sub(read, text)
+
+
+# A Windows drive path in a shell command: quoted whole, or an unquoted run. A POSIX shell (Git Bash) drops an unquoted
+# backslash and a Python literal reads `\U` as an escape, so the path is read with forward slashes, which Windows takes too.
+HANDOFF_WIN_PATH = re.compile(r"""(?<!\w)(?:"[A-Za-z]:\\[^"\n]*"|'[A-Za-z]:\\[^'\n]*'|[A-Za-z]:\\[^\s'"`|&;<>()]*)""")
+HANDOFF_TILDE = re.compile(r"""(?<![^\s=:"'(])~(?=[/\\\s"')]|$)""")   # a `~` the shell expands: a word's first character
+
+
+def _shell_text_paths(text, windows=None):
+    """`text` with the paths a Windows shell call names read as the shell reads them. On Windows (`windows`, the host by
+    default), a word's leading `~` is the environment's HOME when it is set, as in bash, since the home that
+    `os.path.expanduser` gives there is USERPROFILE; and each drive path takes forward slashes (`HANDOFF_WIN_PATH`).
+    Another host keeps `text` as it is."""
+    if not (os.name == "nt" if windows is None else windows):
+        return text
+    home = os.environ.get("HOME")
+    if home and not re.search(r"""[\s'"`$&;|<>()]""", home):
+        text = HANDOFF_TILDE.sub(lambda _found: home, text)
+    return type(text)(HANDOFF_WIN_PATH.sub(lambda found: found.group().replace("\\", "/"), text))
+
+
+def _handoff_puts_no_content(segment):
+    """True for a segment that is one `rm`, `chmod`, `touch` or `mv` and writes no handoff text (the readers found no
+    destination that is a handoff): it names the handoff to delete, move away or change its mode."""
+    tokens = segment_tokens(strip_redirections(segment))
+    starts = command_indexes(tokens) if tokens else []
+    return len(starts) == 1 and basename(tokens[starts[0]]).lower() in HANDOFF_NO_CONTENT
+
+
+def handoff_shell_writes(raw, cwd, tool="Bash"):
+    """[(path, text, append)] for each write a shell call makes onto a session handoff, `text` None when it cannot be
+    told before the command runs; None for a call that writes none. The command is read segment by segment
+    (`_handoff_segment_writes`), so each write keeps its own text, with `$CLAUDE_CONFIG_DIR` expanded first. A file a
+    write copies that any segment of the call writes holds text the disk does not show yet: that write is unknown. A
+    segment that `shell_write_hit` (the frozen-path and protected-path reader) hits and `_handoff_segment_writes`
+    does not explain is unknown unless it only deletes, moves away or changes the mode of the handoff
+    (`_handoff_puts_no_content`), as is a hit of `interpreter_write_hit` that no script explains. A crash of the read
+    allows and is logged, as every scan here fails open. Cost: a substring test for a call that never says `handoffs`;
+    the parse only after it; a file read only for a write onto a handoff."""
+    if not HANDOFF_FOLDER_NAME.search(raw):
+        return None
+    try:
+        def is_handoff(word, where):
+            return bool(session_handoff_path(word, where, True))
+
+        def read_paths(text):   # the text as the shell reads it, its variables and Windows paths settled
+            return _shell_text_paths(_expand_config_dir(_resolve_vars(_shell_text_paths(text))))
+        shell_hit = shell_write_hit(read_paths(raw), cwd, is_handoff, follow_cd=True)
+        py_hit = interpreter_write_hit(_shell_text_paths(raw), cwd, is_handoff)
+        kept, bodies = _split_heredocs(raw)   # the heredoc bodies stay as written: they are the text a write judges
+        ends = []
+        segments = split_segments(read_paths("\n".join(kept)), ends)
+        heredocs = _handoff_heredoc_texts(segments, bodies)
+        reads, sources, excused = [], set(), False   # per segment: (where, its writes, the files they copy)
+        for number, segment in enumerate(segments):
+            if not segment.strip():
+                continue
+            where = dir_before_segment(segments, number, cwd, ends) or cwd
+            copied = []
+            found = _handoff_segment_writes(segment, where, heredocs.get(number), copied)
+            if not found and shell_hit and shell_write_hit(segment, where, is_handoff):
+                if _handoff_puts_no_content(segment):
+                    excused = True
+                else:
+                    found = [("", None, False)]
+            sources.update(copied)
+            reads.append((where, found, copied, segment))
+        if sources:
+            def is_source(word, where):
+                full = shell_abs(os.path.expandvars(os.path.expanduser(word.strip("'\""))), where)
+                return full if full and os.path.normcase(os.path.normpath(full)) in sources else ""
+            written = {os.path.normcase(os.path.normpath(path))
+                       for where, _found, _copied, segment in reads
+                       for path, _text, _append in _handoff_segment_writes(segment, where, None, None, is_source)}
+            if interpreter_write_hit(raw, cwd, lambda word, where: bool(is_source(word, where))):
+                written |= sources   # a script writes one of them: which one is not told
+            reads = [(where, [(path, None, append) for path, _text, append in found] if written & set(copied) else found,
+                      copied, segment) for where, found, copied, segment in reads]
+        writes = [write for _where, found, _copied, _segment in reads for write in found]
+        if py_hit:
+            for kind, script, at in interpreter_scripts(_shell_text_paths(raw), cwd):
+                writes += _py_handoff_writes(script, at) if kind == "py" else []
+        return writes or ([("", None, False)] if (shell_hit and not excused) or py_hit else None)
+    except Exception as exc:
+        record(tool, "noted", "handoff-shell-write", "unknown: " + cap_safe(type(exc).__name__ + ": " + str(exc), 100))
+        return None
+
+
+def handoff_shell_judge(tool, raw, cwd, transcript, session_id=""):
+    """Judge a shell call that writes a session handoff as the three handoff rules judge a Write of the same text. A
+    `>>` or `tee -a` leaves the handoff on disk with the text added. A write whose text is not known before the command
+    runs is refused under handoff-shell-write. The audit helper's remedy call (reread_check.audit_helper_allows) names
+    the handoff only to read it, so it is no write, whatever path spells its script."""
+    owed = reread_check.audit_pending({"session_id": session_id}) if session_id else ""
+    if owed and audit_helper_hit(tool, {"command": raw}, owed):
+        return
+    for path, text, append in handoff_shell_writes(raw, cwd, tool) or ():
+        if text is None:
+            refuse(tool, "deny", "handoff-shell-write", HANDOFF_SHELL_WRITE_REASON, path or "shell write")
+        before = _read_text(path) if append else None
+        result = (None, text) if before is None else (before, before + text)
+        judge_handoff_write(tool, {}, path, cwd, transcript, result)
 
 
 OTHER_CHECKOUT_REASON = (
@@ -3531,21 +3935,34 @@ def below_the_floor(model) -> bool:
     return FLOOR_WORD in str(model).lower()
 
 
-def floor_hit(tool: str, tool_input) -> str:
-    """The model a call names below the floor, or "". Listed roles may run Haiku."""
+def floor_spawn(tool: str, tool_input) -> tuple:
+    """(model, role) of the first spawn or start a call makes below the floor, or ("", ""). Listed roles may run Haiku. `role`
+    is the role the spawn names (the agent type), "" for a session start or a spawn that names none."""
     if tool in SPAWN_TOOLS:
         model = tool_input.get("model")
         if below_the_floor(model) and tool_input.get("subagent_type") not in HAIKU_ROLES:
-            return str(model)
+            return str(model), str(tool_input.get("subagent_type") or "")
     elif tool in (SESSION_TOOL, CREATE_SESSION_TOOL):
         if below_the_floor(tool_input.get("model")):
-            return str(tool_input.get("model"))
+            return str(tool_input.get("model")), ""
     elif tool == "Workflow" and isinstance(tool_input.get("script"), str):
         for _, bodies in script_agent_calls(tool_input["script"]):
             for keys, _, _ in bodies:
                 if below_the_floor(keys.get("model")) and keys.get("agentType") not in HAIKU_ROLES:
-                    return keys["model"]
-    return ""
+                    return keys["model"], str(keys.get("agentType") or "")
+    return "", ""
+
+
+def floor_hit(tool: str, tool_input) -> str:
+    """The model a call names below the floor, or "". Listed roles may run Haiku."""
+    return floor_spawn(tool, tool_input)[0]
+
+
+def floor_call(tool: str, tool_input) -> tuple:
+    """(model, role) the floor judges for a call. The model comes from floor_hit, the one seam that names a call's floor
+    model, so a patch on it reaches every judge; the role is read only once a model fires."""
+    model = floor_hit(tool, tool_input)
+    return (model, floor_spawn(tool, tool_input)[1]) if model else ("", "")
 
 
 # The owner's own word for a model (ruling: "if i say haiku it should work, there shouldnt be any
@@ -3553,45 +3970,43 @@ def floor_hit(tool: str, tool_input) -> str:
 # lifts the floor only: the Opus ceiling (agent-model-cap) never reads it (consultant pick, same time). It covers a lane
 # start too (lane_start_hits). A started session cannot read the word, so start_check.py flags no Haiku start. The audit
 # (start_session_audit.py) can read it through transcript_path, yet flags none either: it stops a start only for an unread handoff.
-MODEL_CLAUSE_BREAK = re.compile(r"[.;,!?:\n\u2013\u2014]+")  # a negation reaches only to the end of its own clause
-MODEL_MENTION = re.compile(r"(?<![A-Za-z])%s(?![A-Za-z])" % FLOOR_WORD, re.I)  # also inside claude-haiku-4-5, haiku-4.5
+def held_model(payload):
+    """The session's live model hold (override.model_override: model, role, at, until, end, said), or None. It is read from
+    the payload's session_id and transcript_path, on demand: one open of the session's pass file, and for a hold that ends
+    at the report, the replies since it. A read that raises is no hold, so the floor and the role row refuse as they do with
+    no word of his: the stricter side."""
+    try:
+        import override
+        return override.model_override(payload.get("session_id"), payload.get("transcript_path"))
+    except Exception:
+        return None
 
 
-def owner_names_model(payload, model) -> bool:
-    """True when the owner's last typed turn names the floor's model `model` (a Haiku name) and no mention of it is
-    negated. The turn is override.latest_owner_text, read from the payload's transcript_path on demand, with pasted and
-    machine blocks stripped (override._strip_blocks: that text is not the owner's words). A mention is a word that holds
-    FLOOR_WORD, so `claude-haiku-4-5` and `haiku-4.5` count. It is negated when, between it and the start of its clause or
-    the nearest word of override.MODEL_SPAN_BREAKS before it, stands a word of override.MODEL_NEGATIONS or one ending
-    n't. A pair of override.MODEL_NEGATION_PAIRS negates only when it stands just before the mention. So "Not sonnet but haiku", "Instead use haiku" and "Skip the checks and run it
-    on haiku" name the model, and "don't use haiku" does not. One negated mention refuses the whole turn ("use haiku. No,
-    not haiku, use sonnet"). No transcript_path, an unreadable transcript, no mention or a model that is not Haiku is
-    False, so the refusal stands."""
+def owner_names_model(payload, model, role=None) -> bool:
+    """True when the session holds the floor's model for `role` (held_model: the owner's judged word for haiku, scoped to
+    the roles it names, hold_covers_role), or when the owner's last typed turn names the floor's model `model` (a Haiku
+    name) and no mention of it is negated. A hold that names other roles lifts no spawn of `role`, though the text match
+    below may. A hold the latest turn negates ("Do not use haiku") is no hold (override.model_override). The plain text match
+    stays beside the hold, so a judge that fails never refuses a Haiku spawn the text match lets through. The turn is
+    override.latest_owner_text, read from the payload's transcript_path on demand, and its mentions are read by
+    override.model_mentions (pasted and machine blocks stripped: that text is not the owner's words; a mention is a word
+    that holds FLOOR_WORD, so `claude-haiku-4-5` and `haiku-4.5` count; one negated mention refuses the whole turn, "use
+    haiku. No, not haiku, use sonnet"; "Not sonnet but haiku" and "Instead use haiku" name it). No transcript_path, an
+    unreadable transcript, no mention or a model that is not Haiku is False, so the refusal stands."""
     transcript = payload.get("transcript_path") if isinstance(payload, dict) else None
-    if not below_the_floor(model) or not isinstance(transcript, str) or not transcript:
+    if not below_the_floor(model):
+        return False
+    held = held_model(payload)
+    if held and held["model"] == FLOOR_WORD and hold_covers_role(held, role):
+        return True
+    if not isinstance(transcript, str) or not transcript:
         return False
     try:
         import override
-        text = override.latest_owner_text(transcript)
-        words_by_clause = [[w.lower() for w in override.ROLE_WORDS.findall(clause)] for clause in
-                           MODEL_CLAUSE_BREAK.split(override._strip_blocks(text or ""))]
-        negations, pairs, breaks = override.MODEL_NEGATIONS, override.MODEL_NEGATION_PAIRS, override.MODEL_SPAN_BREAKS
+        named, negated = override.model_mentions(override.latest_owner_text(transcript), FLOOR_WORD)
     except Exception:
         return False
-    named = False
-    for words in words_by_clause:
-        for at, word in enumerate(words):
-            if not MODEL_MENTION.search(word):
-                continue
-            if tuple(words[max(at - 2, 0):at]) in pairs:
-                return False
-            for i in range(at - 1, -1, -1):
-                if words[i] in breaks:
-                    break
-                if words[i] in negations or words[i].endswith(("n't", "n\u2019t")):
-                    return False
-            named = True
-    return named
+    return named and not negated
 
 
 def lane_effort_hit(tool: str, tool_input) -> str:
@@ -3660,7 +4075,8 @@ def lane_title_hit(tool: str, tool_input) -> str:
 LANE_START_COUNT = "%d lane-start rules broken:"
 
 
-def lane_start_hits(tool: str, tool_input, cwd: str, transcript: str = "", judge_step: bool = True) -> list:
+def lane_start_hits(tool: str, tool_input, cwd: str, transcript: str = "", judge_step: bool = True,
+                    session_id: str = "") -> list:
     """[(rule, reason, matched)] for each lane-start rule a create_session call that tags a lane breaks, in judge order,
     or [] for a call that is no lane start or breaks none. The seven rules come first; lane-step-dup (part one, the live
     carrier read from `transcript`) follows them. The one collection, read by judge() and by bin/lane-start, so the
@@ -3683,7 +4099,7 @@ def lane_start_hits(tool: str, tool_input, cwd: str, transcript: str = "", judge
         hits.append(("brief-ids-in-roster", named_id[1], named_id[0]))
     floor_model = floor_hit(tool, tool_input)
     # The owner's model name lifts the floor here as at step 9; the transcript is read only when the floor fires.
-    if floor_model and not owner_names_model({"transcript_path": transcript}, floor_model):
+    if floor_model and not owner_names_model({"transcript_path": transcript, "session_id": session_id}, floor_model):
         hits.append(("agent-model-floor", LANE_MODEL_FLOOR_REASON, floor_model))
     lane_prompt = lane_effort_hit(tool, tool_input)
     if lane_prompt:
@@ -4251,7 +4667,8 @@ def step_up_reason(prompt: str, role, model, rounds=None) -> str:
 # skill, a hook) names no role, and the first row for a role wins. Cost per Agent or Task spawn: one read of the record and,
 # for a spawn with no model, one read of the agent files. No process starts and no file is written, except the one
 # `agent-role-model-unread` log line when a read fails.
-ROLE_MODEL_RANK = ("haiku", "sonnet", "opus")
+from shared_names import MODEL_FAMILIES  # noqa: E402  the one home of the model list, shared with lint/report_guard.py
+ROLE_MODEL_RANK = MODEL_FAMILIES  # the family a model name holds ranks by its place here; fable ranks above opus
 EFFORT_LEVELS = ("low", "medium", "high", "xhigh", "max")  # the words an effort cell or an `effort:` key can hold
 ROLE_TABLE_FILE = "agent-model-cap.md"   # inside the record folder that lint/layout.py names
 ROLE_TABLE_MAX = 256 * 1024
@@ -4627,7 +5044,7 @@ def role_list_drift(pointer_root):
     real = {keys["name"] for keys in agents if keys.get("name")} | set(ROLE_BUILTINS)
     on = {word: {role for role, model in table.items() if model == word and role in real} for word in ROLE_MODEL_RANK}
     standing_want = on["opus"]
-    # No scoped `opus explore` override form: an Explore on Opus without the marker is lifted by `opus 2h` or `override` (item 137 pick a, option b not picked).
+    # An Explore on Opus without the marker is lifted by a held Opus for explorers or by `override` (item 137 pick a, option b not picked).
     override_want = {role for role in table if role in real} - on["opus"] - {EXPLORE_ROLE}
     lists = (("HAIKU_ROLES", "hooks/guard.py", set(HAIKU_ROLES), on["haiku"], "a haiku row"),
              ("OPUS_STANDING_ROLES", "hooks/guard.py", set(OPUS_STANDING_ROLES), standing_want, "an opus row"),
@@ -4660,10 +5077,11 @@ def role_name(table, subagent_type) -> str:
 # brief would not lift a builder's Opus refusal. The remedy stays lowercase mid-sentence, so both refusals carry the same words.
 BRIEF_UNREAD = "brief_unread"
 WORKFLOW_NO_MODEL = "workflow_no_model"   # set on a spawn_inputs yield for a Workflow call with a literal agentType and no model key
+WORKFLOW_ROLELESS = "workflow_roleless"   # also set on a yield with no agentType at all (only for a call judged under a model hold)
 BRIEF_LITERAL_REMEDY = "write the brief as a literal string so the marker is readable"
 
 
-def spawn_inputs(tool: str, tool_input):
+def spawn_inputs(tool: str, tool_input, roleless=False):
     """Yield each spawn a call makes, shaped as an Agent input (`subagent_type`, `model`, `prompt`). An Agent or Task
     call is one spawn. A Workflow script yields one per agent() call that names a model, with agentType as the role
     and the model read from the script, so the role and Opus checks judge it as they judge an Agent spawn
@@ -4674,7 +5092,9 @@ def spawn_inputs(tool: str, tool_input):
     call whose model or agentType the scan cannot read is skipped, and so is one with no model and no literal
     agentType, or with a spread that may hold the model: a static read never guesses a role or a model. A shorthand or a spread with no literal agentType may set the role, so it is unread;
     a literal agentType beside a spread is read. step_up_hit still skips an unread brief, as a marker it cannot read
-    has no round to check. Other tools yield nothing."""
+    has no round to check. Other tools yield nothing. With `roleless`, a call with no `model` key, no spread and no
+    agentType yields too (the general-purpose role, WORKFLOW_ROLELESS set), for the owner's model hold, which judges the
+    model such a call is served; every other caller leaves it out."""
     if tool in SPAWN_TOOLS:
         yield tool_input
     elif tool == "Workflow" and isinstance(tool_input.get("script"), str):
@@ -4689,6 +5109,9 @@ def spawn_inputs(tool: str, tool_input):
                 if "model" not in keys and "..." not in unseen and keys.get("agentType"):
                     yield {"subagent_type": keys["agentType"], "model": "", "prompt": prompt or "",
                            BRIEF_UNREAD: prompt is None, WORKFLOW_NO_MODEL: True}
+                elif roleless and "model" not in keys and "..." not in unseen:
+                    yield {"subagent_type": None, "model": "", "prompt": prompt or "",
+                           BRIEF_UNREAD: prompt is None, WORKFLOW_NO_MODEL: True, WORKFLOW_ROLELESS: True}
                 continue
             if "..." in unseen and "agentType" not in keys:
                 continue
@@ -4696,12 +5119,14 @@ def spawn_inputs(tool: str, tool_input):
                    BRIEF_UNREAD: prompt is None}
 
 
-def role_model_check(tool: str, tool_input):
+def role_model_check(tool: str, tool_input, hold=None):
     """(reason, matched, unread) for the spawns of an Agent, Task or Workflow call against their roles' rows: the
-    first refusal, else the first unread. Cost: one table read per spawn."""
+    first refusal, else the first unread. `hold` is the session's live model hold (override.model_override), which
+    replaces the row of the roles it covers with its model as the ceiling (role_hold_verdict). Cost: one table read per
+    spawn."""
     unread = ("", "", False)
-    for spawn in spawn_inputs(tool, tool_input):
-        verdict = role_model_one(spawn)
+    for spawn in spawn_inputs(tool, tool_input, hold is not None):
+        verdict = role_model_one(spawn, hold)
         if verdict[0]:
             return verdict
         if verdict[2] and not unread[2]:
@@ -4748,14 +5173,62 @@ def reviewer_free_rounds(rounds, row):
     return tuple(sorted(found, key=int))
 
 
-def role_model_one(tool_input):
+ROLE_HOLD_REASON = (
+    "Rule (configuration): the owner named %s%s: run this spawn on %s. Remedy: set model %s on it (a Workflow agent(): in the "
+    "call's options). If that blocks the task, say so in your report; his `no %s` ends it. (decision agent-model-cap)"
+)
+
+
+def hold_covers_role(hold, role) -> bool:
+    """True when the model hold (override.model_override) covers a spawn of `role`: it names no role, or names this one."""
+    held = hold.get("role")
+    return held is None or role_key(role) in (held if isinstance(held, list) else [held])
+
+
+def hold_exempt(spawn, role, rounds) -> bool:
+    """True for a spawn the main rows already free from the row it runs under: a standing Opus role, an Explore on an audit
+    brief, a reviewer whose brief names a later round, a fix check or the guard marker. A hold that names no role leaves
+    these as they are; a role the hold names is followed, exempt or not."""
+    brief = spawn.get("prompt")
+    return (spawn.get("subagent_type") in OPUS_STANDING_ROLES
+            or (role_key(role) == role_key(EXPLORE_ROLE) and ("audit", None) in marker_hits(brief))
+            or (role == "reviewer" and bool(reviewer_round_models(rounds, brief))))
+
+
+def role_hold_verdict(hold, spawn, role, model, rounds):
+    """The owner's model hold against one spawn: None to leave the spawn to its role's row, else (reason, matched, unread).
+    Only a judged hold (override._read_hold `judged`: the file names its model) is a ceiling. An old keyword file left on
+    disk writes no model; it lifts the Opus spawn refusal alone and never the role row of a non-Opus spawn.
+    The hold's model replaces the row of every role it covers as the ceiling (hold_covers_role; hold_exempt spawns stay on
+    their rows when the hold names no role). A spawn above the ceiling is refused with the model and the time of his word;
+    one at or below it passes, even where its row would refuse it. A spawn on Opus or Fable is left to opus_spawn_hit,
+    which the hold lifts only when it holds that model. A Workflow agent() with no `model` is served the Workflow default
+    (ROLE_WORKFLOW_MODEL_ENV): it is judged on that model, and passes to its row when it is within the ceiling. An Agent
+    spawn with no model is not judged here: its default is read nowhere in this call."""
+    if (not hold.get("judged") or not hold_covers_role(hold, role)
+            or (hold.get("role") is None and hold_exempt(spawn, role, rounds))):
+        return None
+    served = model or (os.environ.get(ROLE_WORKFLOW_MODEL_ENV, "").strip() if spawn.get(WORKFLOW_NO_MODEL) else "")
+    if not served or "opus" in served.lower() or "fable" in served.lower():
+        return None
+    rank = role_model_rank(served)
+    if rank is not None and rank <= ROLE_MODEL_RANK.index(hold["model"]):
+        return ("", "", False) if model else None
+    at = hold.get("at")
+    import local_time  # lazy: the time line's own clock names the hour of his word
+    when = " at " + local_time.central_hhmm(at) if at else ""
+    return ROLE_HOLD_REASON % (hold["model"], when, hold["model"], hold["model"], hold["model"]), served, False
+
+
+def role_model_one(tool_input, hold=None):
     """(reason, matched, unread) for one spawn against its role's row. `reason` is the deny, or "".
-    `unread` is true when the table or the agent files could not be read: the spawn then passes. With no pointer checkout the rule stands down, silent. A spawn on Opus is left to
+    `unread` is true when the table or the agent files could not be read: the spawn then passes. With no pointer checkout the rule stands down, silent. A spawn on Opus or Fable is left to
     opus_spawn_hit. An Explore on an audit brief
     (EXPLORE_AUDIT_MARKER), a reviewer on a later-round brief and a reviewer on a fix check brief
     (FIX_CHECK_MARKER) run above the row. Pure, so never_lifted may call it too.
     An above-row refusal is liftable by the general override (decision agent-model-cap); the
-    no-model refusal (matched ROLE_NO_MODEL_MATCH...) is not, and never_lifted reads only that one."""
+    no-model refusal (matched ROLE_NO_MODEL_MATCH...) is not, and never_lifted reads only that one.
+    With `hold`, the owner's model hold is judged first (role_hold_verdict)."""
     pointer = pointer_checkout()
     if not pointer:
         return "", "", False  # no pointer checkout: nothing to read, as the pointer rules stand down
@@ -4765,11 +5238,19 @@ def role_model_one(tool_input):
     rounds = role_round_table(pointer)
     role = role_name(table, tool_input.get("subagent_type"))
     model = str(tool_input.get("model") or "").strip()
+    if isinstance(hold, dict) and hold:  # a hold is the dict override.model_override reads; anything else is no hold
+        held = role_hold_verdict(hold, tool_input, role, model, rounds)
+        if held is not None:
+            return held
+        if tool_input.get(WORKFLOW_ROLELESS):
+            return "", "", False  # judged only so the hold could see it: no row refuses a call that names no role
     if model:
-        top = len(ROLE_MODEL_RANK) - 1
+        if "fable" in model.lower():
+            return "", "", False  # the Opus ceiling refuses it with no hold of his (opus_spawn_hit), as it refuses Opus
+        top = ROLE_MODEL_RANK.index("opus")
         named = role_model_rank(model)
         row = table.get(role)
-        if named is None:
+        if named is None or named > top:
             # A model the table does not rank is above every row below the top rank. Its own rank is unruled, so none is guessed.
             named = top if row == ROLE_MODEL_RANK[top] else top + 1
         if named == top or row is None:
@@ -5147,22 +5628,39 @@ def audit_disk_cleanup_hit(tool: str, tool_input) -> bool:
     return "disk" in matched
 
 
-OPUS_SPAWN_REASON = (
-    "Rule (configuration): this spawn sets model Opus, above its role's model. Opus runs "
-    "only on the owner's typed override or grant for this spawn, except Plan, the designer, the design "
-    "reviewer, the refuter and an Explore whose brief's first line carries the `%s` marker "
-    "(decision agent-model-cap). Remedy: drop the model field, or name the role's model. A reviewer's Round 2 or "
-    "Round 3 brief names sonnet. A builder's third try runs Sonnet."
-) % EXPLORE_AUDIT_MARKER
 OPUS_STANDING_ROLES = ("Plan", "designer", "design-reviewer", REFUTER_ROLE)
+MODEL_SPAWN_HEAD = (
+    "Rule (configuration): this spawn sets model %s, above its role's model. That model runs only on the owner's own "
+    "typed words that name it for this spawn, or his `override`"
+)
+# Opus only: Plan, the designer, the design reviewer, the refuter and the Audit: Explore are Opus grants, and none covers Fable.
+MODEL_SPAWN_STANDING = (
+    ", except Plan, the designer, the design reviewer, the refuter and an Explore whose brief's first line carries the "
+    "`%s` marker"
+)
+MODEL_SPAWN_TAIL = (
+    " (decision agent-model-cap). A step grant lifts the model its words name. Remedy: run this spawn on the role's "
+    "model now, and do not ask the owner for the model. If he named a model for this work, say in your report that his "
+    "word did not hold. A reviewer's Round 2 or Round 3 brief names sonnet. A builder's third try runs Sonnet."
+)
+
+
+def model_spawn_reason(model: str) -> str:
+    """The agent-model-cap refusal for a spawn on `model` (Opus or Fable), built from the parts above so the two share one
+    text. Only an Opus spawn names the standing grants and the Audit: marker; no standing grant lifts Fable."""
+    standing = "" if "fable" in model.lower() else MODEL_SPAWN_STANDING % EXPLORE_AUDIT_MARKER
+    return MODEL_SPAWN_HEAD % model + standing + MODEL_SPAWN_TAIL
 
 
 def opus_spawn_hit(tool: str, tool_input) -> tuple:
     """(model, role, brief_unread) of the first spawn in an Agent, Task or Workflow call that sets Opus with no standing grant,
-    else ("", "", False). `role` is the role the spawn names, "" for none. `brief_unread` is the spawn's BRIEF_UNREAD.
+    or sets Fable, else ("", "", False). `role` is the role the spawn names, "" for none. `brief_unread` is the spawn's BRIEF_UNREAD.
     A standing grant
     is the role Plan, designer, design-reviewer or refuter, or an Explore whose brief's first non-blank line carries EXPLORE_AUDIT_MARKER (decision agent-model-cap).
-    Any other spawn above its role's model is refused (decision agent-model-cap), a reviewer on Opus too. The refusal is liftable by an override, so never_lifted does not read it."""
+    It is an Opus grant: a spawn on Fable has none (opus_without_grant). Any other spawn above its role's model is
+    refused (decision agent-model-cap), a reviewer on Opus too. The one rule is the same for both models: the refusal is
+    lifted by a held model on the spawn's own model, by a step grant whose words name it, or by an override
+    (override.take), so never_lifted does not read it."""
     for spawn in spawn_inputs(tool, tool_input):
         if opus_without_grant(spawn):
             return str(spawn.get("model")), str(spawn.get("subagent_type") or ""), bool(spawn.get(BRIEF_UNREAD))
@@ -5170,6 +5668,11 @@ def opus_spawn_hit(tool: str, tool_input) -> tuple:
 
 
 def opus_without_grant(tool_input) -> bool:
+    """True when the spawn sets Opus with no standing grant, or sets Fable. Fable ranks above Opus and needs the owner's
+    grant as Opus does, but no standing role or marker covers it: only his word for Fable (a held Fable or a step grant
+    whose words name it, override.take on the spawn's own model) or his `override` lifts it."""
+    if "fable" in str(tool_input.get("model") or "").lower():
+        return True
     if "opus" not in str(tool_input.get("model") or "").lower():
         return False
     role, brief = tool_input.get("subagent_type"), tool_input.get("prompt")
@@ -5544,9 +6047,16 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
 
     # 2. A machine-wide kill. Judged in COMMAND POSITION, from the segment's own tokens, never
     # by the word appearing anywhere in the text. A segment shlex cannot parse fails open:
-    # judge nothing rather than guess what it would run.
+    # judge nothing rather than guess what it would run. The command a wrapper runs is read as shell,
+    # as a text of its own (`sh -c BODY`, `red-run SHA -- CMD`: nested_kill_texts); text that is only data
+    # to another program is no command.
     call_tokens = []
-    for text in texts:
+
+    def kill_texts():   # lazy: the outer texts are judged before the nested read runs, so a raise there cannot skip them
+        yield from texts
+        yield from nested_kill_texts(texts)
+
+    for text in kill_texts():
         previous = None   # a pipe never reaches across a substitution's edge
         for segment in split_segments(text):
             if not segment.strip():
@@ -5867,6 +6377,10 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         if matched:
             refuse(tool, "deny", "builder-test-edit", BUILDER_TEST_REASON, matched)
 
+    # 7c2. A write onto a session handoff (rules handoff-sections, handoff-too-big, handoff-checked-stamp, and
+    # handoff-shell-write for text the guard cannot read first). Not in never_lifted: the owner may mean the write.
+    handoff_shell_judge(tool, raw, cwd, transcript, session_id)
+
     # 7d. A read-only agent's shell write (rule readonly-shell-write): a redirect, `tee`, `touch` or `mktemp` to a
     # file outside its own session's scratchpad, here or in an ssh remote command.
     if readonly_agent(payload):
@@ -6163,122 +6677,6 @@ SENDMESSAGE_REASON = ("A session_ id is not an agent name, so this SendMessage m
                       "mcp__claude-code-remote__send_message, passing the id as session_id, the sure route. "
                       "Rule sendmessage-session-id "
                       "(decision sendmessage-session-id-refused, a SendMessage names an agent, not a cloud session).")
-
-
-# ------------------------------------------------------------------ impeccable is review-only
-#
-# docs/decisions/design-skills.md, rule `impeccable-review-only`: the skill loads only for a review
-# (`audit`, `critique`). Its build commands and its settings writers are refused. The reason names
-# no command; the log holds what the call asked for.
-IMPECCABLE_REASON = ("impeccable is for a design review only. Ask for a review of the rendered "
-                     "screens; make any change to the design by hand.")
-IMPECCABLE_SKILLS = ("impeccable", "impeccable:impeccable")
-IMPECCABLE_REVIEWS = ("audit", "critique")
-# The skill reads the FIRST word of its args as the command and the rest as target text (skills/impeccable
-# SKILL.md, Routing); it asks once when two commands fit. So a `;` starts no second command, and a part
-# after it is refused only when it opens with a command verb other than a review: the Commands table
-# of that SKILL.md is the list, read when a review carries a `;`. `|`, `&&` and a newline always chain.
-IMPECCABLE_CHAIN = re.compile(r"[|\n]|&&")
-IMPECCABLE_JOINERS = ("then", "and")
-IMPECCABLE_SKILL_FILE = os.path.join(_HERE, "..", "skills", "impeccable", "SKILL.md")
-IMPECCABLE_VERB_ROW = re.compile(r"^\| `([a-z]+)[^`]*` \| [A-Z][a-z]+ \|", re.M)
-RUNNER_WORDS = ("npx", "bunx", "node", "pnpm", "yarn", "npm", "dlx", "exec", "run", "x")
-PACKAGE_FLAGS = ("-p", "--package")
-
-
-def impeccable_name(token: str) -> str:
-    """The package or script name of a token, without a path, a `@version` or an extension."""
-    name = basename(token).split("@", 1)[0]
-    return name.rsplit(".", 1)[0]
-
-
-def impeccable_command_verbs():
-    """The command verbs in the Commands table of the impeccable SKILL.md, or None when the file or
-    the table cannot be read. Unread, every part after a `;` is refused, as it was before the table."""
-    try:
-        with open(IMPECCABLE_SKILL_FILE, encoding="utf-8") as handle:
-            table = re.split(r"(?m)^## ", handle.read().split("\n## Commands", 1)[1], 1)[0]
-    except (OSError, IndexError, UnicodeDecodeError):
-        return None
-    return set(IMPECCABLE_VERB_ROW.findall(table)) or None
-
-
-def impeccable_skill_hit(tool_input) -> str:
-    skill, args = tool_input.get("skill"), tool_input.get("args") or ""
-    if not isinstance(skill, str) or skill.lstrip("/") not in IMPECCABLE_SKILLS:
-        return ""
-    words = args.split(";")[0].split() if isinstance(args, str) else []
-    text = args.strip() if isinstance(args, str) else ""
-    if words and words[0] in IMPECCABLE_REVIEWS and not IMPECCABLE_CHAIN.search(text):
-        parts = [part.split() for part in text.split(";")[1:]]
-        for part in parts:   # "then polish" opens with polish: read past a joining word
-            while part and part[0] in IMPECCABLE_JOINERS:
-                part.pop(0)
-        verbs = impeccable_command_verbs() if any(parts) else set()
-        if verbs is not None and not any(part[0] in verbs - set(IMPECCABLE_REVIEWS)
-                                         for part in parts if part):
-            return ""
-    return ("skill %s %s" % (skill, args))[:100]
-
-
-def impeccable_shell_hit(segment: str) -> str:
-    """A segment that runs impeccable with anything but `detect ...` or `hooks status`. Shell
-    wrappers (`bash -c`, `npx -c`) are unwrapped; a runner or script suffix (`.cmd`, `.exe`,
-    `.mjs`) and PowerShell's call operator `&` are read through."""
-    tokens = segment_tokens(segment)
-    if not tokens:
-        return ""
-    script = inline_script(tokens)
-    if script:
-        return next((hit for part in split_segments(script)
-                     if (hit := impeccable_shell_hit(part))), "")
-    index = resolve_command(tokens)
-    if index is None or index >= len(tokens):
-        return ""
-    while index < len(tokens) and (impeccable_name(tokens[index]) in RUNNER_WORDS
-                                   or tokens[index].startswith("-")):
-        if tokens[index] in ("-c", "--call") and index + 1 < len(tokens):
-            return next((hit for part in split_segments(tokens[index + 1])
-                         if (hit := impeccable_shell_hit(part))), "")
-        index += 2 if tokens[index] in PACKAGE_FLAGS else 1
-    if index >= len(tokens) or impeccable_name(tokens[index]) != "impeccable":
-        return ""
-    rest = tokens[index + 1:]
-    while rest and rest[0].startswith("-"):   # leading flags and the `--` that ends them
-        rest = rest[1:]
-    if rest[:1] == ["detect"] or rest[:2] == ["hooks", "status"]:
-        return ""
-    return segment.strip()[:100]
-
-
-# A PowerShell here-string: `@'` ... `'@` is text, `@"` ... `"@` runs its `$(...)`.
-_HERE_STRING = re.compile(r"@(['\"])[ \t]*\r?\n(.*?)\r?\n\1@", re.S)
-
-
-def impeccable_command_hit(raw: str) -> str:
-    """Judge a whole command for impeccable. Only a body a shell reads is judged as shell lines,
-    and an unquoted heredoc body or an expandable here-string is judged by the `$(...)` and
-    backticks it runs. The limits: a Python, Node, Perl or Ruby
-    body is not read, and a here-string body is allowed."""
-    texts = []
-    if POWERSHELL_CALL[0] and "@" in raw:
-        def cut(found):
-            if found.group(1) == '"':
-                texts.extend(t for t, _ in _substitutions(found.group(2), powershell=True,
-                                                          heredoc=True)[0][:-1])
-            return "x"
-        raw = _HERE_STRING.sub(cut, raw)
-    texts.append(strip_heredoc_bodies(raw, shells_only=True))
-    if "<<" in raw:
-        for quote, body, _ in _split_heredocs(raw)[1]:
-            if not quote:
-                texts.extend(t for t, _ in _substitutions(body, heredoc=True)[0][:-1])
-    for text in texts:
-        for segment in split_segments(text):
-            matched = impeccable_shell_hit(segment)
-            if matched:
-                return matched
-    return ""
 
 
 # ------------------------------------------------------------------ simulator boots
@@ -7115,9 +7513,11 @@ def scratchpad_agent(payload) -> str:
 REDIRECT_WORD = re.compile(r"(?:\d*[<>]+&?|&>>?)")
 
 
-def scratchpad_copies(command: str, cwd: str):
-    """[(verb, source, destination, into)] for each `cp` and `mv` of the shell text, as absolute paths: the
-    destination of each source (a folder destination takes the source's name), with `-t DIR` read too. A flag
+def scratchpad_copies(command: str, cwd: str, verbs=("cp", "mv")):
+    """[(verb, source, destination, into)] for each `cp` and `mv` of the shell text (or each command word in `verbs`:
+    the handoff rules add `rsync` and `ditto`), as absolute paths: the
+    destination of each source (a folder destination takes the source's name), with `-t DIR` read too, for `cp` and `mv` only
+    (`rsync -t` keeps times). A flag
     is skipped and so is a redirect; a flag's own value is not told (`cp -S .bak`), a rare miss. `into` is the
     folder an `mv` moves its sources into (a folder destination, or the `-t` folder), else ''. It is '' too when
     the destination word holds a brace list or a glob, which the shell makes into other words, and when any other
@@ -7136,17 +7536,18 @@ def scratchpad_copies(command: str, cwd: str):
                 names[os.path.normpath(named)] = names.get(os.path.normpath(named), 0) + 1
         for word, args in scratchpad_command_words(tokens):
             verb = basename(word)
-            if verb not in ("cp", "mv"):
+            if verb not in verbs:
                 continue
+            target_flag = verb in ("cp", "mv")
             plain, target, take, skip = [], "", False, False
             for arg in args:
                 if skip:
                     skip = False
                 elif take:
                     target, take = arg, False
-                elif arg in ("-t", "--target-directory"):
+                elif target_flag and arg in ("-t", "--target-directory"):
                     take = True
-                elif arg.startswith("--target-directory="):
+                elif target_flag and arg.startswith("--target-directory="):
                     target = arg.split("=", 1)[1]
                 elif REDIRECT_WORD.match(arg):
                     skip = bool(REDIRECT_WORD.fullmatch(arg))   # `2> f` names its file in the next word
@@ -7655,6 +8056,12 @@ def _redirect_targets(segment: str):
     """The target of each unquoted output redirect in one segment that writes no file (`_null_device`) and is no
     descriptor duplicate (`2>&1`). An input redirect and a heredoc header (`<<`) write nothing. A comparison's `>`
     is already masked (`_mask_comparisons`)."""
+    for target, _append in _redirect_writes(segment):
+        yield target
+
+
+def _redirect_writes(segment: str):
+    """(target, append) for each redirect `_redirect_targets` counts; `append` is True for `>>`."""
     for found in REDIRECTION.finditer(segment):
         word = found.group()
         if word[0] == "<" or not unquoted_at(segment, found.start()):
@@ -7679,7 +8086,7 @@ def _redirect_targets(segment: str):
             except ValueError:
                 pass
         if target and not _null_device(target):
-            yield target
+            yield target, ">>" in word[:operator]
 
 
 def _mktemp_paths(args):
@@ -7769,8 +8176,8 @@ def never_lifted(payload, tool: str, tool_input: dict, cwd: str) -> bool:
     check."""
     POWERSHELL_CALL[0] = tool == "PowerShell"
     # role_model_check's above-row refusal is liftable (item 127 pick a); only its no-model refusal is never lifted.
-    floor_model = floor_hit(tool, tool_input)  # the owner's own word for that model leaves the floor out of this list (step 9)
-    if ((floor_model and not owner_names_model(payload, floor_model)) or step_up_hit(tool, tool_input)
+    floor_model, floor_role = floor_call(tool, tool_input)  # the owner's own word for that model leaves the floor out of this list (step 9)
+    if ((floor_model and not owner_names_model(payload, floor_model, floor_role)) or step_up_hit(tool, tool_input)
             or role_model_check(tool, tool_input)[1].startswith(ROLE_NO_MODEL_MATCH)
             or worktree_home_hit(payload, tool, tool_input, cwd)):
         return True
@@ -7789,40 +8196,6 @@ def never_lifted(payload, tool: str, tool_input: dict, cwd: str) -> bool:
     return False
 
 
-# A Workflow call whose args hold a placeholder (rule workflow-args-shape-check). Mistake: a call that ran with a placeholder
-# such as "FACT_CLOSE_PLACEHOLDER" or "__FILL__" as args gave agents nothing to check. The whole value must be the
-# placeholder, so a sentence that names one passes. A bare env var name as a whole value ("MAILBOX_REPO") reads as a
-# placeholder and is refused: that is a false alarm only when the owner means a real value, and the owner's override
-# covers it (decision guard-guards-mistakes-only). The args are structured values, so no quote or comment case applies.
-WORKFLOW_ARGS_CAPS = re.compile(r"[A-Z0-9_]*[A-Z][A-Z0-9_]*")
-WORKFLOW_ARGS_DUNDER = re.compile(r"__\w+__")
-WORKFLOW_ARGS_REASON = ("The Workflow call's args hold the placeholder `%s`, so its agents would check nothing. "
-                        "Replace it with the real value, then start the Workflow again. "
-                        "(decision workflow-args-shape-check, a Workflow call never runs on placeholder args)")
-
-
-def workflow_args_placeholder(value) -> bool:
-    """True when `value` is a string that is, whole, an all-caps word with an underscore or a __X__ word."""
-    if not isinstance(value, str):
-        return False
-    text = value.strip()
-    return bool(text and ((WORKFLOW_ARGS_CAPS.fullmatch(text) and "_" in text) or WORKFLOW_ARGS_DUNDER.fullmatch(text)))
-
-
-def workflow_args_hit(tool: str, tool_input: dict) -> str:
-    """The first placeholder in a Workflow call's args, or "". Reads args, and each array item or object value."""
-    if tool != "Workflow":
-        return ""
-    args = tool_input.get("args")
-    if isinstance(args, list):
-        values = args
-    elif isinstance(args, dict):
-        values = list(args.values())
-    else:
-        values = [args]
-    return next((v.strip() for v in values if workflow_args_placeholder(v)), "")
-
-
 # Set by rule compaction-audit when an Audit: spawn passes it. main() reads it after judge() returns.
 AUDIT_SPAWN_PASSED: list = []
 
@@ -7836,63 +8209,6 @@ def audit_flag_clear_after_allow(payload) -> None:
             audit_clear(payload)
     except Exception:
         pass
-
-
-# A send_later check-in that waits on CI for longer than the cap (rule ci-wait-cap; decision ci-wait-cap-guard).
-# Mistake: a session sets a CI check-in that wakes after the 1-hour prompt cache ends. Harm: the wake pays a full
-# context rewrite. The cap is cap_minutes() in hooks/ci_wait_cap.py, read on each call and never copied here. The message
-# is plain text, so comment openers and lone quotes in it carry no meaning to the scan. A missing cap file raises, and
-# main() logs the crash and lets the call through: a lost source is never turned into a made-up limit.
-CI_WAIT_TOOL = REMOTE_SERVER + "__send_later"
-CI_WAIT_WORDS = re.compile(
-    r"(?<!\w)(?:ci|checks|pr\s+runs?|workflow\s+runs?|check\s+runs?|pipelines?|github\s+actions)(?!\w)", re.IGNORECASE)
-CI_WAIT_DIGITS = re.compile(r"\d+(?:\.\d+)?")
-CI_WAIT_REASON = ("A check-in that waits on CI may wait at most %d minutes, because under the 1-hour prompt cache a later "
-                  "wake pays a full context rewrite. Set send_later with delay_minutes of %d or less, or an `at` no more "
-                  "than %d minutes ahead, then set the next check-in when this one wakes. "
-                  "(decision ci-wait-cap-guard, a CI check-in stays inside the prompt cache)")
-
-
-def ci_wait_minutes(tool_input: dict):
-    """The wait a send_later call asks for, in minutes: the larger of delay_minutes and the `at` time's distance from
-    the clock. delay_minutes is a number or a string of digits. An `at` with no offset reads in the clock's own offset.
-    None when neither reads: no field, or a value that is not a number or an ISO-8601 time."""
-    waits = []
-    delay = tool_input.get("delay_minutes")
-    if isinstance(delay, str) and CI_WAIT_DIGITS.fullmatch(delay.strip()):
-        waits.append(float(delay))
-    elif isinstance(delay, (int, float)) and not isinstance(delay, bool):
-        waits.append(delay)
-    at = tool_input.get("at")
-    if isinstance(at, str):
-        import local_time  # the one home of the clock, which LOCAL_TIME_NOW replaces in tests
-        from datetime import datetime
-        text = at.strip()
-        try:
-            when = datetime.fromisoformat(text[:-1] + "+00:00" if text[-1:] in ("Z", "z") else text)
-        except ValueError:
-            when = None
-        if when is not None:
-            now = local_time.clock()
-            if when.tzinfo is None:
-                when = when.replace(tzinfo=now.tzinfo)
-            waits.append((when - now).total_seconds() / 60)
-    return max(waits) if waits else None
-
-
-def ci_wait_hit(tool: str, tool_input: dict) -> str:
-    """The refusal reason when this send_later waits on CI past the cap, else "". Reads the whole message."""
-    if tool != CI_WAIT_TOOL:
-        return ""
-    message = tool_input.get("message")
-    if not isinstance(message, str) or not CI_WAIT_WORDS.search(message):
-        return ""
-    wait = ci_wait_minutes(tool_input)
-    if wait is None:
-        return ""
-    import ci_wait_cap  # the one home of the cap
-    cap = ci_wait_cap.cap_minutes()
-    return CI_WAIT_REASON % (cap, cap, cap) if wait > cap else ""
 
 
 # The cite of the answered-claim refusal. The reason itself is built by answered_claim_hit (hooks/answered_claims.py).
@@ -7994,7 +8310,8 @@ def judge(payload) -> None:
     # by agent-no-remote-tools (8b) after the two brief rules, as every agent's create_session is.
     lane_start = is_lane_create_session(tool, tool_input) and not (payload.get("agent_id") and tool in REMOTE_OUTWARD_TOOLS)
     if lane_start:
-        refuse_lane_start(tool, lane_start_hits(tool, tool_input, cwd, trust_transcript if isinstance(trust_transcript, str) else ""))
+        refuse_lane_start(tool, lane_start_hits(tool, tool_input, cwd, trust_transcript if isinstance(trust_transcript, str) else "",
+                                                session_id=str(payload.get("session_id") or "")))
     else:
         # A lane brief for a topic the target lane does not hold (rule lane-one-topic).
         briefed = brief_hit(tool, tool_input, trust_transcript if isinstance(trust_transcript, str) else "")
@@ -8037,8 +8354,8 @@ def judge(payload) -> None:
     # 9. The agent model floor. A spawn that names a Haiku model is refused. The reason names no
     # model; the log holds what the call asked for. A lane start's floor is judged with the lane-start rules (8a).
     # The owner's last turn naming the model lifts it (owner_names_model); the transcript is read only when the floor fires.
-    floor_model = floor_hit(tool, tool_input)
-    if floor_model and not owner_names_model(payload, floor_model):
+    floor_model, floor_role = floor_call(tool, tool_input)
+    if floor_model and not owner_names_model(payload, floor_model, floor_role):
         refuse(tool, "deny", "agent-model-floor", MODEL_FLOOR_REASON, floor_model)
 
     # 9b. Step-up: a reviewer's second round on Sonnet. A builder's third try has no step-up: it runs Sonnet, its role row (owner item 893). A reviewer's third round passes here on
@@ -8050,7 +8367,10 @@ def judge(payload) -> None:
     # 9b3. The role model row: a spawn above its role's row, or with no model where nothing else sets one, is refused.
     # The override lifts the above-row refusal and never the no-model one (never_lifted).
     # An unread table or agent folder passes and logs one line. Opus is judged at 9d.
-    role_reason, role_matched, role_unread = role_model_check(tool, tool_input)
+    # The owner's model hold (his judged word for a model, held_model) is read for a spawn call only, and replaces the row
+    # of the roles it covers with his model as the ceiling (role_hold_verdict).
+    hold = held_model(payload) if tool in SPAWN_TOOLS or tool == "Workflow" else None
+    role_reason, role_matched, role_unread = role_model_check(tool, tool_input, hold)
     if role_unread:
         record(tool, "noted", "agent-role-model-unread", role_matched)
     if role_reason:
@@ -8066,16 +8386,17 @@ def judge(payload) -> None:
     if load_reason:
         refuse(tool, "deny", "load-brake", load_reason, load_matched)
 
-    # 9d. The Opus ceiling: a spawn on Opus with no standing grant is refused (decision agent-model-cap).
-    # An override, an Opus pass for the spawn's role or a step grant lifts it. A spawn with no role runs general-purpose.
+    # 9d. The Opus ceiling: a spawn on Opus with no standing grant, or on Fable, is refused (decision agent-model-cap).
+    # An override lifts it; so does a pass file on the spawn's own model for its role (the owner's held Opus or held Fable)
+    # and a step grant whose words name that model. A spawn with no role runs general-purpose.
     opus_model, opus_role, opus_unread = opus_spawn_hit(tool, tool_input)
     if opus_model:
         refuse(tool, "deny", "agent-model-cap",
-               OPUS_SPAWN_REASON
+               model_spawn_reason(opus_model)
                + (" The scan could not read this brief, so it read no marker: " + BRIEF_LITERAL_REMEDY + "."
-                  if opus_unread and role_key(opus_role) != "builder" else ""),
+                  if opus_unread and role_key(opus_role) != "builder" and "fable" not in opus_model.lower() else ""),
                opus_model,
-               spawn_role=opus_role or "general-purpose")
+               spawn_role=opus_role or "general-purpose", spawn_model=opus_model)
 
     # 9e. A builder's or test-author's brief that claims what main or today does with an input carries the probe that
     # showed it (rule brief-claim-has-probe). An override lifts it: the owner may mean the brief as it stands.
@@ -8318,23 +8639,9 @@ def judge(payload) -> None:
         if is_frozen(target, cwd):
             refuse(tool, "deny", "frozen-path", FROZEN_REASON, target)
 
-        # 7a. A write that leaves a session handoff without a required section (rule handoff-sections).
-        # Not in never_lifted: the owner may mean the write.
-        handoff_result = handoff_sections_result(tool, tool_input, target, cwd)
-        dropped = handoff_sections_hit(tool, tool_input, target, cwd, handoff_result)
-        if dropped:
-            refuse(tool, "deny", "handoff-sections", HANDOFF_SECTIONS_REASON % dropped, dropped)
-        # 7a''. A write that leaves a session handoff over the size limit (rule handoff-too-big), from any writer.
-        # Not in never_lifted: the owner may mean the write. Cost: a path compare for any other file; the stat of the
-        # handoff on disk only for a Write whose text is over the limit.
-        oversize = reread_check.too_big_estimate(handoff_result, handoff_target_path(target, cwd)) if handoff_result else 0
-        if oversize:
-            refuse(tool, "deny", "handoff-too-big", HANDOFF_TOO_BIG_REASON % (oversize, reread_check.HANDOFF_MAX_TOKENS),
-                   "%d estimated tokens" % oversize)
-        # 7a'. A write that restamps a premise's Checked value with no evidence (rule handoff-checked-stamp).
-        stamped = handoff_stamp_hit(tool, tool_input, target, cwd, payload.get("transcript_path"), handoff_result)
-        if stamped:
-            refuse(tool, "deny", "handoff-checked-stamp", HANDOFF_STAMP_REASON % stamped[0], stamped[1])
+        # 7a. The three handoff rules (handoff-sections, handoff-too-big, handoff-checked-stamp). Not in never_lifted:
+        # the owner may mean the write.
+        judge_handoff_write(tool, tool_input, target, cwd, payload.get("transcript_path"))
         # 7d. A path the repo that holds the target lists as protected (decision protected-path). Cost: the
         # holding checkout's extras file, read once per call, only when the target sits in a checkout.
         if is_protected(target, cwd):
@@ -8402,7 +8709,8 @@ def main() -> None:
     except Exception:
         pass  # a guard_core without the setter still judges: its line has no session cell (unknown session)
     try:
-        guard_core.set_override_context(payload.get("session_id"), payload.get("agent_id"), payload.get("cwd"))
+        guard_core.set_override_context(payload.get("session_id"), payload.get("agent_id"), payload.get("cwd"),
+                                        payload.get("transcript_path"))
     except Exception:
         pass  # a guard_core without the setter has no override: every refusal stands
     try:

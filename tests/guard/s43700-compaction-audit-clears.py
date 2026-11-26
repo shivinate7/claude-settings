@@ -61,12 +61,14 @@ def ca_hook(folder, mode, payload, cfg):
                           input=json.dumps(payload), capture_output=True, text=True, env=ca_env(cfg), timeout=120)
 
 
-def ca_call(folder, cfg, tool, tool_input):
-    """One call through the copy's guard.py, from a folder that is not a git tree, in session CA_SID."""
-    payload = {"tool_name": tool, "tool_input": tool_input, "cwd": NOGIT, "session_id": CA_SID,
+def ca_call(folder, cfg, tool, tool_input, where=None):
+    """One call through the copy's guard.py, in session CA_SID. `where` is the folder the call runs from: the payload's
+    cwd and the guard process's own working folder, so a relative script path resolves there, as in a session. None
+    keeps the default, a folder that is not a git tree, with the guard process in the folder the suite runs from."""
+    payload = {"tool_name": tool, "tool_input": tool_input, "cwd": where or NOGIT, "session_id": CA_SID,
                "transcript_path": CA_TRANSCRIPT}
     return subprocess.run(guard_start(os.path.join(folder, "hooks", "guard.py")), input=json.dumps(payload),
-                          capture_output=True, text=True, env=ca_env(cfg), timeout=120)
+                          capture_output=True, text=True, env=ca_env(cfg), timeout=120, cwd=where)
 
 
 def ca_owed(folder, cfg):

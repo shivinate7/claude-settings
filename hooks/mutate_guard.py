@@ -1309,7 +1309,7 @@ MUTATIONS = [
     ("role-model: the reviewer lift drops its rank test, so a reviewer on a model the table does not rank walks past with the marker",
      'any(role_model_rank(word) >= named\n',
      'any(True or role_model_rank(word) >= named\n', "guard",
-     'role-model: fix check: reviewer on claude-fable-5-1 with the marker on line one is denied, the lift does not reach an unranked model'),
+     'role-model: fix check: reviewer on claude-mystery-9 with the marker on line one is denied under agent-role-model, the lift does not reach an unranked model'),
     ("role-model: the guard marker lifts nothing, so a reviewer on sonnet with it is denied",
      '    if review_guard_marked(prompt):\n        words.append(',
      '    if False:\n        words.append(', "guard",
@@ -3088,7 +3088,28 @@ MUTATIONS = [
     ("opus override: the end instant still lifts",
      '    if at >= until or (role is not None',
      '    if at > until or (role is not None',
-     "override", 'opus override: `opus 2h` lets an Opus spawn through'),
+     "override", 'opus override: a held Opus lifts an Opus spawn through'),
+    # THE OWNER'S MODEL HOLD (hooks/override.py). Each row names the case that kills it.
+    ("owner-model-word: the hold reader drops `end`, so a hold that ends at the report outlives it",
+     '"end": data.get("end"),',
+     '"end": None,',
+     "override", "owner-model-word: control, an Agent spawn on haiku is refused after a report ends the haiku hold"),
+    ("owner-model-word: take() has no `until` check, so a held model lifts a spawn past its 2 h end",
+     '    if at >= until or (role is not None and role != str(spawn_role).lower()):',
+     '    if role is not None and role != str(spawn_role).lower():',
+     "override", "opus override: a held Opus lifts an Opus spawn through, an agent's too, until it ends"),
+    ("owner-model-word: take() lets a held sonnet lift the Opus ceiling, since the model check is dropped",
+     'if hold["model"] != ("opus" if model is None else _family(model)):',
+     'if False:',
+     "override", "owner-model-word: a held sonnet does not lift the Opus ceiling for a spawn with no role"),
+    ("owner-model-word: the role hold skips the ceiling for a named role, so a round-2 reviewer on sonnet walks past",
+     'or (hold.get("role") is None and hold_exempt(spawn, role, rounds))):',
+     'or hold.get("role") is not None):',
+     "guard", "owner-model-word: a round-2 reviewer spawn on sonnet is refused under agent-role-model when the owner's haiku hold names reviewer"),
+    ("owner-model-word: the role hold reads an unjudged Opus file as a ceiling, so a sonnet role spawn is refused",
+     'if (not hold.get("judged") or not hold_covers_role(hold, role)',
+     'if (not hold_covers_role(hold, role)',
+     "guard", "owner-model-word: a model-less Opus file (a keyword-era file) refuses a test-author on sonnet under agent-role-model, as on main"),
     # THE VETO AND THE TAKE (decision owner-override). never_lifted names the acts an override may not lift, and
     # override.take reads the one-act override. A mutant that lifts a never-lifted act, or reads no override, must go red.
     ("never-lifted: a shell kill of pid 1 is liftable, so an override reaches it",
@@ -3131,9 +3152,9 @@ MUTATIONS = [
      '            "(decision guard-hooks-fail-closed, a guard with a missing part refuses the call)")}}))',
      '"then retry.")}}))',
      "guard", 'override: a missing-module deny says that no override lifts it'),
-    ("override line: the Opus spawn ask no longer names the Opus word",
-     'if rule == OPUS_RULE and spawn_role is not None:\n        role = opus_role(str(spawn_role))',
-     'if False:\n        role = opus_role(str(spawn_role))',
+    ("override line: the Opus spawn refusal's offer drops its own branch, so it ends with the generic line",
+     '    if rule == OPUS_RULE and spawn_role is not None:\n        return ("The owner lifts this by naming',
+     '    if False:\n        return ("The owner lifts this by naming',
      "override", 'override: a refusal an override lifts ends with the opus override line'),
     ("override line: an agent's refusal offers the main session's line",
      '    if agent_id:\n        return ("To allow this act',
@@ -3558,8 +3579,9 @@ MUTATIONS = [
      '                "unread_note": staticmethod(lambda payload: ""), "too_big_estimate": staticmethod(lambda result, path: 0),\n'
      '                "agent_rewrite": staticmethod(lambda payload: None),\n'
      '                "HANDOFF_MAX_TOKENS": 10000, "READ_CAP_TOKENS": 25000, "READ_MAX_LINES": 2000,\n'
-     '                "AUDIT_OWED": "", "AUDIT_REMEDY": "", "AUDIT_HELPER_HEAD": "",\n'
-     '                "audit_helper_command": staticmethod(lambda payload: "")})\n',
+     '                "AUDIT_OWED": "", "AUDIT_REMEDY": "", "AUDIT_HELPER_HEAD": "", "AUDIT_HELPER_SCRIPT": "",\n'
+     '                "audit_helper_command": staticmethod(lambda payload: ""),\n'
+     '                "audit_helper_allows": staticmethod(lambda command, handoff: False)})\n',
      "guard", "a guard copy without reread_check.py refuses as guard-crash"),
     ("handoff-unread: a reread_check without its precompact_handoff sibling is let load again",
      '        if reread_check.ph is None:',
@@ -3597,7 +3619,7 @@ MUTATIONS = [
      '            pass',
      "audit", "after the read, a Bash call is refused by compaction-audit"),
     ("compaction-audit: the audit helper allows any command that names the helper, so a chained or copied call passes",
-     '    return tool == "Bash" and isinstance(command, str) and command == reread_check.audit_helper_command(handoff)',
+     '    return tool == "Bash" and isinstance(command, str) and reread_check.audit_helper_allows(command, handoff)',
      '    return tool == "Bash" and isinstance(command, str) and "precompact_handoff.py" in command',
      "audit", "the helper command with a chained rm stays refused"),
     ("compaction-audit: the refusal drops the session's transcript path, so an Audit: brief cannot name it",
@@ -4088,6 +4110,10 @@ GUARD_MODULE_FAMILIES = {
     "hooks/guard_browser.py": ["browser-keychain"],
     # hooks/guard_write.py holds the silent-write family moved out of guard.py. Its mutants meet the write section.
     "hooks/guard_write.py": ["write"],
+    # hooks/guard_impeccable.py holds the impeccable family moved out of guard.py. Its mutants meet the impeccable section.
+    "hooks/guard_impeccable.py": ["impeccable"],
+    "hooks/guard_workflow_args.py": ["workflow-args"],
+    "hooks/guard_ci_wait.py": ["ci-wait-cap"],
     # hooks/guard_cite.py holds the cite family moved out of guard.py. Its mutants meet the cite and scratchpad-message sections.
     "hooks/guard_cite.py": ["cite", "scratchpad-message"],
     # hooks/guard.py holds the rules that no guard_<x>.py module owns. A mutant of it meets six families that read those rules.
@@ -4106,7 +4132,6 @@ EMPTY_MOVE_REASON = ("empty in the write-family move (decision guard-split-by-fa
                      "move, and the module takes its row with its first rule")
 GUARD_MODULE_EXEMPT = {
     "hooks/guard_core.py": "shared by every family, so a mutant of it needs the whole test_guard.py, which takes minutes",
-    "hooks/guard_launch.py": "the launcher runs guard.py from its bytecode cache, never judges a call, and no family reaches it",
     "hooks/guard_readonly.py": EMPTY_MOVE_REASON,
     "hooks/guard_model_cap.py": EMPTY_MOVE_REASON,
     "hooks/guard_checkout.py": EMPTY_MOVE_REASON,
@@ -4114,10 +4139,7 @@ GUARD_MODULE_EXEMPT = {
     "hooks/guard_paths.py": EMPTY_MOVE_REASON,
     "hooks/guard_scratchpad_owner.py": EMPTY_MOVE_REASON,
     "hooks/guard_pages.py": EMPTY_MOVE_REASON,
-    "hooks/guard_impeccable.py": EMPTY_MOVE_REASON,
     "hooks/guard_simulator.py": EMPTY_MOVE_REASON,
-    "hooks/guard_workflow_args.py": EMPTY_MOVE_REASON,
-    "hooks/guard_ci_wait.py": EMPTY_MOVE_REASON,
 }
 # The gold standard: the guard's own suite against the same mechanical mutants, so the comparison is
 # one engine to one engine. The hand-written MUTATIONS above kill 100% by construction (any survivor

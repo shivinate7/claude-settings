@@ -15,7 +15,7 @@ lint/test_find_copies.py.
 This file also holds the runner's own proofs of its crash scan and its registration hygiene (classes CrashScan and
 RegistrationHygiene). Each runs the runner on a section set of its own, so no suite case is in them.
 
-The GuardLoader classes pin how a guard start is loaded. Every guard start runs through hooks/guard_launch.py beside
+The GuardLoader classes pin how a guard start is loaded. Every guard start runs through hooks/launch_guard.py beside
 the guard, as settings.json does (test_guard.py guard_start). GuardLoaderCount counts the compiles of the guard and of
 each of its modules in those starts: one from a cold cache, none from a warm one, also under PYTHONDONTWRITEBYTECODE=1.
 GuardLoaderCache pins that a stale, corrupt, truncated, empty or other-version cache is rebuilt with the uncached
@@ -469,7 +469,7 @@ class WatchedBeatOff(unittest.TestCase):
 # holds both kinds. A section folder of its own cannot run: the sections depend on one another (LOG_CHECKS_EXTRA).
 LOADER_FAMILY = "sendmessage-session-id"
 GUARD = os.path.join(HERE, "guard.py")
-LAUNCHER = os.path.join(HERE, "guard_launch.py")
+LAUNCHER = os.path.join(HERE, "launch_guard.py")
 SETTINGS = os.path.join(REPO, "settings.json")
 CACHE_ENV = ("PYTHONDONTWRITEBYTECODE", "PYTHONPYCACHEPREFIX", "PYTHONPATH")  # set or stripped per case, never inherited
 # A sitecustomize that logs one line per compile() call: the compiled file, and the argv of the process that compiled
@@ -761,7 +761,7 @@ class GuardLoaderCache(unittest.TestCase):
         hooks = os.path.join(config, "hooks")
         mutate_shared.guard_tree(hooks)
         guard_copy = os.path.join(hooks, "guard.py")
-        launcher = os.path.join(hooks, "guard_launch.py")
+        launcher = os.path.join(hooks, "launch_guard.py")
         cache = cache_file(None, guard_copy)   # beside the copy: base_env strips PYTHONPYCACHEPREFIX for every child
         nogit = os.path.join(root, "nogit")   # a folder that is no git tree, so the payload reads no repo
         os.makedirs(nogit)
@@ -834,7 +834,7 @@ def verdict_with_rule(rc, out):
 
 
 class GuardLauncher(unittest.TestCase):
-    """The settings.json guard command starts hooks/guard_launch.py. Without the launcher beside the guard, the same
+    """The settings.json guard command starts hooks/launch_guard.py. Without the launcher beside the guard, the same
     command falls back to guard.py. Each start gives the verdict a plain start gives."""
 
     def guard_commands(self):
@@ -852,7 +852,7 @@ class GuardLauncher(unittest.TestCase):
         commands = self.guard_commands()
         self.assertTrue(commands, "settings.json holds no guard hook command, so the launcher check reads nothing")
         for command in commands:
-            self.assertIn("guard_launch.py", command,
+            self.assertIn("launch_guard.py", command,
                           "a settings.json guard command starts guard.py without the launcher: %r" % command[:160])
 
     def test_without_the_launcher_the_command_falls_back_to_the_guard(self):
@@ -863,7 +863,7 @@ class GuardLauncher(unittest.TestCase):
         os.makedirs(nogit)
         for config in (with_launcher, without):
             mutate_shared.guard_tree(os.path.join(config, "hooks"))
-        launcher = os.path.join(without, "hooks", "guard_launch.py")
+        launcher = os.path.join(without, "hooks", "launch_guard.py")
         if os.path.isfile(launcher):   # main has no launcher to remove, and the same check then holds as its control
             os.remove(launcher)
         plain = [sys.executable, os.path.join(without, "hooks", "guard.py")]

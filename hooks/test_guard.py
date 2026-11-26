@@ -81,11 +81,11 @@ GUARD = os.environ.get("GUARD_UNDER_TEST") or os.path.join(HERE, "guard.py")
 
 
 def guard_start(guard=None):
-    """The argv that starts a guard the way settings.json does: hooks/guard_launch.py beside it when that file is
+    """The argv that starts a guard the way settings.json does: hooks/launch_guard.py beside it when that file is
     there, else the guard itself. Every case that starts a guard calls this, so the suite and the live hook cannot
     drift (test_guard_beat.py pins the command string to the launcher)."""
     guard = guard or GUARD
-    launcher = os.path.join(os.path.dirname(guard), "guard_launch.py")
+    launcher = os.path.join(os.path.dirname(guard), "launch_guard.py")
     return [sys.executable, launcher if os.path.isfile(launcher) else guard]
 
 

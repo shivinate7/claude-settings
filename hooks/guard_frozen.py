@@ -1236,16 +1236,17 @@ def frozen_shell_hit(cmd: str, cwd: str) -> str:
     return _shell_write_hit(cmd, cwd, is_frozen, _holds_frozen)
 
 
-def shell_write_hit(raw: str, cwd: str, predicate, holds=None) -> str:
+def shell_write_hit(raw: str, cwd: str, predicate, holds=None, follow_cd: bool = False) -> str:
     """Return the path a whole shell command writes to that `predicate(path, cwd)` accepts, else ''.
     A shell reads the command with its heredoc bodies dropped, except a body a shell runs
     (`strip_heredoc_bodies`). The text a python, node, perl or ruby script holds is data: its heredoc body,
     a file written and then run by one, and the script of a `python -c` or `node -e` are read only at their
     shell spots (`script_spots`: os.system, subprocess, `%x`, a backtick in ruby). A crash of that reading
-    falls back to reading every body, which refuses more and never less."""
+    falls back to reading every body, which refuses more and never less. `follow_cd` reads a relative path from the
+    folder a `cd` before it moved to (`_shell_write_hit`)."""
     try:
         hit = _shell_write_hit(strip_heredoc_bodies(raw, shells_only=True, per_body=True), cwd, predicate, holds,
-                           script_data=True)
+                           follow_cd, script_data=True)
         texts = []
         resolved = _resolve_vars(raw)   # each body and `-c` script reads `$F` as the command's own assignment
         for lang, body, quote in interpreter_bodies(resolved):
@@ -1256,10 +1257,10 @@ def shell_write_hit(raw: str, cwd: str, predicate, holds=None) -> str:
             for kind, script, *_ in _inline_scripts(resolved):
                 texts += script_spots(script, kind)
         for text in texts:
-            hit = hit or _shell_write_hit(text, cwd, predicate, holds)
+            hit = hit or _shell_write_hit(text, cwd, predicate, holds, follow_cd)
         return hit
     except Exception:
-        return _shell_write_hit(strip_heredoc_bodies(raw), cwd, predicate, holds)
+        return _shell_write_hit(strip_heredoc_bodies(raw), cwd, predicate, holds, follow_cd)
 
 
 def project_config_shell_hit(cmd: str, cwd: str) -> str:
@@ -2003,7 +2004,10 @@ def interpreter_write_hit(raw: str, cwd: str, predicate, script_files: bool = Fa
         return ""
 
 
-def _interpreter_write_hit(raw: str, cwd: str, predicate, script_files: bool = False, protected: bool = False) -> str:
+def interpreter_scripts(raw: str, cwd: str):
+    """Yield (kind, script, folder) for each python ("py") and node ("js") script `raw` feeds: the body of each heredoc
+    whose header names one (the folder is `cwd`), and each `python -c` and `node -e` script (the folder the shell is in
+    when it runs). The one reading of these scripts; `_interpreter_write_hit` and the handoff rules take it from here."""
     if "<<" in raw:
         seen = set()
         for reading in (False, True):   # bash's own walk, and the one where a contraction's `'` is text
@@ -2012,19 +2016,19 @@ def _interpreter_write_hit(raw: str, cwd: str, predicate, script_files: bool = F
                     continue
                 seen.add((header, body))
                 if _PY_HEADER.search(header):
-                    hit = _py_hit(body, cwd, predicate, protected=protected)
+                    yield "py", body, cwd
                 elif _NODE_HEADER.search(header):
-                    hit = _js_hit(body, cwd, predicate)
-                else:
-                    continue
-                if hit:
-                    return hit
+                    yield "js", body, cwd
     if any(flag in raw for flag in _INLINE_FLAG_WORDS):
         for kind, script, number, segments, ends in _inline_scripts(raw):
-            at = dir_before_segment(segments, number, cwd, ends) or cwd
-            hit = _py_hit(script, at, predicate, protected=protected) if kind == "py" else _js_hit(script, at, predicate)
-            if hit:
-                return hit
+            yield kind, script, dir_before_segment(segments, number, cwd, ends) or cwd
+
+
+def _interpreter_write_hit(raw: str, cwd: str, predicate, script_files: bool = False, protected: bool = False) -> str:
+    for kind, script, at in interpreter_scripts(raw, cwd):
+        hit = _py_hit(script, at, predicate, protected=protected) if kind == "py" else _js_hit(script, at, predicate)
+        if hit:
+            return hit
     return _script_file_hit(raw, cwd, predicate) if script_files else ""
 
 
