@@ -273,6 +273,10 @@ def ov_offer_check(kind):
                 return False, "the refusal does not name %r: %s" % (word, reason[-120:])
         if kind == "opus" and "opus 2h" in reason:
             return False, "the Opus refusal names the keyword opus 2h, which the one rule retired: %s" % reason[-120:]
+        if kind == "opus" and "naming the model for this work in his own words" not in reason:
+            # A literal pin: the expected line comes from the module under test, so a mutant that drops the Opus line would
+            # match its own generic line. The owner-facing sentence itself must be in the refusal.
+            return False, "the Opus refusal's offer line is not the one-rule line: %s" % reason[-120:]
         if kind == "main" and reason.count("override") < 2:
             return False, "the main session's refusal names one override word, want `override` and `override 15m`"
         if not expected:
