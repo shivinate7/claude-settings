@@ -3281,10 +3281,12 @@ def combine_hint(root, host, trigger=None, exclude=None):
 def queue_hint(root, host, n, info):
     """Print one line, before the lock, on `merge N --confirm` and `merge N --ready` for a ready pull request: how deep the CI queue is and whether N goes alone or a train
     is worth building. One read of the queued run count (Host.queued_runs). An empty queue says N goes alone and reads no ready list; any other depth goes through
-    combine_hint with the others, N left out. A failed read prints one unknown line. A hint only: no verdict, no exit code. A batch integration PR gets none, and a host that
-    reads no queue (a scripted one) gets none. Cost: one `actions/runs` GET, then on a queue that is not empty one ready-list read (reviewed_read)."""
+    combine_hint with N as `exclude`: N stays in the ready set when it is a batch row (only the front PR is left out), and N is read against the others for a clash. A failed read prints one unknown line. A hint only: no verdict, no exit code. A batch integration PR gets none, and a host that
+    reads no queue (a scripted one) gets none. Under the stamp value "none" no CI is read, so none (decision private-repos-no-ci). Cost: one `actions/runs` GET, then on a queue that is not empty one ready-list read (reviewed_read)."""
     if is_integration_pr(info) or not hasattr(host, "queued_runs"):
         return
+    if getattr(host, "required", None) == "none":
+        return  # no CI run is read under the stamp value none (decision private-repos-no-ci)
     try:
         depth = host.queued_runs()
     except Exception as e:
