@@ -1477,4 +1477,4 @@ await test('no unhandled rejection escaped a background judge', async () => {
 const fails = results.filter(r => r.startsWith('FAIL')).length
 console.log(results.join('\n'))
 console.log(`decision-watch pins: ${results.length - fails} pass, ${fails} fail of ${results.length}`)
-if (fails) process.exitCode = 1
+if (fails || results.length === 0) process.exitCode = 1

@@ -1,5 +1,5 @@
 # Launchd labels that bin/sim-test disables on a simulator it boots itself.
-# iOS 27.1 simulators crash these Siri, intelligence, Mail and Spotlight daemons on every boot (from the Degen report,
+# Phone simulators crash these Siri, intelligence, Mail and Spotlight daemons on every boot (from the Degen report,
 # 2026-11-12). Each crash is noise in DiagnosticReports.
 # The disable lives in the device data, so it survives a reboot and not an erase.
 # The widget and app-intent daemons are not listed: they stay on.

@@ -1,0 +1,1 @@
+- child-file-case-duplicate: a hand-edited docs/children.txt with two entries that differ only in letter case lists both and exits 0 on a file read; the add subcommand refuses such a duplicate, the read does not. Seen: 2026-11-25 x1

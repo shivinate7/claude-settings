@@ -782,7 +782,7 @@ def _push_branch_config(cwd: str, current: str, with_default: bool, overrides=No
             key("push.default"), key("push.autosetupremote"))
 
 
-# Rule push-main judges the remote a push goes to. A URL is a network remote when it carries a scheme
+# Rule force-push (a push that writes main or master) judges the remote a push goes to. A URL is a network remote when it carries a scheme
 # (`https://`, `ssh://`, `git://`) or is scp-like (`host:path`, `user@host:path`).
 _PUSH_URL_SCHEME = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*://")
 _PUSH_URL_SCP = re.compile(r"[^/:\\]+:")
@@ -927,7 +927,7 @@ def push_ask_hit(args, cwd: str, overrides=None) -> str:
     no read. A colon-less refspec other than `main` or `master` reads the current branch once
     (`symbolic-ref`), to tell an implied destination from a literal one.
 
-    'main' (rule push-main): a non-forced push whose destination is literally `main` or `master`
+    'main' (rule force-push): a non-forced push whose destination is literally `main` or `master`
     to a network remote (`_push_goes_to_network`): a push to a path, a `file://` URL or a remote
     with no URL is silent. The remote's HEAD is never read. A push of a stray branch (rule push-stray-branch) is allowed and
     returns ''. A deletion, a forced push, a mirror, and a push of tags alone are never judged here. Reads: none for
@@ -1694,6 +1694,10 @@ PUSH_REASON = (
     "Rule (Git): a forced push can overwrite newer remote work with a stale copy. "
     "Remedy: retry with --force-with-lease --force-if-includes."
 )
+# The remedy both force-push reasons give in a repo with no merge tool: a push to the lane's own branch.
+PUSH_BRANCH_REMEDY = (
+    "Remedy: push the commit to your own branch, `git push origin HEAD:<branch>`, and name that branch in your report. "
+)
 PUSH_MAIN_REASON = (
     "Rule (Git): this push writes the default branch, main or master. Main moves only by pull request "
     "(rule git-main-only-by-pr, decision guard-remedy-not-to-owner). "
@@ -1705,7 +1709,7 @@ PUSH_MAIN_REASON = (
 PUSH_MAIN_BRANCH_REASON = (
     "Rule (Git): this push writes the default branch, main or master "
     "(decision guard-remedy-not-to-owner, a guard never asks the owner). "
-    "Remedy: push the commit to your own branch, `git push origin HEAD:<branch>`, and name that branch in your report. "
+    + PUSH_BRANCH_REMEDY
     + guard_core.COMPLY_TAIL
 )
 PUSH_ALL_REASON = (
@@ -1737,7 +1741,7 @@ PUSH_ASK_BRANCH_REASON = (
     "Rule (Git): this forced push may overwrite the history of the default branch, or its target is "
     "unreadable. A retry would force the same branch again "
     "(decision guard-remedy-not-to-owner, a guard never asks the owner). "
-    "Remedy: push the commit to your own branch, `git push origin HEAD:<branch>`, and name that branch in your report. "
+    + PUSH_BRANCH_REMEDY
     + guard_core.COMPLY_TAIL
 )
 

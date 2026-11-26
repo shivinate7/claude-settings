@@ -394,7 +394,7 @@ def past_ruling_context(payload, units):
                                                      question_form._git_root_of(cwd) or cwd or os.getcwd())
     print(question_form.unknown_line(unknown), file=sys.stderr)
     return (question_form.candidates_block(candidates, unknown, [words for _, words in units]),
-            question_form.candidate_ids(candidates),
+            question_form.candidate_ids(question_form.shown_candidates(candidates, unknown)),
             question_form.unreadable_sources(unknown), candidates)
 
 

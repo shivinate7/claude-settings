@@ -18,6 +18,7 @@ import importlib.util
 import io
 import os
 import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -357,6 +358,69 @@ class CensusFindings(unittest.TestCase):
         code, out = self.run_main(sweep_rows, guard_rows)
         self.assertEqual(out.splitlines()[-1:], ["mutant anchor census failed: 2 of 5 mutants have a bad row or anchor"], out)
         self.assertEqual(code, 1, out)
+
+
+def probe_rows(label, old):
+    """A folder file of one row, in the table's shape, whose anchor is `old` and whose target is a guard module."""
+    return "ROWS = [\n    (%r, %r, 'x', 'guard', 'a case name'),\n]\n" % (label, old)
+
+
+class FolderRowsAreCensused(unittest.TestCase):
+    """The census reads the list the harness runs, folder rows included. Each case runs the real census script in a copy of
+    the tree, under the run folder, with one probe file in hooks/mutants/. The copy holds hooks/, janitor/ and testing/ flat,
+    without test files, as the census reads them. The census imports janitor/mutate_sweep.py, so the copy needs janitor/."""
+
+    def tree(self, name):
+        root = os.path.join(RUN_FOLDER, name)
+        os.makedirs(os.path.join(root, "lint"))
+        shutil.copyfile(os.path.join(os.path.dirname(HERE), "lint", "check_mutant_anchors.py"),
+                        os.path.join(root, "lint", "check_mutant_anchors.py"))
+        repo = os.path.dirname(HERE)
+        for folder in ("hooks", "janitor", "testing"):
+            dest = os.path.join(root, folder)
+            os.makedirs(dest)
+            for entry in os.listdir(os.path.join(repo, folder)):
+                source = os.path.join(repo, folder, entry)
+                if entry.endswith(".py") and not entry.startswith("test_") and os.path.isfile(source):
+                    shutil.copyfile(source, os.path.join(dest, entry))
+        os.makedirs(os.path.join(root, "bin"))
+        shutil.copyfile(os.path.join(repo, "bin", "sim-lease"), os.path.join(root, "bin", "sim-lease"))
+        return root
+
+    def probe(self, root, name, text):
+        folder = os.path.join(root, "hooks", "mutants")
+        os.makedirs(folder, exist_ok=True)
+        with open(os.path.join(folder, name), "w", encoding="utf-8") as handle:
+            handle.write(text)
+
+    def census(self, root):
+        script = os.path.join(root, "lint", "check_mutant_anchors.py")
+        return subprocess.run([sys.executable, script], cwd=root, capture_output=True, text=True, timeout=600)
+
+    def test_a_folder_row_with_a_stale_anchor_fails_the_census(self):
+        root = self.tree("stale")
+        self.probe(root, "aa-stale.py", probe_rows("census probe: stale anchor", "NO SUCH ANCHOR TEXT 4f1c"))
+        proc = self.census(root)
+        self.assertEqual(proc.returncode, 1, "the census passed a folder row whose anchor is in no guard module:\n" + proc.stdout)
+        self.assertIn("census probe: stale anchor", proc.stdout)
+
+    def test_a_folder_row_with_an_ambiguous_anchor_fails_the_census(self):
+        root = self.tree("ambiguous")
+        for name in ("guard_probe_a.py", "guard_probe_b.py"):
+            with open(os.path.join(root, "hooks", name), "w", encoding="utf-8") as handle:
+                handle.write("PROBE_TWICE = 1\n")
+        self.probe(root, "aa-twice.py", probe_rows("census probe: ambiguous anchor", "PROBE_TWICE = 1"))
+        proc = self.census(root)
+        self.assertEqual(proc.returncode, 1, "the census passed a folder row whose anchor sits in two guard modules:\n" + proc.stdout)
+        self.assertIn("census probe: ambiguous anchor", proc.stdout)
+
+    def test_a_folder_row_with_a_valid_anchor_passes_the_census(self):
+        # The probe file holds its own anchor text too. A census that scanned folder files would find it twice and fail.
+        root = self.tree("valid")
+        self.probe(root, "aa-valid.py", probe_rows("census probe: valid anchor", "    question_form.use_hooks_home(_HERE)"))
+        proc = self.census(root)
+        self.assertEqual(proc.returncode, 0, "the census failed a valid folder row:\n" + proc.stdout)
+        self.assertIn("PASS mutant anchor census", proc.stdout)
 
 
 if __name__ == "__main__":

@@ -170,6 +170,22 @@ ppush_allow("a dry-run push to the ready branch", VCS + " push --dry-run origin 
 ppush_allow("a push to the ready branch in a repo pinned requiredChecks none, run green", VCS + " push origin feat-stale", STAMPNOCHECK,
             GHPUSH_GREEN)
 
+# UNKNOWN PIN STRING. STAMPUNKNOWN pins requiredChecks "all-proof", a string the merge tool does not pin. The read of the pin
+# is unknown, not "no pin", so the push judges the ready pull request as main does: the open-PR read still runs, and the
+# unknown string only refuses what needs the pin. A push to the ready branch is refused while its run is running.
+# THE RED. Each control below differs from it by one thing, and keeps its verdict on the old code and after the fix.
+ppush_refuse("pinned-string-unknown: a bare-named push to the ready branch feat-stale, its run running, under an unknown pin string",
+             VCS + " push origin feat-stale", STAMPUNKNOWN, GHPUSH_RUNNING)
+# THE CONTROLS. A draft branch is never refused, whatever the pin. STAMPPROTECT pins the known string protection, the string
+# the unknown one falls back to, so the same two pushes keep their verdicts beside the unknown string. first-proof is no
+# control here: it waits on no check (merge.waits_on_no_check), so a push under it is never refused.
+ppush_allow("pinned-string-unknown: a push to the draft branch feat-stale under an unknown pin string is allowed",
+            VCS + " push origin feat-stale", STAMPUNKNOWN, GHPUSH_DRAFT)
+ppush_refuse("pinned-string-unknown: a known pin protection refuses the same push to the ready branch, its run running",
+             VCS + " push origin feat-stale", STAMPPROTECT, GHPUSH_RUNNING)
+ppush_allow("pinned-string-unknown: a known pin protection allows the same push to the draft branch feat-stale",
+            VCS + " push origin feat-stale", STAMPPROTECT, GHPUSH_DRAFT)
+
 
 # THE REFUSAL TEXT. The last sentence is the comply-anyway line, every refusal of this rule ends with it.
 def ppush_ends_case():

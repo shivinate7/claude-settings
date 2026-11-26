@@ -1,0 +1,1 @@
+- watchdog-no-ps-leaves-child: With no `ps`, the watchdog in `bounded_run` (hooks/session_start.sh:76) kills only the wrapper subshell's pid, so the command it bounds is not killed and can outlive the timeout. Seen: 2026-11-25 x1
