@@ -476,6 +476,10 @@ NESTED_KILL_REFUSE = (
      "red-run abc1234 -- timeout 5 sh -c 'pkill -f node'"),
     ("bash -lc runs pkill", "bash -lc 'pkill -f node'"),
     ("the body in double quotes", 'sh -c "pkill -f \'sleep 30\'"'),
+    # Overreach guard for the body-as-data fix. An inner shell runs the heredoc body, so the body stays a
+    # command. The un-nested form is refused at main's merge base; this nested form is pinned to the same
+    # refusal. The merge base allows the nested form, so this row is red there and green on the branch.
+    ("a heredoc fed to an inner sh, which runs the pkill body", "sh -c 'sh <<EOF\npkill -f node\nEOF'"),
 )
 for _name, _command in NESTED_KILL_REFUSE:
     sh("kill nested: " + _name, _command, "deny", "machine-wide-kill", cwd=NOGIT)
@@ -503,6 +507,29 @@ NESTED_KILL_ALLOW = (
     ("a commit message holds the kill text", VCS + ' commit -m "docs: pkill -f node is refused"'),
     ("a commit message holds a nested sh -c body",
      VCS + ''' commit -m "docs: sh -c 'pkill -f node' is refused"'''),
+    # A heredoc body is data the nested shell writes or prints, so a body line that starts with pkill
+    # passes. Each row is a false alarm on the branch's pre-change tip, where the body line is read as a
+    # command, except the last row: a python3 heredoc is interpreter input, so it is green on both.
+    ("sh -c cats a heredoc whose body line is pkill, double-quoted body",
+     'sh -c "cat <<EOF\npkill -f node\nEOF"'),
+    ("bash -c writes a heredoc whose body line is pkill into a file",
+     "bash -c 'cat > notes.txt <<EOF\npkill -f node\nEOF'"),
+    ("sh -c cats a heredoc with a quoted delimiter, body line pkill",
+     "sh -c \"cat <<'EOF'\npkill -f node\nEOF\""),
+    ("bash -c writes a quoted-delimiter heredoc into a file, body line pkill",
+     "bash -c 'cat > notes.txt <<\"EOF\"\npkill -f node\nEOF'"),
+    ("sh -c cats a dash heredoc with a tab-indented body, double-quoted",
+     "sh -c \"cat <<-EOF\n\tpkill -f node\n\tEOF\""),
+    ("bash -c writes a dash heredoc with a tab-indented body into a file",
+     "bash -c 'cat > notes.txt <<-EOF\n\tpkill -f node\n\tEOF'"),
+    ("red-run wraps sh -c, which cats a heredoc whose body line is pkill",
+     "red-run abc1234 -- sh -c 'cat <<EOF\npkill -f node\nEOF'"),
+    ("bash -c commits with a -F heredoc message whose body line is pkill",
+     "bash -c '" + VCS + " commit -F - <<EOF\nKill rule: refuse the nested form\n\npkill -f node\nEOF'"),
+    ("bash -c commits with a cat heredoc message whose body line is pkill",
+     "bash -c '" + VCS + " commit -m \"$(cat <<EOF\nKill rule: refuse the nested form\n\npkill -f node\nEOF\n)\"'"),
+    ("sh -c runs python3 on a heredoc whose triple-quoted string holds a pkill line",
+     "sh -c 'python3 - <<EOF\nprint(\"\"\"\npkill -f node\n\"\"\")\nEOF'"),
 )
 for _name, _command in NESTED_KILL_ALLOW:
     sh("kill nested: " + _name + " passes", _command, "allow", cwd=NOGIT)
