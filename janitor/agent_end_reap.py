@@ -267,7 +267,8 @@ def decide(target: str):
 
 def cwd_reader(timeout=BATCH_TIMEOUT):
     """`(pids, cwd_of)` for every process but this one, or None when the enumeration failed.
-    CWD_OF(pid) is that pid's cwd, or None when its own read failed."""
+    CWD_OF(pid) is that pid's cwd, or None when its own read failed. The batch table is the run's
+    shared read (`sweep.shared_process_table`)."""
     pids = sweep.list_all_pids()
     if pids is None:
         return None
@@ -275,7 +276,7 @@ def cwd_reader(timeout=BATCH_TIMEOUT):
     if sys.platform == "darwin":
         # One `lsof` for every pid: 1,300 per-pid reads at 27 ms overran the 60 s hook limit.
         # A failed batch keeps everything; it never falls back to per-pid reads.
-        table = sweep._read_all_cwds_macos(timeout)
+        table = sweep._all_cwds_macos(timeout)
         if table is None:
             return None
         cwd_of = sweep._first_cwd_by_pid(table).get
@@ -514,6 +515,15 @@ def build_keep(entry: dict, idle, deadline: float):
         return "unreadable-subject: processes", None
     if any(sweep._cwd_under_checkout(c, path) for c in cwds):
         return "process-in-worktree", cwds
+    if sweep.table_is_shared():
+        # The shared read may be old, and the caller renames folders next: read again, fresh.
+        with sweep.fresh_process_reads():
+            again = all_cwds(max(1, min(BATCH_TIMEOUT, deadline - time.monotonic())))
+        if again is None:
+            return "unreadable-subject: processes", None
+        if any(sweep._cwd_under_checkout(c, path) for c in again):
+            return "process-in-worktree", again
+        cwds = again
     return None, cwds
 
 
@@ -617,7 +627,8 @@ def stop_and_settle(path: str, decision: dict, deadline: float):
     `processes_in` does not list."""
     decision["signalled"] = [sweep.send_signal(pid) for pid in decision["stop_pids"]]
     while True:
-        inside, _unreadable = sweep.processes_in(path)
+        with sweep.fresh_process_reads():
+            inside, _unreadable = sweep.processes_in(path)
         if inside is not None and not inside:
             return None
         if inside is None:
@@ -702,16 +713,17 @@ def handle(raw: str, started=None):
     record = {"raw": raw, "target": target}
     if not target:
         return record
-    reason, decisions = _decide(target)
-    for decision in decisions:
-        if decision["action"] == "reap":
-            decision["signalled"] = sweep.send_signal(decision["pid"])
-    # claudePid: whether the harness sets CLAUDE_PID in a SubagentStop hook's env is not measured.
-    record.update(reason=reason, decisions=decisions, claudePid=os.environ.get("CLAUDE_PID"))
-    if reason is None:
-        now = time.monotonic()
-        deadline = min(now + WORKTREE_SECONDS, (now if started is None else started) + HOOK_BUDGET)
-        record["worktrees"] = reap_worktrees(target, deadline, payload)
+    with sweep.shared_process_table():  # one batch cwd read for the whole run; a removal reads fresh
+        reason, decisions = _decide(target)
+        for decision in decisions:
+            if decision["action"] == "reap":
+                decision["signalled"] = sweep.send_signal(decision["pid"])
+        # claudePid: whether the harness sets CLAUDE_PID in a SubagentStop hook's env is not measured.
+        record.update(reason=reason, decisions=decisions, claudePid=os.environ.get("CLAUDE_PID"))
+        if reason is None:
+            now = time.monotonic()
+            deadline = min(now + WORKTREE_SECONDS, (now if started is None else started) + HOOK_BUDGET)
+            record["worktrees"] = reap_worktrees(target, deadline, payload)
     return record
 
 
