@@ -5308,12 +5308,40 @@ _SPONSOR = ("import os, subprocess, sys, time\n"
             "time.sleep(120)\n")
 
 
+# The stub `lsof` the agent-end fixture puts first on PATH. It logs every start, so a case counts the
+# reads a run makes. The cwd table lists this user's processes only, read through the real lsof with
+# `-p`, so no case scans every process on the machine. `$LSOF_LATE` adds table lines from start number
+# `$LSOF_FROM` on: a process that enters a tree after the first read. `$LSOF_FAIL` fails every cwd read.
+# An open-files read (`+D`) finds nothing. A per-pid read goes to the real lsof unchanged.
+LSOF_STUB = r"""#!/bin/sh
+printf '%s\n' "$*" >> "${LSOF_COUNT:-/dev/null}"
+case "$*" in
+  *"+D"*) exit 1 ;;
+  *"-d cwd"*) ;;
+  *) exit 1 ;;
+esac
+case "$*" in
+  *"-p "*) exec "@REAL@" "$@" ;;
+esac
+if [ -n "$LSOF_FAIL" ]; then exit 2; fi
+pids=$(ps -axo pid=,uid= | awk -v me="$(id -u)" '$2 == me { printf "%s%s", sep, $1; sep = "," }')
+if [ -z "$pids" ]; then exit 1; fi
+"@REAL@" -a -d cwd -Fpn -p "$pids" 2>/dev/null
+status=$?
+if [ -n "$LSOF_LATE" ]; then
+  count=$(wc -l < "${LSOF_COUNT:-/dev/null}" | tr -d ' ')
+  if [ "$count" -ge "${LSOF_FROM:-1}" ]; then cat "$LSOF_LATE"; fi
+fi
+exit $status
+"""
+
+
 class _AgentEndFixture(unittest.TestCase):
     """Shared fixture for the agent-end worktree cases below. Real repo with a bare remote, real
     worktrees under `.claude/worktrees/`, and the SubagentStop hook run as the harness runs it."""
 
     def setUp(self):
-        self.root = tempfile.mkdtemp(prefix="agent_end_wt_")
+        self.root = tempfile.mkdtemp(prefix="agent_end_wt_", dir=_test_temp.run_folder())
         self.addCleanup(shutil.rmtree, self.root, True)
         self.cfg = os.path.join(self.root, "cfg")  # the config dir the hook process reads and writes
         self.primary = os.path.join(self.root, "repo")
@@ -5321,6 +5349,23 @@ class _AgentEndFixture(unittest.TestCase):
         give_remote(self.primary)
         import agent_end_reap
         self.reap = agent_end_reap
+        self.install_lsof_stub()
+
+    def install_lsof_stub(self):
+        """Put the stub `lsof` first on PATH, so every read a hook or an in-process run makes goes
+        through it. Its starts are logged to `self.lsof_count`. Windows reads no lsof here: no stub."""
+        self.lsof_count = os.path.join(self.root, "lsof-starts.txt")
+        if sys.platform.startswith("win"):
+            return
+        folder = os.path.join(self.root, "lsof-bin")
+        os.makedirs(folder)
+        stub = os.path.join(folder, "lsof")
+        write(stub, LSOF_STUB.replace("@REAL@", shutil.which("lsof") or ""))
+        os.chmod(stub, 0o755)
+        patch = mock.patch.dict(os.environ, {"PATH": folder + os.pathsep + os.environ.get("PATH", ""),
+                                             "LSOF_COUNT": self.lsof_count})
+        patch.start()
+        self.addCleanup(patch.stop)
 
     def add(self, name):
         """A worktree at `.claude/worktrees/agent-NAME` on a new lane branch cut from main. HEAD sits
@@ -5564,6 +5609,138 @@ class _AgentEndFixture(unittest.TestCase):
         for pid in children:
             self.addCleanup(sweep.send_signal, pid)
         return shell, children
+
+
+@unittest.skipIf(sys.platform.startswith("win"), "the stub lsof is a POSIX shell script")
+class OneLsofPerRunTests(_AgentEndFixture):
+    """A run reads the process table once, not once per tree it judges. A whole-machine `lsof -d cwd`
+    takes seconds on a real Mac, so one agent-end reap or one sweep that judges several trees must not
+    start one per tree, and one leftover-temp pass must not open one `lsof +D` per folder. Cases 1, 2 and
+    5 are the shared-read pins: they fail on the code as it stands. Cases 3 and 4 are the safety rules the
+    shared read must keep, and they hold now: a tree the run removes gets a fresh read just before its
+    removal, and a failed or timed-out read removes nothing. Each case reads sys.platform as darwin,
+    where the cwd table and the open-files read are taken."""
+
+    def darwin(self):
+        return mock.patch.object(sys, "platform", "darwin")
+
+    def keep_tree(self, name):
+        """An agent's tree the run may only keep: idle past the rule, clean and pushed, so a process
+        inside it is the only reason it stays."""
+        tree = self.add(name)
+        _age_admin_files(tree, 31 * 60)
+        return tree
+
+    def rows_by_path(self, record):
+        return {_norm_path(str(row["path"])): row for row in record.get("worktrees") or [] if "path" in row}
+
+    def count_starts(self, wanted):
+        if not os.path.exists(self.lsof_count):
+            return 0
+        with open(self.lsof_count, encoding="utf-8") as handle:
+            return sum(1 for line in handle if wanted(line))
+
+    def batch_cwd_starts(self):
+        """Batch `lsof -d cwd` starts: a per-pid read (`-p PID`) is not counted."""
+        return self.count_starts(lambda argv: "-d cwd" in argv and "-p " not in argv)
+
+    def open_file_starts(self):
+        return self.count_starts(lambda argv: "+D" in argv)
+
+    def test_one_agent_end_reap_reads_the_process_table_once_for_three_kept_trees(self):
+        own = self.add("ending")
+        trees = [self.keep_tree(name) for name in ("one", "two", "three")]
+        for tree in trees:
+            self.sleeper(tree)  # a live process inside each tree: the reap keeps all three
+        with self.darwin():
+            record = self.run_in_process("ending", own)
+        self.assertIsNone(record.get("reason"), "the reap did not run: %s" % record.get("reason"))
+        rows = self.rows_by_path(record)
+        for tree in trees:
+            self.assertIn(_norm_path(tree), rows, "the reap wrote no row for %s" % tree)
+            self.assertEqual(rows[_norm_path(tree)]["action"], "keep",
+                             "a tree with a process inside was not kept: %s" % rows[_norm_path(tree)].get("reason"))
+        starts = self.batch_cwd_starts()
+        self.assertLessEqual(starts, 1, "one agent-end reap of three kept trees started the batch cwd read %d "
+                                        "times; want at most once" % starts)
+
+    def test_one_acting_sweep_reads_the_process_table_once_for_three_kept_trees(self):
+        trees = [self.keep_tree(name) for name in ("one", "two", "three")]
+        for tree in trees:
+            self.sleeper(tree)  # a live process inside each tree: the sweep keeps all three
+        with self.darwin(), mock.patch.object(sweep, "reap_listener"):  # no real listener is reaped
+            sweep.sweep_repo(self.primary, True, os.path.join(self.root, "restore.log"), attended=True)
+        for tree in trees:
+            self.assertKept(tree)
+        starts = self.batch_cwd_starts()
+        self.assertLessEqual(starts, 1, "one acting sweep over three kept trees started the batch cwd read %d "
+                                        "times; want at most once" % starts)
+
+    def test_a_tree_the_run_removes_gets_a_fresh_read_before_its_removal(self):
+        own = self.add("ending")
+        late = self.keep_tree("late")  # a process enters this tree after the run's first read
+        control = self.keep_tree("ctl")  # no process: the run must remove it
+        table = os.path.join(self.root, "late-table.txt")
+        write(table, "p2147483\nn%s\n" % os.path.realpath(late))
+        with self.darwin(), mock.patch.dict(os.environ, {"LSOF_LATE": table, "LSOF_FROM": "2"}):
+            record = self.run_in_process("ending", own)
+        self.assertIsNone(record.get("reason"), "the reap did not run: %s" % record.get("reason"))
+        self.assertRemoved(control, " (the clean control tree: the run must remove a tree with no process inside)")
+        self.assertKept(late)
+
+    def test_a_failed_read_keeps_every_tree_and_removes_none(self):
+        own = self.add("ending")
+        tree = self.add("gone")  # clean, pushed and removable, so only the failed read can keep it
+        with self.darwin(), mock.patch.dict(os.environ, {"LSOF_FAIL": "1"}):
+            _age_admin_files(tree, 31 * 60)
+            record = self.run_in_process("ending", own)
+        self.assertIsNotNone(record.get("reason"), "a failed process-table read did not stop the reap")
+        self.assertKept(tree)
+        with self.darwin():
+            _age_admin_files(tree, 31 * 60)
+            self.run_in_process("ending", own)
+        self.assertRemoved(tree, " (the same tree goes once the read works, so the keep came from the failed read)")
+
+    def test_a_timed_out_read_keeps_every_tree_and_removes_none(self):
+        own = self.add("ending")
+        tree = self.add("gone")
+        real_run = subprocess.run
+
+        def timing_out(argv, *args, **kwargs):
+            if argv and argv[0] == "lsof":
+                raise subprocess.TimeoutExpired(argv, kwargs.get("timeout"))
+            return real_run(argv, *args, **kwargs)
+        with self.darwin(), mock.patch.object(subprocess, "run", timing_out):
+            _age_admin_files(tree, 31 * 60)
+            record = self.run_in_process("ending", own)
+        self.assertIsNotNone(record.get("reason"), "a timed-out process-table read did not stop the reap")
+        self.assertKept(tree)
+        with self.darwin():
+            _age_admin_files(tree, 31 * 60)
+            self.run_in_process("ending", own)
+        self.assertRemoved(tree, " (the same tree goes once the read works, so the keep came from the timeout)")
+
+    def test_leftover_temp_reads_the_process_table_and_open_files_once_for_three_candidates(self):
+        temp = os.path.join(self.root, "tmp")
+        run_folders = os.path.join(temp, "claude-settings-test-temp")
+        os.makedirs(run_folders)
+        dead = temp_dead_pid()
+        now = time.time()
+        for _ in range(3):
+            folder = os.path.join(run_folders, "%d-%s" % (dead, uuid.uuid4().hex))
+            os.makedirs(folder)
+            os.utime(folder, (now - 2 * 60 * 60, now - 2 * 60 * 60))  # over the one-hour limit
+            self.sleeper(folder)  # a live process inside each folder: every candidate is kept
+        with self.darwin():
+            decisions = sweep.find_leftover_temp(temp, now)
+        self.assertEqual(sorted(d["action"] for d in decisions), ["keep"] * 3,
+                         "the three candidates were not all judged and kept: %r" % decisions)
+        opens = self.open_file_starts()
+        self.assertLessEqual(opens, 1, "leftover temp folders opened the open-files read %d times for three "
+                                       "candidates; want at most once" % opens)
+        cwd = self.batch_cwd_starts()
+        self.assertLessEqual(cwd, 1, "leftover temp folders started the batch cwd read %d times for three "
+                                     "candidates; want at most once" % cwd)
 
 
 class AgentEndOwnWorktreeTests(_AgentEndFixture):
