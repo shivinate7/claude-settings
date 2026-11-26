@@ -1314,6 +1314,40 @@ sh("detached: nohup wrapping a real kill still hits rule 2, not this rule",
 sh("detached: the shape inside a heredoc body is data, not a command",
    "cat <<'EOF' > notes.txt\nnohup python3 server.py &\nEOF", "allow", cwd=NOGIT)
 
+# PID CAPTURE, PER JOB. A background job is exempt only with its own `$!`: one `$!` in the call covers
+# one job, not every job in it. A `$!` inside quotes is text, not a capture.
+sh("detached: twelve background jobs under one pid capture are refused",
+   " ".join(["yes > /dev/null &"] * 12) + " echo $!", "deny", "detached-launch", cwd=NOGIT)
+sh("detached: two different background jobs under one pid capture are refused",
+   "make test & make lint & echo $!", "deny", "detached-launch", cwd=NOGIT)
+sh("detached: a quoted $! is text, so the background job it follows is refused",
+   "make test & echo 'pid $!'", "deny", "detached-launch", cwd=NOGIT)
+# LOAD GENERATORS. A CPU load generator (`yes`, `stress`, a busy `while` loop with no sleep) starts in
+# the background only under a time limit and in its own session. The form read is `timeout N setsid
+# cmd &`: the time limit is the `timeout` word before the command, the session is the `setsid` word after it.
+sh("detached: yes in the background with no time limit is refused", "yes > /dev/null & echo $!",
+   "deny", "detached-launch", cwd=NOGIT)
+sh("detached: stress with a pid capture and no time limit is refused", "stress --cpu 4 & pid=$!",
+   "deny", "detached-launch", cwd=NOGIT)
+sh("detached: a busy while true loop with no sleep, in the background, is refused",
+   "while true; do :; done & pid=$!", "deny", "detached-launch", cwd=NOGIT)
+sh("detached: a busy while colon loop with no sleep, in the background, is refused",
+   "while :; do :; done & pid=$!", "deny", "detached-launch", cwd=NOGIT)
+sh("detached: yes under a time limit but not its own session is refused",
+   "timeout 600 yes > /dev/null & pid=$!", "deny", "detached-launch", cwd=NOGIT)
+# CONTROLS. A test job or server with its own capture is no load generator; a time-limited yes in its
+# own session, a foreground pipe and a short sleep start nothing the rule refuses.
+sh("detached: one background test job with its own pid capture is allowed",
+   "python3 lint/test_guard_inputs.py & pid=$!", "allow", cwd=NOGIT)
+sh("detached: two background jobs, each with its own pid capture, are allowed",
+   "make test & p1=$!; make lint & p2=$!", "allow", cwd=NOGIT)
+sh("detached: yes under a time limit in its own session, pid printed, is allowed",
+   "timeout 600 setsid yes > /dev/null & echo $!", "allow", cwd=NOGIT)
+sh("detached: a foreground yes piped into head starts no job", "yes | head -n 5", "allow",
+   cwd=NOGIT)
+sh("detached: a short background sleep with its pid captured is allowed", "sleep 5 & pid=$!",
+   "allow", cwd=NOGIT)
+
 # THE WINDOWS FORMS, the owner's scope change: the same protection PowerShell needs, since
 # guard.py judges Bash and PowerShell alike (SHELL_TOOLS). MEASURED 2026-09-24 against local
 # transcripts: 4 real `Start-Process` calls, all through the PowerShell tool, all already
