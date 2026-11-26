@@ -1,0 +1,1 @@
+- child-case-allow-untested: the rename compare in lint/children.py list --active allows a letter-case difference (casefold), but no case in lint/test_children.py pins that allow side; a mutant that compares names exactly passes class ListActive. Seen: 2026-11-25 x1
