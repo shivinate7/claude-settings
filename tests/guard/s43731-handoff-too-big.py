@@ -105,6 +105,7 @@ add("handoff-too-big: a MultiEdit that grows an over-limit handoff on disk is re
 HTB_SCRATCH = os.path.join(ROOT, "htb-scratch")
 HTB_OVER_FILE = os.path.join(HTB_SCRATCH, "over.md")      # htb_text(35001): 10001 estimated tokens, six sections
 HTB_AT_FILE = os.path.join(HTB_SCRATCH, "at.md")          # htb_text(35000): the limit itself, which passes
+HTB_NAMED_OVER = os.path.join(HTB_SCRATCH, HTB_NEW + ".md")  # htb_text(35001), named as HTB_NEW's handoff
 HBA_CFG = os.path.join(ROOT, "hba-cfg")                   # an installed prompt, and HTB_NEW's handoff at 35000 bytes
 HTB_HOME_REL = os.path.relpath(HTB_NEW_HANDOFF, ROOT).replace(os.sep, "/")
 HTB_TILDE = "~/" + HTB_HOME_REL
@@ -115,6 +116,7 @@ HTB_HOME = {"HOME": ROOT}
 def _build_htb_scratch():
     write(HTB_OVER_FILE, htb_text(35001))
     write(HTB_AT_FILE, htb_text(35000))
+    write(HTB_NAMED_OVER, htb_text(35001))
 
 
 def _build_hba():
@@ -122,7 +124,7 @@ def _build_hba():
     write(hs_handoff(HBA_CFG, HTB_NEW), htb_text(35000))
 
 
-lazy_fixture([HTB_OVER_FILE, HTB_AT_FILE], _build_htb_scratch)
+lazy_fixture([HTB_OVER_FILE, HTB_AT_FILE, HTB_NAMED_OVER], _build_htb_scratch)
 lazy_fixture([HBA_CFG], _build_hba)
 
 
@@ -143,6 +145,36 @@ HTB_BASH_SCOPE_LABEL = ("handoff-too-big: scope: the Bash scratch files are 3500
                         "the new session's handoff")
 LOG_FAMILY[HTB_BASH_SCOPE_LABEL] = FAMILY
 LOG_CHECKS = LOG_CHECKS + ((HTB_BASH_SCOPE_LABEL, htb_bash_scope),)
+
+
+def htb_named_scope():
+    """The folder case copies a file over the limit named as HTB_NEW's handoff, so the copy lands on that handoff. The
+    CLAUDE_CONFIG_DIR cases expand the variable to the same path. A name, size or expansion that differs would move those
+    cases with no other check failing."""
+    materialize(HTB_NAMED_OVER)
+    if os.path.basename(HTB_NAMED_OVER) != os.path.basename(HTB_NEW_HANDOFF):
+        return False, "the named over file is %r, not the new session's handoff name" % os.path.basename(HTB_NAMED_OVER)
+    size = os.path.getsize(HTB_NAMED_OVER)
+    if size != 35001:
+        return False, "the named over file is %d bytes, want 35001" % size
+    saved = os.environ.get("CLAUDE_CONFIG_DIR")
+    os.environ["CLAUDE_CONFIG_DIR"] = HTB_CFG
+    try:
+        expanded = os.path.expandvars("$CLAUDE_CONFIG_DIR/handoffs/%s.md" % HTB_NEW)
+    finally:
+        if saved is None:
+            os.environ.pop("CLAUDE_CONFIG_DIR", None)
+        else:
+            os.environ["CLAUDE_CONFIG_DIR"] = saved
+    if expanded != HTB_NEW_HANDOFF:
+        return False, "$CLAUDE_CONFIG_DIR expands to %s, want %s" % (expanded, HTB_NEW_HANDOFF)
+    return True, "the named over file is 35001 bytes, named as the new session's handoff, and $CLAUDE_CONFIG_DIR names it"
+
+
+HTB_NAMED_SCOPE_LABEL = ("handoff-too-big: scope: the named over file is 35001 bytes, named as the new session's handoff, "
+                         "and $CLAUDE_CONFIG_DIR names it")
+LOG_FAMILY[HTB_NAMED_SCOPE_LABEL] = FAMILY
+LOG_CHECKS = LOG_CHECKS + ((HTB_NAMED_SCOPE_LABEL, htb_named_scope),)
 
 
 def htb_bash_refuse(name, command, **kw):
@@ -189,3 +221,23 @@ sh("handoff-too-big: a heredoc redirected with > at the limit, 35000 bytes, onto
 sh("handoff-too-big: a Bash append of one line onto a small session handoff on disk passes, silently",
    "cat >> %s <<'EOF'\n%sEOF\n" % (hs_handoff(HS_CFG), HTB_LINE), "allow",
    cwd=NOGIT, session=HS_SID, config=HS_CFG, silent=True)
+
+# Shell forms that write a session handoff through a config variable or a folder target, judged as a Write of the same text.
+# The cd form onto the bare file name is judged already and is pinned here. The two CLAUDE_CONFIG_DIR cases differ only in
+# the file's size, so the one at the limit passes and the one over it is refused.
+htb_bash_refuse("handoff-too-big: a Bash cp of a scratch file one byte over the limit to "
+              "$CLAUDE_CONFIG_DIR/handoffs/<session>.md is refused, naming the estimate",
+              "cp %s \"$CLAUDE_CONFIG_DIR/handoffs/%s.md\"" % (HTB_OVER_FILE, HTB_NEW))
+sh("handoff-too-big: a Bash cp of a scratch file at the limit, 35000 bytes, to $CLAUDE_CONFIG_DIR/handoffs/<session>.md "
+   "passes, silently",
+   "cp %s \"$CLAUDE_CONFIG_DIR/handoffs/%s.md\"" % (HTB_AT_FILE, HTB_NEW), "allow",
+   cwd=NOGIT, session=HTB_NEW, config=HTB_CFG, silent=True)
+htb_bash_refuse("handoff-too-big: a Bash cp of a scratch file one byte over the limit, named as the new session's handoff, "
+              "into the handoffs folder with a trailing slash, is refused, naming the estimate",
+              "cp %s %s/" % (HTB_NAMED_OVER, os.path.dirname(HTB_NEW_HANDOFF)))
+htb_bash_refuse("handoff-too-big: a Bash cp of a scratch file one byte over the limit, named as the new session's handoff, "
+              "into the handoffs folder with no slash, is refused, naming the estimate",
+              "cp %s %s" % (HTB_NAMED_OVER, os.path.dirname(HTB_NEW_HANDOFF)))
+htb_bash_refuse("handoff-too-big: a cd into the handoffs folder, then a cp of a scratch file one byte over the limit onto the "
+              "bare file name, is refused, naming the estimate",
+              "cd %s && cp %s %s.md" % (os.path.dirname(HTB_NEW_HANDOFF), HTB_OVER_FILE, HTB_NEW))

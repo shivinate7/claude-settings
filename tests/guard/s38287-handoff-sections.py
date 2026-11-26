@@ -548,6 +548,28 @@ def _build_hbw():
 
 
 lazy_fixture([HBW_NOSEC, HBW_GOOD], _build_hbw)
+HS_FOLDER = os.path.dirname(HS_HANDOFF)                                 # the handoffs folder: a folder target names it
+HBW_NAMED = os.path.join(ROOT, "hbw-named", HS_SID + ".md")             # drops the tail, named as the session handoff
+HBW_NAMED_GOOD = os.path.join(ROOT, "hbw-named-good", HS_SID + ".md")   # all six sections, under the same name
+HBW_CFG_VAR_HANDOFF = "\"$CLAUDE_CONFIG_DIR/handoffs/%s.md\"" % HS_SID  # the session handoff, through the config variable
+# A case-insensitive volume reads one folder under two spellings. The probe runs on this run's volume, which HS_CFG sits on:
+# where the capitals spelling is the same folder, a Bash write to it is a write to the session handoff. Where it is another
+# folder, that case is skipped and says why.
+CASE_DIR = os.path.join(ROOT, "case-probe")
+os.makedirs(os.path.join(CASE_DIR, "handoffs"), exist_ok=True)
+try:
+    CASE_INSENSITIVE = os.path.samefile(os.path.join(CASE_DIR, "HANDOFFS"), os.path.join(CASE_DIR, "handoffs"))
+except OSError:
+    CASE_INSENSITIVE = False
+HS_CASE_HANDOFF = os.path.join(HS_CFG, "HANDOFFS", HS_SID + ".md")      # the session handoff, its folder in capitals
+
+
+def _build_hbw_named():
+    write(HBW_NAMED, hs_text(omit=HS_TAIL))
+    write(HBW_NAMED_GOOD, hs_text())
+
+
+lazy_fixture([HBW_NAMED, HBW_NAMED_GOOD], _build_hbw_named)
 
 
 def hbw_home_expands(rel, want):
@@ -673,6 +695,104 @@ hbw_refuse("handoff-shell-write: a pipe from git into tee onto the session hando
          "the Write tool as the remedy",
          VCS + " log --oneline | tee " + HBW_DOLLAR, env=HBW_HOME,
          rule=HSW_RULE, carries=(HSW_REMEDY,), lacks=HSW_LACKS)
+
+
+# ----------------------------------------------------------------- Bash forms that put a session handoff's text on disk
+# Judged as a Write of the same text: a source that is a readable file is refused under the rule its content breaks (a file
+# that drops the tail, handoff-sections). perl -pi -e rewrites the file with a program's text, which the guard cannot read
+# before the command runs, so it is refused under handoff-shell-write. The cd and shell-variable forms are judged already
+# and are pinned here, so a change to the readers keeps them.
+def hbw_named_scope():
+    """The folder forms copy a file named as the session handoff, so the copy lands on the handoff itself. The no-slash form
+    needs the folder to exist on disk. A file under another name, or a missing folder, would move those cases to another
+    target with no other check failing."""
+    materialize(HS_CFG)
+    if not os.path.isdir(HS_FOLDER):
+        return False, "the handoffs folder is not on disk, so a cp with no slash would not name it"
+    for path, want in ((HBW_NAMED, hs_text(omit=HS_TAIL)), (HBW_NAMED_GOOD, hs_text())):
+        if os.path.basename(path) != os.path.basename(HS_HANDOFF):
+            return False, "%s is not named as the session handoff" % os.path.basename(path)
+        materialize(path)
+        try:
+            with open(path, "r", encoding="utf-8") as handle:
+                text = handle.read()
+        except OSError as e:
+            return False, "%s is unreadable: %s" % (path, e)
+        if text != want:
+            return False, "%s on disk is not the text the cases name" % path
+    return True, "the folder forms' scratch files are named as the session handoff, and the handoffs folder is on disk"
+
+
+LOG_CHECKS_EXTRA.append(("handoff-sections: scope: the folder forms' scratch files are named as the session handoff",
+                         hbw_named_scope))
+
+hbw_refuse("handoff-sections: a Bash cp of a scratch file named as the session handoff, into the handoffs folder with a "
+           "trailing slash, is refused, naming the three",
+           "cp %s %s/" % (HBW_NAMED, HS_FOLDER))
+hbw_refuse("handoff-sections: a Bash cp of a scratch file named as the session handoff, into the handoffs folder with no "
+           "slash, is refused, naming the three",
+           "cp %s %s" % (HBW_NAMED, HS_FOLDER))
+hbw_refuse("handoff-sections: a Bash cp -t of a scratch file named as the session handoff, into the handoffs folder, is "
+           "refused, naming the three",
+           "cp -t %s %s" % (HS_FOLDER, HBW_NAMED))
+hbw_refuse("handoff-sections: a Bash noclobber-override redirect >| of a scratch file that drops the tail onto the session "
+           "handoff is refused, naming the three",
+           "cat %s >| %s" % (HBW_NOSEC, HS_HANDOFF))
+hbw_refuse("handoff-sections: a Bash dd of a scratch file that drops the tail, with of= the session handoff, is refused, "
+           "naming the three",
+           "dd if=%s of=%s" % (HBW_NOSEC, HS_HANDOFF))
+hbw_refuse("handoff-sections: a Bash rsync of a scratch file that drops the tail onto the session handoff is refused, "
+           "naming the three",
+           "rsync %s %s" % (HBW_NOSEC, HS_HANDOFF))
+hbw_refuse("handoff-sections: a Bash ditto of a scratch file that drops the tail onto the session handoff is refused, "
+           "naming the three",
+           "ditto %s %s" % (HBW_NOSEC, HS_HANDOFF))
+hbw_refuse("handoff-sections: a cd into the handoffs folder, then a cp of a scratch file that drops the tail onto the bare "
+           "file name, is refused, naming the three",
+           "cd %s && cp %s %s.md" % (HS_FOLDER, HBW_NOSEC, HS_SID))
+hbw_refuse("handoff-sections: a cd into the handoffs folder, then a > redirect of a scratch file that drops the tail onto "
+           "the bare file name, is refused, naming the three",
+           "cd %s && cat %s > %s.md" % (HS_FOLDER, HBW_NOSEC, HS_SID))
+hbw_refuse("handoff-sections: a cp of a scratch file that drops the tail onto the session handoff, its path held in a shell "
+           "variable set earlier on the line, is refused, naming the three",
+           "H=%s && cp %s \"$H\"" % (HS_HANDOFF, HBW_NOSEC))
+hbw_refuse("handoff-sections: a cp of a scratch file that drops the tail onto the session handoff, its path held in a shell "
+           "variable set with a semicolon, is refused, naming the three",
+           "H=%s; cp %s $H" % (HS_HANDOFF, HBW_NOSEC))
+hbw_refuse("handoff-sections: a cp of a scratch file that drops the tail to $CLAUDE_CONFIG_DIR/handoffs/<session>.md, the "
+           "variable set in the payload's environment, is refused, naming the three",
+           "cp %s %s" % (HBW_NOSEC, HBW_CFG_VAR_HANDOFF))
+if CASE_INSENSITIVE:
+    hbw_refuse("handoff-sections: a cp of a scratch file that drops the tail onto the session handoff, named in the handoffs "
+               "folder's capitals spelling, which is the same folder on this volume, is refused, naming the three",
+               "cp %s %s" % (HBW_NOSEC, HS_CASE_HANDOFF))
+else:
+    skip_case("handoff-sections: a cp into the handoffs folder spelled in capitals is refused, naming the three",
+              "this volume is case-sensitive, so the capitals spelling is another folder, not the session handoff")
+hbw_refuse("handoff-shell-write: a perl -pi -e that rewrites the session handoff in place is refused, with the Write tool as "
+           "the remedy",
+           "perl -pi -e 's/Goal/Goal/' %s" % HS_HANDOFF,
+           rule=HSW_RULE, carries=(HSW_REMEDY,), lacks=HSW_LACKS)
+
+# The controls: each is the same shape as a refused form above, with a target or content the rules pass.
+hbw_allow("handoff-sections: a Bash cp of a complete scratch file named as the session handoff, into the handoffs folder "
+          "with a trailing slash, passes, silently",
+          "cp %s %s/" % (HBW_NAMED_GOOD, HS_FOLDER))
+hbw_allow("handoff-sections: a Bash cp of a complete scratch file to $CLAUDE_CONFIG_DIR/handoffs/<session>.md passes, "
+          "silently",
+          "cp %s %s" % (HBW_GOOD, HBW_CFG_VAR_HANDOFF))
+hbw_allow("handoff-sections: a printf appended with > to the session's owner-feedback inbox passes, silently",
+          "printf 'item\\n' >> %s" % HBW_INBOX)
+hbw_allow("handoff-sections: a printf piped into tee -a on the session's owner-feedback inbox passes, silently",
+          "printf 'item\\n' | tee -a %s" % HBW_INBOX)
+hbw_allow("handoff-sections: an rsync of a handoff that lacks Next steps out to a scratch folder passes, silently",
+          "rsync %s %s/" % (hs_handoff(HS_CFG, HS_GAP), HBW_DIR))
+hbw_allow("handoff-sections: a cp of a scratch file that drops the tail into a folder elsewhere whose name contains handoffs "
+          "passes, silently",
+          "cp %s %s" % (HBW_NOSEC, os.path.join(HBW_DIR, "handoffs-archive", HS_SID + ".md")))
+sh("handoff-sections: the audit brief run of the session handoff, python3 on the installed script, passes, silently",
+   "python3 %s --audit-brief --handoff %s" % (os.path.join(HERE, "precompact_handoff.py"), HS_HANDOFF), "allow",
+   cwd=NOGIT, session=HS_SID, config=HS_CFG, silent=True)
 
 
 # =========================================================================== handoff-checked-stamp
