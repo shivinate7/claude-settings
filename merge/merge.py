@@ -1785,6 +1785,11 @@ class Host:
             rows.append({"name": s["context"], "bucket": self.STATE_BUCKET.get(s["state"], "fail"), "status": True, "link": s.get("target_url")})
         return self.buckets(rows, warn, sha)
 
+    def failed_attempts(self, sha):
+        """-> the entries "name: fail link" of every failed attempt of every job on `sha`, from the check runs read with filter=all (the older attempts of a re-run too; `checks` reads the latest attempt of each job only). Only confirm's live-head gate reads it, for a proof whose latest rows are all cancels. A failed read is a Stop, never an empty list."""
+        rows = [self.run_row(r, r.get("details_url")) for r in self.pages(f"commits/{sha}/check-runs", "check_runs", fields={"filter": "all"})]
+        return [f"{d['name']}: {d['bucket']} {d['link'] or ''}".strip() for d in rows if d["bucket"] == "fail"]
+
     DRAFT_TOUCHED = "touched"  # the job of lane-touched-tests.yml that runs the touched tests on Linux
     DRAFT_TEST_JOB = re.compile(r"run \((windows|macos)")  # its Windows and macOS jobs, which the Linux-only lane lint never runs
     DRAFT_OK = ("success", "skipped", "neutral")
@@ -5244,6 +5249,23 @@ def head_check_red(state):
     others = [e for e in rest.split("; ") if e and not (e.startswith("workflow ") and e.endswith(NO_JOB_RAN))]
     return "a check is " + state if others else None
 
+CANCELLED = "cancelled"  # GitHub's conclusion of a cancelled run or job: judge_runs words a cancelled run with it, and it is the key of clear_rule.CONCLUSION_BUCKET
+
+@functools.lru_cache(maxsize=None)
+def cancel_entry():
+    """-> the pattern of a red entry made only of a cancel: classify's for a cancelled check row ("<name>: <bucket> <link>") and judge_runs' for a cancelled run ("workflow <name>: cancelled"). The bucket word is read from clear_rule.CONCLUSION_BUCKET, the one home of what a row emits, and the pattern is built when asked, as load_clear_rule is."""
+    bucket = re.escape(load_clear_rule().CONCLUSION_BUCKET[CANCELLED])
+    return re.compile(rf"workflow .+: {CANCELLED}|[^;]+?: {bucket}(?: \S*)?")
+
+def head_check_failed(state):
+    """-> the red text of `state` when a check of the head failed, else None. As head_check_red, but a red made only of cancelled checks and runs (no fail,
+    no timeout, no other entry) is no failure: it reads like a pending one (owner, 18:23 CST Nov 25 2026, decision merge-needs-current-base). Only confirm's
+    live-head gate reads it so; classify, judge_runs and head_check_red keep a cancel red."""
+    red = head_check_red(state)
+    if red and all(cancel_entry().fullmatch(e) for e in state[len("red: "):].split(" (ignored: ")[0].split("; ")):
+        return None
+    return red
+
 CI_SCOPE = ".github/scripts/ci-scope.sh"  # the repo's one home of which jobs read which paths; --express reads it for a prose-only diff
 RULED_STORE_PATH = "roadmap/rulings/{id}.json"  # on origin/roadmap: one file per ruling; --express reads one
 RULING_LINE = re.compile(r"^Ruling:[ \t]*(.*?)[ \t\r]*$", re.M)  # only the first such line counts, so a later valid one cannot rescue an invalid first
@@ -6060,7 +6082,10 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
             own = None  # the live head's own state, read once when this tool's commits sit on the proof
             if proof != info["head"]:
                 own = host.head_state(n, info["head"], **proof_kw(needs_proof))
-                if head_not_green(own) is None and not state.startswith("unknown (") and not head_check_red(state):  # a green run of the live head itself proves it over a pending or skipped read of the head under it (a draft's skipped rollup is no failure of this head). A proof that failed (ruling R1: a red parent refuses a clean main merge) or could not be read still refuses, as before
+                if head_not_green(own) is None and not state.startswith("unknown (") and not head_check_failed(state):  # a green run of the live head itself proves it over a pending or skipped read of the head under it (a draft's skipped rollup is no failure of this head). A proof that failed (ruling R1: a red parent refuses a clean main merge) or could not be read still refuses, as before; one red only from cancelled checks and runs is no failure and reads like a pending one
+                    earlier = host.failed_attempts(proof) if head_check_red(state) else []  # a cancel-only proof: its latest rows hold no failure, but an earlier attempt whose re-run the next push cancelled may have failed
+                    if earlier:
+                        raise Stop(f"the checks of the proven head {proof[:9]} hold a failed attempt that a later one cancelled, so the own run of {info['head'][:9]} does not cover it, and nothing was claimed or pushed {GREEN_CITE}: {'; '.join(earlier)}.")
                     say(f"merge: the own run of {info['head'][:9]} is green, so it is the proof, not the checks of {proof[:9]} under it.")
                     proof, state, not_green = info["head"], own, None
                 else:

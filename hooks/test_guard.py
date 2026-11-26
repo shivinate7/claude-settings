@@ -212,6 +212,7 @@ FAMILIES = {
     "sections": "the section files: a set the loader refuses (no section file, two files with one number, a name whose number disagrees with its header, a log check appended after the LOG_CHECKS_EXTRA join) stops a run before any case",
     "fg-bash-while-bg": "a foreground Bash call that can run long (a test, lint, merge, build or install, or a time limit over 60000 ms) is refused while this session's background command or agent runs; the run_in_background form, a quick read and a call with no background work pass",
     "review-log": "a PR comment whose first line is the review marker: refused when merge/merge.py parse_review refuses its body (review-log-form), and when a 40-hex sha on its Head or Fix check line does not resolve in the call's checkout (review-log-sha); the add and update comment tools, a body with no marker, and a check that cannot run pass",
+    "family-hit": "a rule family module's hit(call) and shell_hit(call), in _FAMILY_MODULES order: judge calls hit after its own rules and before each tool's own tail rules, and judge_shell calls shell_hit after its own rules and before settle_ask; a Read, a Grep or a SubagentStop calls neither; a module with neither passes; an earlier refusal stands; a refusal by hit is the hook's deny; a raise in hit fails open with one guard-crash line",
     "fixtureless": "the fixtureless set, checked fresh: each member gives the result it gives with every lazy fixture built, in a fresh process with only its named fixtures built",
     "misc": "anything outside a tagged section",
 }
