@@ -1,0 +1,1 @@
+- fake-state-hides-classifier: `rollup_reads` in merge/test_merge.py replaces `head_state` with a lambda that returns canned state strings, so `classify` and `judge_runs` do not run in the cases that use it. A rollup where every check skipped classifies as red with `NO_CHECK_RAN` ("no check ran on this head"), not pending (`classify`, merge/merge.py). Seen: 2026-11-25 x1

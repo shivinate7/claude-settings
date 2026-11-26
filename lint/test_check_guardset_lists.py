@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
 """Fixture suite for lint/check_guardset_lists.py, and the pin that job checks runs it.
 
-The guard set's lists name each flat module a guard file imports: the install.sh and install.ps1 copy and
-set loops, and the ci-scope.sh case line. hooks/test_install_src.sh reads them in guardset4, guardset7 and
-guardset8, but only job checks-install-checkout runs that file. Lane lint runs job checks alone, so a short
-list can pass lane lint while the install checkout job goes red.
+The guard set is one list, the manifest hooks/guard-set.txt: one file name per line, sorted, in the form of
+landed-dirs.txt. install.sh, install.ps1 (its PowerShell set loop and the post-merge hook it writes) and ci-scope.sh
+read it at run time and hold no list of their own. hooks/test_install_src.sh checks the manifest names each flat
+module a guard file imports (guardset4, guardset7, guardset8), but only job checks-install-checkout runs that file.
+Lane lint runs job checks alone, so a short manifest can pass lane lint while the install checkout job goes red.
 
 Each behaviour case finds the step in job checks first, then runs the command that step runs, in a fixture
 built from disk. On a commit with no such step, every behaviour case fails on that one named cause.
+A manifest case edits the fixture's manifest (make_fixture's `manifest`), and a copy case writes a list into a file that
+must not hold one (`edits`). On a tree whose check ignores the manifest, each such case exits 0 where it wants 1.
 """
 import os
 import re
@@ -27,11 +30,23 @@ CHECK = "lint/check_guardset_lists.py"
 CONTROL = "lint/check_unknown_reads_contract.py"  # a step that job checks already runs: the locator's green control
 CHECKS_YML = os.path.join(REPO, ".github", "workflows", "checks.yml")
 PROBE = "zz_guardset_probe.py"  # a flat module that no guard-set list names
+MANIFEST = os.path.join("hooks", "guard-set.txt")  # the one list of the guard set's files
+MANIFEST_NAME = "guard-set.txt"  # how a failure names it
+# Ten files the manifest names today. A line that names eight or more of them is a copy of the list. The names are a sample, not
+# the list: a copy needs no more than these to be one.
+SAMPLE = ("shared_names.py git_reads.py question_form.py own_session.py precompact_handoff.py merge_options.py "
+          "override.py _nowindow.py proc_env.py reread_check.py").split()
+SORT_A, SORT_B = "zz_sort_a.py", "zz_sort_b.py"  # two hooks files for the order cases: each is a real file, so no other cause fails
+INSTALL_SH, INSTALL_PS1 = "install.sh", "install.ps1"
+CI_SCOPE = os.path.join(".github", "scripts", "ci-scope.sh")
 FIXTURE_DIRS = ("hooks", "lint", "testing", os.path.join(".github", "scripts"))
 FIXTURE_FILES = ("install.sh", "install.ps1", "landed-dirs.txt")
 TIMEOUT = 300  # hang guard: the guard-set cases run in about 5 s
 SUITE = os.path.join("hooks", "test_install_src.sh")
 HANG_SUITE = "#!/bin/sh\nexec sleep 60\n"  # runs 60 s, so a cap of 1 s always ends it first
+# A suite whose every guard-set case passes at once. A case about the manifest's form, the readers or a copied list runs the check with
+# it, so the only cause of a red verdict is the one the case names, and the run skips the suite's own 5 s.
+PASSING_SUITE = "#!/bin/sh\n" + "".join("echo 'ok   - guardset%d: fake'\n" % n for n in range(1, 21))
 OK_THEN_EXIT_ONE = ("#!/bin/sh\necho 'ok   - guardset4: fake'\necho 'ok   - guardset7: fake'\n"
                     "echo 'ok   - guardset8: fake'\nexit 1\n")
 NO_STEP = "job checks in .github/workflows/checks.yml has no step that runs `python3 %s`, so a short guard-set list passes lane lint"
@@ -64,10 +79,13 @@ def run_command(command, cwd):
     return done.returncode, done.stdout + done.stderr
 
 
-def make_fixture(name, probe=False, drop_case=None, suite=None, cap=None):
+def make_fixture(name, probe=False, drop_case=None, suite=None, cap=None, manifest=0, edits=(), files=None):
     """A git-initialised copy of the guard-set tree, built from disk. `probe` adds one flat module that a guard
     file imports and no list names. `drop_case` takes one `run <case>` line out of the case list, so it never runs.
-    `suite` replaces the text of the suite file, and `cap` sets the check's TIMEOUT to that many seconds."""
+    `suite` replaces the text of the suite file, and `cap` sets the check's TIMEOUT to that many seconds.
+    `manifest` changes hooks/guard-set.txt: a function from its text ("" when the tree has none) to the new text, or None
+    to remove it. `edits` is (path, function) pairs: each function turns that file's text into the text written back,
+    read and written with no line-end change. `files` maps a new path to its text."""
     root = os.path.join(RUN, name)
     os.makedirs(root)
     for d in FIXTURE_DIRS:
@@ -102,7 +120,75 @@ def make_fixture(name, probe=False, drop_case=None, suite=None, cap=None):
             raise AssertionError("the check holds `TIMEOUT = <n>` %d times, want once" % n)
         with open(path, "w", encoding="utf-8") as fh:
             fh.write(text)
+    for rel, text in (files or {}).items():
+        with open(os.path.join(root, rel), "w", encoding="utf-8", newline="") as fh:
+            fh.write(text)
+    for rel, change in edits:
+        edit_file(root, rel, change)
+    if manifest != 0:
+        path = os.path.join(root, MANIFEST)
+        if manifest is None:
+            if os.path.exists(path):
+                os.remove(path)
+        else:
+            edit_file(root, MANIFEST, manifest, missing_ok=True)
     return root
+
+
+def edit_file(root, rel, change, missing_ok=False):
+    """Rewrite one fixture file through `change`, with its line ends as they are. A file the tree lacks reads as ''
+    only when `missing_ok`: the manifest of a tree that has none yet."""
+    path = os.path.join(root, rel)
+    if missing_ok and not os.path.exists(path):
+        text = ""
+    else:
+        with open(path, encoding="utf-8", newline="") as fh:
+            text = fh.read()
+    with open(path, "w", encoding="utf-8", newline="") as fh:
+        fh.write(change(text))
+
+
+def add_entries(*names):
+    """A manifest change: each name as a last line, in the order given."""
+    def change(text):
+        return text + ("" if not text or text.endswith("\n") else "\n") + "".join(n + "\n" for n in names)
+    return change
+
+
+def crlf(change):
+    """A manifest change that gives every line of what `change` made a CRLF end."""
+    return lambda text: change(text).replace("\r\n", "\n").replace("\n", "\r\n")
+
+
+def append_lines(*lines):
+    """An `edits` change: the lines at the end of the file."""
+    return lambda text: text + ("" if text.endswith("\n") else "\n") + "".join(l + "\n" for l in lines)
+
+
+def in_hook_here_string(line):
+    """An `edits` change for install.ps1: the line first inside the here-string that holds the post-merge hook."""
+    def change(text):
+        marker = '    $hook = @"\n'
+        if text.count(marker) != 1:
+            raise AssertionError("install.ps1 holds the hook's here-string opener %d times, want once" % text.count(marker))
+        return text.replace(marker, marker + line + "\n")
+    return change
+
+
+def without_manifest_name(outside_here_string):
+    """An `edits` change for install.ps1 that makes each `guard-set.txt` in the text outside the post-merge hook's here-string
+    (`outside_here_string`), or inside it, a name no file has. The other part is left as it is."""
+    def change(text):
+        opener, closer = '    $hook = @"\n', '\n"@\n'
+        if text.count(opener) != 1 or text.count(closer) != 1:
+            raise AssertionError("install.ps1 does not hold the hook's here-string once")
+        head, rest = text.split(opener)
+        body, tail = rest.split(closer)
+        gone = lambda part: part.replace("guard-set.txt", "guard-set.gone")
+        if outside_here_string:
+            return gone(head) + opener + body + closer + gone(tail)
+        return head + opener + gone(body) + closer + tail
+    return change
 
 
 def setUpModule():
@@ -146,7 +232,17 @@ class GuardSetCheck(Base):
         code, out = run_command(command, make_fixture("short", probe=True))
         self.assertEqual(code, 1, "the step exits %d on a short list, want 1:\n%s" % (code, tail(out)))
         self.assertIn(PROBE, out, "the output does not name %s:\n%s" % (PROBE, tail(out)))
-        self.assertIn("install.sh copy loop", out, "the output does not name the list:\n%s" % tail(out))
+        self.assertIn(MANIFEST_NAME, out, "the output does not name the list to edit, %s:\n%s" % (MANIFEST_NAME, tail(out)))
+
+    def test_a_module_named_only_in_the_manifest_exits_zero(self):
+        _, command = self.locate()
+        code, out = run_command(command, make_fixture("listed", probe=True, manifest=add_entries(PROBE)))
+        self.assertEqual(code, 0, "the step exits %d when the manifest names %s, want 0:\n%s" % (code, PROBE, tail(out)))
+
+    def test_a_manifest_with_crlf_line_ends_exits_zero(self):
+        _, command = self.locate()
+        code, out = run_command(command, make_fixture("crlf", probe=True, manifest=crlf(add_entries(PROBE))))
+        self.assertEqual(code, 0, "the step exits %d when each manifest line ends CRLF and names %s, want 0:\n%s" % (code, PROBE, tail(out)))
 
     def test_complete_lists_exit_zero(self):
         _, command = self.locate()
@@ -170,6 +266,114 @@ class GuardSetCheck(Base):
         code, out = run_command(command, make_fixture("exit-after-ok", suite=OK_THEN_EXIT_ONE))
         self.assertEqual(code, 1, "the step exits %d when each case prints ok and the suite exits 1, want 1:\n%s" % (code, tail(out)))
         self.assertIn("exited 1", out, "the output does not say the suite exited 1:\n%s" % tail(out))
+
+
+class ManifestForm(Base):
+    """The manifest is one file name per line, sorted, none twice, each a file in hooks/, with at least one. A name is a whole line:
+    a merge of two lanes that each add a line must leave a list the check can still read. One cause per case."""
+    SORT_FILES = {os.path.join("hooks", SORT_A): "# a hooks file for the order cases\n",
+                  os.path.join("hooks", SORT_B): "# a hooks file for the order cases\n"}
+
+    def refuses(self, name, why, *must_name, **fixture):
+        _, command = self.locate()
+        code, out = run_command(command, make_fixture(name, suite=PASSING_SUITE, **fixture))
+        self.assertEqual(code, 1, "the step exits %d on %s, want 1:\n%s" % (code, why, tail(out)))
+        for text in must_name:
+            self.assertIn(text, out, "the output does not name %s:\n%s" % (text, tail(out)))
+
+    def test_an_unsorted_manifest_exits_one_and_names_the_entry(self):
+        self.refuses("unsorted", "%s listed before %s" % (SORT_B, SORT_A), SORT_A, MANIFEST_NAME,
+                     files=self.SORT_FILES, manifest=add_entries(SORT_B, SORT_A))
+
+    def test_a_sorted_manifest_with_the_same_two_entries_exits_zero(self):  # control: the order is the only difference
+        _, command = self.locate()
+        code, out = run_command(command, make_fixture("sorted", suite=PASSING_SUITE, files=self.SORT_FILES, manifest=add_entries(SORT_A, SORT_B)))
+        self.assertEqual(code, 0, "the step exits %d on %s then %s, want 0:\n%s" % (code, SORT_A, SORT_B, tail(out)))
+
+    def test_a_repeated_entry_exits_one_and_names_it(self):
+        self.refuses("repeated", "%s listed twice" % SORT_A, SORT_A, MANIFEST_NAME,
+                     files=self.SORT_FILES, manifest=add_entries(SORT_A, SORT_A))
+
+    def test_an_entry_that_names_no_file_exits_one_and_names_it(self):
+        self.refuses("no-file", "an entry with no file in hooks/", "zz_no_such_module.py", MANIFEST_NAME,
+                     manifest=add_entries("zz_no_such_module.py"))
+
+    def test_a_manifest_with_no_entry_exits_one_and_names_it(self):
+        self.refuses("empty", "a manifest of comments only", MANIFEST_NAME,
+                     manifest=lambda text: "# the guard set's files: none yet\n")
+
+    def test_a_missing_manifest_exits_one_and_names_it(self):
+        self.refuses("missing", "no manifest", MANIFEST_NAME, manifest=None)
+
+
+class OneListScan(Base):
+    """The list lives in the manifest alone. A line of install.sh, install.ps1 or ci-scope.sh that names eight or more files of it is a
+    copy that drifts (the copies it replaces had already drifted: ci-scope.sh lacked lease.py, the comments lacked answered_claims.py).
+    The scan reads text, never the language: it counts a name after a `#` inside a quoted string, in a comment, after a lone quote, and
+    inside the here-string that holds the post-merge hook. ci-scope.sh's shoot arm names members for the page export suite's own
+    import list, which lint/test_ci_scope.py walks, so a line that sets the shoot flag is no copy."""
+    NAMES = " ".join(SAMPLE)
+
+    def copy_in(self, label, rel, change, want_name):
+        _, command = self.locate()
+        code, out = run_command(command, make_fixture("copy-" + re.sub(r"\W+", "-", label), suite=PASSING_SUITE, edits=((rel, change),)))
+        self.assertEqual(code, 1, "the step exits %d with a ten-name list as %s in %s, want 1:\n%s" % (code, label, rel, tail(out)))
+        self.assertIn(want_name, out, "the output does not name %s:\n%s" % (want_name, tail(out)))
+
+    def test_a_list_in_install_sh_exits_one_and_names_it(self):
+        contexts = (
+            ("a code line", ['SAMPLE_COPY="%s"' % self.NAMES]),
+            ("a comment line", ["# the set: %s" % self.NAMES]),
+            ("a name after a # inside a string", ['x="# a"; : %s' % self.NAMES]),
+            ("a line after a lone quote", ["# Don't miss the set below", ': %s' % self.NAMES]),
+        )
+        for label, lines in contexts:
+            with self.subTest(context=label):
+                self.copy_in(label, INSTALL_SH, append_lines(*lines), INSTALL_SH)
+
+    def test_a_list_in_install_ps1_exits_one_and_names_it(self):
+        contexts = (
+            ("a PowerShell line", append_lines("$SampleCopy = '%s'" % self.NAMES)),
+            ("a line inside the hook's here-string", in_hook_here_string(": %s" % self.NAMES)),
+        )
+        for label, change in contexts:
+            with self.subTest(context=label):
+                self.copy_in(label, INSTALL_PS1, change, INSTALL_PS1)
+
+    def test_a_list_in_ci_scope_exits_one_and_names_it(self):
+        self.copy_in("a case arm", CI_SCOPE, append_lines('      hooks/zz.py|%s) on="$on code " ;;' % "|".join("hooks/" + n for n in SAMPLE)),
+                     "ci-scope.sh")
+
+    def test_a_line_naming_seven_members_exits_zero(self):  # control: seven is no copy, so the boundary is the count
+        _, command = self.locate()
+        code, out = run_command(command, make_fixture("seven", suite=PASSING_SUITE, edits=((INSTALL_SH, append_lines(": " + " ".join(SAMPLE[:7]))),)))
+        self.assertEqual(code, 0, "the step exits %d with a seven-name line in install.sh, want 0:\n%s" % (code, tail(out)))
+
+
+class ManifestReaders(Base):
+    """install.sh, and install.ps1 in its PowerShell set loop and in the hook it writes, each name the manifest in a line that is no
+    comment. Without it the file holds no list and reads none, so a guard set lands empty. install.sh's reads are run by
+    hooks/test_install_src.sh (guardset10 to guardset14); this check is the one that job checks runs. PowerShell cannot run here, so
+    the text is what job checks reads. The reader must take LF and CRLF line ends and run on Windows PowerShell 5.1: the helper that
+    reads landed-dirs.txt (Get-LandedDirs, Get-Content) is the form."""
+
+    def refuses(self, name, rel, change, why):
+        _, command = self.locate()
+        code, out = run_command(command, make_fixture(name, suite=PASSING_SUITE, edits=((rel, change),)))
+        self.assertEqual(code, 1, "the step exits %d when %s, want 1:\n%s" % (code, why, tail(out)))
+        self.assertIn(rel.replace(os.sep, "/").split("/")[-1], out, "the output does not name %s:\n%s" % (rel, tail(out)))
+
+    def test_install_sh_that_never_names_the_manifest_exits_one_and_names_it(self):
+        self.refuses("sh-no-reader", INSTALL_SH, lambda text: text.replace(MANIFEST_NAME, "guard-set.gone"),
+                     "install.sh never names %s" % MANIFEST_NAME)
+
+    def test_install_ps1_that_never_names_the_manifest_in_powershell_exits_one_and_names_it(self):
+        self.refuses("ps1-no-reader", INSTALL_PS1, without_manifest_name(outside_here_string=True),
+                     "install.ps1 names %s only inside the hook's here-string" % MANIFEST_NAME)
+
+    def test_install_ps1_hook_that_never_names_the_manifest_exits_one_and_names_it(self):
+        self.refuses("hook-no-reader", INSTALL_PS1, without_manifest_name(outside_here_string=False),
+                     "install.ps1's post-merge hook never names %s" % MANIFEST_NAME)
 
 
 class RunFolderSweep(unittest.TestCase):

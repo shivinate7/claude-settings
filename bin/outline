@@ -1,0 +1,446 @@
+#!/usr/bin/env python3
+"""usage: outline FILE [SYMBOL]
+       outline -h | --help
+
+Read a long file by section. It prints one line per unit, `<first>-<last> <kind> <name>`, in file order, so a reader
+opens only the range it needs. With SYMBOL it prints the one line of the unit with that name.
+Units: Python (class, function, method, constant of more than 5 lines), Markdown (heading), a YAML workflow (job,
+step), shell (function). It reads FILE once and starts no child process, writes no file and keeps no log.
+Names: Python and shell nest with dots (Outer.run.inner); a step is jobs.<id>.<name>; a heading is its own text.
+A SYMBOL with no dot matches each unit whose last name part it is, so a function and a method of one name are two
+candidates. A dotted SYMBOL is an exact name, else a name's last dotted parts. Two or more matches are ambiguous.
+Python lists a class in a module, a class, or an if, try, with, for or while of either; it does not list a class
+inside a def (that class's methods are listed).
+Ranges: Python as ast gives them (a decorator belongs to its def). Markdown, YAML and shell end on the line before
+the next unit of the same or a higher level, so a blank line before it belongs to the earlier unit. Lines are
+counted by newline only, as sed counts them: a form feed or U+2028 inside a line is no break.
+Exit 0: the outline, the symbol's line, or this help. 1: no such symbol, or an ambiguous one (each candidate is
+printed). 2: a file this tool does not read or cannot read (including a YAML file indented with a tab), or a wrong
+call (one line says which).
+"""
+import ast
+import os
+import re
+import sys
+
+LONG_CONSTANT = 5  # a constant spanning more than this many lines is a unit
+CONSTANT = re.compile(r"^_*[A-Z][A-Z0-9_]*$")
+
+
+class Refusal(Exception):
+    pass
+
+
+def unit(first, last, kind, name):
+    return (first, last, kind, name)
+
+
+def split_lines(text):
+    """The lines of `text`, broken at newlines only. str.splitlines also breaks at a form feed, U+2028 and a lone CR, so
+    its line numbers would not match sed's."""
+    lines = [line[:-1] if line.endswith("\r") else line for line in text.split("\n")]
+    if lines and lines[-1] == "":
+        lines.pop()
+    return lines
+
+
+def last_content_line(lines):
+    """The last line number of the file that holds text: trailing blank lines end no unit."""
+    count = len(lines)
+    while count > 1 and not lines[count - 1].strip():
+        count -= 1
+    return count
+
+
+# ---- Python, by ast
+
+def py_span(node):
+    firsts = [item.lineno for item in getattr(node, "decorator_list", [])]
+    return min([node.lineno] + firsts), node.end_lineno
+
+
+def py_units(source):
+    try:
+        tree = ast.parse(source)
+    except (SyntaxError, ValueError) as err:
+        raise Refusal("cannot parse as Python: %s" % err)
+    units = []
+
+    def walk(body, scope, in_class, top, in_def):
+        for node in body:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                is_class = isinstance(node, ast.ClassDef)
+                first, last = py_span(node)
+                kind = "class" if is_class else ("method" if in_class else "function")
+                if not is_class or not in_def:  # a class inside a def sits in that def's range; its methods are listed
+                    units.append(unit(first, last, kind, ".".join(scope + [node.name])))
+                walk(node.body, scope + [node.name], is_class, False, in_def or not is_class)
+            elif top and isinstance(node, (ast.Assign, ast.AnnAssign)):
+                targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+                names = [t.id for t in targets if isinstance(t, ast.Name) and CONSTANT.match(t.id)]
+                if names and node.end_lineno - node.lineno + 1 > LONG_CONSTANT:
+                    units.append(unit(node.lineno, node.end_lineno, "constant", names[0]))
+            else:
+                # if, try, with, for and while keep their bodies' units at the same scope
+                for field in ("body", "orelse", "finalbody"):
+                    inner = getattr(node, field, None)
+                    if isinstance(inner, list):
+                        walk(inner, scope, in_class, top, in_def)
+                for handler in getattr(node, "handlers", []):
+                    walk(handler.body, scope, in_class, top, in_def)
+
+    walk(tree.body, [], False, True, False)
+    return units
+
+
+# ---- Markdown
+
+FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
+HEADING = re.compile(r"^ {0,3}(#{1,6})[ \t]+(.*?)(?:[ \t]+#+)?[ \t]*$")
+
+
+def md_units(lines):
+    found, fence = [], None
+    for number, line in enumerate(lines, 1):
+        opener = FENCE.match(line)
+        if fence:
+            if opener and opener.group(1)[0] == fence[0] and len(opener.group(1)) >= len(fence) \
+                    and not line.strip().strip(fence[0]):
+                fence = None
+            continue
+        if opener:
+            fence = opener.group(1)
+            continue
+        match = HEADING.match(line)
+        if match and match.group(2):
+            found.append((number, len(match.group(1)), match.group(2).strip()))
+    end_of_file = last_content_line(lines)
+    units = []
+    for index, (number, level, title) in enumerate(found):
+        last = end_of_file
+        for later, later_level, _ in found[index + 1:]:
+            if later_level <= level:
+                last = later - 1
+                break
+        units.append(unit(number, max(last, number), "heading", title))
+    return units
+
+
+# ---- YAML workflow
+
+BLOCK_SCALAR = re.compile(r"(?::|^-)[ \t]+(?:[&!]\S+[ \t]+)*[|>][+\-0-9]*[ \t]*(?:#.*)?$")
+KEY = re.compile(r"^(\s*)([^\s#:][^:]*?):(?:[ \t]+(.*))?$")
+DASH = re.compile(r"^(\s*)-([ \t]+)")
+
+
+def indent_of(text):
+    return len(text) - len(text.lstrip(" "))
+
+
+def yaml_structure(lines):
+    """Per line: its text, or '' when the line is blank, a comment or the body of a block scalar (`run: |`)."""
+    masked, block_indent = [], None
+    for line in lines:
+        stripped = line.strip()
+        if block_indent is not None:
+            if not stripped or indent_of(line) > block_indent:
+                masked.append("")
+                continue
+            block_indent = None
+        if not stripped or stripped.startswith("#"):
+            masked.append("")
+            continue
+        masked.append(line.rstrip())
+        if BLOCK_SCALAR.search(stripped):
+            # the body sits deeper than the mapping that holds the key: after the dash for `- run: |`
+            dash = DASH.match(line)
+            block_indent = len(dash.group(0)) if dash and not re.match(r"^-[ \t]+[|>]", stripped) else indent_of(line)
+    return masked
+
+
+def scalar(value):
+    value = (value or "").strip()
+    if value[:1] in ("'", '"'):
+        end = value.rfind(value[0])
+        return value[1:end] if end > 0 else value[1:]
+    return re.sub(r"\s+#.*$", "", value).strip()
+
+
+def first_body_line(lines, start, key_indent):
+    """The first non-blank line of the block scalar whose lines begin at index `start`."""
+    for text in lines[start:]:
+        if text.strip():
+            return text.strip() if indent_of(text) > key_indent else ""
+    return ""
+
+
+def step_name(lines, masked, item, stop, ordinal):
+    """A step's `name:`, else its `uses:`, else the text of its `run:`, else `step <n>`."""
+    dash = DASH.match(masked[item])
+    column = len(dash.group(0)) if dash else indent_of(masked[item]) + 2
+    keys = {}
+    for i in range(item, stop):
+        text = masked[i]
+        if i == item:
+            text = " " * column + text[column:]
+        if text and indent_of(text) == column:
+            match = KEY.match(text)
+            if match:
+                keys.setdefault(match.group(2).strip(), (i, match.group(3)))
+    for key in ("name", "uses"):
+        if key in keys and scalar(keys[key][1]):
+            return scalar(keys[key][1])
+    if "run" in keys:
+        row, value = keys["run"]
+        if value and not BLOCK_SCALAR.search("run: " + value):
+            return scalar(value)
+        return first_body_line(lines, row + 1, column) or "step %d" % ordinal
+    return "step %d" % ordinal
+
+
+def step_rows(masked, steps_at, stop):
+    """-> (the rows where a step starts, the row where the steps list ends)."""
+    rows, item_indent = [], None
+    for i in range(steps_at + 1, stop):
+        text = masked[i]
+        if not text:
+            continue
+        if item_indent is None:
+            item_indent = indent_of(text)
+        if indent_of(text) < item_indent or (indent_of(text) == item_indent and not text.lstrip().startswith("-")):
+            return rows, i
+        if indent_of(text) == item_indent:
+            rows.append(i)
+    return rows, stop
+
+
+def yaml_units(lines):
+    masked = yaml_structure(lines)
+    for number, text in enumerate(masked, 1):
+        if re.match(r" *\t", text):
+            raise Refusal("cannot read YAML: line %d is indented with a tab, and YAML indents with spaces" % number)
+    count = len(lines)
+    end_of_file = last_content_line(lines)
+    jobs_at = next((i for i, text in enumerate(masked) if re.match(r"^jobs:[ \t]*$", text)), None)
+    if jobs_at is None:
+        return []
+    top_end = next((i for i in range(jobs_at + 1, count) if masked[i] and indent_of(masked[i]) == 0), count)
+    job_indent = next((indent_of(masked[i]) for i in range(jobs_at + 1, top_end) if masked[i]), None)
+    if job_indent is None:
+        return []
+    job_rows = [i for i in range(jobs_at + 1, top_end)
+                if masked[i] and indent_of(masked[i]) == job_indent and KEY.match(masked[i])]
+    units = []
+    for position, row in enumerate(job_rows):
+        stop = job_rows[position + 1] if position + 1 < len(job_rows) else top_end
+        job_id = scalar(KEY.match(masked[row]).group(2))
+        units.append(unit(row + 1, min(stop, end_of_file), "job", "jobs.%s" % job_id))
+        child_indent = next((indent_of(masked[i]) for i in range(row + 1, stop) if masked[i]), None)
+        steps_at = next((i for i in range(row + 1, stop) if masked[i] and indent_of(masked[i]) == child_indent
+                         and re.match(r"^\s*steps:[ \t]*$", masked[i])), None)
+        if steps_at is None:
+            continue
+        rows, steps_stop = step_rows(masked, steps_at, stop)
+        for index, item in enumerate(rows):
+            item_stop = rows[index + 1] if index + 1 < len(rows) else steps_stop
+            name = step_name(lines, masked, item, item_stop, index + 1)
+            units.append(unit(item + 1, min(item_stop, end_of_file), "step", "jobs.%s.%s" % (job_id, name)))
+    return units
+
+
+# ---- shell
+
+FUNCTION = re.compile(r"^\s*(?:function\s+([A-Za-z_][\w.:+\-]*)(?:\s*\(\s*\))?|([A-Za-z_][\w.:+\-]*)\s*\(\s*\))")
+HEREDOC = re.compile(r"<<(-?)[ \t]*(?:'([^']*)'|\"([^\"]*)\"|\\?([A-Za-z_]\w*))")
+
+
+def shell_code(lines):
+    """Each line with comments, strings and here-doc bodies blanked, so a brace or a `name() {` in one counts for nothing."""
+    out, quote, pending, heredoc = [], None, [], None
+    for line in lines:
+        if heredoc:
+            end, strip_tabs = heredoc
+            if (line.lstrip("\t") if strip_tabs else line) == end:
+                heredoc = pending.pop(0) if pending else None
+            out.append("")
+            continue
+        code, i = [], 0
+        while i < len(line):
+            char = line[i]
+            if quote:
+                if quote == '"' and char == "\\":
+                    i += 1
+                elif char == quote:
+                    quote = None
+                i += 1
+                continue
+            if char == "\\":
+                code.append("_")
+                i += 2
+                continue
+            if char in "'\"":
+                quote = char
+                i += 1
+                continue
+            if char == "#" and (not code or code[-1] in " \t;|&()"):
+                break
+            if line.startswith("<<", i) and not line.startswith("<<<", i):
+                so_far = "".join(code)
+                match = HEREDOC.match(line, i)
+                if match and so_far.count("((") <= so_far.count("))"):  # `<<` inside (( )) is a shift
+                    pending.append((match.group(2) or match.group(3) or match.group(4), match.group(1) == "-"))
+                    i = match.end()
+                    continue
+            code.append(char)
+            i += 1
+        out.append("".join(code))
+        if pending and heredoc is None:
+            heredoc = pending.pop(0)
+    return out
+
+
+SHELL_TOKEN = re.compile(r";;&|;;|;&|[A-Za-z_]\w*|\S")
+ARM_END = (";;", ";&", ";;&")
+COMMAND_START = (None, ";", "&", "|", "(", "{", ")", "then", "do", "else", "elif") + ARM_END
+
+
+def shell_body_end(code, row, rest):
+    """The last line of the `{ }` or `( )` body that starts in `rest`, the text after the header on line `row`.
+    None: it never closes. In a `( )` body a case pattern's `)` closes nothing, so `case`, `in`, `;;` and `esac` are
+    tracked: the `)` after `in` or after an arm's end is a pattern's, with an optional `(` before it."""
+    opener, depth, cases, awaiting_in, pattern = None, 0, 0, 0, False
+    for index in range(row, len(code)):
+        prev = None
+        for token in SHELL_TOKEN.findall(rest if index == row else code[index]):
+            if opener is None:
+                if token not in ("{", "("):
+                    return row + 1  # the body is no group, so the header line is the unit
+                opener, depth = token, 1
+            else:
+                if opener == "(":
+                    if token == "case" and prev in COMMAND_START:
+                        cases, awaiting_in = cases + 1, awaiting_in + 1
+                    elif token == "in" and awaiting_in:
+                        awaiting_in, pattern = awaiting_in - 1, True
+                    elif token == "esac" and cases and prev in COMMAND_START:
+                        cases, pattern = cases - 1, False
+                    elif token in ARM_END and cases:
+                        pattern = True
+                    elif pattern and token in ("(", ")"):
+                        pattern = token == "("
+                        prev = token
+                        continue
+                if token == opener:
+                    depth += 1
+                elif token == ("}" if opener == "{" else ")"):
+                    depth -= 1
+                    if depth == 0:
+                        return index + 1
+            prev = token
+    return None
+
+
+def shell_units(lines):
+    code = shell_code(lines)
+    end_of_file = last_content_line(lines)
+    units, open_scopes = [], []
+    for row, text in enumerate(code):
+        match = FUNCTION.match(text)
+        if not match:
+            continue
+        name = match.group(1) or match.group(2)
+        last = shell_body_end(code, row, text[match.end():]) or end_of_file
+        open_scopes = [scope for scope in open_scopes if scope[1] >= row + 1]
+        units.append(unit(row + 1, last, "function", ".".join([scope[0] for scope in open_scopes] + [name])))
+        open_scopes.append((name, last))
+    return units
+
+
+# ---- dispatch
+
+def interpreter(first_line):
+    """The program a `#!` line names, through `env` when it uses it; '' when the line is no `#!` line."""
+    if not first_line.startswith("#!"):
+        return ""
+    words = first_line[2:].split()
+    if words and os.path.basename(words[0]) == "env":
+        words = [word for word in words[1:] if not word.startswith("-") and "=" not in word]
+    return os.path.basename(words[0]) if words else ""
+
+
+def file_kind(path, text):
+    ext = os.path.splitext(path)[1].lower()
+    if ext == ".py":
+        return "python"
+    if ext in (".md", ".markdown"):
+        return "markdown"
+    if ext in (".yml", ".yaml"):
+        return "yaml"
+    if ext in (".sh", ".bash", ".zsh"):
+        return "shell"
+    if not ext:
+        tool = interpreter(text.split("\n", 1)[0].rstrip("\r"))
+        if tool.startswith("python"):
+            return "python"
+        if tool in ("sh", "bash", "zsh", "dash", "ksh"):
+            return "shell"
+    return None
+
+
+def outline(path):
+    try:
+        with open(path, "rb") as handle:
+            raw = handle.read()
+    except OSError as err:
+        raise Refusal("cannot read %s: %s" % (path, err.strerror or err))
+    try:
+        text = raw.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        raise Refusal("cannot read %s: not UTF-8 text" % path)
+    kind = file_kind(path, text)
+    if kind is None:
+        raise Refusal("not read: %s is not a .py, .md, .yml, .yaml or .sh file, or a script with a python or shell #! line" % path)
+    if kind == "python":
+        return py_units(text)
+    lines = split_lines(text)
+    return {"markdown": md_units, "yaml": yaml_units, "shell": shell_units}[kind](lines)
+
+
+def pick(units, symbol):
+    if "." not in symbol:  # a bare name is each unit it ends: a function and a method of one name are both candidates
+        return [u for u in units if u[3] == symbol or u[3].endswith("." + symbol)]
+    exact = [u for u in units if u[3] == symbol]
+    return exact or [u for u in units if u[3].endswith("." + symbol)]
+
+
+def show(found):
+    return "%d-%d %s %s" % found
+
+
+def main(argv):
+    if argv and argv[0] in ("-h", "--help"):
+        print(__doc__.strip())
+        return 0
+    if not 1 <= len(argv) <= 2:
+        print("usage: outline FILE [SYMBOL]")
+        return 2
+    try:
+        units = outline(argv[0])
+    except Refusal as err:
+        print("outline: %s" % err)
+        return 2
+    if len(argv) == 1:
+        for found in units:
+            print(show(found))
+        return 0
+    matches = pick(units, argv[1])
+    if not matches:
+        print("outline: no unit named %s in %s" % (argv[1], argv[0]))
+        return 1
+    for found in matches:
+        print(show(found))
+    return 0 if len(matches) == 1 else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
