@@ -14598,6 +14598,13 @@ class RedMainBrake(Env):
         rc, out, _ = self.go([main_run(904, "cancelled"), main_run(903, "failure")], jobs)
         self.merged(rc, out)
 
+    def test_a_cancelled_run_no_job_started_in_that_a_newer_run_replaced_does_not_refuse_the_merge(self):
+        """Red on the old code: the cancelled run reads unknown and refuses the merge. Superseded (a newer push run is on the page), the green
+        run below it decides, so the merge goes through (decision no-merge-onto-red-main, the superseded cancel)."""
+        jobs = {1202: [], 1201: [main_job("scope", "success"), main_job("checks", "success", 20)]}
+        rc, out, _ = self.go([main_run(1203, None, status="in_progress"), main_run(1202, "cancelled"), main_run(1201, "success")], jobs)
+        self.assertEqual(rc, 0, "a cancelled run that a newer run replaced refuses the merge:\n" + out)
+
     # The stale-cancel shape (decision no-merge-onto-red-main): main's schedule run R was cancelled on an old head with no red job.
     # The push run N after it, on the new head, passed every job R ran; each case changes one thing of this shape.
     INC_R, INC_N = 1110, 1111
@@ -15380,6 +15387,18 @@ class RedMainBrake(Env):
         for pr in (2651, 2652):
             self.assertNotIn(f"#{pr}", detail, f"the verdict blames #{pr}, a later red run on top of the breaking merge")
 
+    def test_a_red_main_detail_names_a_replaced_commit_in_the_span_of_its_breaking_merge(self):
+        """Breaking merge 903 is red again on its re-run. Run 902 below it was cancelled and replaced, and run 901 is green. The span runs from 901's
+        commit up to 903's, so the detail names 902's commit too and says that run was replaced."""
+        runs = [self.merge_run(903, "failure", 2650, run_attempt=2), self.merge_run(902, "cancelled", 2649), self.merge_run(901, "success", 2648)]
+        jobs = {903: [main_job("scope", "success"), main_job("checks", "failure", 20)], 902: [], 901: [main_job("scope", "success"), main_job("checks", "success", 20)]}
+        rc, out, before = self.go(runs, jobs)
+        self.merged_onto_red(rc, out, "checks")
+        detail = self.red_detail()
+        self.assertIn(self.sha_of(903)[:9], detail, "the detail does not name the breaking merge commit, run 903's")
+        self.assertIn(self.sha_of(902)[:9], detail, "the detail names no commit for run 902, which was replaced inside the span of breaking merge 903:\n" + detail)
+        self.assertIn("replaced", detail, "the detail does not say that a replaced run's commit is in the span:\n" + detail)
+
     def test_a_red_main_blames_the_breaking_run_deep_in_a_full_page_of_fifty(self):
         """Re-pointed by ruling Q5 v (owner, chat, 10:42 CST Nov 20, 2026): the red main merges; the blame is the verdict's detail."""
         # a full page, newest first: 1060 to 1041 are red, and 1041 is red again on its re-run; its parent 1040 is green, and the rest are green
@@ -16003,6 +16022,26 @@ class RedMainBrake(Env):
         rc, out, _ = self.go(runs, jobs, pulls={2651: self.revert_pull(2651, R)})
         self.merged(rc, out)
 
+    def test_a_revert_of_the_breaking_merge_lifts_a_red_main_past_a_replaced_run_above_it(self):
+        """Red on the old code: run 904, cancelled and replaced by run 905, sits above breaking merge 903, so the blame names two commits, and
+        revert_proven, which needs exactly one blamed commit, refuses the lift. Fixed: the blame is 903's commit alone and the revert of 903 lifts the red main."""
+        B = self.land_breaking_merge()
+        A = sh(self.other, "git", "rev-parse", f"{B}^1")
+        C = self.commit_on_main("Lane 2652 lands on main", "lane-2652.txt")  # run 904's commit: cancelled before any job started, replaced by run 905
+        D = self.commit_on_main("Lane 2653 lands on main", "lane-2653.txt")  # run 905's commit: red again on its re-run
+        R, M = self.land_revert(2651, B)
+        self.assert_first_parent_chain(M, D, C, B, A)
+        self.assert_revert_on_main(B, R, M)
+        run906, jobs906 = self.merge_run_of(906, M, 2651)
+        runs = [run906, main_run(905, "failure", sha=D, run_attempt=2), main_run(904, "cancelled", sha=C),
+                main_run(903, "failure", sha=B, run_attempt=2, message="Merge pull request #2650 from o/lane-2650"), main_run(902, "success", sha=A, message="base files")]
+        jobs = {906: jobs906, 905: [main_job("scope", "success"), main_job("checks", "failure", 20)], 904: [],
+                903: [main_job("scope", "success"), main_job("checks", "failure", 20)], 902: self.RAN_PUSH}
+        rc, out, _ = self.go(runs, jobs, pulls={2651: self.revert_pull(2651, R)})
+        self.assertEqual(rc, 0, "the merge was refused:\n" + out)
+        self.assertFalse(printed(out, "main is RED"), "the revert of breaking merge 903 does not lift the red main: the blame names replaced run 904's commit "
+                                 "with 903's, and revert_proven needs exactly one blamed commit:\n" + out)
+
     def test_a_merge_titled_as_a_revert_onto_a_red_main_merges_when_it_reverts_nothing(self):
         """Re-pointed by ruling Q5 v (owner, chat, 10:42 CST Nov 20, 2026): a PR may merge onto a red main; a title that reverts nothing does not refuse it."""
         # class 2: the lane's own commit has a revert's title, but main's breaking merge is not reverted by anything: a title proves nothing
@@ -16585,6 +16624,27 @@ class MainRunVerdict(Env):
         self.assertIn("test_new", text, "the stacked break names no new failing test:\n" + text)
         self.assertNotIn(self.OLD_SHA[:9], line, "the stacked break names the old merge:\n" + line)
 
+    def test_a_breaking_merge_names_a_replaced_commit_in_its_span(self):
+        """Run 1003 broke main, red again on its re-run. Run 1002 below it was cancelled and replaced, and run 1001 is green. The span runs from 1001's
+        commit up to 1003's, so the line names 1002's commit too and says that run was replaced."""
+        runs = [main_run(self.LATER, "failure", sha=self.LATER_SHA, run_attempt=2), main_run(self.NOW, "cancelled", sha=self.NEW_SHA),
+                main_run(self.PREV, "success", sha=self.GREEN_SHA)]
+        jobs = {self.LATER: [main_job("scope", "success"), self.red_job("checks", 9102)], self.NOW: [],
+                self.PREV: [main_job("scope", "success"), main_job("checks", "success", 20)]}
+        _rc, text, _word, line = self.judged(self.NEW_BREAK, self.LATER_SHA, runs, jobs, job_logs={9102: self.NEW_LOG})
+        self.assertIn(self.NEW_SHA[:9], line, "the breaking merge names no commit of the run replaced inside its span:\n" + text)
+        self.assertIn("replaced", line, "the breaking merge does not say that a replaced run's commit is in its span:\n" + line)
+
+    def test_control_a_breaking_merge_names_no_commit_beside_its_own_when_the_green_run_is_next(self):
+        runs = [main_run(self.LATER, "failure", sha=self.LATER_SHA, run_attempt=2), main_run(self.NOW, "success", sha=self.NEW_SHA),
+                main_run(self.PREV, "success", sha=self.GREEN_SHA)]
+        jobs = {self.LATER: [main_job("scope", "success"), self.red_job("checks", 9102)],
+                self.NOW: [main_job("scope", "success"), main_job("checks", "success", 20)],
+                self.PREV: [main_job("scope", "success"), main_job("checks", "success", 20)]}
+        _rc, text, _word, line = self.judged(self.NEW_BREAK, self.LATER_SHA, runs, jobs, job_logs={9102: self.NEW_LOG})
+        self.assertIn(self.LATER_SHA[:9], line, "the breaking merge names no commit of its own:\n" + text)
+        self.assertNotIn(self.NEW_SHA[:9], line, "the breaking merge names the green run's commit, which is not in its span:\n" + line)
+
     def test_a_red_job_whose_log_names_no_test_is_first_red(self):
         """A step timeout or runner fault ends a job red and names no test (run 14673 in the audit). A new red job is a first red all the same."""
         runs = [main_run(self.NOW, "failure", sha=self.NEW_SHA), main_run(self.PREV, "success", sha=self.GREEN_SHA)]
@@ -16621,6 +16681,78 @@ class MainRunVerdict(Env):
     def test_a_cancelled_judged_run_is_unknown(self):
         """A run cancelled before it finished has no verdict: unknown, never green, first red or carried."""
         runs = [main_run(self.NOW, "cancelled", sha=self.NEW_SHA), main_run(self.PREV, "success", sha=self.GREEN_SHA)]
+        jobs = {self.NOW: [main_job("scope", "success"), main_job("checks", "cancelled", 20)], self.PREV: [main_job("checks", "success", 20)]}
+        self.judged(self.UNKNOWN, self.NEW_SHA, runs, jobs)
+
+    # A superseded run (the shared test in clear_rule): a push run cancelled before any job started, with a newer push run of main on the
+    # page. Its commit has no verdict of its own, so its line reads `superseded`, which is neither green nor unknown.
+    LATER, LATER_SHA = 1003, "7d1c0a52" + "4" * 32  # the newer push run, the covering run that replaces NOW
+
+    def covered(self, runs, jobs, token, exit_code, **reads):
+        """Judge NEW_SHA, a push run that the newer run LATER replaced: the line holds `token` and the exit code is `exit_code`. -> (exit code, output, line)."""
+        rc, text, _word, line = self.verdict(self.NEW_SHA, runs, jobs, **reads)
+        self.assertEqual(rc, exit_code, f"exit code {rc} for a commit whose covering run reads {token!r}, not {exit_code}:\n{text}")
+        self.assertIn(token, text, f"the line does not name the state of the covering run, {token!r}:\n{text}")
+        return rc, text, line
+
+    def test_a_replaced_push_run_whose_covering_run_is_in_progress_exits_1_still_going(self):
+        """Ruling of 12:38 CST Nov 25 2026: a replaced push run is skipped, and the run that replaced it decides. While that run is still going
+        it has not decided: the commit has no verdict yet, so exit 1, and the line says the covering run is still in progress."""
+        runs = [main_run(self.LATER, None, status="in_progress", sha=self.LATER_SHA), main_run(self.NOW, "cancelled", sha=self.NEW_SHA),
+                main_run(self.PREV, "success", sha=self.GREEN_SHA)]
+        jobs = {self.LATER: [], self.NOW: [], self.PREV: [main_job("scope", "success"), main_job("checks", "success", 20)]}
+        _rc, text, _line = self.covered(runs, jobs, "is still in_progress", 1)
+        self.assertIn(f"run {self.LATER}", text, "the line does not name the covering run:\n" + text)
+
+    def test_a_replaced_push_run_whose_covering_run_is_queued_exits_1_still_going(self):
+        """A queued covering run has not decided either: exit 1, and the line says it is still queued."""
+        runs = [main_run(self.LATER, None, status="queued", sha=self.LATER_SHA), main_run(self.NOW, "cancelled", sha=self.NEW_SHA),
+                main_run(self.PREV, "success", sha=self.GREEN_SHA)]
+        jobs = {self.LATER: [], self.NOW: [], self.PREV: [main_job("scope", "success"), main_job("checks", "success", 20)]}
+        self.covered(runs, jobs, "is still queued", 1)
+
+    def test_a_replaced_push_run_whose_covering_run_cannot_be_read_is_unknown_and_refuses(self):
+        """The covering run's jobs cannot be read, so the commit has no verdict: exit 1, with the failed read's text in the line."""
+        runs = [main_run(self.LATER, "success", sha=self.LATER_SHA), main_run(self.NOW, "cancelled", sha=self.NEW_SHA),
+                main_run(self.PREV, "success", sha=self.GREEN_SHA)]
+        jobs = {self.LATER: [main_job("scope", "success"), main_job("checks", "success", 20)], self.NOW: [],
+                self.PREV: [main_job("scope", "success"), main_job("checks", "success", 20)]}
+        self.covered(runs, jobs, "HTTP 502 Bad Gateway", 1, jobs_fail_of={self.LATER: "HTTP 502 Bad Gateway"})
+
+    def test_a_replaced_push_run_whose_covering_run_is_red_reads_the_failing_test_of_that_run(self):
+        """The covering run is red with a failing test its own verdict names. The replaced commit reads that verdict, and exits as that verdict does (0 for a first red)."""
+        runs = [main_run(self.LATER, "failure", sha=self.LATER_SHA), main_run(self.NOW, "cancelled", sha=self.NEW_SHA),
+                main_run(self.PREV, "success", sha=self.GREEN_SHA)]
+        jobs = {self.LATER: [main_job("scope", "success"), self.red_job("checks", 9102)], self.NOW: [],
+                self.PREV: [main_job("scope", "success"), main_job("checks", "success", 20)]}
+        self.covered(runs, jobs, "test_new", 0, job_logs={9102: self.NEW_LOG})
+
+    def test_control_a_replaced_push_run_whose_covering_run_is_green_reads_superseded_with_exit_0(self):
+        runs = [main_run(self.LATER, "success", sha=self.LATER_SHA), main_run(self.NOW, "cancelled", sha=self.NEW_SHA),
+                main_run(self.PREV, "success", sha=self.GREEN_SHA)]
+        jobs = {self.LATER: [main_job("scope", "success"), main_job("checks", "success", 20)], self.NOW: [],
+                self.PREV: [main_job("scope", "success"), main_job("checks", "success", 20)]}
+        self.judged("superseded", self.NEW_SHA, runs, jobs)
+
+    def test_control_a_cancelled_push_run_with_no_newer_run_reads_unknown_beside_a_replaced_one(self):
+        """Control, unknown on the old code too: a cancel that no newer run replaced has no verdict, though its own cancelled newer run exists."""
+        runs = [main_run(self.LATER, "cancelled", sha=self.LATER_SHA), main_run(self.NOW, "cancelled", sha=self.NEW_SHA),
+                main_run(self.PREV, "success", sha=self.GREEN_SHA)]
+        jobs = {self.LATER: [], self.NOW: [], self.PREV: [main_job("scope", "success"), main_job("checks", "success", 20)]}
+        self.judged(self.UNKNOWN, self.LATER_SHA, runs, jobs)
+
+    def test_control_a_run_replaced_by_a_cancelled_run_is_not_proven_green(self):
+        """Control, not green on the old code: the replacement is itself cancelled and no run replaced it, so the green run below proves nothing."""
+        runs = [main_run(self.LATER, "cancelled", sha=self.LATER_SHA), main_run(self.NOW, "cancelled", sha=self.NEW_SHA),
+                main_run(self.PREV, "success", sha=self.GREEN_SHA)]
+        jobs = {self.LATER: [], self.NOW: [], self.PREV: [main_job("scope", "success"), main_job("checks", "success", 20)]}
+        _rc, text, word, _line = self.verdict(self.NEW_SHA, runs, jobs)
+        self.assertNotEqual(word, "green", "a run replaced by a cancelled run that nothing replaced reads green, so it is proven:\n" + text)
+
+    def test_control_a_cancel_after_a_job_started_beside_a_newer_run_is_unknown(self):
+        """Control, unknown on the old code too: a job that started makes the cancel a real cancel, so a newer run does not replace it."""
+        runs = [main_run(self.LATER, None, status="in_progress", sha=self.LATER_SHA), main_run(self.NOW, "cancelled", sha=self.NEW_SHA),
+                main_run(self.PREV, "success", sha=self.GREEN_SHA)]
         jobs = {self.NOW: [main_job("scope", "success"), main_job("checks", "cancelled", 20)], self.PREV: [main_job("checks", "success", 20)]}
         self.judged(self.UNKNOWN, self.NEW_SHA, runs, jobs)
 

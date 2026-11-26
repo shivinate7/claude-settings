@@ -19,13 +19,15 @@ on:
 permissions:
   contents: read
 
-# A PR shares one group per ref, so a new push cancels the old run. Every other run gets its own
-# group: GitHub keeps one pending run per group and replaces it, even without cancel-in-progress,
-# so a shared group on main can leave a merged commit with no verdict. The draft state is in the
-# group: `gh pr create --draft` then `gh pr ready` fires two runs, and the draft run (skips every
-# job) must not cancel the ready run (decision draft-until-reviewed).
+# A PR shares one group per ref, so a new push cancels the old run. Main's push runs share one group:
+# GitHub keeps one run going and one pending, and a newer push replaces the pending run, cancelled
+# with no job started. cancel-in-progress stays false, so a running job is never cancelled. The judge,
+# push-skip's base walk and `merge --main-run` step over such a replaced run (clear_rule.superseded_run).
+# Every other run (schedule, dispatch) gets its own group. The draft state is in the PR group:
+# `gh pr create --draft` then `gh pr ready` fires two runs, and the draft run (skips every job) must
+# not cancel the ready run (decision draft-until-reviewed).
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('{0}-{1}', github.ref, github.event.pull_request.draft) || github.run_id }}
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('{0}-{1}', github.ref, github.event.pull_request.draft) || github.event_name == 'push' && github.ref || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 # Git's auto gc runs detached and writes into a test repo's .git/objects while the test deletes it.
