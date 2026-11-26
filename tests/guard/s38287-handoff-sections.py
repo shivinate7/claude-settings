@@ -521,6 +521,160 @@ LOG_CHECKS_EXTRA.append(("handoff-sections: an allowed write writes no file and 
                          "writes its guard.log line only", hs_cost_check))
 
 
+# ------------------------------------------------------------------------------------- Bash writes to the session handoff
+# A Bash call that puts content on the session handoff is judged as a write of that content when the command names it: a
+# readable file (cp, mv, cat of a file), a heredoc, or literal text in python3 -c. Content that a program or computed code
+# makes is unknown before the command runs, so that call is refused with the Write tool as the remedy, under HSW_RULE
+# (the owner may reverse this pick). The size and checked-stamp families hold the same command shapes for their rules.
+# The ~ and $HOME forms run with HOME set to ROOT, so they name the fixture's home and nothing outside it.
+HSW_RULE = "handoff-shell-write"
+HSW_REMEDY = "Write tool"
+HBW_DIR = os.path.join(ROOT, "hbw")                  # the scratch files a Bash call copies from
+HBW_NOSEC = os.path.join(HBW_DIR, "nosec.md")        # a handoff that drops the tail, under the size limit
+HBW_GOOD = os.path.join(HBW_DIR, "good.md")          # a handoff with all six sections, under the size limit
+HBW_OUT = os.path.join(HBW_DIR, "out.md")            # where a read-out copies the handoff; no case writes it
+HBW_KEEP = ("Goal", "Working premises", "Where things stand")   # the three a tail-cut handoff keeps
+HBW_HOME_REL = os.path.relpath(HS_HANDOFF, ROOT).replace(os.sep, "/")   # hs-cfg/handoffs/<HS_SID>.md
+HBW_TILDE = "~/" + HBW_HOME_REL
+HBW_DOLLAR = "$HOME/" + HBW_HOME_REL
+HBW_HOME = {"HOME": ROOT}                            # the env that makes ~ and $HOME name the fixture's home
+HBW_OTHER = hs_handoff(HS_CFG, HS_OTHER)             # another session's handoff in the same config folder
+HBW_INBOX = hs_inbox(HS_CFG)                         # the session's owner-feedback inbox, beside its handoff
+
+
+def _build_hbw():
+    write(HBW_NOSEC, hs_text(omit=HS_TAIL))
+    write(HBW_GOOD, hs_text())
+
+
+lazy_fixture([HBW_NOSEC, HBW_GOOD], _build_hbw)
+
+
+def hbw_home_expands(rel, want):
+    """(ok, tilde, dollar): with HOME set to ROOT, `~/rel` and `$HOME/rel` each expand to `want`. The guard reads HOME
+    from its environment, so the case's env sets it the same way."""
+    saved = os.environ.get("HOME")
+    os.environ["HOME"] = ROOT
+    try:
+        tilde = os.path.expanduser("~/" + rel)
+        dollar = os.path.expandvars("$HOME/" + rel)
+    finally:
+        if saved is None:
+            os.environ.pop("HOME", None)
+        else:
+            os.environ["HOME"] = saved
+    return tilde == want and dollar == want, tilde, dollar
+
+
+def hbw_scope():
+    """The Bash cases copy the scratch file on disk, and read the ~ and $HOME forms as the session handoff under HOME. A
+    scratch file that differs from its text, or a form that names another path, would move a verdict with no other check
+    failing."""
+    materialize(HBW_NOSEC)
+    try:
+        with open(HBW_NOSEC, "r", encoding="utf-8") as handle:
+            text = handle.read()
+    except OSError as e:
+        return False, "the scratch file is unreadable: %s" % e
+    if text != hs_text(omit=HS_TAIL):
+        return False, "the scratch file on disk is not the handoff without the tail"
+    ok, tilde, dollar = hbw_home_expands(HBW_HOME_REL, hs_handoff(HS_CFG))
+    if not ok:
+        return False, "with HOME at the fixture root, ~ names %s and $HOME names %s" % (tilde, dollar)
+    return True, "the scratch file drops the tail, and ~ and $HOME name the session handoff under the fixture root"
+
+
+LOG_CHECKS_EXTRA.append(("handoff-sections: scope: the Bash scratch file drops the tail, and ~ and $HOME name the session "
+                         "handoff", hbw_scope))
+
+
+def hbw_refuse(name, command, rule=HS_RULE, carries=HS_TAIL, lacks=HBW_KEEP, **kw):
+    """One Bash call the rule refuses: the deny, its rule, and the fragments its reason names and does not name."""
+    sh(name, command, "deny", rule, cwd=NOGIT, session=HS_SID, config=HS_CFG, carries=carries, lacks=lacks, **kw)
+
+
+def hbw_allow(name, command, **kw):
+    """One Bash call that passes silently: a control, or a write whose content the rules judge good."""
+    sh(name, command, "allow", cwd=NOGIT, session=HS_SID, config=HS_CFG, silent=True, **kw)
+
+
+HBW_PY = "python3 -c \"open('%s', 'w').write('''%s''')\""   # a literal, multi-line text written by python3 -c
+HBW_NOSEC_TEXT = hs_text(omit=HS_TAIL)
+HBW_GOOD_TEXT = hs_text()
+
+hbw_refuse("handoff-sections: a Bash cp of a scratch file that drops the tail onto the session handoff is refused, "
+         "naming the three",
+         "cp %s %s" % (HBW_NOSEC, HS_HANDOFF))
+hbw_refuse("handoff-sections: a Bash mv of a scratch file that drops the tail onto the session handoff is refused, "
+         "naming the three",
+         "mv %s %s" % (HBW_NOSEC, HS_HANDOFF))
+hbw_refuse("handoff-sections: a Bash cat of a scratch file redirected onto the session handoff is refused, naming the three",
+         "cat %s > %s" % (HBW_NOSEC, HS_HANDOFF))
+hbw_refuse("handoff-sections: a heredoc redirected with > onto the session handoff, dropping the tail, is refused, "
+         "naming the three",
+         "cat > %s <<'EOF'\n%sEOF\n" % (HS_HANDOFF, HBW_NOSEC_TEXT))
+hbw_refuse("handoff-sections: a tee of a heredoc onto the session handoff, dropping the tail, is refused, naming the three",
+         "tee %s <<'EOF'\n%sEOF\n" % (HS_HANDOFF, HBW_NOSEC_TEXT))
+hbw_refuse("handoff-sections: a python3 -c that writes a literal handoff dropping the tail onto the session handoff is "
+         "refused, naming the three",
+         HBW_PY % (HS_HANDOFF, HBW_NOSEC_TEXT))
+hbw_refuse("handoff-sections: a Bash cp of a scratch file that drops the tail, written with ~, is refused, naming the three",
+         "cp %s %s" % (HBW_NOSEC, HBW_TILDE), env=HBW_HOME)
+hbw_refuse("handoff-sections: a Bash cp of a scratch file that drops the tail, written with $HOME, is refused, naming "
+         "the three",
+         "cp %s %s" % (HBW_NOSEC, HBW_DOLLAR), env=HBW_HOME)
+hbw_refuse("handoff-sections: a Bash cp of a scratch file that drops the tail onto another session's handoff is refused, "
+         "naming the three",
+         "cp %s %s" % (HBW_NOSEC, HBW_OTHER))
+
+# The controls: each is the same shape as a refused call above, with a target or content the rules pass.
+hbw_allow("handoff-sections: a Bash cp of a complete scratch file onto the session handoff passes, silently",
+          "cp %s %s" % (HBW_GOOD, HS_HANDOFF))
+hbw_allow("handoff-sections: a heredoc redirected with > onto the session handoff, keeping all six sections, passes, silently",
+          "cat > %s <<'EOF'\n%sEOF\n" % (HS_HANDOFF, HBW_GOOD_TEXT))
+hbw_allow("handoff-sections: a tee of a heredoc onto the session handoff, keeping all six sections, passes, silently",
+          "tee %s <<'EOF'\n%sEOF\n" % (HS_HANDOFF, HBW_GOOD_TEXT))
+hbw_allow("handoff-sections: a python3 -c that writes a literal handoff keeping all six sections passes, silently",
+          HBW_PY % (HS_HANDOFF, HBW_GOOD_TEXT))
+hbw_allow("handoff-sections: a Bash cp of a complete scratch file onto another session's handoff passes, silently",
+          "cp %s %s" % (HBW_GOOD, HBW_OTHER))
+hbw_allow("handoff-sections: a Bash append of a complete scratch file to the session handoff keeps all six sections, "
+          "and passes, silently",
+          "cat %s >> %s" % (HBW_GOOD, HS_HANDOFF))
+hbw_allow("handoff-sections: a read-out cp of the session handoff to a scratch file passes, silently",
+          "cp %s %s" % (HS_HANDOFF, HBW_OUT))
+hbw_allow("handoff-sections: a cat of the session handoff passes, silently", "cat %s" % HS_HANDOFF)
+hbw_allow("handoff-sections: a wc of the session handoff passes, silently", "wc -l %s" % HS_HANDOFF)
+hbw_allow("handoff-sections: a grep of the session handoff passes, silently",
+          "grep -n 'Next steps' %s" % HS_HANDOFF)
+hbw_allow("handoff-sections: a command that only names the session handoff in an echo string passes, silently",
+          "echo \"cp %s %s\"" % (HBW_NOSEC, HS_HANDOFF))
+hbw_allow("handoff-sections: an item-line heredoc appended to the owner-feedback inbox passes, silently",
+          "cat >> %s <<'EOF'\n%sEOF\n" % (HBW_INBOX, HS_INBOX_TEXT))
+hbw_refuse("handoff-sections: the same item lines redirected with > onto the session handoff are refused, naming all six",
+         "cat > %s <<'EOF'\n%sEOF\n" % (HS_HANDOFF, HS_INBOX_TEXT), carries=HS_SECTIONS, lacks=())
+
+# A pipe from a program, or python3 -c with computed text, puts content on the handoff the guard cannot read before the
+# command runs. The call is refused under HSW_RULE, and the remedy names the Write tool.
+HSW_LACKS = HS_SECTIONS
+hbw_refuse("handoff-shell-write: a pipe from git into tee onto the session handoff is refused, with the Write tool as "
+         "the remedy",
+         VCS + " log --oneline | tee %s" % HS_HANDOFF,
+         rule=HSW_RULE, carries=(HSW_REMEDY,), lacks=HSW_LACKS)
+hbw_refuse("handoff-shell-write: a python3 -c that writes computed text onto the session handoff is refused, with the "
+         "Write tool as the remedy",
+         "python3 -c \"open('%s', 'w').write('A' * 40000)\"" % HS_HANDOFF,
+         rule=HSW_RULE, carries=(HSW_REMEDY,), lacks=HSW_LACKS)
+hbw_refuse("handoff-shell-write: a pipe from git into tee onto the session handoff, written with ~, is refused, with the "
+         "Write tool as the remedy",
+         VCS + " log --oneline | tee " + HBW_TILDE, env=HBW_HOME,
+         rule=HSW_RULE, carries=(HSW_REMEDY,), lacks=HSW_LACKS)
+hbw_refuse("handoff-shell-write: a pipe from git into tee onto the session handoff, written with $HOME, is refused, with "
+         "the Write tool as the remedy",
+         VCS + " log --oneline | tee " + HBW_DOLLAR, env=HBW_HOME,
+         rule=HSW_RULE, carries=(HSW_REMEDY,), lacks=HSW_LACKS)
+
+
 # =========================================================================== handoff-checked-stamp
 # A write to a session handoff that restamps a premise's `Checked` value needs evidence in the session's own transcript: a
 # tool_use, after the last compact_boundary record, whose input holds a token of that premise's Source. A restamp with no

@@ -96,3 +96,96 @@ add("handoff-too-big: a MultiEdit that grows an over-limit handoff on disk is re
     carries=("estimated 10293 tokens", "over the limit of 10000"),
     file_path=HTB_HANDOFF,
     edits=[{"old_string": HTB_BASE, "new_string": "Nothing in flight; the red run is recorded.\n"}])
+
+
+# ------------------------------------------------------------------------ Bash writes past the size limit
+# The Bash forms of the Write cases above. Each call puts over-limit text on HTB_NEW's handoff, which has no file on disk, so
+# the size of the content is the whole test; the `>>` case grows a handoff that is on disk. The scratch files keep all six
+# sections, since the sections rule is judged first. The ~ and $HOME forms run with HOME set to ROOT (hbw_home_expands).
+HTB_SCRATCH = os.path.join(ROOT, "htb-scratch")
+HTB_OVER_FILE = os.path.join(HTB_SCRATCH, "over.md")      # htb_text(35001): 10001 estimated tokens, six sections
+HTB_AT_FILE = os.path.join(HTB_SCRATCH, "at.md")          # htb_text(35000): the limit itself, which passes
+HBA_CFG = os.path.join(ROOT, "hba-cfg")                   # an installed prompt, and HTB_NEW's handoff at 35000 bytes
+HTB_HOME_REL = os.path.relpath(HTB_NEW_HANDOFF, ROOT).replace(os.sep, "/")
+HTB_TILDE = "~/" + HTB_HOME_REL
+HTB_DOLLAR = "$HOME/" + HTB_HOME_REL
+HTB_HOME = {"HOME": ROOT}
+
+
+def _build_htb_scratch():
+    write(HTB_OVER_FILE, htb_text(35001))
+    write(HTB_AT_FILE, htb_text(35000))
+
+
+def _build_hba():
+    hs_install(HBA_CFG, hs_prompt_text())
+    write(hs_handoff(HBA_CFG, HTB_NEW), htb_text(35000))
+
+
+lazy_fixture([HTB_OVER_FILE, HTB_AT_FILE], _build_htb_scratch)
+lazy_fixture([HBA_CFG], _build_hba)
+
+
+def htb_bash_scope():
+    """The Bash cases copy scratch files of 35001 and 35000 bytes, and read the ~ and $HOME forms as HTB_NEW's handoff under
+    HOME. A file of another size would move the boundary with no other check failing."""
+    materialize(HTB_OVER_FILE)
+    sizes = (os.path.getsize(HTB_OVER_FILE), os.path.getsize(HTB_AT_FILE))
+    if sizes != (35001, 35000):
+        return False, "the scratch files are %r bytes, want (35001, 35000)" % (sizes,)
+    ok, tilde, dollar = hbw_home_expands(HTB_HOME_REL, hs_handoff(HTB_CFG, HTB_NEW))
+    if not ok:
+        return False, "with HOME at the fixture root, ~ names %s and $HOME names %s" % (tilde, dollar)
+    return True, "the scratch files are 35001 and 35000 bytes, and ~ and $HOME name the new session's handoff"
+
+
+HTB_BASH_SCOPE_LABEL = ("handoff-too-big: scope: the Bash scratch files are 35001 and 35000 bytes, and ~ and $HOME name "
+                        "the new session's handoff")
+LOG_FAMILY[HTB_BASH_SCOPE_LABEL] = FAMILY
+LOG_CHECKS = LOG_CHECKS + ((HTB_BASH_SCOPE_LABEL, htb_bash_scope),)
+
+
+def htb_bash_refuse(name, command, **kw):
+    """One Bash call the size rule refuses for HTB_NEW's handoff: the deny, and the estimate of 10001 tokens."""
+    sh(name, command, "deny", HTB_RULE, cwd=NOGIT, session=HTB_NEW, config=HTB_CFG,
+       carries=("estimated 10001 tokens", "over the limit of 10000"), **kw)
+
+
+htb_bash_refuse("handoff-too-big: a Bash cp of a scratch file one byte over the limit onto a session handoff is refused, "
+              "naming the estimate",
+              "cp %s %s" % (HTB_OVER_FILE, HTB_NEW_HANDOFF))
+htb_bash_refuse("handoff-too-big: a Bash mv of a scratch file one byte over the limit onto a session handoff is refused, "
+              "naming the estimate",
+              "mv %s %s" % (HTB_OVER_FILE, HTB_NEW_HANDOFF))
+htb_bash_refuse("handoff-too-big: a Bash cat of a scratch file one byte over the limit redirected onto a session handoff is "
+              "refused, naming the estimate",
+              "cat %s > %s" % (HTB_OVER_FILE, HTB_NEW_HANDOFF))
+htb_bash_refuse("handoff-too-big: a heredoc redirected with > one byte over the limit onto a session handoff is refused, "
+              "naming the estimate",
+              "cat > %s <<'EOF'\n%sEOF\n" % (HTB_NEW_HANDOFF, htb_text(35001)))
+htb_bash_refuse("handoff-too-big: a tee of a heredoc one byte over the limit onto a session handoff is refused, naming the "
+              "estimate",
+              "tee %s <<'EOF'\n%sEOF\n" % (HTB_NEW_HANDOFF, htb_text(35001)))
+htb_bash_refuse("handoff-too-big: a python3 -c that writes a literal one byte over the limit onto a session handoff is "
+              "refused, naming the estimate",
+              "python3 -c \"open('%s', 'w').write('''%s''')\"" % (HTB_NEW_HANDOFF, htb_text(35001)))
+htb_bash_refuse("handoff-too-big: a Bash cp of a scratch file one byte over the limit, written with ~, is refused, naming "
+              "the estimate",
+              "cp %s %s" % (HTB_OVER_FILE, HTB_TILDE), env=HTB_HOME)
+htb_bash_refuse("handoff-too-big: a Bash cp of a scratch file one byte over the limit, written with $HOME, is refused, "
+              "naming the estimate",
+              "cp %s %s" % (HTB_OVER_FILE, HTB_DOLLAR), env=HTB_HOME)
+sh("handoff-too-big: a Bash append of one line onto a handoff on disk at 35000 bytes, which goes over, is refused, naming "
+   "10007 tokens",
+   "cat >> %s <<'EOF'\n%sEOF\n" % (hs_handoff(HBA_CFG, HTB_NEW), HTB_LINE), "deny", HTB_RULE,
+   cwd=NOGIT, session=HTB_NEW, config=HBA_CFG, carries=("estimated 10007 tokens", "over the limit of 10000"))
+
+# The controls: the same shapes at the limit, and an append onto a small handoff, pass silently.
+sh("handoff-too-big: a Bash cp of a scratch file at the limit, 35000 bytes, onto a session handoff passes, silently",
+   "cp %s %s" % (HTB_AT_FILE, HTB_NEW_HANDOFF), "allow", cwd=NOGIT, session=HTB_NEW, config=HTB_CFG, silent=True)
+sh("handoff-too-big: a heredoc redirected with > at the limit, 35000 bytes, onto a session handoff passes, silently",
+   "cat > %s <<'EOF'\n%sEOF\n" % (HTB_NEW_HANDOFF, htb_text(35000)), "allow",
+   cwd=NOGIT, session=HTB_NEW, config=HTB_CFG, silent=True)
+sh("handoff-too-big: a Bash append of one line onto a small session handoff on disk passes, silently",
+   "cat >> %s <<'EOF'\n%sEOF\n" % (hs_handoff(HS_CFG), HTB_LINE), "allow",
+   cwd=NOGIT, session=HS_SID, config=HS_CFG, silent=True)
