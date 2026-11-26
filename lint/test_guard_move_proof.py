@@ -617,5 +617,61 @@ class NewUnitFreeNames(Proof):
                         "--new", "c", lines=["new (allowed by --new): def c at guard.py"])
 
 
+class Annotations(Proof):
+    """An annotated assignment makes `symtable` report `__conditional_annotations__` as a module-scope name on Python
+    3.14 and later. No unit defines that name, so rule 3 reported it unresolved. Annotations are deferred, so a name an
+    annotation reads is no import-time read. Each red case has a plain-assignment control of the same shape."""
+
+    def test_an_unchanged_annotated_assignment_in_a_module_that_lost_a_unit_passes(self):
+        self.assertPass(tree(guard="X: list = []\n\ndef a():\n    return 1\n"),
+                        tree(guard="X: list = []\n", guard_x="def a():\n    return 1\n"),
+                        lines=["1 moved module"])
+
+    def test_a_plain_assignment_in_the_same_shape_passes(self):
+        self.assertPass(tree(guard="X = []\n\ndef a():\n    return 1\n"),
+                        tree(guard="X = []\n", guard_x="def a():\n    return 1\n"),
+                        lines=["1 moved module"])
+
+    def test_a_moved_annotated_assignment_passes_and_its_target_counts_as_defined(self):
+        self.assertPass(tree(guard="X: list = []\n\ndef a():\n    return X\n"),
+                        tree(guard="from guard_x import X\n\ndef a():\n    return X\n", guard_x="X: list = []\n"),
+                        lines=["1 moved module"])
+
+    def test_a_plain_assignment_moved_with_the_same_reader_passes(self):
+        self.assertPass(tree(guard="X = []\n\ndef a():\n    return X\n"),
+                        tree(guard="from guard_x import X\n\ndef a():\n    return X\n", guard_x="X = []\n"),
+                        lines=["1 moved module"])
+
+    def test_a_conditional_annotated_assignment_in_a_module_that_lost_a_unit_passes(self):
+        self.assertPass(tree(guard="if True:\n    X: list = []\n\ndef a():\n    return 1\n"),
+                        tree(guard="if True:\n    X: list = []\n", guard_x="def a():\n    return 1\n"),
+                        lines=["1 moved module"])
+
+    def test_a_plain_conditional_assignment_in_the_same_shape_passes(self):
+        self.assertPass(tree(guard="if True:\n    X = []\n\ndef a():\n    return 1\n"),
+                        tree(guard="if True:\n    X = []\n", guard_x="def a():\n    return 1\n"),
+                        lines=["1 moved module"])
+
+    def test_an_annotation_naming_a_later_class_passes_because_annotations_are_deferred(self):
+        self.assertPass(tree(guard="X: Later = 1\n\nclass Later:\n    pass\n\ndef a():\n    return 1\n"),
+                        tree(guard="X: Later = 1\n\nclass Later:\n    pass\n", guard_x="def a():\n    return 1\n"),
+                        lines=["1 moved module"])
+
+    def test_a_value_reading_a_later_class_at_import_time_still_fails(self):
+        self.assertFail(tree(guard="Y = Later()\n\nclass Later:\n    pass\n\ndef a():\n    return 1\n"),
+                        tree(guard="Y = Later()\n\nclass Later:\n    pass\n", guard_x="def a():\n    return 1\n"),
+                        lines=["`Later` is read at import time at guard.py:1"])
+
+    def test_a_new_annotated_assignment_named_by_new_passes(self):
+        self.assertPass(tree(guard="def b():\n    return 2\n"),
+                        tree(guard="def b():\n    return 2\n\nX: list = []\n"),
+                        "--new", "X", lines=["new (allowed by --new): X at guard.py:4"])
+
+    def test_a_plain_new_assignment_named_by_new_passes(self):
+        self.assertPass(tree(guard="def b():\n    return 2\n"),
+                        tree(guard="def b():\n    return 2\n\nX = []\n"),
+                        "--new", "X", lines=["new (allowed by --new): X at guard.py:4"])
+
+
 if __name__ == "__main__":
     unittest.main()
