@@ -1,0 +1,1 @@
+- clash-read-names-front-pr: `combine_hint` in merge/merge.py checks clashes against every ready PR but N, so the front PR (the lowest number, which merges alone and is not a train member) can be named in the "cannot join a train with it" sentence. Seen: 2026-11-25 x1
