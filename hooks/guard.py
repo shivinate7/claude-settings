@@ -1785,10 +1785,14 @@ def handoff_shell_writes(raw, cwd, tool="Bash"):
         return None
 
 
-def handoff_shell_judge(tool, raw, cwd, transcript):
+def handoff_shell_judge(tool, raw, cwd, transcript, session_id=""):
     """Judge a shell call that writes a session handoff as the three handoff rules judge a Write of the same text. A
     `>>` or `tee -a` leaves the handoff on disk with the text added. A write whose text is not known before the command
-    runs is refused under handoff-shell-write."""
+    runs is refused under handoff-shell-write. The audit helper's remedy call (reread_check.audit_helper_allows) names
+    the handoff only to read it, so it is no write, whatever path spells its script."""
+    owed = reread_check.audit_pending({"session_id": session_id}) if session_id else ""
+    if owed and audit_helper_hit(tool, {"command": raw}, owed):
+        return
     for path, text, append in handoff_shell_writes(raw, cwd, tool) or ():
         if text is None:
             refuse(tool, "deny", "handoff-shell-write", HANDOFF_SHELL_WRITE_REASON, path or "shell write")
@@ -6346,7 +6350,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
 
     # 7c2. A write onto a session handoff (rules handoff-sections, handoff-too-big, handoff-checked-stamp, and
     # handoff-shell-write for text the guard cannot read first). Not in never_lifted: the owner may mean the write.
-    handoff_shell_judge(tool, raw, cwd, transcript)
+    handoff_shell_judge(tool, raw, cwd, transcript, session_id)
 
     # 7d. A read-only agent's shell write (rule readonly-shell-write): a redirect, `tee`, `touch` or `mktemp` to a
     # file outside its own session's scratchpad, here or in an ssh remote command.
