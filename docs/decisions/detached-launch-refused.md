@@ -2,9 +2,10 @@
 
 ## The ruling
 
-The `detached-launch` rule in `hooks/guard.py` refuses a command that starts a process and detaches it from the session. It refuses these three shapes too:
+The `detached-launch` rule in `hooks/guard.py` refuses a command that starts a process and detaches it from the session. It refuses these shapes too:
 
-- A bare `&` job in any segment, unless the command captures the pid with `$!`.
+- A bare `&` job in any segment that has no `$!` of its own. Each `&` job needs its own `$!`: one `$!` names only the last job, so twelve jobs under one capture are refused. A `$!` inside single quotes is text and counts for none. The guard counts jobs and `$!` captures with the shell tokenizer (`backgrounding_amps`, `pid_captures`).
+- A CPU load generator as a background job: `yes`, `stress`, `stress-ng`, or a `while true` or `while :` loop with no `sleep` (`LOAD_GENERATOR_WORDS` in `hooks/guard_kill.py`). It starts in the background only as `timeout N setsid <cmd> &`, so it ends with its lane. A foreground `yes | head` and a short `sleep 5 &` pass. A lane started twelve `yes` jobs under one `echo $!`, and the load reached 48 to 130 (owner's list keeper picks, 2026-11-26 02:27 and 02:45 CST; reversible).
 - `disown` in command position.
 - The same shapes inside the script of `sh -c` or `bash -c`.
 

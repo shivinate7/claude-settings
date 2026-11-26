@@ -596,25 +596,34 @@ def amp_pieces(segment: str):
     return [(type(segment)(text), cut) for text, cut in pieces if text.strip() or not cut]
 
 
-def backgrounding_amp(segment: str, tokens, start: int = 0) -> str:
-    """The text a backgrounding `&` ends in one segment, else ''. The one home of "this command
-    runs as a background job", read by the check-tail rule and the detached-launch rule. A `&` is a
-    job when it ends a piece that holds a word after a command word (the one at `start` in the
-    first piece, any word in a later one), spaced or glued (`_amp_cuts`). The pieces come from the
-    raw text, never from `tokens`: they keep no quote marks, so a quoted `&` and a bare one are the
-    same token. `tokens` is `segment_tokens(segment)`; None means the segment cannot be read, which
-    is no job. A `&` at the head of a segment (`|&`, a PowerShell `& $cmd`) ends an empty piece."""
+def backgrounding_amps(segment: str, tokens, start: int = 0):
+    """Every backgrounding `&` of one segment, as [(text it ends in, the words of its job)]. The
+    one reader of "this runs as a background job": `backgrounding_amp` takes the first, and the
+    detached-launch rule counts them all, since one `$!` names only the last job. A `&` is a job
+    when it ends a piece that holds a word after a command word (the one at `start` in the first
+    piece, any word in a later one), spaced or glued (`_amp_cuts`). The pieces come from the raw
+    text, never from `tokens`: they keep no quote marks, so a quoted `&` and a bare one are the
+    same token. `tokens` is `segment_tokens(segment)`; None means the segment cannot be read,
+    which is no job. A `&` at the head of a segment (`|&`, a PowerShell `& $cmd`) ends an empty
+    piece."""
     if not tokens:
-        return ""
-    last, floor = 0, start
+        return []
+    jobs, last, floor = [], 0, start
     for index, kind in _amp_cuts(segment):
         if kind == "redirect":
             continue
         words = segment_tokens(type(segment)(segment[last:index]))
         if words and (kind == "glued" or len(words) > floor):
-            return words[-1] + ("&" if kind == "glued" else " &")
+            jobs.append((words[-1] + ("&" if kind == "glued" else " &"), words))
         last, floor = index + 1, 0
-    return ""
+    return jobs
+
+
+def backgrounding_amp(segment: str, tokens, start: int = 0) -> str:
+    """The text the first backgrounding `&` ends in one segment, else '' (`backgrounding_amps`).
+    Read by the check-tail rule and the detached-launch rule."""
+    jobs = backgrounding_amps(segment, tokens, start)
+    return jobs[0][0] if jobs else ""
 
 
 def segment_tokens(segment: str):

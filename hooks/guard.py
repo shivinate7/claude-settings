@@ -107,9 +107,15 @@ Shell tools (Bash, PowerShell), in judge_shell order:
   scratchpad-commit-msg-owner  deny. A commit from an agent's call whose -F message file resolves
                        into any session's scratchpad. `-F -`, `-m`, an orchestrator's call and a file
                        elsewhere pass. (scratchpad-commit-msg-owner)
-  machine-wide-kill   deny. A kill by name or pattern, or of a pid that is not a descendant of
-                       this session. (a-kill-by-pid-needs-an-owned-pid)
-  detached-launch      deny. A command that starts a process and detaches it from the session.
+  machine-wide-kill   deny. A kill by name or pattern, or of a literal pid this session does not own.
+                       A pid is owned when it descends from this session, when its environment holds
+                       this session's tag and its parent or grandparent is init (a re-parented job),
+                       or when it runs in one of this session's agent worktrees with init as parent.
+                       (a-kill-by-pid-needs-an-owned-pid)
+  detached-launch      deny. A command that starts a process and detaches it from the session, a `&`
+                       job with no `$!` of its own (a `$!` in quotes is text), or a background
+                       `yes`, `stress`, `stress-ng` or busy `while true` loop not run as
+                       `timeout N setsid <cmd> &`. (detached-launch-refused)
   wsl-allow-list       deny. A `wsl` call outside the fixed list of test commands. (wsl-allow-list)
   review-log-form, review-log-sha  deny. A PR comment (the add and update tools, a Bash gh pr comment or gh api body) whose
                        first line is the review log marker and whose body merge/merge.py parse_review refuses, or
