@@ -1258,7 +1258,7 @@ class SessionStartLivePinNoticeTests(SessionStartAgentWorktreeNoticeTests):
 # The waiting page behind main (rule page-stale). A repo whose extras name a waiting page prints one line when a stamp
 # exists and none equals main's page.html blob sha. The stamps are the record file on origin/roadmap and the local stamp
 # <git common dir>/waiting-page-built, which alone counts while the record file is missing or unreadable. A stamp equal
-# to main's blob, or no stamp at all, prints nothing.
+# to main's blob prints nothing. No stamp at all prints the freshness-unknown line, which names the page's url.
 # Main is origin/main of the claude-settings clone that the config's CLAUDE.md names, the
 # checkout the guard's stale_pages reads, not the session's own repo. The page text here is a stand-in: the
 # hook compares blob shas and never reads the text.
@@ -1321,7 +1321,15 @@ class SessionStartWaitingPageTests(SessionStartAgentWorktreeNoticeTests):
         self.stamp(self.main_sha)
         self.assertEqual(self.waiting_lines(self.run_checked()), [])
 
-    def test_no_stamp_prints_no_line(self):
+    def test_no_page_built_record_prints_freshness_unknown_line_with_the_url(self):
+        hits = self.waiting_lines(self.run_checked())
+        self.assertEqual(len(hits), 1, "expected one waiting page line, got %r" % hits)
+        self.assertIn(WAITING_URL, hits[0], "the waiting page line does not name the page's url: %r" % hits[0])
+        self.assertIn("freshness unknown", hits[0], "the waiting page line does not say freshness unknown: %r" % hits[0])
+        self.assertIn("no page-built stamp", hits[0], "the waiting page line does not say no page-built stamp: %r" % hits[0])
+
+    def test_no_page_built_record_and_no_page_url_prints_no_page_line(self):
+        os.remove(os.path.join(self.primary, ".claude", "layout-extras.json"))
         self.assertEqual(self.waiting_lines(self.run_checked()), [])
 
     def test_main_unreadable_prints_no_line_even_with_a_stale_stamp(self):
