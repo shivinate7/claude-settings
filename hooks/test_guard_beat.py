@@ -52,7 +52,6 @@ sys.path.insert(0, HERE)
 import mutate_shared  # noqa: E402  module_files and guard_tree: the one home of the guard's module list and copy
 import stall_watch  # noqa: E402  the watcher, and its exit code on a stall (STALL_EXIT)
 import guard_merge  # noqa: E402  merge_module: the merge tool's own FAIL-line parser, read by merge.failing_line
-import mutate_shared  # noqa: E402  guard_tree: a copy of the guard with its siblings, for a planted crash
 
 RUN_FOLDER = _test_temp.run_folder()
 CONFIG_DIR = os.path.join(RUN_FOLDER, "config")
