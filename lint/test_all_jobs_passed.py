@@ -24,6 +24,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from test_windows_split import CHECKS, LINUX_GUARD_JOBS, MACOS_JOBS, all_jobs, eval_with, yaml_scalar  # noqa: E402  the one home of the checks.yml path and the guard shards
 from test_windows_split import ALL_JOBS_PASSED_JOB, DRAFT_GUARD, NIGHTLY_SKIP_JOB, PUSH_OFF_SHARDS, PUSH_SKIP_JOB, RECORDS_ONLY_CONDITION, SUITE_FLAG, unwrap  # noqa: E402  the one home of the rollup job name, the draft guard, the skip jobs, the shard list, the records-only skip and the suite flags
+from test_windows_split import draft_run_results  # noqa: E402  the one home of the draft-run model (cut 5)
 from all_jobs_passed_rules import (ALL_JOBS_PASSED_USES, COMMENT_DELTA_CLAUSE, DELTA_CLAUSES, all_problems,  # noqa: E402  the one home of the rules
                                    child_problems, ci_done_problems, needs_of, needs_problems, off_problems, scope_if_problems,
                                    scope_skips_problems, shape_problems, split_jobs, step_with, steps_problems, steps_part)
@@ -290,6 +291,23 @@ class PushOffRollup(unittest.TestCase):
                 with self.subTest(job=name, if_=expr):
                     text = self.rollup_text(expr, name, runs_on="ubuntu-latest", needs=None)
                     self.assertTrue(off_problems(text), f"{name} with {expr} passes the rollup rules")
+
+
+class DraftRunSkipsEveryJob(unittest.TestCase):
+    """Cut 5 (lane draft-run-starts-no-job): on a draft pull_request run every job of checks.yml is skipped, the rollup too, so the run has
+    no job result for all-jobs-passed to read, and the rule file accepts checks.yml. Reads the real file."""
+
+    def setUp(self):
+        with open(CHECKS, encoding="utf-8") as f:
+            self.text = f.read()
+
+    def test_a_draft_run_skips_every_job_and_the_rule_file_accepts_it(self):
+        # Named failure: a job starts on a draft run, so the run has a result the rollup would read; or the rule file refuses the file.
+        results = draft_run_results(self.text, draft=True)
+        started = sorted(name for name, result in results.items() if result != "skipped")
+        self.assertEqual(started, [], f"a job starts on a draft run, so the run has a job result: {started}")
+        self.assertEqual(results.get(ALL_JOBS_PASSED_JOB), "skipped", "all-jobs-passed runs on a draft run, and reads its skipped needs as red")
+        self.assertEqual(all_problems(self.text), [], "the rule file refuses checks.yml, whose draft run skips every job")
 
 
 class DeltaClausesOnTheRealWorkflow(unittest.TestCase):
