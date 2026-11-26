@@ -2215,12 +2215,12 @@ def _busy_reasons(paths):
         inside, _unreadable = processes_in(path)
         if inside is None or inside:
             answers[path] = _busy_reason(inside, [])
+        elif sys.platform == "darwin" and not os.path.exists(path):
+            answers[path] = None  # gone: no holder, and one such folder would make `lsof +D` fail for the whole batch
         else:
             waiting.append(path)
     if waiting and sys.platform == "darwin":
-        # A folder that no longer exists makes `lsof +D` fail for the whole batch, and it has no holder.
-        present = [path for path in waiting if os.path.exists(path)]
-        table = _open_files_under(present) if present else []
+        table = _open_files_under(waiting)
         for path in waiting:
             holders = None if table is None else [pid for pid, name in table if _cwd_under_checkout(name, path)]
             answers[path] = _busy_reason([], holders)
