@@ -2221,6 +2221,11 @@ def _busy_reasons(paths):
             waiting.append(path)
     if waiting and sys.platform == "darwin":
         table = _open_files_under(waiting)
+        if table is None and len(waiting) > 1:
+            # one unreadable folder fails the whole batch: judge each folder alone, so only that one stays unknown
+            for path in waiting:
+                answers.update(_busy_reasons([path]))
+            return answers
         for path in waiting:
             holders = None if table is None else [pid for pid, name in table if _cwd_under_checkout(name, path)]
             answers[path] = _busy_reason([], holders)
