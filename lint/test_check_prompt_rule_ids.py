@@ -326,20 +326,20 @@ class FunctionPromptTests(unittest.TestCase):
                       path="hooks/peer_guard.py")
 
     def test_f_string_prompt_returned_by_a_function_is_reported(self):
-        src = ('def peer_text(to):\n'
+        src = ('def peer_prompt(to):\n'
                '    return f"Judge the message to {to}. Rule: output-ghost-fstr (message a peer)."\n')
         reported_once(self, make_tree(hooks={"peer_guard.py": src}), src, "output-ghost-fstr",
                       path="hooks/peer_guard.py")
 
     def test_implicitly_joined_prompt_returned_by_a_function_is_reported(self):
-        src = ('def judge_text():\n'
+        src = ('def judge_prompt():\n'
                '    return ("Judge the message from one agent. "\n'
                '            "Rule: output-ghost-joined (message a peer).")\n')
         reported_once(self, make_tree(hooks={"peer_guard.py": src}), src, "output-ghost-joined",
                       path="hooks/peer_guard.py")
 
     def test_plus_joined_prompt_returned_by_a_function_is_reported(self):
-        src = ('def judge_text():\n'
+        src = ('def judge_prompt():\n'
                '    return "Judge the message from one agent. " + "Rule: output-ghost-plus (message a peer)."\n')
         reported_once(self, make_tree(hooks={"peer_guard.py": src}), src, "output-ghost-plus",
                       path="hooks/peer_guard.py")
