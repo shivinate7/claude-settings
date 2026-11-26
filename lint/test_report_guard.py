@@ -3680,15 +3680,58 @@ class QuestionReachesPageTests(SameTurnWriter, unittest.TestCase):
                 self.assert_blocked(out, "Pick guard")
 
     def test_qm_layout_writer_red_no_usable_key_still_says_not_known(self):
-        # Catches: a missing, null, empty or non-string key read as a writer id, so a send to any id passes.
-        for label, value in (("no key", self.NO_KEY), ("null", None), ("empty", ""), ("number", 5),
-                             ("list", [self.WRITER])):
+        # Catches: a missing, null, empty or non-string key read as a writer id, so a send to any id passes, and the
+        # string "null" (any case) read as one too. A question with no send under such a key is blocked as unknown.
+        for index, (label, value) in enumerate((("no key", self.NO_KEY), ("null", None), ("empty", ""), ("number", 5),
+                                                ("list", [self.WRITER]), ("null text", "null"), ("NULL text", "NULL"))):
             with self.subTest(key=label):
-                repo = self.make_repo("key_" + label.replace(" ", "_"), writer=value)
+                repo = self.make_repo("key_%d" % index, writer=value)  # an index: names differing in case collide on macOS
                 self.assertEqual(self.extras_key(repo), value, "scope: the repo's extras file does not hold the key as set")
-                out = self.stop([human("decide"), *self.send(session_id=self.WRITER), assistant_text(self.reply(self.PICK))],
-                                repo=repo)
-                self.assert_blocked(out, "Pick guard", "the page writer is not known to this session")
+                sent = [human("decide"), *self.send(session_id=self.WRITER), assistant_text(self.reply(self.PICK))]
+                unsent = [human("decide"), assistant_text(self.reply(self.PICK))]
+                for sends, records in (("send", sent), ("no send", unsent)):
+                    with self.subTest(sends=sends):
+                        out = self.stop(records, repo=repo)
+                        self.assert_blocked(out, "Pick guard", "the page writer is not known to this session")
+
+    def test_qm_layout_writer_green_na_key_passes_with_no_send(self):
+        # Catches: the page writer set to N/A read as a writer, so a question with no send is refused as "the page
+        # writer is session N/A", a session that does not exist. N/A names no writer, so the question owes no send to
+        # one: no block. The note that says so is pinned by the case beside it. The absent and null keys stay pinned above.
+        for index, value in enumerate(("none", "None", "N/A", "n/a")):
+            with self.subTest(key=value):
+                repo = self.make_repo("na_key_%d" % index, writer=value)
+                self.assertEqual(self.extras_key(repo), value, "scope: the repo's extras file does not hold the key as set")
+                out = self.stop([human("decide"), assistant_text(self.reply(self.PICK))], repo=repo)
+                self.assertNotEqual((out or {}).get("decision"), "block",
+                                    "a question with no send was blocked under the N/A page writer key %r: %s" % (value, out))
+
+    def test_qm_red_none_key_no_writer_note_says_no_page_writer(self):
+        # Catches: a none page-writer key returning no note at all, so a pick in the reply leaves no trace. With no page
+        # writer the check asks for no send and no item, and prints one note that says so.
+        repo = self.make_repo("na_note", writer="none")
+        self.assertEqual(self.extras_key(repo), "none", "scope: the repo's extras file does not hold the key as set")
+        out = self.stop([human("decide"), assistant_text(self.reply(self.PICK))], repo=repo)
+        self.assertIsNotNone(out, "no note printed: a question under the none page-writer key left no trace")
+        self.assertNotEqual(out.get("decision"), "block", out)
+        note = out.get("systemMessage", "")
+        self.assertIn("not sent", note, "the note does not say the question was not sent: %s" % note)
+        self.assertIn("no page writer", note, "the note does not name the repo's lack of a page writer: %s" % note)
+
+    def test_qm_green_real_writer_key_with_no_send_still_blocks(self):
+        # Catches: the none-key return widened to every key, so a question under a named page writer passes with no send.
+        repo = self.make_repo("keyed_block", writer=self.WRITER)
+        self.assertEqual(self.extras_key(repo), self.WRITER, "scope: the repo's extras file does not hold the key as set")
+        out = self.stop([human("decide"), assistant_text(self.reply(self.PICK))], repo=repo)
+        self.assert_blocked(out, "Pick guard", "the page writer is session " + self.WRITER)
+
+    def test_qm_green_lane_with_none_key_is_told_to_send_to_its_parent(self):
+        # Catches: the none-key return placed ahead of the lane check, so a lane under N/A passes its question with no
+        # send to its parent.
+        repo = self.make_repo("lane_na", writer="none")
+        self.assertEqual(self.extras_key(repo), "none", "scope: the repo's extras file does not hold the key as set")
+        out = self.lane(peer_msg("pick?"), assistant_text(self.reply(self.PICK)), repo=repo)
+        self.assert_blocked(out, "Lane pick guard", "its parent")
 
     def test_qm_layout_writer_transcript_read_wins_over_the_key(self):
         # Catches: the layout key taking the place of a meta/page read that names another writer.
