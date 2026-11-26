@@ -620,6 +620,53 @@ class GuardLoaderCache(unittest.TestCase):
     def test_other_version_cache_gives_the_uncached_verdicts(self):
         self.tampered_run(other_version, "a cache written by another version, its magic number wrong")
 
+    def test_same_size_edit_in_one_second_gives_the_uncached_verdict(self):
+        # F1: a same-size edit of guard.py, its mtime pinned back to the cached one. A cache trusted by mtime and size
+        # judges with the edited code; the launcher must rebuild it from the hash of the source it reads, and give
+        # the verdict a plain start gives. No sleep: the mtime is set to the cached one's exact value.
+        root = tempfile.mkdtemp(dir=RUN_FOLDER)
+        config = os.path.join(root, "config")
+        hooks = os.path.join(config, "hooks")
+        mutate_shared.guard_tree(hooks)
+        guard_copy = os.path.join(hooks, "guard.py")
+        launcher = os.path.join(hooks, "guard_launch.py")
+        cache = importlib.util.cache_from_source(guard_copy)
+        nogit = os.path.join(root, "nogit")   # a folder that is no git tree, so the payload reads no repo
+        os.makedirs(nogit)
+        payload = json.dumps({"tool_name": "Bash", "tool_input": {"command": "cat .env"}, "cwd": nogit,
+                              "session_id": "s-same-size-edit"})
+        with open(guard_copy, "rb") as handle:
+            true_source = handle.read()
+        # The same eleven bytes: the env-file check in judge_shell never fires in the variant.
+        old, new = b"if refusal:", b"if 0 and 1:"
+        self.assertEqual(len(old), len(new), "the variant must be the same size as the source")
+        self.assertEqual(true_source.count(old), 1, "the variant's anchor is not in guard.py exactly once")
+        variant = true_source.replace(old, new, 1)
+
+        # Warm the cache on the variant, and keep the variant's mtime: the cache records it.
+        write_bytes(guard_copy, variant)
+        cached_mtime = os.stat(guard_copy)
+        warm = verdict_with_rule(*guard_call([sys.executable, launcher], payload, config))
+        self.assertIsNotNone(read_bytes_or_none(cache), "no guard cache at %s after the warm start on the variant" % cache)
+        self.assertNotEqual(warm[1], "deny", "the variant still denies cat .env (%r), so a stale cache would not show"
+                            % (warm,))
+
+        # Restore the true source, then pin its mtime to the cached one's: same size, same mtime as the stale cache.
+        write_bytes(guard_copy, true_source)
+        os.utime(guard_copy, ns=(cached_mtime.st_atime_ns, cached_mtime.st_mtime_ns))
+        plain = verdict_with_rule(*guard_call([sys.executable, guard_copy], payload, config))
+        self.assertEqual(plain[1:], ("deny", "env-file"), "a plain start gave %r for cat .env, want deny by env-file"
+                         % (plain,))
+
+        launched = verdict_with_rule(*guard_call([sys.executable, launcher], payload, config))
+        self.assertEqual(launched, plain, "the launcher gave %r for cat .env after a same-size edit, a plain start %r: "
+                         "the stale cache judged with the edited code" % (launched, plain))
+        # By count of the stored hash: the stale cache was not used, so it now holds the hash of the restored source.
+        expected_head = importlib.util.MAGIC_NUMBER + b"\x03\x00\x00\x00" + importlib.util.source_hash(true_source)
+        head = (read_bytes_or_none(cache) or b"")[:16]
+        self.assertEqual(head, expected_head, "the cache at %s does not hold the hash of the restored source: the "
+                         "launcher did not rewrite the stale cache" % cache)
+
 
 GUARD_PAYLOADS = (("rm -rf /", "deny"), ("echo hi", "allow"))  # a refused delete, and a call the guard lets through silently
 
@@ -641,6 +688,17 @@ def verdict_of(rc, out):
         return rc, json.loads(out)["hookSpecificOutput"]["permissionDecision"]
     except (ValueError, KeyError, TypeError):
         return rc, "unreadable: " + out[:120]
+
+
+def verdict_with_rule(rc, out):
+    """The verdict of one guard start as (rc, decision, rule). The rule is the word before the colon of the printed
+    reason, or "" when the start printed none."""
+    rc, decision = verdict_of(rc, out)
+    try:
+        rule = json.loads(out)["hookSpecificOutput"]["permissionDecisionReason"].split(":", 1)[0]
+    except (ValueError, KeyError, TypeError):
+        rule = ""
+    return rc, decision, rule
 
 
 class GuardLauncher(unittest.TestCase):
