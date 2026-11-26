@@ -2323,19 +2323,34 @@ def push_guard_jobs(text):
 
 def macos_daily_ok(name, expr):
     """True when `expr` is macOS job `name`'s job-level if: false on a push, false on a pull_request whatever its flags and draft
-    state, true on a schedule and a workflow_dispatch. A step-level skip still starts the macOS runner, so the job-level if keeps it off.
-    tool_pins reads true on a schedule and a dispatch, as ci-scope.sh sets it on every such run (decision tool-pins), so a job-level
-    tool-pins clause admits those runs."""
+    state, true on a plain daily and on a workflow_dispatch. A step-level skip still starts the macOS runner, so the job-level if keeps
+    it off. An if that reads DAILY_SKIP_OUTPUT is off on a skipped daily; an if that reads tool_pins admits a skipped daily only through
+    tool_pins. Every other output stays free, so a second output joined by || changes a skipped daily's answer and is refused.
+    A plain daily and a dispatch carry tool_pins on (ci-scope.sh, decision tool-pins); a dispatch never skips."""
     if name not in MACOS_JOBS or not expr:
         return False
-    flags = sorted(set(re.findall(r"needs\.scope\.outputs\.(\w+)", expr)))
+    read = set(re.findall(r"needs\.scope\.outputs\.(\w+)", expr))
+    flags = sorted(read | {DAILY_SKIP_OUTPUT})
     try:
         for values in itertools.product(("true", "false"), repeat=len(flags)):
             vals = dict(zip(flags, values))
-            daily = {**vals, "tool_pins": "true"}
-            if eval_with(expr, "push", vals) or not eval_with(expr, "schedule", daily) or not eval_with(expr, "workflow_dispatch", daily):
+            if eval_with(expr, "push", vals) or any(eval_with(expr, "pull_request", vals, draft=draft) for draft in (False, True)):
                 return False
-            if any(eval_with(expr, "pull_request", vals, draft=draft) for draft in (False, True)):
+            skipped = vals[DAILY_SKIP_OUTPUT] == "true"
+            pins_off = "tool_pins" in read and vals["tool_pins"] != "true"
+            if not skipped:
+                if pins_off:
+                    continue
+                want = True
+            elif DAILY_SKIP_OUTPUT in read:
+                want = False
+            elif "tool_pins" in read:
+                want = not pins_off
+            else:
+                want = True
+            if eval_with(expr, "schedule", vals) != want:
+                return False
+            if not skipped and not pins_off and not eval_with(expr, "workflow_dispatch", vals):
                 return False
         return True
     except Exception:
@@ -2521,7 +2536,8 @@ class MacOnceByBatch(unittest.TestCase):
                 expr = all_jobs(self.text).get(name, {}).get("if")
                 self.assertIsNotNone(expr, f"{name} has no job-level if")
                 for event in ("schedule", "workflow_dispatch"):
-                    self.assertTrue(eval_if(expr, event, "true"), f"{name} does not run on {event}")
+                    # A plain daily or a dispatch: no records-only skip. A skipped daily is the F1 case (MacosSkippedDailyStartsNoMacRunner).
+                    self.assertTrue(eval_with(expr, event, {DAILY_SKIP_OUTPUT: "false"}, default="true"), f"{name} does not run on {event}")
 
     def test_checks_macos_runs_one_guard_slice_and_checks_macos_b_runs_none(self):
         # Named failure: checks-macos still runs a guard shard, or checks-macos-b still runs a guard step.
