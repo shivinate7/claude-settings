@@ -7,9 +7,9 @@ goes to stderr, flushed, and is appended to STALL_WATCH_BEAT when that is set. E
 on one family (GUARD_FAMILY=branch-worktree: 64 cases and one log check, 16-18 s per family run) and reads what it
 printed. The watch classes run that family under hooks/stall_watch.py with a short limit. The defs classes run
 the beat's own defs with a fake clock, so no suite runs. Two cases judge by a count, not by wall time, so machine
-load cannot move them: DefaultRun counts checkpoints on a fake clock, with the suite's own default line, and the
-no-stall case of WatchedBeatOn runs stall_watch.watch() in this process on a fake clock that a sleep moves by one
-tick. The run folder and its sweep are the shared helper's (lint/_test_temp.py); its sweep is proved in
+load cannot move them: DefaultIntervalOnFakeClock counts checkpoints on a fake clock, with the suite's own default
+line, and WatcherOnFakeClock runs stall_watch.watch() in this process on a fake clock, where each sleep is one tick
+and moves it 0.2 s. The run folder and its sweep are the shared helper's (lint/_test_temp.py); its sweep is proved in
 lint/test_find_copies.py.
 
     python3 hooks/test_guard_beat.py
@@ -47,9 +47,9 @@ TINY = "0.001"  # a quiet stretch of a millisecond: every checkpoint that finds 
 OFF = "100000"  # a quiet stretch no run reaches: the beat never fires
 WATCH_QUIET = "8"  # the watcher's limit in seconds: above the ~2 s import and registration, far below 300 s
 TIMEOUT = 900  # a bound against a hang, never an assert
-DEFAULT_RUN_SECONDS = 32  # a short default run: 64 cases, a checkpoint before and after each, 0.25 s of quiet apart
+DEFAULT_RUN_SECONDS = 32  # a short quiet stretch: 64 cases, a checkpoint before and after each, 0.25 s of quiet apart
 FAKE_JOB_TICKS = 150  # the fake job ends at this watcher sleep: 30 fake seconds at 0.2 s a sleep
-FAKE_BEAT_TICKS = 5  # with beats on, the fake job writes one beat line every 5 sleeps: one a fake second
+FAKE_BEAT_TICKS = 35  # with beats on, the fake job writes one beat line every 35 sleeps: one each 7 fake seconds
 FAKE_PID = 0  # the fake watch's job pid; the faked job state ignores it
 MAX_TICKS = 1000  # a fake watch still running at this sleep has not returned: a failure, not a hang
 MAX_READS = 20000  # a fake watch that reads the clock this often without a sleep spins: a failure, not a hang
@@ -317,21 +317,23 @@ class BetweenCases(unittest.TestCase):
                         "no beat between case lines %d and %d" % (cases[0] + 1, cases[1] + 1))
 
 
-class DefaultRun(unittest.TestCase):
-    """Control: with GUARD_HEARTBEAT unset, a short run prints no beat. The run is counted on a fake clock, not
-    timed: a checkpoint before and after each of the family's 64 cases, 0.25 s of fake quiet apart, DEFAULT_RUN_SECONDS
-    in all. The interval is the suite's own line, run with an empty environment, not a copy of it here."""
+class DefaultIntervalOnFakeClock(unittest.TestCase):
+    """Control: with GUARD_HEARTBEAT unset, a short quiet stretch prints no beat at the suite's default interval. No
+    suite runs. The defs are the suite's parse_heartbeat and beat, and the interval is the suite's own default line,
+    run with an empty environment, not a copy of it here. The stretch is counted on a fake clock: a checkpoint before
+    and after each of the family's 64 cases, 0.25 s of fake quiet apart, DEFAULT_RUN_SECONDS in all."""
 
-    def test_a_short_default_run_prints_no_beat(self):
+    def test_no_beat_in_a_short_quiet_stretch_at_the_default_interval(self):
         beat_file = os.path.join(RUN_FOLDER, "default-run-beat.txt")
         open(beat_file, "w").close()
         defs = Defs(["parse_heartbeat", "beat"], beat_file=beat_file)
         defs.assign("GUARD_HEARTBEAT", {})  # GUARD_HEARTBEAT unset
         checkpoints(defs, seconds=DEFAULT_RUN_SECONDS, step=0.25)
-        self.assertEqual(len(defs.printed), 0, "%d beats printed in a %d s run under the default interval: %r"
+        self.assertEqual(len(defs.printed), 0, "%d beats printed in %d fake s of quiet under the default interval: %r"
                          % (len(defs.printed), DEFAULT_RUN_SECONDS, defs.printed[:1]))
         with open(beat_file, encoding="utf-8") as f:
-            self.assertEqual(f.read(), "", "a beat was appended to the beat file in a short default run")
+            self.assertEqual(f.read(), "", "a beat was appended to the beat file in a short quiet stretch under the "
+                             "default interval")
         # Control: the same instrument prints one beat once one gap runs past the same interval.
         control_file = os.path.join(RUN_FOLDER, "default-control-beat.txt")
         open(control_file, "w").close()
@@ -342,7 +344,7 @@ class DefaultRun(unittest.TestCase):
         control.call("beat", "control, after one gap past the interval")
         quiet = DEFAULT_RUN_SECONDS + interval + 1.0
         self.assertEqual(len(control.printed), 1, "%.0f s of quiet past the default interval printed %d beats, want 1: "
-                         "the beat cannot fire, so the short run proves nothing" % (quiet, len(control.printed)))
+                         "the beat cannot fire, so the quiet stretch proves nothing" % (quiet, len(control.printed)))
 
 
 class InvalidHeartbeat(unittest.TestCase):
@@ -388,10 +390,28 @@ class BeatCost(unittest.TestCase):
             self.assertEqual(f.read(), "", "a beat was written with no quiet time: the interval check is gone")
 
 
+class WatcherOnFakeClock(unittest.TestCase):
+    """The beat on, under stall_watch.watch() on a fake clock. No job starts: the fake job's state, its beats and its
+    end are all faked, so the stall count depends on no load. The control is the same watch with no beats, which must
+    stall at the same limit. The beats come every 7 fake seconds, under the 8 s limit, so a watch that stalls on a
+    gap of 5 to 7 s goes red here."""
+
+    def test_the_watcher_reports_no_stall(self):
+        on = watch_on_fake_clock("fake-beat-on", beats=True)
+        off = watch_on_fake_clock("fake-beat-off", beats=False)  # control: silence on the same watch must stall
+        self.assertEqual(on.reports, 0, "the watcher reported a stall on a fake job that wrote a beat every %.0f fake "
+                         "seconds under the %s s limit" % (FAKE_BEAT_TICKS * 0.2, WATCH_QUIET))
+        self.assertEqual(on.rc, 0, "the watcher returned %r on a fake job that ended, not 0" % on.rc)
+        self.assertEqual(len(beat_lines(on.out)), on.beats_written, "the watcher relayed %d beat lines of the %d the "
+                         "fake job wrote" % (len(beat_lines(on.out)), on.beats_written))
+        self.assertEqual(off.rc, stall_watch.STALL_EXIT, "the fake watch with no beat returned %r, not a stall: the "
+                         "watch cannot fire, so the no-stall arm proves nothing" % off.rc)
+
+
 class WatchedBeatOn(unittest.TestCase):
-    """The beat on, under the watcher. The job must pass first: a crash at import would also end with no stall.
-    The no-stall case runs the watcher on a fake clock, so the job's startup under load cannot end it. The relay case
-    runs the real job under the watcher, and is the one that shows a real job's beat reaches the watcher."""
+    """The beat on, under the watcher, with a real job. The job must pass first: a crash at import would also end with
+    no stall. The relay case shows a real job's beat reaches the watcher. The no-stall case is WatcherOnFakeClock's,
+    which starts no job."""
 
     @classmethod
     def setUpClass(cls):
@@ -401,16 +421,6 @@ class WatchedBeatOn(unittest.TestCase):
         self.assertEqual(self.watched.job_rc, 0, "the watched run with the beat on exited %r, not 0"
                          % self.watched.job_rc)
         self.assertIn(SUMMARY, self.watched.job_out, "the watched run with the beat on printed no summary line")
-
-    def test_the_watcher_reports_no_stall(self):
-        on = watch_on_fake_clock("fake-beat-on", beats=True)
-        off = watch_on_fake_clock("fake-beat-off", beats=False)  # control: silence on the same watch must stall
-        self.assertEqual(on.reports, 0, "the watcher reported a stall on a fake job that wrote a beat each fake second")
-        self.assertEqual(on.rc, 0, "the watcher returned %r on a fake job that ended, not 0" % on.rc)
-        self.assertEqual(len(beat_lines(on.out)), on.beats_written, "the watcher relayed %d beat lines of the %d the "
-                         "fake job wrote" % (len(beat_lines(on.out)), on.beats_written))
-        self.assertEqual(off.rc, stall_watch.STALL_EXIT, "the fake watch with no beat returned %r, not a stall: the "
-                         "watch cannot fire, so the no-stall arm proves nothing" % off.rc)
 
     def test_the_watcher_relays_the_beat_from_the_beat_file(self):
         self.assertTrue(beat_lines(self.watched.watch_out), "the watcher relayed no beat line from the beat file")
