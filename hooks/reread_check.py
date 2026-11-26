@@ -298,7 +298,8 @@ def _esc(text):
 # (guard.COMPACTION_AUDIT_REASON), so the two cannot drift. It holds one `%s`: the handoff path.
 AUDIT_OWED = "context was compacted and the handoff audit is still owed. "
 # The helper command the remedy prints. The guard's compaction-audit rule lets exactly this command through while the
-# audit is owed (guard.audit_remedy_hit), so the printed text and the allowance read these three names and cannot drift.
+# audit is owed (guard.audit_remedy_hit), so the printed text and the allowance read these names and cannot drift.
+AUDIT_INTERPRETER = "python3"
 AUDIT_SCRIPT_NAME = "precompact_handoff.py"
 AUDIT_SCRIPT = os.path.join(os.path.dirname(os.path.realpath(__file__)), AUDIT_SCRIPT_NAME)
 AUDIT_BRIEF_ARGS = ("--audit-brief", "--handoff")
@@ -306,7 +307,7 @@ AUDIT_BRIEF_ARGS = ("--audit-brief", "--handoff")
 
 def audit_remedy_command(handoff, script=AUDIT_SCRIPT):
     """The command the remedy prints, as the shell reads it: the helper's path and the handoff path in double quotes."""
-    return 'python3 "%s" %s "%s"' % (script, " ".join(AUDIT_BRIEF_ARGS), handoff)
+    return '%s "%s" %s "%s"' % (AUDIT_INTERPRETER, script, " ".join(AUDIT_BRIEF_ARGS), handoff)
 
 
 AUDIT_REMEDY = (

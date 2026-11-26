@@ -5716,8 +5716,9 @@ def audit_cleanup_form(tool: str, tool_input) -> bool:
 def audit_remedy_hit(tool: str, tool_input, handoff: str) -> bool:
     """True when this call is the command the compaction-audit refusal prints: the helper from this guard's own hooks
     folder with exactly --audit-brief --handoff <the session's handoff>, and nothing chained, piped or redirected. The
-    words are python3 or python, the script (the same file by realpath, so a symlinked or hash-suffixed folder
-    matches) and the flags of reread_check.AUDIT_BRIEF_ARGS. Quotes are optional. The printed spelling is
+    words are reread_check.AUDIT_INTERPRETER, the script as an absolute path (the refusal prints one; a relative path
+    would resolve against this hook's folder, not the call's, so it is refused; the same file by realpath, so a
+    symlinked or hash-suffixed folder matches) and the flags of reread_check.AUDIT_BRIEF_ARGS. Quotes are optional. The printed spelling is
     reread_check.audit_remedy_command, the one home; any other spelling may hold no shell syntax. A pass clears
     nothing: the audit stays owed."""
     command = tool_input.get("command") if isinstance(tool_input, dict) else None
@@ -5728,9 +5729,11 @@ def audit_remedy_hit(tool: str, tool_input, handoff: str) -> bool:
         words = shlex.split(command)
     except ValueError:
         return False
-    if len(words) != 2 + len(reread_check.AUDIT_BRIEF_ARGS) + 1 or words[0] not in ("python3", "python"):
+    if len(words) != 2 + len(reread_check.AUDIT_BRIEF_ARGS) + 1 or words[0] != reread_check.AUDIT_INTERPRETER:
         return False
     script, args = words[1], words[2:]
+    if not os.path.isabs(script):
+        return False
     if args != list(reread_check.AUDIT_BRIEF_ARGS) + [handoff]:
         return False
     # The printed spelling needs no syntax check: the script is judged below. Any other spelling may carry none.
