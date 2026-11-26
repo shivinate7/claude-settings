@@ -5317,6 +5317,8 @@ _SPONSOR = ("import os, subprocess, sys, time\n"
 # on stderr, list nothing and exit 1. `$LSOF_UNREADABLE` names one existing folder whose read fails the
 # same way, with `Permission denied`.
 # `$LSOF_REAL_OPEN` sends the open-files read to the real lsof. A per-pid read goes to the real lsof unchanged.
+# `$LSOF_TABLE` names a file of `-Fpn` lines that stands for the whole cwd table: the stub prints it and runs
+# no real lsof, so a case needs none on PATH. The file holds at least one line: an empty table reads as failed.
 LSOF_STUB = r"""#!/bin/sh
 printf '%s\n' "$*" >> "${LSOF_COUNT:-/dev/null}"
 case "$*" in
@@ -5337,16 +5339,49 @@ case "$*" in
   *"-p "*) exec "@REAL@" "$@" ;;
 esac
 if [ -n "$LSOF_FAIL" ]; then exit 2; fi
-pids=$(ps -axo pid=,uid= | awk -v me="$(id -u)" '$2 == me { printf "%s%s", sep, $1; sep = "," }')
-if [ -z "$pids" ]; then exit 1; fi
-"@REAL@" -a -d cwd -Fpn -p "$pids" 2>/dev/null
-status=$?
+if [ -n "$LSOF_TABLE" ]; then
+  cat "$LSOF_TABLE"
+  status=0
+else
+  pids=$(ps -axo pid=,uid= | awk -v me="$(id -u)" '$2 == me { printf "%s%s", sep, $1; sep = "," }')
+  if [ -z "$pids" ]; then exit 1; fi
+  "@REAL@" -a -d cwd -Fpn -p "$pids" 2>/dev/null
+  status=$?
+fi
 if [ -n "$LSOF_LATE" ]; then
   count=$(wc -l < "${LSOF_COUNT:-/dev/null}" | tr -d ' ')
   if [ "$count" -ge "${LSOF_FROM:-1}" ]; then cat "$LSOF_LATE"; fi
 fi
 exit $status
 """
+
+def install_lsof_stub(test, cwd_table=None):
+    """Put the stub `lsof` first on PATH for TEST, so every read a hook or an in-process run makes goes
+    through it. Its starts are logged to `test.lsof_count`. `cwd_table`, a list of `-Fpn` lines, sets the
+    whole cwd table through `set_lsof_table`, so the read runs no real lsof. Windows reads no lsof here: no stub."""
+    test.lsof_count = os.path.join(test.root, "lsof-starts.txt")
+    test.real_lsof = shutil.which("lsof")  # None when the machine has no lsof: a real-read case skips
+    if sys.platform.startswith("win"):
+        return
+    folder = os.path.join(test.root, "lsof-bin")
+    os.makedirs(folder)
+    stub = os.path.join(folder, "lsof")
+    write(stub, LSOF_STUB.replace("@REAL@", test.real_lsof or ""))
+    os.chmod(stub, 0o755)
+    env = {"PATH": folder + os.pathsep + os.environ.get("PATH", ""), "LSOF_COUNT": test.lsof_count}
+    if cwd_table is not None:
+        test.lsof_table = os.path.join(test.root, "lsof-table.txt")
+        env["LSOF_TABLE"] = test.lsof_table
+        set_lsof_table(test, cwd_table)
+    patch = mock.patch.dict(os.environ, env)
+    patch.start()
+    test.addCleanup(patch.stop)
+
+
+def set_lsof_table(test, lines):
+    """Rewrite the cwd table the stub prints: `lines` are `-Fpn` lines, one entry each."""
+    write(test.lsof_table, "".join(line + "\n" for line in lines))
+
 
 # A process that opens one file for writing and keeps it open while it sleeps: the open file a `+D` read lists.
 _HOLD = ("import sys, time\n"
@@ -5369,24 +5404,7 @@ class _AgentEndFixture(unittest.TestCase):
         give_remote(self.primary)
         import agent_end_reap
         self.reap = agent_end_reap
-        self.install_lsof_stub()
-
-    def install_lsof_stub(self):
-        """Put the stub `lsof` first on PATH, so every read a hook or an in-process run makes goes
-        through it. Its starts are logged to `self.lsof_count`. Windows reads no lsof here: no stub."""
-        self.lsof_count = os.path.join(self.root, "lsof-starts.txt")
-        self.real_lsof = shutil.which("lsof")  # None when the machine has no lsof: a real-read case skips
-        if sys.platform.startswith("win"):
-            return
-        folder = os.path.join(self.root, "lsof-bin")
-        os.makedirs(folder)
-        stub = os.path.join(folder, "lsof")
-        write(stub, LSOF_STUB.replace("@REAL@", self.real_lsof or ""))
-        os.chmod(stub, 0o755)
-        patch = mock.patch.dict(os.environ, {"PATH": folder + os.pathsep + os.environ.get("PATH", ""),
-                                             "LSOF_COUNT": self.lsof_count})
-        patch.start()
-        self.addCleanup(patch.stop)
+        install_lsof_stub(self)
 
     def add(self, name):
         """A worktree at `.claude/worktrees/agent-NAME` on a new lane branch cut from main. HEAD sits
@@ -7793,12 +7811,24 @@ class BuildDirReapTests(unittest.TestCase):
         # Native platform: on Linux the first read is the only process read, so this case pins it there.
         self.check_build_started_during_the_hook()
 
+    @unittest.skipIf(sys.platform.startswith("win"), "the stub lsof is a POSIX shell script")
     def test_a_build_started_during_the_hook_keeps_its_build_folders_on_macos(self):
         # The shared read and its re-read before a removal run only on macOS, so this case reads darwin.
+        # Its cwd table is the stub's, so no real lsof runs and the case reads the same with none on PATH.
+        install_lsof_stub(self, cwd_table=self.cwd_table_lines())
         with mock.patch.object(sys, "platform", "darwin"):
-            self.check_build_started_during_the_hook()
+            self.check_build_started_during_the_hook(
+                on_build=lambda proc, cwd: set_lsof_table(self, self.cwd_table_lines((proc, cwd))))
 
-    def check_build_started_during_the_hook(self):
+    def cwd_table_lines(self, *holders):
+        """`-Fpn` lines for the stub's table: this test process at the case root, outside every tree,
+        then each `(process, cwd)` a test holds. Paths are real paths, as lsof prints them."""
+        lines = ["p%d" % os.getpid(), "n" + os.path.realpath(self.root)]
+        for proc, cwd in holders:
+            lines += ["p%d" % proc.pid, "n" + os.path.realpath(cwd)]
+        return lines
+
+    def check_build_started_during_the_hook(self, on_build=None):
         # A build that starts after the hook's first process read must still keep its folders.
         primary = self.make_primary("late-build")
         late, quiet = self.add_agent(primary, "bdrLateBuild"), self.add_agent(primary, "bdrQuiet")
@@ -7811,7 +7841,9 @@ class BuildDirReapTests(unittest.TestCase):
 
         def then_start_build(target):
             answer = real(target)
-            self.hold_cwd(late)  # the build's cwd is the worktree root
+            proc = self.hold_cwd(late)  # the build's cwd is the worktree root
+            if on_build is not None:
+                on_build(proc, late)
             return answer
 
         with mock.patch.object(self.reap, "_decide", new=then_start_build):
