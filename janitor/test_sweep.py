@@ -5807,6 +5807,47 @@ class OneLsofPerRunTests(_AgentEndFixture):
                              % answers)
         self.assertIsNone(answers[clear], "a folder with no holder in the batch read was kept: %r" % answers)
 
+    def test_a_missing_folder_in_the_batch_never_reads_a_held_folder_as_clear(self):
+        held = os.path.join(self.root, "held")
+        missing = os.path.join(self.root, "missing")  # never created: a folder gone before the batch read
+        os.makedirs(held)
+        open_file = os.path.join(self.root, "open-files.txt")
+        write(open_file, "p2147483\nn%s\n" % os.path.join(os.path.realpath(held), "held.txt"))  # one holder, in HELD
+        with self.darwin(), mock.patch.dict(os.environ, {"LSOF_OPEN": open_file}):
+            control = sweep._busy_reasons([held])  # the same holder read alone, so the batch below is the only change
+            self.assertIsNotNone(control[held], "control: a holder alone in its folder was not read as busy: %r"
+                                 % control)
+            before = len(self.open_file_argv_lines())
+            answers = sweep._busy_reasons([held, missing])
+        reads = self.open_file_argv_lines()[before:]
+        self.assertEqual(len(reads), 1, "the batch with a missing folder made %d open-files reads; want one: %r"
+                         % (len(reads), reads))
+        self.assertTrue(all(folder in reads[0] for folder in (held, missing)),
+                        "the one open-files read does not name both folders: %r" % reads[0])
+        self.assertIsNotNone(answers[held], "a folder with a live holder was read as clear because another folder "
+                             "of the batch does not exist: %r" % answers)
+
+    def test_a_real_open_file_stays_busy_when_a_missing_folder_is_in_the_batch(self):
+        if self.real_lsof is None:
+            self.skipTest("no lsof on PATH: the real open-files read cannot run here")
+        held = os.path.join(self.root, "held")
+        missing = os.path.join(self.root, "missing")  # never created
+        os.makedirs(held)
+        self.sleeper(self.root, holds=os.path.join(held, "held.txt"))  # cwd outside HELD: the open file is the only holder
+        with self.darwin(), mock.patch.dict(os.environ, {"LSOF_REAL_OPEN": "1"}):
+            control = sweep._busy_reasons([held])
+            self.assertIsNotNone(control[held], "control: a real open file in its folder was not read as busy: %r"
+                                 % control)
+            before = len(self.open_file_argv_lines())
+            answers = sweep._busy_reasons([held, missing])
+        reads = self.open_file_argv_lines()[before:]
+        self.assertEqual(len(reads), 1, "the batch with a missing folder made %d open-files reads; want one: %r"
+                         % (len(reads), reads))
+        self.assertTrue(all(folder in reads[0] for folder in (held, missing)),
+                        "the one open-files read does not name both folders: %r" % reads[0])
+        self.assertIsNotNone(answers[held], "a folder with a real open file was read as clear because another "
+                             "folder of the batch does not exist: %r" % answers)
+
 
 class AgentEndOwnWorktreeTests(_AgentEndFixture):
     """When an agent ends (SubagentStop), janitor/agent_end_reap.py KEEPS the ending agent's OWN
