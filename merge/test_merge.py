@@ -2010,10 +2010,11 @@ class ClaudeMdFlag(Env):
         self.assert_flagged(rc, out, "CLAUDE.md")
 
     def unreadable(self, fail):
-        """Patch merge.sh so the PR-paths read fails: `fail(args)` returns (rc, text) or raises. -> the list of args it saw."""
+        """Patch merge.sh so the PR-paths read fails: `fail(args)` returns (rc, text) or raises. -> the list of args it saw.
+        Only the `--name-only` diff with a `...` range is the PR-paths read. The head-config read is `--name-status`, so it runs for real."""
         real_sh, seen = merge.sh, []
         def stub(args, cwd=None, input=None, env=None, stdout_only=False, **kw):  # kw: other sh calls of the run pass more keywords (boot_stamp passes timeout on macOS); the real sh takes them
-            if "diff" in args and any("..." in a for a in args):
+            if "diff" in args and "--name-only" in args and any("..." in a for a in args):
                 seen.append(args)
                 return fail(args)
             return real_sh(args, cwd=cwd, input=input, env=env, stdout_only=stdout_only, **kw)
