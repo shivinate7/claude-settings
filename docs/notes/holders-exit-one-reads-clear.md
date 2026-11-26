@@ -1,0 +1,1 @@
+- holders-exit-one-reads-clear: `_open_file_holders` in `janitor/sweep.py` reads exit code 1 with a message on stderr as a clear read (no holder), as on main. Its answer only vetoes a removal, so a wrong clear lets a removal go ahead. `_open_files_under` reads that same case as unknown. Seen: 2026-11-25 x1
