@@ -36,7 +36,7 @@ Lane picks the owner may reverse:
 - Rule `agent-no-remote-tools` (hooks/guard.py, rule 8b) refuses a call with a non-empty `agent_id` that names one of the 20 names in `REMOTE_OUTWARD_TOOLS` (hooks/shared_names.py). Those tools start, message, tag or archive sessions, set scheduled tasks, or attach repos and computers. The server has 32 tools (measured 2026-11-07 15:42 CST). Any non-empty `agent_id` counts, in any shape.
 - Rule `agent-no-mcp-tools` (hooks/guard.py, rule 8c) refuses a call with a non-empty `agent_id` to an MCP tool that the allow list does not cover. The remote server is skipped there, because rule 8b judges its outward tools first.
 - The allow list is read from settings.json: the install root's copy first, and the config folder's copy when the first cannot be read (`mcp_allow_entries`). Only `mcp__` entries count. When neither copy can be read, nothing is covered, so the call is refused. The cost cases in tests/guard/s43811-agent-no-mcp-tools.py pin this.
-- The PreToolUse matcher in settings.json (about line 269) ends `mcp__(?!ccd_session__start_session$).*`. The guard therefore starts for every MCP call except `ccd_session__start_session`.
+- The PreToolUse matcher in settings.json (about line 269) ends `mcp__(?!ccd_session__start_session$).*`. The guard therefore starts for every MCP call except `ccd_session__start_session`. Measured 2026-11-25, 18:59 to 19:05 CST, in the desktop app's Manual mode on a scratch folder, with one call to an allow-listed browser-pane tool: no project hook, no card; the widened matcher with a hook that answers allow, no card (the transcript shows the hook fired); the widened matcher with a hook that prints nothing, as the guard does for a main-session call, no card.
 - The guard stops a mistake, not an attacker (`guard-guards-mistakes-only`). The mistake is an agent that misreads its brief. That is why the guard exists (`building-guard-needs-incident`).
 
 ## Cost
@@ -49,7 +49,6 @@ Lane picks the owner may reverse:
 
 - An agent's call to the session-start tool never reaches the guard, because the matcher leaves that tool out for the main session's sake. The harness asks, as on main.
 - The remote-session read tools that are not outward pass the guard. The harness then asks, as on main.
-- Nobody has measured whether a covering hook changes the app's ask card on an allow-listed main-session MCP call.
 
 Kind: process
 Home: hooks/guard.py
