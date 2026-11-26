@@ -229,6 +229,8 @@ def off_problems(text):
             if not draft_guard_only(jobs[name]["if"] or "") and not shard_push_off(rest or "") and not shard_records_only_if(jobs[name]["if"]) and not records_only_if(jobs[name]["if"], name):
                 problems.append(f"shard {name} is in all-jobs-passed's needs but its job-level if is not the draft guard: "
                                 f"{jobs[name]['if']}")
+        elif name in (NIGHTLY_SKIP_JOB, PUSH_SKIP_JOB) and draft_guard_only(jobs[name]["if"] or ""):
+            continue  # a skip job with the draft guard alone: a draft run starts no job, and the rollup is skipped on a draft too, so it never reads that skip
         elif name in PUSH_OFF_JOBS and jobs[name]["if"] is not None and push_off_only(job_if_without_records(jobs[name]["if"])):
             continue  # a listed job (R61 push-off list) with the push guard alone, or with the records-only skip joined: a pull_request runs it, so the rollup needs it and never reads a skip
         elif name == CHECKS_JOB and jobs[name]["if"] is not None and not checks_if_problems(job_needs_of(text, name), delta_clauses_off(name, jobs[name]["if"])):

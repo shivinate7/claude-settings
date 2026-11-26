@@ -43,10 +43,11 @@ jobs:
   # skip or not, runs everything, since a push never runs the Windows shards (.github/scripts/nightly-skip.py). It prints the range the daily covers, to the log and the step
   # summary. Scope waits on it, so a skip reaches every job through needs and the run is a visible success: nothing is cancelled,
   # since a cancelled run reads UNKNOWN and blocks merges. A failed read, or another daily still going, says skip=false: unknown runs
-  # everything. The job itself starts on every event and its steps run on a schedule only: a job-level `if` would leave it skipped,
-  # and a skipped ancestor skips every job behind scope. Reads per daily: one schedule runs read, one push runs read per page of 100, up to 5 pages,
+  # everything. The job starts on every event but a draft pull request (its job-level `if` is the draft guard alone, decision draft-until-reviewed), and its steps run on a schedule only. A draft run starts no job,
+  # so scope and every job behind it skip too. Reads per daily: one schedule runs read, one push runs read per page of 100, up to 5 pages,
   # no jobs read.
   nightly-skip:
+    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
     runs-on: ubuntu-latest
     # Cap 5 min, unmeasured: the job makes a handful of reads.
     timeout-minutes: 5
@@ -76,8 +77,9 @@ jobs:
   # every suite job succeeded; a step scope skipped is no gap (the shared action actions/push-skip, ruling own-769-a-narrowed-pr-push).
   # Scope waits on it, so a skip reaches every job through needs and the run is a completed success: nothing is cancelled, since a
   # cancelled run reads UNKNOWN and blocks merges. A failed read says skip=false: unknown runs everything. A suite a narrowed PR run
-  # left out is not run on main until a later change touches it. The job starts on every event and its steps run on a push only, so it stays on all-jobs-passed's needs like nightly-skip. Reads per push: the PR list, per head its commit, and per matching head its runs; a push that does not skip adds the base search, one push runs read and a jobs read per green run walked past (unmeasured). The base output feeds scope's BASE_SHA on a push.
+  # left out is not run on main until a later change touches it. The job starts on every event but a draft pull request (its job-level `if` is the draft guard alone) and its steps run on a push only, so it stays on all-jobs-passed's needs like nightly-skip. Reads per push: the PR list, per head its commit, and per matching head its runs; a push that does not skip adds the base search, one push runs read and a jobs read per green run walked past (unmeasured). The base output feeds scope's BASE_SHA on a push.
   push-skip:
+    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
     runs-on: ubuntu-latest
     # Cap 5 min, unmeasured: the job makes a handful of reads.
     timeout-minutes: 5
