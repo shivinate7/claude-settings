@@ -596,10 +596,11 @@ def amp_pieces(segment: str):
     return [(type(segment)(text), cut) for text, cut in pieces if text.strip() or not cut]
 
 
-def backgrounding_amps(segment: str, tokens, start: int = 0):
-    """Every backgrounding `&` of one segment, as [(text it ends in, the words of its job)]. The
-    one reader of "this runs as a background job": `backgrounding_amp` takes the first, and the
-    detached-launch rule counts them all, since one `$!` names only the last job. A `&` is a job
+def backgrounding_amp_spots(segment: str, tokens, start: int = 0):
+    """Every backgrounding `&` of one segment, as [(index of the `&` in `segment`, text it ends in, the
+    words of its job)]. The one reader of "this runs as a background job": `backgrounding_amps` and
+    `backgrounding_amp` read it, and the detached-launch rule pairs each spot with the `$!` after it,
+    since one `$!` names only the last job. A `&` is a job
     when it ends a piece that holds a word after a command word (the one at `start` in the first
     piece, any word in a later one), spaced or glued (`_amp_cuts`). The pieces come from the raw
     text, never from `tokens`: they keep no quote marks, so a quoted `&` and a bare one are the
@@ -614,9 +615,15 @@ def backgrounding_amps(segment: str, tokens, start: int = 0):
             continue
         words = segment_tokens(type(segment)(segment[last:index]))
         if words and (kind == "glued" or len(words) > floor):
-            jobs.append((words[-1] + ("&" if kind == "glued" else " &"), words))
+            jobs.append((index, words[-1] + ("&" if kind == "glued" else " &"), words))
         last, floor = index + 1, 0
     return jobs
+
+
+def backgrounding_amps(segment: str, tokens, start: int = 0):
+    """Every backgrounding `&` of one segment, as [(text it ends in, the words of its job)]
+    (`backgrounding_amp_spots` without the index)."""
+    return [(text, words) for _, text, words in backgrounding_amp_spots(segment, tokens, start)]
 
 
 def backgrounding_amp(segment: str, tokens, start: int = 0) -> str:

@@ -20,7 +20,7 @@ from guard_core import (
     QUOTE_MARKS,
     ASSIGNMENT, CMD_EXE_NAMES, DURATION, ENV_PATTERN_COMMANDS, PLAYWRIGHT_PS_SHELLS,
     POWERSHELL_CALL, PowerShellScript, SILENT_WRITE_REDIRECT, _pwsh_script, _skip_assignments_and_keywords,
-    _split_heredocs, _strip_heredoc_bodies_unconditionally, _wrapper_flags, backgrounding_amps, basename,
+    _split_heredocs, _strip_heredoc_bodies_unconditionally, _wrapper_flags, backgrounding_amp_spots, backgrounding_amps, basename,
     inline_script, resolve_command, segment_tokens, split_segments, walk_quotes,
 )
 from guard_env import substitution_commands
@@ -584,30 +584,73 @@ def cmd_start_hit(tokens) -> str:
     return ""
 
 
-def pid_captures(segment: str) -> int:
-    """How many `$!` one segment holds as shell code: not one inside single quotes (`'pid $!'` is text
-    that prints `$!`), nor an escaped `\\$!`. A `$!` in double quotes expands, so it counts. A comment and
-    a heredoc body are gone before this reads (`split_segments`, `_strip_heredoc_bodies_unconditionally`)."""
-    steps = list(walk_quotes(segment))
-    return sum(1 for index, char, quote in steps
-               if char == "$" and quote not in ("'", "$'") and segment[index + 1:index + 2] == "!")
+def pid_capture_spots(segment: str):
+    """The index of each `$!` one segment holds as shell code: not one inside single quotes (`'pid $!'`
+    is text that prints `$!`), nor an escaped `\\$!`. A `$!` in double quotes expands, so it counts. A comment
+    and a heredoc body are gone before this reads (`split_segments`, `_strip_heredoc_bodies_unconditionally`)."""
+    return [index for index, char, quote in walk_quotes(segment)
+            if char == "$" and quote not in ("'", "$'") and segment[index + 1:index + 2] == "!"]
 
 
-def bare_background_hit(cmd: str) -> str:
-    """Return the matched text when the command holds more background jobs than `$!` pid captures,
-    else ''. Each `&` job needs its own `$!`: one `$!` names only the last job started, so a second
-    job under it has no pid to stop (decision detached-launch-refused). The `&` must come AFTER the
-    command word: a leading `&` is PowerShell's call operator, never a background job. Every heredoc
-    body is dropped first: an `&` there is not a job.
-    """
-    cmd = _strip_heredoc_bodies_unconditionally(cmd)
-    jobs, captures = [], 0
+LOOP_HEADS = ("while", "until", "for")
+HEAD_PREFIXES = ("{", "(", "do", "then", "else", "elif", "!")   # words that open a block, ahead of its first command
+
+
+def _pid_events(cmd: str):
+    """The events of a command in the order the shell runs them, as [(kind, text)]: "job" (a backgrounding
+    `&`, with its text), "capture" (a `$!`), "open" (a `for`, `while` or `until` head) and "close" (a `done`).
+    A `done` after a job's `&` (`do x & done`) closes its loop. Within a segment the order is the text order."""
+    events = []
     for segment in split_segments(cmd):
         tokens = segment_tokens(segment) if segment.strip() else None
         if not tokens:
             continue
-        captures += pid_captures(segment)
-        jobs += [text for text, _ in backgrounding_amps(segment, tokens, _skip_assignments_and_keywords(tokens))]
+        spots = backgrounding_amp_spots(segment, tokens, _skip_assignments_and_keywords(tokens))
+        starts = [0] + [index + 1 for index, _, _ in spots]
+        ends = [index for index, _, _ in spots] + [len(segment)]
+        marks = [(index, 1, "capture", "") for index in pid_capture_spots(segment)]
+        marks += [(index, 2, "job", text) for index, text, _ in spots]
+        for start, end in zip(starts, ends):
+            words = segment_tokens(type(segment)(segment[start:end])) or []
+            head = 0
+            while head < len(words) and words[head] in HEAD_PREFIXES:
+                head += 1
+            if head < len(words) and words[head] in LOOP_HEADS:
+                marks.append((start, 0, "open", ""))
+            elif head < len(words) and words[head] == "done":
+                marks.append((start, 0, "close", ""))
+        events += [(kind, text) for _, _, kind, text in sorted(marks)]
+    return events
+
+
+def bare_background_hit(cmd: str) -> str:
+    """Return the matched text of the first background job that has no `$!` of its own, else ''. Each
+    `&` job needs a `$!` after it and before the next job: one `$!` names only the last job started,
+    so a second job under it has no pid to stop (decision detached-launch-refused). A job in a loop
+    body needs its `$!` in that same body, since a `$!` after `done` names only the last job. A `$!`
+    before any job names nothing. The `&` must come AFTER the command word: a leading `&` is
+    PowerShell's call operator, never a background job. Every heredoc body is dropped first: an `&`
+    there is not a job.
+    """
+    cmd = _strip_heredoc_bodies_unconditionally(cmd)
+    jobs, captures = [], 0   # every job so far, and how many of the first ones have their `$!`
+    loops, opened, waiting = [], 0, None   # waiting: the loop (0: none) of the job that awaits its `$!`
+    for kind, text in _pid_events(cmd):
+        if kind == "open":
+            opened += 1
+            loops.append(opened)
+        elif kind == "close":
+            closed = loops.pop() if loops else 0
+            if closed and waiting == closed:
+                break   # the loop body ended before its job's `$!`
+        elif kind == "capture":
+            if waiting is not None:
+                captures, waiting = captures + 1, None
+        elif waiting is not None:
+            break   # the next job starts before the last one's `$!`
+        else:
+            jobs.append(text)
+            waiting = loops[-1] if loops else 0
     return jobs[captures] if len(jobs) > captures else ""
 
 
@@ -645,8 +688,8 @@ def _busy_loop_ends(segments):
 
 def _load_stage(tokens) -> str:
     """The load generator word one command stage runs (`yes`, `stress`, `stress-ng`, or a shell whose
-    `-c` script holds a busy loop), else ''. `timeout` and the other wrappers are read past, and
-    so is `setsid` and its flags, which no wrapper list holds."""
+    `-c` script runs one or holds a busy loop: `_script_load`), else ''. `timeout` and the other
+    wrappers are read past, and so is `setsid` and its flags, which no wrapper list holds."""
     index = resolve_command(tokens)
     while index is not None and index < len(tokens) and basename(tokens[index]) == "setsid":
         index += 1
@@ -657,19 +700,39 @@ def _load_stage(tokens) -> str:
     word = basename(tokens[index])
     if word in LOAD_GENERATOR_WORDS:
         return word
-    script = inline_script(tokens)
-    if script and _busy_loop_ends(split_segments(_strip_heredoc_bodies_unconditionally(script))):
-        return word + " -c (a busy loop)"
+    found = _script_load(inline_script(tokens[index:]))
+    return word + " -c (" + found + ")" if found else ""
+
+
+def _script_load(script: str) -> str:
+    """What a shell's `-c` script runs that is a load generator, else ''. The script is one job, read the
+    way a bare command is: a busy loop, or a stage that is a load generator and is not itself under
+    `timeout N setsid`. A nested `sh -c` is read the same way."""
+    if not script:
+        return ""
+    segments = split_segments(_strip_heredoc_bodies_unconditionally(script))
+    if _busy_loop_ends(segments):
+        return "a busy loop"
+    for segment in segments:
+        stage = segment_tokens(segment) if segment.strip() else None
+        found = _load_stage(stage) if stage else ""
+        if found and not _under_limit_and_session(stage):
+            return found
     return ""
 
 
+def _is_time_limit(word: str) -> bool:
+    """Whether `word` is a `timeout` duration that sets a limit: `0`, `0s` and `0.0` set none."""
+    return bool(DURATION.match(word)) and float(word.rstrip("smhd")) > 0
+
+
 def _under_limit_and_session(tokens) -> bool:
-    """Whether a stage starts `timeout [flags] DURATION setsid`: the time limit, then its own session."""
+    """Whether a stage starts `timeout [flags] DURATION setsid`: a time limit above zero, then its own session."""
     index = _skip_assignments_and_keywords(tokens)
     if index >= len(tokens) or basename(tokens[index]) != "timeout":
         return False
     index, _ = _wrapper_flags("timeout", tokens, index + 1)
-    return (index + 1 < len(tokens) and bool(DURATION.match(tokens[index]))
+    return (index + 1 < len(tokens) and _is_time_limit(tokens[index])
             and basename(tokens[index + 1]) == "setsid")
 
 
@@ -775,7 +838,7 @@ DETACHED_LAUNCH_REASON = (
     "`$p = Start-Process ... -PassThru` in PowerShell, then stop it later with `kill <pid>` or "
     "`Stop-Process -Id <id>`. A `$!` in quotes is only text and captures nothing. A CPU load generator "
     "(`yes`, `stress`, `stress-ng`, a `while true` or `while :` loop with no pause in it) starts in the "
-    "background only as `timeout N setsid <cmd> & echo $!`, so it ends with its lane. Take a free port, such as port 0 or a random high port, never a port another "
+    "background only as `timeout N setsid <cmd> & echo $!`, with N above zero, so it ends after N seconds or with its process group. Take a free port, such as port 0 or a random high port, never a port another "
     "project may own, such as 8000, 5173, 3000, or 8080. "
     "(decision detached-launch-refused, a detached process is refused so a pid can always be named)"
 )

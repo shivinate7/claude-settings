@@ -114,8 +114,9 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        (a-kill-by-pid-needs-an-owned-pid)
   detached-launch      deny. A command that starts a process and detaches it from the session, a `&`
                        job with no `$!` of its own (a `$!` in quotes is text), or a background
-                       `yes`, `stress`, `stress-ng` or busy `while true` loop not run as
-                       `timeout N setsid <cmd> &`. (detached-launch-refused)
+                       `yes`, `stress`, `stress-ng` or busy `while true` or `while :` loop (also in
+                       the script of `sh -c`) not run as `timeout N setsid <cmd> &`, N above zero.
+                       (detached-launch-refused)
   wsl-allow-list       deny. A `wsl` call outside the fixed list of test commands. (wsl-allow-list)
   review-log-form, review-log-sha  deny. A PR comment (the add and update tools, a Bash gh pr comment or gh api body) whose
                        first line is the review log marker and whose body merge/merge.py parse_review refuses, or
