@@ -17418,15 +17418,16 @@ def batch_hint_lines(text):
 
 class ConfirmBatchHint(CloudSession):
     """The batch hint that `merge <pr> --confirm` and `merge <pr> --ready` print on a ready pull request: one read of the CI queue depth
-    (Host.queued_runs), then one line. An empty queue says the pull request goes alone and reads no ready list. A queue that is not empty reads the
-    other ready, reviewed pull requests (merge.reviewed_read), leaves this one out, and names them. At BUILD_THRESHOLD a batch runner gets the build
-    command without this pull request, and a lane is handed to the batch runner. The hint is a hint: no verdict and no exit code changes. A role
+    (Host.queued_runs), then one line. The queue depth gates only empty against not empty: an empty queue says the pull request goes alone and
+    reads no ready list. A queue that is not empty reads the other ready, reviewed pull requests (merge.reviewed_read), leaves this one out, and
+    names them. The count of those others is compared with BUILD_THRESHOLD, as combine_hint compares it: at the threshold a batch runner gets the
+    build command without this pull request, and a lane is handed to the batch runner. The hint is a hint: no verdict and no exit code changes. A role
     needs a cloud run and a role file, so those cases use CloudSession.cloud and put_role; every case counts its reads."""
 
-    def ready_pulls(self, total):
-        """The ready pull requests a read of main finds: `total` of them, #7 (the pull request under merge) among them and not the lowest, so
-        a hint that drops the front would name it. Sized from merge.BUILD_THRESHOLD by the cases that count against it."""
-        return (5, 7) + tuple(range(8, 8 + total - 2))
+    def ready_pulls(self, others):
+        """The ready pull requests a read of main finds, with #7 (the pull request under merge) among them: `others` besides #7. #5 is the lowest
+        number, so a hint that drops the front instead of #7 would name #7. The threshold counts the others, as combine_hint's does."""
+        return tuple(sorted({5, 7} | set(range(8, 8 + others - 1)))) if others else (7,)
 
     def hint_run(self, *argv, depth=0, ready=(), heads=None, error=None, cloud=False):
         """One first step of `merge <argv>` with the queue at `depth` and merge.reviewed_read as a ReadyList of `ready`. The pull request's
@@ -17455,8 +17456,8 @@ class ConfirmBatchHint(CloudSession):
         self.assertEqual(reads.calls, 0, "an empty queue read the ready list %d times, want none" % reads.calls)
 
     def test_deep_queue_lists_other_ready_and_omits_n(self):
-        ready = self.ready_pulls(merge.BUILD_THRESHOLD)
-        rc, text, reads = self.hint_run("7", "--confirm", depth=2 * merge.BUILD_THRESHOLD, ready=ready)
+        ready = self.ready_pulls(2)  # two other ready pull requests, #5 and #8, under the threshold: the line names them anyway
+        rc, text, reads = self.hint_run("7", "--confirm", depth=5, ready=ready)  # the queue depth gates only empty against not empty
         self.assertEqual(reads.calls, 1, "scope: the ready list was read %d times, want once: %s" % (reads.calls, text))
         self.assertEqual(rc, 0, text)
         hint = batch_hint_lines(text)
@@ -17466,8 +17467,8 @@ class ConfirmBatchHint(CloudSession):
         self.assertNotRegex(hint[0], r"#7\b", "this pull request is named in its own queue hint: " + hint[0])
 
     def test_under_threshold_alone_line_gives_queue_depth_and_ready_count(self):
-        total = merge.BUILD_THRESHOLD - 1  # one short of the threshold: the ready list holds that many pull requests, #7 among them
-        rc, text, reads = self.hint_run("7", "--confirm", depth=3, ready=self.ready_pulls(total))
+        others = merge.BUILD_THRESHOLD - 1  # one short of the threshold: that many other ready pull requests, #7 aside
+        rc, text, reads = self.hint_run("7", "--confirm", depth=3, ready=self.ready_pulls(others))
         self.assertEqual(reads.calls, 1, "scope: the ready list was read %d times, want once: %s" % (reads.calls, text))
         self.assertEqual(rc, 0, text)
         hint = batch_hint_lines(text)
@@ -17475,7 +17476,7 @@ class ConfirmBatchHint(CloudSession):
         line = hint[0]
         self.assertIn("alone", line.lower(), "the under-threshold line does not say the pull request goes alone: " + line)
         self.assertRegex(line, r"\b3\b", "the line does not give the queue depth, 3: " + line)
-        self.assertRegex(line, r"\b(%d|%d)\b" % (total, total - 1), "the line does not give the ready count, %d ready or %d other: %s" % (total, total - 1, line))
+        self.assertRegex(line, r"\b%d\b" % others, "the line does not give the count of other ready pull requests, %d: %s" % (others, line))
         self.assertNotRegex(line, r"#7\b", "this pull request is named in its own queue hint: " + line)
 
     def test_at_threshold_batch_runner_gets_build_command_without_n(self):
