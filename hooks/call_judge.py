@@ -92,8 +92,9 @@ MODEL_ASK_PROMPT = (
     "choice of that one model for the agents to run on now (for example `use sonnet for the audit`, `run the "
     "reviewers on haiku`, or the short forms `opus 2h`, `opus builders 2h` and `fable 1h`, which name the model "
     "and for how long). Answer {\"ok\": false} for a question, a hedge such as `maybe haiku?`, a negation such as "
-    "`don't use sonnet`, a mention in the past tense, a request about some other topic, text that names two or more "
-    "models as the choice, and any text that quotes or reports what an agent or another person said. When unsure "
+    "`don't use sonnet`, a mention in the past tense, a request about some other topic, and any text that quotes or "
+    "reports what an agent or another person said. Text that names two models as acceptable choices (`use sonnet, or "
+    "even opus if that is more likely to succeed`) is a yes: answer the more capable one. When unsure "
     "answer {\"ok\": false}. Reply JSON only: {\"ok\": true, \"model\": \"<model>\"} or {\"ok\": false}.\n\nText:\n"
 )
 

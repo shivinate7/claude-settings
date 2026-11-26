@@ -59,8 +59,11 @@ odd answer writes nothing. The rules of the words:
       whatever the judge says. The judge's answer must name a model the words name.
     - The roles the ask names are held, two or more as a list, only when a plain list joins them (PLAIN_LIST: commas,
       and, or, &, plus); any other words between two roles: no hold. A role word with a NEGATIONS word (not, no, don't,
-      never, except, without, or an exclusion word such as skip or instead) within three words before or after it: no hold.
+      never, except, without, or an exclusion word such as skip or instead) within three words before or after it, or
+      earlier in its own clause, is left out of the hold, never granted; an ask whose only roles are left out: no hold.
       A role word is MODEL_ROLES: its name, its plural, or `explorer(s)`.
+    - A prompt that names Opus beside a lower model in one sentence, neither negated, holds Opus whichever model the
+      judge answered (_two_model_pick); `use sonnet, not opus` holds sonnet.
     - An ask for Opus or Fable that names no role takes its roles from the owner's earlier typed prompts (decision
       owner-override: scope from context, fall back to every role), before the ask only. _context_prompts reads them from
       the one tail read (_tail_prompts), through the one owner-turn test (_owner_text), each through _strip_blocks,
@@ -208,8 +211,8 @@ NO_OVERRIDE = "No override lifts this refusal."
 def offer(rule, spawn_role=None, agent_id=None, spawn_model=None):
     """The line an owner types to lift a refusal of this rule, for the call that was refused. For the model ceiling's
     refusal of a spawn above its role's model, the line names no keyword and no model: the owner's own words name the
-    model for this work, or `override` lifts it. `spawn_model` is accepted so a caller may pass it; the line is the same
-    for every model."""
+    model for this work, or `override` lifts it. `spawn_model` is read by no code here; a test passes it, and the line is
+    the same for every model."""
     if rule == OPUS_RULE and spawn_role is not None:
         return ("The owner lifts this by naming the model for this work in his own words, or by typing %s."
                 % ("`override 15m` (a one-act `override` does not reach an agent's call)" if agent_id
@@ -333,6 +336,24 @@ def _negates(text, family):
     return negated and not named
 
 
+SENTENCE_BREAK = re.compile(r"[;!?\n]+|\.(?=\s|$)")  # the end of a sentence, as the owner types it
+TWO_MODEL_PICK = "opus"  # the model main holds for a sentence that names it beside a lower model (ruling pending)
+
+
+def _two_model_pick(text, family):
+    """The model a yes for `family` holds. TWO_MODEL_PICK when `family` is below it and one sentence of `text` names both
+    with no negation reaching either ("just use sonnet agents throughout or even opus"): main's Opus hold for that
+    sentence, whichever model the judge named first. Else `family`. "use sonnet, not opus" negates Opus, so it holds
+    sonnet. A mention in another sentence ("use sonnet. The opus run was fine.") lifts nothing."""
+    order = MODEL_FAMILIES.index
+    if family not in MODEL_FAMILIES or order(family) >= order(TWO_MODEL_PICK):
+        return family
+    for sentence in SENTENCE_BREAK.split(text):
+        if model_mentions(sentence, family)[0] and model_mentions(sentence, TWO_MODEL_PICK)[0]:
+            return TWO_MODEL_PICK
+    return family
+
+
 def _strip_quotes(text):
     """`text` less the reply quotes (REPLY_QUOTES): what he pasted back from Claude's own report is not his words."""
     return REPLY_QUOTES.sub(" ", text)
@@ -373,27 +394,46 @@ def model_role(word):
     return MODEL_ROLE_WORDS.get(word.lower())
 
 
+def _clause_negated(text, matches, at):
+    """True when a negation word stands earlier in the clause (MODEL_CLAUSE_BREAK) of the word matches[at] of `text`: a
+    NEGATIONS word or one ending n't. A negation reaches the rest of its own clause, however many words lie between."""
+    for i in range(at - 1, -1, -1):
+        if MODEL_CLAUSE_BREAK.search(text, matches[i].end(), matches[at].start()):
+            return False
+        word = matches[i].group().lower()
+        if word in NEGATIONS or word.endswith(("n't", "n\u2019t")):
+            return True
+    return False
+
+
 def _ask_scope(text, resolve=model_role, allowed=MODEL_ROLES):
     """(length, roles) a plain ask names, or None when the words are unclear: two lengths, a decimal or compound
-    length, a role with a negation within NEGATION_SPAN words before or after it, or two role words joined by
-    anything but a plain list (PLAIN_LIST). `roles` is the sorted list of the roles it names, empty when it names
-    none. A role word is `resolve`d and must be in `allowed`: the model ask reads MODEL_ROLES."""
+    length, or two granted role words joined by anything but a plain list (PLAIN_LIST). `roles` is the sorted list of
+    the roles it grants, empty when it names none. A role word is `resolve`d and must be in `allowed`: the model ask
+    reads MODEL_ROLES. A role word a negation reaches is excluded, never granted: a NEGATIONS word within
+    NEGATION_SPAN words before or after it, or earlier in its own clause (_clause_negated). The roles left are the
+    grant; an ask that names roles only under a negation leaves none, and is None (the words give no role to grant:
+    fail closed)."""
     lengths = _ask_lengths(text)
     if lengths is None:
         return None
     matches = list(ROLE_WORDS.finditer(text))
     words = [m.group() for m in matches]
-    roles, last_end = set(), None
+    roles, excluded, last_end = set(), set(), None
     for at, word in enumerate(words):
         role = resolve(word)
         if role not in allowed:
             continue
-        if _near_negation(words, at, NEGATIONS):
-            return None
+        if _near_negation(words, at, NEGATIONS) or _clause_negated(text, matches, at):
+            excluded.add(role)
+            continue
         if last_end is not None and not PLAIN_LIST.fullmatch(text, last_end, matches[at].start()):
             return None
         roles.add(role)
         last_end = matches[at].end()
+    roles -= excluded
+    if excluded and not roles:
+        return None
     return (lengths[0] if lengths else DEFAULT_ASK_LENGTH), sorted(roles)
 
 
@@ -685,6 +725,7 @@ def grant_model_ask(session_id, prompt, at, judge=None, transcript=None, source=
     scope = _ask_scope(text)
     if scope is None:
         return None
+    family = _two_model_pick(text, family)
     length, roles = scope
     said = " ".join(text.split())
     end = None if _ask_lengths(text) else HOLD_END_REPORT  # a length he states is his; with none, the report ends it
