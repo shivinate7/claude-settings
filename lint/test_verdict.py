@@ -1998,10 +1998,10 @@ class HangLineOneHome(unittest.TestCase):
         self.assertEqual(len(self.constants_with(text, self.WORDS)), 2, "the scan does not read string constants alone")
 
 
-def fifty_lines_with(line=None):
-    """Code that prints 50 filler lines, and `line` among them when given, 25 lines in: a ready-pass line in the middle of a long run."""
+def fifty_lines_with(*lines):
+    """Code that prints 50 filler lines, and each of `lines` among them, 25 lines in: merge-tool lines in the middle of a long run."""
     body = ["print('filler %d')" % i for i in range(50)]
-    if line is not None: body.insert(25, "print(%r)" % line)
+    body[25:25] = ["print(%r)" % line for line in lines]
     return "\n".join(body) + "\n"
 
 class ReadyPassLine(unittest.TestCase):
@@ -2140,15 +2140,57 @@ class ReadyPassLine(unittest.TestCase):
             self.assertEqual(lines[1:], [], "a line whose unfinished part passes KEPT_CARRY prints a kept line or a partial one: %r"
                              % ([l[:80] for l in lines[1:]],))
 
-    def test_kept_forms_are_fixed_prefixes_of_both_merge_formats(self):
+    def test_kept_forms_are_fixed_prefixes_of_the_lines_the_guard_reads(self):
+        """The kept forms are fixed prefixes of the printed lines the merge guard reads (hooks/guard_merge.py _ready_stood_shas), and each
+        of those lines has a kept form. A run with no ready checks prints no pass line, so the pass formats alone do not cover it."""
         kept = getattr(load_verdict_module(), "READY_PASS_KEPT", None)
         self.assertIsNotNone(kept, "bin/verdict holds no READY_PASS_KEPT constant, so no ready-pass line is kept")
-        formats = (merge.READY_PASS_FMT, merge.READY_PASS_SKIPPED_FMT)
+        printed = (merge.READY_PASS_FMT, merge.READY_PASS_SKIPPED_FMT, merge.READY_NO_CHECKS_LINE, merge.READY_UNCHECKED_FMT,
+                   merge.READY_RECORDS_CURRENT_FMT, merge.READY_RECORDS_PUSHED_FMT, merge.READY_MERGED_FMT,
+                   "merge: " + merge.READY_CLAIM_STOP_FMT)  # the stop prints "merge: " before its text
         for form in kept:
-            for fmt in formats:
-                self.assertTrue(form and "{" not in form and fmt.startswith(form), "kept form %r is not a fixed prefix of %r" % (form, fmt))
-        for fmt in formats:
+            self.assertTrue(form and "{" not in form and any(fmt.startswith(form) for fmt in printed),
+                            "kept form %r is not a fixed prefix of a line the merge guard reads" % form)
+        for fmt in printed:
             self.assertTrue(any(fmt.startswith(form) for form in kept), "no kept form covers %r" % fmt)
+
+
+class NoChecksReadyLines(unittest.TestCase):
+    """A repo that declares no merge.readyChecks prints no pass line. Its ready run prints READY_NO_CHECKS_LINE and each line that names its
+    head, and the merge guard reads the head from those lines (hooks/guard_merge.py _ready_stood_shas). verdict keeps each of them, word for
+    word, after its PASS line, as it keeps a pass line. The lines are built from the templates in merge/merge.py, never copied."""
+    SHA = "1234abcde"
+    LINES = (  # every line of the draft step that the guard reads for a run with no ready checks
+        ("the no-checks line", merge.READY_NO_CHECKS_LINE),
+        ("the unchecked line", merge.READY_UNCHECKED_FMT.format(n="12", sha=SHA)),
+        ("the records-current line", merge.READY_RECORDS_CURRENT_FMT.format(branch="feat-x", sha=SHA)),
+        ("the records-pushed line", merge.READY_RECORDS_PUSHED_FMT.format(branch="feat-x", sha=SHA)),
+        ("the merged-here line", merge.READY_MERGED_FMT.format(base="main", branch="feat-x", sha=SHA)),
+        ("the claim-stop line", "merge: " + merge.READY_CLAIM_STOP_FMT.format(sha=SHA, branch="feat-x", claim="D-002")),  # the stop prints "merge: " first
+    )
+    DRAFT = "merge: #12 stays a draft. Mark it ready after its draft run shows."  # a line of the draft step the guard does not read
+
+    def kept(self, printed):
+        """The lines verdict prints after its PASS line, for a run that prints `printed` in the middle of a long log."""
+        r = run(fifty_lines_with(*printed))
+        lines = r.stdout.splitlines()
+        self.assertEqual(r.returncode, 0)
+        self.assertTrue(lines and lines[0].startswith("PASS "), "the run did not print its PASS line first: %r" % r.stdout)
+        return lines[1:]
+
+    def test_no_checks_run_keeps_every_line_the_guard_reads(self):
+        kept = self.kept([line for _, line in self.LINES])
+        for label, line in self.LINES:
+            with self.subTest(label):
+                self.assertIn(line, kept, "verdict drops %s, which the merge guard reads to find the head (hooks/guard_merge.py "
+                              "_ready_stood_shas): kept %r" % (label, kept))
+
+    def test_no_checks_line_alone_is_kept(self):  # the least a no-checks run can print: its no-checks line, and no line that names a head
+        self.assertEqual(self.kept([merge.READY_NO_CHECKS_LINE]), [merge.READY_NO_CHECKS_LINE],
+                         "verdict drops the no-checks line of a run that prints no other step line")
+
+    def test_no_checks_run_keeps_no_line_the_guard_does_not_read(self):  # control: the draft line names no head, and verdict keeps it as before
+        self.assertEqual(self.kept([self.DRAFT]), [], "verdict keeps a draft line that the merge guard does not read")
 
 
 def tearDownModule():

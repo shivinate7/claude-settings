@@ -1,0 +1,1 @@
+- guard-proof-no-base-compare: (#3995) the order and import checks of lint/guard_move_proof.py do not compare with base, so a read-before-bind or a bad import already on main fails every later move with no flag to excuse it; the guard modules are clean today. Seen: 2026-11-25 x1

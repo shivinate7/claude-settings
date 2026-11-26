@@ -10,7 +10,7 @@
 # Exit 0 is also FAIL (`cut`) for a pytest argv (`pytest`, `py.test`, `python -m pytest`, also through `env`, `uv run`, `uvx` and `bash -c`) with `-q` or a line-start session header, and no line-start summary: the run stopped early. A `-qq` run (no summary line) is complete when a line of progress chars ends `[100%]` (any padding, colour codes ignored), or, with `--co`, when it prints a `<file>: <count>` line. A `bash -c` script is read by its own scanner: a newline, `;`, `&`, `|` or `do`/`then`/`else`/`{`/`!` starts a command, a `#` starts a comment only at a word start, and heredoc text is no command.
 # A run with no $VERDICT_LOG deletes verdict-*.log files older than 1 day from the temp folder: regular files whose first line is our own header only; errors skipped.
 # $VERDICT_HANG_SECONDS=N (off when unset, and on Windows): a child with no new output byte and no CPU advance in any process under it for N s is stopped (where reaped children's CPU cannot be read, as on macOS, a process not seen at the first silent wake also counts as work, since a step that works through short children shows only as new pids): print its process tree and the log tail, end the tree (TERM, then KILL), print one `HANG ...` line, exit 124. It reads the process table (hooks/_nowindow.py) only on a silent wake, never while the child prints (decision hang-stop).
-# A PASS, SKIP or FAIL also prints, after its line, each output line that starts with a READY_PASS_KEPT prefix, word for word, and no other log line: the merge guard reads the merge tool's ready-pass line from the transcript (hooks/guard_merge.py _ready_pass_shas), and a run that prints it can still exit 1. A FAIL with $VERDICT_FULL_LOG=1 prints the whole log, which holds those lines. A HANG prints as before.
+# A PASS, SKIP or FAIL also prints, after its line, each output line that opens a ready-run line the merge guard reads (READY_LITERAL_KEPT prefixes and READY_FIELD_LINES patterns), word for word, and no other log line: the merge guard reads the merge tool's ready-pass line, or in a repo with no ready checks its head-naming lines, from the transcript (hooks/guard_merge.py _ready_pass_shas), and a run that prints it can still exit 1. A FAIL with $VERDICT_FULL_LOG=1 prints the whole log, which holds those lines. A HANG prints as before.
 # Killed by signal N: exit 128+N. Ctrl-C: exit 130. Windows: bin/verdict.cmd.
 import codecs, os, re, shutil, signal, subprocess, sys, tempfile, time
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "hooks"))
@@ -20,8 +20,18 @@ CAP = 30
 NAMES = 300  # at most this many more lines, each a failing case's name line; with the last CAP hot lines the excerpt stays bounded
 NAME_WIDTH = 300
 CASE_NAME = re.compile(r"(?:\x1b\[[0-9;]*m)*(?:FAIL|FAILED|ERROR)\b")  # a line that starts a failing case's name: unittest `FAIL: test_x (m.T.test_x)` and `ERROR: ...`, pytest `FAILED path::test_x`, the shell suites' `FAIL - name`
-READY_PASS_KEPT = ("merge: the ready checks (",)  # the fixed prefix of merge/merge.py READY_PASS_FMT and READY_PASS_SKIPPED_FMT; lint/test_verdict.py checks it against both
-READY_LINE = re.compile(rb"^(?:" + b"|".join(re.escape(k.encode()) for k in READY_PASS_KEPT) + rb")[^\n]*", re.M)
+READY_LITERAL_KEPT = ("merge: the ready checks (",  # READY_PASS_FMT and READY_PASS_SKIPPED_FMT
+                      "merge: this repo declares no ready checks (merge.readyChecks), so the draft step runs none.",  # READY_NO_CHECKS_LINE, a whole line
+                      "merge: the draft step ran no checks on #",  # READY_UNCHECKED_FMT
+                      "merge: the records page on ",  # READY_RECORDS_CURRENT_FMT
+                      "merge: the records page pushed to ")  # READY_RECORDS_PUSHED_FMT
+READY_FIELD_LINES = (rb"merge: \S+ is merged into \S+ at [0-9a-f]{7,40}, here only\. Nothing is pushed yet\.",  # READY_MERGED_FMT
+                     rb"merge: [0-9a-f]{7,40} on \S+ holds a Record-claim \([^)\n]*\), so the draft step adds no page commit on top of it\.")  # "merge: " + READY_CLAIM_STOP_FMT
+# The lines of merge/merge.py's draft step that the merge guard reads (hooks/guard_merge.py _ready_stood_shas): the pass line, or, in a repo with no ready checks, the lines that name the head. bin/verdict imports no
+# merge.py (an 8000-line module, on every run), so each form is written here and lint/test_verdict.py (ReadyPassLine, NoChecksReadyLines) builds each line from merge.py's own templates and checks it is kept.
+# READY_FIELD_LINES: the merged-here and claim-stop lines open with a field, so a fixed prefix cannot name them; they match a pattern (merge.py READY_LINE_FIELDS holds the field shapes).
+READY_PASS_KEPT = READY_LITERAL_KEPT + ("merge: ",)  # every kept form's fixed prefix; "merge: " is the whole fixed prefix of the two field lines, so it keeps nothing by itself (READY_LINE reads READY_LITERAL_KEPT and READY_FIELD_LINES)
+READY_LINE = re.compile(rb"^(?:" + b"|".join([re.escape(k.encode()) for k in READY_LITERAL_KEPT] + list(READY_FIELD_LINES)) + rb")[^\n]*", re.M)
 CHUNK, OVERLAP = 1 << 20, 256  # OVERLAP > longest marker
 KEPT_B = tuple(k.encode() for k in READY_PASS_KEPT)
 KEPT_CARRY = 64 << 10  # a kept line longer than this is dropped, so a log with no newline is never held whole

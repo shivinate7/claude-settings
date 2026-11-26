@@ -1,0 +1,1 @@
+- confirm-test-skips-claim-push: HeadConfigOnConfirm asserts the refusal and that nothing merged, but not that nothing was claimed or pushed. Decision: `config-lands-after-its-reader` (a config change that needs new tool code lands in two pull requests). Seen: 2026-11-25 x1

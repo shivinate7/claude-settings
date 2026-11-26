@@ -194,27 +194,30 @@ def flagged(job_id, desc="test"):
             started(cid, job_id, win_path(job_id), False)]
 
 
-def task_notification(job_id, status, summary=None):
+def task_notification(job_id, status, summary=None, note=None, result=None):
     """The text of a completion notice: a <task-notification> block. The summary defaults to the
-    command name and the status."""
+    command name and the status. note and result, when given, are the harness note and the result body that
+    follow the summary, as a real notice holds them. Left out, neither element is written."""
     if summary is None:
         summary = 'Background command "sleep 600" ' + status
+    extra = ("<note>%s</note>\n" % note if note is not None else "") + (
+        "<result>%s</result>\n" % result if result is not None else "")
     return ("<task-notification>\n<task-id>%s</task-id>\n<tool-use-id>toolu_%s</tool-use-id>\n"
             "<output-file>%s</output-file>\n<status>%s</status>\n"
-            "<summary>%s</summary>\n</task-notification>"
-            % (job_id, job_id, win_path(job_id), status, summary))
+            "<summary>%s</summary>\n%s</task-notification>"
+            % (job_id, job_id, win_path(job_id), status, summary, extra))
 
 
-def notice(job_id, status="completed", summary=None):
+def notice(job_id, status="completed", summary=None, note=None, result=None):
     """A completion notice as the transcript holds it: a user message whose content is a string."""
     return {"type": "user", "message": {"role": "user",
-                                        "content": task_notification(job_id, status, summary)}}
+                                        "content": task_notification(job_id, status, summary, note, result)}}
 
 
-def attachment_notice(job_id, status="completed", summary=None):
+def attachment_notice(job_id, status="completed", summary=None, note=None, result=None):
     """The same notice as a queued_command attachment record. It has no message key."""
     return {"type": "attachment", "attachment": {
-        "type": "queued_command", "prompt": task_notification(job_id, status, summary)}}
+        "type": "queued_command", "prompt": task_notification(job_id, status, summary, note, result)}}
 
 
 def stop_call(call_id, job_id):
@@ -2719,6 +2722,386 @@ def A18m_unread_row_names_the_exception_type():
         rows = [line for line in msg.splitlines() if aid in line and "unread" in line]
         problems += expect(any(exc.__name__ in line for line in rows),
                            f"the unread row for agent {aid} whose read raised {exc.__name__} does not name it: {rows!r}")
+    return problems
+
+
+# ---- The waiting text in a completed notice (decision stall-watch, "The Stop-time check") ----
+# A completed notice closes its agent unless its <summary> says the agent is waiting. The phrase in the <result> body
+# or in a <note> element does not make the agent wait. REAL_NOTE is the harness note of a real waiting notice; it never
+# holds the waiting text.
+
+REAL_NOTE = ("This agent stopped with background work of its own still running. It may resume on its own when that "
+             "work completes or reports, and the same task-id notifies again if it does; the result below may be interim.")
+INTERIM = "Still building. Waiting for the completion notice."
+FINISHED = 'Agent "review the diff" finished'
+INCIDENT_AGES = (24540, 27000, 30000, 33000, 36120)  # seconds: 409 to 602 minutes, the ages the incident ran at
+
+
+def real_waiting_notice(aid, result=INTERIM):
+    """The record of a real waiting notice: the waiting phrase in its summary, the harness note, an interim result."""
+    return notice(aid, "completed", summary='Agent "review the diff" ' + WAITING, note=REAL_NOTE, result=result)
+
+
+def scope_problems(mod):
+    """Scope before subject (P7): the module reads the harness's waiting text and the notice tag. Without them the
+    check prints nothing, so a case about the subject would pass for the wrong reason."""
+    return (expect(mod.AGENT_WAITING_TEXT == WAITING, f"module waiting text is {mod.AGENT_WAITING_TEXT!r}, want {WAITING!r}")
+            + expect(bool(mod.TASK_NOTIFICATION_TAG), "module has no task notice tag"))
+
+
+def pair_session(folder, ago, done, live, done_records):
+    """A session in folder with two background agents, launched ago seconds before the Stop and still writing: done,
+    which has done_records after its launch (already stamped), and live, which has no notice. Return the path."""
+    ld, sd = background_agent(folder, done, agent_step("pd"), 10)
+    ll, sl = background_agent(folder, live, agent_step("pl"), 10)
+    return transcript(stamped(ld + ll, ago) + list(done_records), agents=[sd, sl], folder=folder)
+
+
+def live_named_done_not(out, live, done, label):
+    """Scope first: the live agent is named in the one block. Then the finished agent is named nowhere in the output."""
+    problems = [f"{label}: {p}" for p in agent_block(out, live)]
+    problems += expect(done not in out, f"{label}: the finished agent {done} is named, though its notice closed it: {out[:200]!r}")
+    return problems
+
+
+@case
+def A19_finished_notice_quoting_waiting_text_in_result_closes_the_agent():
+    """A19. a completed notice whose summary says the agent finished, and whose result quotes the waiting text, closes
+    the agent: closed_by_notice(keep_waiting=True) holds its id and waiting_ids does not. Fails on the current tree: the whole notice
+    carries the phrase, so the agent reads as waiting. Scope first: the phrase is in the result, not the summary"""
+    mod = load_module("stall_watch_a19")
+    aid = agent_id(90)
+    text = task_notification(aid, "completed", summary=FINISHED, result='The notice reads "%s" in quotes.' % WAITING)
+    problems = scope_problems(mod)
+    problems += expect(("<summary>%s</summary>" % FINISHED) in text and WAITING in text,
+                       f"scope: the notice does not hold the phrase in its result under a finished summary: {text!r}")
+    closed = mod.closed_by_notice(text, keep_waiting=True)
+    problems += expect(aid in closed, f"closed_by_notice(keep_waiting=True) does not close {aid}, whose notice says it finished: {closed}")
+    problems += expect(aid not in mod.waiting_ids(text), f"waiting_ids names {aid}, a finished agent")
+    return problems
+
+
+@case
+def A19a_finished_notice_quoting_waiting_text_prints_no_block_at_any_age():
+    """A19a. a finished agent whose result quotes the waiting text is closed at 31 min, 409 min and 602 min, the ages
+    the incident ran at, so the Stop names it in no block. Scope first: a live agent launched the same time, with no
+    notice, is named in the block. Fails on the current tree: the quoting notice keeps the agent open"""
+    problems = []
+    done, live = agent_id(91), agent_id(92)
+    quote = notice(done, "completed", summary=FINISHED, result='The notice reads "%s" in quotes.' % WAITING)
+    for ago in (1860, 24540, 36120):
+        rc, out, err = run_stop(pair_session(new_dir(), ago, done, live, [quote]))
+        problems += expect(rc == 0, f"{ago} s: exit {rc}, want 0: {err.strip()[:200]}")
+        problems += live_named_done_not(out, live, done, f"{ago} s")
+    return problems
+
+
+@case
+def A19b_waiting_text_in_note_element_only_does_not_keep_the_agent_open():
+    """A19b. a finished agent whose <note> element holds the waiting text, and whose summary does not: the note is not
+    the summary, so the agent is closed at 31 min, and the live control is named. Fails on the current tree. No real harness note
+    holds the phrase, so this guards a form no real notice has yet; the real note is case A19i. Scope first: the phrase
+    is in the note under a finished summary"""
+    mod = load_module("stall_watch_a19b")
+    aid, live = agent_id(93), agent_id(94)
+    note = REAL_NOTE + " The agent " + WAITING + "."
+    rec = notice(aid, "completed", summary=FINISHED, note=note, result="done")
+    text = rec["message"]["content"]
+    problems = scope_problems(mod)
+    problems += expect(("<summary>%s</summary>" % FINISHED) in text and ("<note>%s</note>" % note) in text,
+                       f"scope: the phrase is not in the note element under a finished summary: {text!r}")
+    closed = mod.closed_by_notice(text, keep_waiting=True)
+    problems += expect(aid in closed, f"closed_by_notice(keep_waiting=True) does not close {aid}, whose note alone holds the waiting text: {closed}")
+    problems += expect(aid not in mod.waiting_ids(text), f"waiting_ids names {aid}, a finished agent whose summary lacks the waiting text")
+    rc, out, err = run_stop(pair_session(new_dir(), 1860, aid, live, [rec]))
+    problems += expect(rc == 0, f"exit {rc}, want 0: {err.strip()[:200]}")
+    problems += live_named_done_not(out, live, aid, "note-only phrase")
+    return problems
+
+
+@case
+def A19c_real_waiting_notice_keeps_the_agent_open_and_blocks_at_30_min():
+    """A19c. control, passing on the current tree. A real waiting notice: the phrase in its summary, the harness note, an interim
+    result. The agent stays open: closed_by_notice(keep_waiting=True) holds no id and waiting_ids holds it. The Stop
+    blocks on it at 1800 s, and the block says it is waiting on its own background work. Scope first: the phrase is in
+    the summary"""
+    mod = load_module("stall_watch_a19c")
+    aid = agent_id(95)
+    rec = real_waiting_notice(aid)
+    text = rec["message"]["content"]
+    problems = scope_problems(mod)
+    problems += expect(("<summary>Agent \"review the diff\" %s</summary>" % WAITING) in text,
+                       f"scope: the phrase is not in the summary of the real waiting notice: {text!r}")
+    closed = mod.closed_by_notice(text, keep_waiting=True)
+    problems += expect(closed == [], f"a real waiting notice closes its agent: {closed}")
+    problems += expect(mod.waiting_ids(text) == [aid], f"waiting_ids of a real waiting notice is {mod.waiting_ids(text)}, want [{aid}]")
+    folder = new_dir()
+    launch, spec = background_agent(folder, aid, agent_step("cw"), 10)
+    rc, out, err = run_stop(transcript(stamped(launch, LONG_AGE) + [rec], agents=[spec], folder=folder))
+    problems += expect(rc == 0, f"exit {rc}, want 0: {err.strip()[:200]}")
+    problems += agent_block(out, aid)
+    problems += expect(WAITING in block_text(out),
+                       f"the block does not say the agent is waiting on its own background work: {block_text(out)!r}")
+    return problems
+
+
+@case
+def A19d_waiting_notice_then_finished_notice_for_the_same_id_closes_the_agent():
+    """A19d. control, passing on the current tree. An agent sends a waiting notice 600 s before the Stop, then a finished notice for
+    the same id 300 s before it. Scope first: the waiting notice alone keeps the agent open and the Stop blocks on it.
+    With the finished notice after it, the agent is closed and named in no block, and the live agent is still named"""
+    aid, live = agent_id(96), agent_id(97)
+    waiting = real_waiting_notice(aid)
+    finished = notice(aid, "completed", summary=FINISHED, result="done")
+    rc, out, err = run_stop(pair_session(new_dir(), 1860, aid, live, stamped([waiting], 600)))
+    problems = expect(rc == 0, f"waiting only: exit {rc}, want 0: {err.strip()[:200]}")
+    problems += agent_block(out, aid)
+    rc, out, err = run_stop(pair_session(new_dir(), 1860, aid, live,
+                                         stamped([waiting], 600) + stamped([finished], 300)))
+    problems += expect(rc == 0, f"waiting then finished: exit {rc}, want 0: {err.strip()[:200]}")
+    problems += live_named_done_not(out, live, aid, "waiting then finished")
+    return problems
+
+
+@case
+def A19e_scanner_traps_in_a_finished_result_do_not_keep_the_agent_open():
+    """A19e. a finished agent whose result holds the waiting text in a shape a scanner can trip on: the phrase in a
+    quoted string; a whole summary element that says the agent is waiting; the phrase on a later line after a lone <
+    and a lone quote. Each closes the agent at 31 min, so only the live agent is named. Control, passing on the current tree: a real
+    waiting notice whose result holds a </summary> tag, a lone < and a lone quote stays open and is named"""
+    live = agent_id(98)
+    traps = [
+        ("phrase in a quoted string", 'The log read "Agent x %s" and stopped.' % WAITING),
+        ("a whole summary element", '<summary>Agent "fix" %s</summary> is the line quoted.' % WAITING),
+        ("lone < and lone quote", 'check x < 3 and he said "no\nthe last line: %s.' % WAITING),
+    ]
+    problems = []
+    for n, (label, result) in enumerate(traps):
+        aid = agent_id(99 + n)
+        rec = notice(aid, "completed", summary=FINISHED, result=result)
+        rc, out, err = run_stop(pair_session(new_dir(), 1860, aid, live, [rec]))
+        problems += expect(rc == 0, f"{label}: exit {rc}, want 0: {err.strip()[:200]}")
+        problems += live_named_done_not(out, live, aid, label)
+    ctl = agent_id(102)
+    rec = notice(ctl, "completed", summary='Agent "review the diff" ' + WAITING, note=REAL_NOTE,
+                 result='parsed </summary> then x < 3 and he said "no"')
+    rc, out, err = run_stop(pair_session(new_dir(), 1860, ctl, live, [rec]))
+    problems += expect(rc == 0, f"control: exit {rc}, want 0: {err.strip()[:200]}")
+    problems += [f"control: {p}" for p in agent_block(out, ctl)]
+    return problems
+
+
+@case
+def A19f_finished_agent_whose_description_holds_the_waiting_text_is_closed():
+    """A19f. a finished agent whose description, which its summary carries, holds the waiting text. The summary ends
+    with 'finished', so the agent is closed and the Stop names only the live agent at 31 min. Fails on the current tree: the whole
+    notice carries the phrase. A check that the summary merely contains the phrase would keep it open, so this stops it"""
+    aid, live = agent_id(103), agent_id(104)
+    summary = 'Agent "check the fix is waiting on its own background work" finished'
+    rec = notice(aid, "completed", summary=summary, result="done")
+    problems = expect(WAITING in summary and summary.endswith("finished"),
+                      f"scope: the summary does not hold the phrase in a finished description: {summary!r}")
+    rc, out, err = run_stop(pair_session(new_dir(), 1860, aid, live, [rec]))
+    problems += expect(rc == 0, f"exit {rc}, want 0: {err.strip()[:200]}")
+    problems += live_named_done_not(out, live, aid, "description holds the phrase")
+    return problems
+
+
+@case
+def A19g_five_finished_agents_quoting_the_waiting_text_at_incident_ages_are_all_closed():
+    """A19g. full size: five finished agents, each launched at one of the incident's ages (409 to 602 minutes), each with
+    a result that quotes the waiting text. None is named in the block, and a live agent launched 602 minutes before is
+    named. Fails on the current tree: each quoting notice keeps its agent open"""
+    folder = new_dir()
+    launches, specs, notices, dones = [], [], [], []
+    for n, ago in enumerate(INCIDENT_AGES):
+        aid = agent_id(110 + n)
+        dones.append(aid)
+        launch, spec = background_agent(folder, aid, agent_step("g%d" % n), 10)
+        launches += stamped(launch, ago)
+        specs.append(spec)
+        notices.append(notice(aid, "completed", summary=FINISHED, result='The notice reads "%s" in quotes.' % WAITING))
+    live = agent_id(119)
+    ll, sl = background_agent(folder, live, agent_step("gl"), 10)
+    launches += stamped(ll, INCIDENT_AGES[-1])
+    specs.append(sl)
+    rc, out, err = run_stop(transcript(launches + notices, agents=specs, folder=folder))
+    problems = expect(rc == 0, f"exit {rc}, want 0: {err.strip()[:200]}")
+    problems += [f"live control: {p}" for p in agent_block(out, live)]
+    for aid in dones:
+        problems += expect(aid not in out, f"finished agent {aid} is named, though its notice closed it: {out[:200]!r}")
+    return problems
+
+
+@case
+def A19h_finished_notice_with_an_empty_result_closes_the_agent():
+    """A19h. the empty state: a finished notice whose result is empty closes its agent, so closed_by_notice(keep_waiting=True)
+    holds its id. Passing on the current tree, since no phrase is present; it is the control for the empty case"""
+    mod = load_module("stall_watch_a19h")
+    aid = agent_id(120)
+    text = task_notification(aid, "completed", summary=FINISHED, result="")
+    problems = scope_problems(mod)
+    problems += expect("<result></result>" in text, f"scope: the notice has no empty result element: {text!r}")
+    problems += expect(aid in mod.closed_by_notice(text, keep_waiting=True),
+                       f"closed_by_notice(keep_waiting=True) does not close {aid} with an empty result")
+    return problems
+
+
+@case
+def A19i_real_harness_note_on_a_finished_notice_does_not_keep_the_agent_open():
+    """A19i. control, passing on the current tree. A finished notice that carries the real harness note, whose words do not hold the
+    waiting text: the note does not keep the agent open. closed_by_notice(keep_waiting=True) holds its id and waiting_ids
+    does not. Scope first: the note is the real harness note, under a finished summary"""
+    mod = load_module("stall_watch_a19i")
+    aid = agent_id(121)
+    text = task_notification(aid, "completed", summary=FINISHED, note=REAL_NOTE, result="done")
+    problems = scope_problems(mod)
+    problems += expect(("<note>%s</note>" % REAL_NOTE) in text and WAITING not in REAL_NOTE,
+                       "scope: the harness note is not the real one, or it holds the waiting text")
+    problems += expect(aid in mod.closed_by_notice(text, keep_waiting=True),
+                       f"closed_by_notice(keep_waiting=True) does not close {aid} whose note is the real harness note")
+    problems += expect(aid not in mod.waiting_ids(text), f"waiting_ids names {aid}, a finished agent")
+    return problems
+
+
+@case
+def A19j_real_waiting_notice_whose_summary_holds_an_opening_result_tag_keeps_the_agent_open():
+    """A19j. a real waiting notice whose agent description holds a literal <result> tag: the summary reads 'Agent "fix
+    <result> parse" is waiting on its own background work'. The agent stays open: says_waiting is true for the notice,
+    closed_by_notice(keep_waiting=True) holds no id, and waiting_ids holds it. Fails on the current tree: the first
+    <result> cuts the summary before its closing tag, so the notice reads as finished. Scope first: the tag and the
+    phrase are in the summary, and the summary ends with the phrase"""
+    mod = load_module("stall_watch_a19j")
+    aid = agent_id(122)
+    summary = 'Agent "fix <result> parse" ' + WAITING
+    rec = notice(aid, "completed", summary=summary, note=REAL_NOTE, result=INTERIM)
+    text = rec["message"]["content"]
+    problems = scope_problems(mod)
+    problems += expect(("<summary>%s</summary>" % summary) in text and "<result>" in summary and summary.endswith(WAITING),
+                       f"scope: the summary does not hold the opening result tag and end with the phrase: {text!r}")
+    segment = text.split(mod.TASK_NOTIFICATION_TAG)[1] if mod.TASK_NOTIFICATION_TAG else text  # what closed_by_notice reads
+    problems += expect(mod.says_waiting(segment),
+                       f"says_waiting is false for a real waiting notice whose summary holds <result>: {segment[:300]!r}")
+    closed = mod.closed_by_notice(text, keep_waiting=True)
+    problems += expect(aid not in closed, f"closed_by_notice(keep_waiting=True) closes {aid}, whose notice says it is waiting: {closed}")
+    problems += expect(aid in mod.waiting_ids(text), f"waiting_ids is {mod.waiting_ids(text)}, does not hold {aid}")
+    return problems
+
+
+@case
+def A19k_real_waiting_notice_whose_summary_holds_a_closing_summary_tag_keeps_the_agent_open():
+    """A19k. a real waiting notice whose agent description holds a literal </summary> tag: the summary reads 'Agent "fix
+    </summary> parse" is waiting on its own background work'. The agent stays open: says_waiting is true for the notice,
+    closed_by_notice(keep_waiting=True) holds no id, and waiting_ids holds it. Fails on the current tree: the lazy summary
+    match stops at the description's closing tag, so the notice reads as finished. Scope first: the closing tag and the
+    phrase are in the summary, and the summary ends with the phrase"""
+    mod = load_module("stall_watch_a19k")
+    aid = agent_id(123)
+    summary = 'Agent "fix </summary> parse" ' + WAITING
+    rec = notice(aid, "completed", summary=summary, note=REAL_NOTE, result=INTERIM)
+    text = rec["message"]["content"]
+    problems = scope_problems(mod)
+    problems += expect(("<summary>%s</summary>" % summary) in text and "</summary>" in summary and summary.endswith(WAITING),
+                       f"scope: the summary does not hold the closing summary tag and end with the phrase: {text!r}")
+    segment = text.split(mod.TASK_NOTIFICATION_TAG)[1] if mod.TASK_NOTIFICATION_TAG else text  # what closed_by_notice reads
+    problems += expect(mod.says_waiting(segment),
+                       f"says_waiting is false for a real waiting notice whose summary holds </summary>: {segment[:300]!r}")
+    closed = mod.closed_by_notice(text, keep_waiting=True)
+    problems += expect(aid not in closed, f"closed_by_notice(keep_waiting=True) closes {aid}, whose notice says it is waiting: {closed}")
+    problems += expect(aid in mod.waiting_ids(text), f"waiting_ids is {mod.waiting_ids(text)}, does not hold {aid}")
+    return problems
+
+
+@case
+def A19l_finished_notice_whose_result_quotes_a_closing_summary_tag_then_a_result_tag_closes_the_agent():
+    """A19l. a finished notice, summary 'Agent "review the diff" finished', whose result body holds the waiting text, then a
+    literal closing summary tag, a newline, a literal opening result tag and z. The summary ends at the notice's own closing
+    summary tag, the first one a result, note or notice end follows, so the quoted tag in the result does not reach it.
+    Says_waiting is false, closed_by_notice(keep_waiting=True) closes the agent, and waiting_ids holds none. Fails on the
+    current tree: the last qualifying closing tag is the quoted one, so the summary runs into the result and ends with the
+    phrase. Scope first: the summary is the finished one, and the result holds the quoted tag"""
+    mod = load_module("stall_watch_a19l")
+    aid = agent_id(124)
+    result = "q " + WAITING + "</summary>\n<result>z"
+    text = task_notification(aid, "completed", summary=FINISHED, result=result)
+    problems = scope_problems(mod)
+    problems += expect(("<summary>%s</summary>" % FINISHED) in text and ("<result>%s</result>" % result) in text,
+                       f"scope: the notice does not hold the finished summary and the quoted tag in its result: {text!r}")
+    segment = text.split(mod.TASK_NOTIFICATION_TAG)[1] if mod.TASK_NOTIFICATION_TAG else text  # what closed_by_notice reads
+    problems += expect(not mod.says_waiting(segment),
+                       f"says_waiting is true for a finished notice whose result quotes a closing summary tag: {segment[:300]!r}")
+    problems += expect(aid in mod.closed_by_notice(text, keep_waiting=True),
+                       f"closed_by_notice(keep_waiting=True) does not close {aid}, a finished agent")
+    problems += expect(mod.waiting_ids(text) == [], f"waiting_ids is {mod.waiting_ids(text)}, want none for a finished agent")
+    return problems
+
+
+@case
+def A19m_finished_notice_whose_result_quotes_a_closing_summary_tag_then_a_note_tag_closes_the_agent():
+    """A19m. as A19l, but the quoted closing summary tag is followed at once by a literal opening note tag, then z. The
+    notice's own closing summary tag comes first and is followed by the result tag, so it is the summary's end. Says_waiting
+    is false, closed_by_notice(keep_waiting=True) closes the agent, and waiting_ids holds none. Fails on the current tree,
+    where the quoted tag, followed by the note tag, is the last qualifying closing tag. Scope first: the summary is the
+    finished one, and the result holds the quoted tag followed by the note tag"""
+    mod = load_module("stall_watch_a19m")
+    aid = agent_id(125)
+    result = "q " + WAITING + "</summary><note>z"
+    text = task_notification(aid, "completed", summary=FINISHED, result=result)
+    problems = scope_problems(mod)
+    problems += expect(("<summary>%s</summary>" % FINISHED) in text and ("<result>%s</result>" % result) in text,
+                       f"scope: the notice does not hold the finished summary and the quoted tag in its result: {text!r}")
+    segment = text.split(mod.TASK_NOTIFICATION_TAG)[1] if mod.TASK_NOTIFICATION_TAG else text  # what closed_by_notice reads
+    problems += expect(not mod.says_waiting(segment),
+                       f"says_waiting is true for a finished notice whose result quotes a closing summary tag: {segment[:300]!r}")
+    problems += expect(aid in mod.closed_by_notice(text, keep_waiting=True),
+                       f"closed_by_notice(keep_waiting=True) does not close {aid}, a finished agent")
+    problems += expect(mod.waiting_ids(text) == [], f"waiting_ids is {mod.waiting_ids(text)}, want none for a finished agent")
+    return problems
+
+
+@case
+def A19n_finished_notice_whose_result_quotes_a_closing_summary_tag_then_the_notice_end_closes_the_agent():
+    """A19n. as A19l, but the quoted closing summary tag is followed at once by the notice's own closing tag. The notice's
+    own closing summary tag comes first and is followed by the result tag, so it is the summary's end. Says_waiting is
+    false, closed_by_notice(keep_waiting=True) closes the agent, and waiting_ids holds none. Fails on the current tree,
+    where the quoted tag, followed by the notice's closing tag, is the last qualifying closing tag. Scope first: the summary
+    is the finished one, and the result holds the quoted tag followed by the notice's closing tag"""
+    mod = load_module("stall_watch_a19n")
+    aid = agent_id(126)
+    result = "q " + WAITING + "</summary></task-notification>"
+    text = task_notification(aid, "completed", summary=FINISHED, result=result)
+    problems = scope_problems(mod)
+    problems += expect(("<summary>%s</summary>" % FINISHED) in text and ("<result>%s</result>" % result) in text,
+                       f"scope: the notice does not hold the finished summary and the quoted tag in its result: {text!r}")
+    segment = text.split(mod.TASK_NOTIFICATION_TAG)[1] if mod.TASK_NOTIFICATION_TAG else text  # what closed_by_notice reads
+    problems += expect(not mod.says_waiting(segment),
+                       f"says_waiting is true for a finished notice whose result quotes a closing summary tag: {segment[:300]!r}")
+    problems += expect(aid in mod.closed_by_notice(text, keep_waiting=True),
+                       f"closed_by_notice(keep_waiting=True) does not close {aid}, a finished agent")
+    problems += expect(mod.waiting_ids(text) == [], f"waiting_ids is {mod.waiting_ids(text)}, want none for a finished agent")
+    return problems
+
+
+@case
+def A19o_real_waiting_notice_whose_result_quotes_a_closing_summary_tag_then_a_result_tag_keeps_the_agent_open():
+    """A19o. a real waiting notice, summary 'Agent "review the diff" is waiting on its own background work', whose result body
+    is the interim text, then a literal closing summary tag, a newline, a literal opening result tag and z. The summary ends
+    at the notice's own closing summary tag, so the quoted tag does not move the end. The agent stays open: says_waiting is
+    true, closed_by_notice(keep_waiting=True) holds no id, and waiting_ids holds it. Fails on the current tree: the last
+    qualifying closing tag is the quoted one, so the summary ends at the interim text and reads as finished. Scope first:
+    the summary ends with the phrase, and the result holds the quoted tag"""
+    mod = load_module("stall_watch_a19o")
+    aid = agent_id(127)
+    text = real_waiting_notice(aid, result=INTERIM + "</summary>\n<result>z")["message"]["content"]
+    problems = scope_problems(mod)
+    problems += expect(("<summary>Agent \"review the diff\" %s</summary>" % WAITING) in text and "</summary>\n<result>z</result>" in text,
+                       f"scope: the summary does not end with the phrase, or the result lacks the quoted tag: {text!r}")
+    segment = text.split(mod.TASK_NOTIFICATION_TAG)[1] if mod.TASK_NOTIFICATION_TAG else text  # what closed_by_notice reads
+    problems += expect(mod.says_waiting(segment),
+                       f"says_waiting is false for a real waiting notice whose result quotes a closing summary tag: {segment[:300]!r}")
+    problems += expect(aid not in mod.closed_by_notice(text, keep_waiting=True),
+                       f"closed_by_notice(keep_waiting=True) closes {aid}, whose notice says it is waiting")
+    problems += expect(aid in mod.waiting_ids(text), f"waiting_ids is {mod.waiting_ids(text)}, does not hold {aid}")
     return problems
 
 

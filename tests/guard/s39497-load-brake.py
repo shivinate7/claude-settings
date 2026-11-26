@@ -865,8 +865,11 @@ lb_add("an agent's Bash, a read that raises: allowed",
        lb_decision_check("Bash", "raise", "allow", tool_input={"command": "echo hi"}, agent=LB_AGENT))
 lb_add("an agent's Agent call, memory 97.2%: full, refused, one read, not two",
        lb_decision_check("Agent", lb_reading(memory_pct=97.2), "deny", LB_MEM_FULL, agent=LB_AGENT))
-lb_add("an agent's session tool that writes nothing reads no load under the worst reading",
-       lb_no_read_check("mcp__ccd_session__list_start_targets", {}, agent=LB_AGENT))
+# The agent's call is to a tool settings.json allows, so rule agent-no-mcp-tools (8c) does not refuse it before the
+# brake runs. A refusal there would end the case with the reader never reached.
+lb_add("an agent's read_artifact, a read the allow list covers and that writes nothing: "
+       "reads no load under the worst reading",
+       lb_no_read_check("mcp__claude-artifacts__read_artifact", {"slug": "load-brake-probe"}, agent=LB_AGENT))
 lb_add("a Bash call whose agent_id is malformed reads no load under the worst reading",
        lb_no_read_check("Bash", {"command": "echo hi"}, agent="not an id!"))
 

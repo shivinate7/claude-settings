@@ -1,0 +1,1 @@
+- case-times-report-no-run-id: `read_rows` in `lint/case_times_report.py` (lines 36-41) merges every `.jsonl` file under the folder, with no run id, so two runs in one folder count each case twice. Decision `per-case-times` (the per-case times record). Seen: 2026-11-25 x1

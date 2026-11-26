@@ -159,7 +159,8 @@ t() { # want label [FAIL glob] [EMPTY glob] [text the issue must name] [jobs rea
   # want: green, red, unknown (the verdict and a ::warning::), or unknown-verdict (the verdict alone). Env, per case: ALARM_DIR (a folder
   # whose clear_rule.py is the stub below), JUDGES (the judge calls the run must make), RUN_ARGS_HAS (text the run list call must carry),
   # ISSUE_CALLS (`none`: no issue call of any kind; else one call such as `issue create` that the calls must include), WARN_HAS (text
-  # the ::warning:: line must carry, so an unknown names its cause).
+  # the ::warning:: line must carry, so an unknown names its cause), WARN_NOT (text no ::warning:: line may carry: alarm.sh's
+  # "clear_rule.py failed" is the warning a crash of clear_rule.py leaves, and a crash must not pass as an answer).
   : > "$tmp/log"; : > "$tmp/reads"; : > "$tmp/judge"; : > "$tmp/runargs"; : > "$tmp/issues"
   out="$(PATH="$tmp/bin:$PATH" RUNS="$tmp/runs" WORKFLOWS="$tmp/workflows" JOBS="$tmp/jobs" READS="$tmp/reads" LOG="$tmp/log" ISSUES="$tmp/issues" \
     FAIL="${3:-}" EMPTY="${4:-}" CONTENTS="$tmp/contents" CONTENTS_DEFAULT="$tmp/no-if.yml" GITHUB_REPOSITORY=o/r SELF=alarm \
@@ -189,6 +190,7 @@ t() { # want label [FAIL glob] [EMPTY glob] [text the issue must name] [jobs rea
     elif ! grep -qxF -- "$ISSUE_CALLS" "$tmp/issues"; then ok=0; extra="$extra; no issue call '$ISSUE_CALLS'"; fi
   fi
   if [ -n "${WARN_HAS:-}" ] && ! grep -qF -- "$WARN_HAS" <<<"$out"; then ok=0; extra="$extra; no ::warning:: with '$WARN_HAS'"; fi
+  if [ -n "${WARN_NOT:-}" ] && grep -qF -- "$WARN_NOT" <<<"$out"; then ok=0; extra="$extra; a ::warning:: with '$WARN_NOT', so clear_rule.py crashed (stderr: $(head -c 300 "$tmp/err"))"; fi
   if [ "$ok" = 1 ]; then echo "ok   $2"; else echo "FAIL $2 (exit $code, got: $out; jobs reads: $(tr '\n' ' ' < "$tmp/reads"))$extra"; bad=1; fi
 }
 runs_are "$(gh_run ci failure 2026-01-02 u1 push 1)" "$(gh_run ci success 2026-01-01 u0 push 2)"
@@ -428,7 +430,7 @@ runs_are "$(gh_run ci failure 2026-01-02 https://runs/red-1 push 1)"
 STUB_JUDGE=green JUDGES=1 ALARM_DIR="$tmp/stub" t green one-home-a-green-judge-answer-decides-over-a-red-run
 runs_are "$(gh_run ci success 2026-01-02 u1 push 1)"
 jobs_of 1 checks:success
-STUB_JUDGE=unknown JUDGES=1 ALARM_DIR="$tmp/stub" t unknown-verdict one-home-an-unknown-judge-answer-decides-over-a-green-run
+WARN_NOT="clear_rule.py failed" STUB_JUDGE=unknown JUDGES=1 ALARM_DIR="$tmp/stub" t unknown-verdict one-home-an-unknown-judge-answer-decides-over-a-green-run
 # Controls, green on the old code: a plain green run is clear, a plain red run alarms and names its run, a cancelled newest run
 # over an older red run stays green (a cancelled run never alarms), and the fetch still asks for 100 runs.
 runs_are "$(gh_run ci success 2026-01-02 u1 push 1)"
