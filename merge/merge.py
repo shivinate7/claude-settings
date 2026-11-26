@@ -430,6 +430,7 @@ LANE_LINT_CITE = "(decision lanes-run-no-full-ci-job, a lane hands off only a he
 WORKFLOW_READ_CITE = "(decision private-repos-no-ci, the workflow files on the base set the wait, so a file the tool cannot read stops the merge)"
 HEAD_STAMP_CITE = "(decision private-repos-no-ci, a setup PR's own stamp that turns CI off is read and checked in full, so a broken one stops the merge)"
 HEAD_CONFIG_CITE = "(decision config-lands-after-its-reader, a merge config change that needs new tool code lands in a second pull request, after the stable branch holds that code)"
+HEAD_VALUE_CITE = "(decision config-lands-after-its-reader, a head config value that no version of the merge tool takes is fixed in the file and pushed)"
 # The paths a review record's `--guard no` refuses: the rule dirs, then the tool and the hooks, as folder prefixes. GUARD_FILES match a whole path.
 # It reads RULE_DIRS, never a copy.
 GUARD_PATHS = stale_cites.RULE_DIRS + ("merge/", "githooks/")
@@ -3020,14 +3021,15 @@ def head_config_refusal(root, head, base, path=DEFAULT_CONFIG):
         return f"{where} is not an object in its merge block: merge must be a JSON object. Every merge in the repo reads this file from the default branch, so fix it before the PR goes on."
     try:
         with contextlib.redirect_stdout(io.StringIO()):  # parse_config says its defaults and floors; only its refusal is read here
-            parse_config(root, cfg, head, f"the head {head[:9]}", path, "", fill=False)  # no cite here: it belongs to the causes a newer tool may take, added below
+            parse_config(root, cfg, head, f"the head {head[:9]}", path, " " + HEAD_VALUE_CITE, fill=False)
     except ConfigValueStop as e:
+        reason = str(e).removesuffix(" " + HEAD_VALUE_CITE)  # a newer tool may take the value, so those causes carry the second-pull-request cite instead
         cite = " " + HEAD_CONFIG_CITE
         land = f"land the tool change first, wait until stable holds it, then change {path} in a second PR"
         if e.cause == "newer":
-            return f"{e}{cite} The merge tool at stable does not know this value or key yet, so every merge in the repo would be refused once this lands. {land[0].upper() + land[1:]}."
+            return f"{reason}{cite} The merge tool at stable does not know this value or key yet, so every merge in the repo would be refused once this lands. {land[0].upper() + land[1:]}."
         if e.cause == "either":
-            return (f"{e}{cite} Either the merge tool at stable does not know this value yet, so every merge in the repo would be refused once this lands: then {land}. "
+            return (f"{reason}{cite} Either the merge tool at stable does not know this value yet, so every merge in the repo would be refused once this lands: then {land}. "
                     f"Or the value is a typo: then fix it in {path} and push.")
         return f"{e} No version of the merge tool takes this value, so fix it in {path} and push."
     except Stop as e:  # not a verdict on the value: parse_config could not read the workflows at the head
