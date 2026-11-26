@@ -3,6 +3,14 @@ FAMILY = "agent-no-mcp-tools"
 AGENT_NO_MCP = "agent-no-mcp-tools"  # the rule id the refusal names
 # The refusal says why: an agent cannot answer a permission prompt, so a call that would ask waits on no one.
 MCP_REFUSAL = "answer a permission prompt"
+# The refusal leads with its rule id, the label before the reason's first ": ". A case asserts the rule by that label (rule=,
+# and the label in carries), never by the absence of a sibling's slug, because the refusal may cite the record that holds it.
+MCP_LABEL = AGENT_NO_MCP + ": "
+MCP_REFUSAL_CARRIES = (MCP_LABEL, MCP_REFUSAL)
+# The decision that holds this rule (decision agent-no-remote-tools). Its slug equals the sibling rule's name, so it is
+# named here by its own constant and never by AGENT_NO_REMOTE. OLD_CITE is the record the refusal cited before, which it must drop.
+HOME_CITE = "decision agent-no-remote-tools"
+OLD_CITE = "lanes-start-as-agents"
 # MCP tools the settings.json allow list does not cover: a computer-use tool and a rea tool.
 UNLISTED_MCP_CALLS = (
     ("mcp__computer-use__app_click", {}),
@@ -24,13 +32,17 @@ def mcp_call(name, tool_input, agent_id=None, agent_type=None):
     return json.dumps(body)
 
 
-# An agent's call to an unlisted MCP tool is refused, from either agent shape. The reason carries the phrase and no remote rule id.
+# An agent's call to an unlisted MCP tool is refused, from either agent shape. The reason leads with this rule's label and carries the phrase.
 for _name, _input in UNLISTED_MCP_CALLS:
     for _shape, _id, _type in AGENT_SHAPES:
         add("agent-no-mcp-tools: %s from %s is refused" % (_name, _shape), "deny",
-            raw=mcp_call(_name, _input, _id, _type), rule=AGENT_NO_MCP, carries=MCP_REFUSAL, lacks=AGENT_NO_REMOTE)
+            raw=mcp_call(_name, _input, _id, _type), rule=AGENT_NO_MCP, carries=MCP_REFUSAL_CARRIES)
     # The same call from the session itself, with no agent_id, passes: the rule judges an agent's calls only.
     add("agent-no-mcp-tools: %s from the session itself is allowed" % _name, "allow", raw=mcp_call(_name, _input))
+# The refusal cites the record that holds this rule, and not the record the sibling agent rule's refusal is copied from.
+add("agent-no-mcp-tools: an agent's MCP refusal cites decision agent-no-remote-tools, not lanes-start-as-agents", "deny",
+    raw=mcp_call(UNLISTED_MCP_CALLS[0][0], UNLISTED_MCP_CALLS[0][1], AGENT_ID_VALUE, "general-purpose"),
+    rule=AGENT_NO_MCP, carries=HOME_CITE, lacks=OLD_CITE)
 
 # An agent's call to an MCP tool the allow list covers passes, from either agent shape.
 for _shape, _id, _type in AGENT_SHAPES:
@@ -47,7 +59,7 @@ add("agent-no-mcp-tools: send_message from a general-purpose agent is still refu
 LOOKALIKE_MCP_CALL = ("mcp__Claude_Browser_evil__navigate", {"url": "about:blank"})
 add("agent-no-mcp-tools: %s from a designer agent is refused, a lookalike server is not covered" % LOOKALIKE_MCP_CALL[0],
     "deny", raw=mcp_call(LOOKALIKE_MCP_CALL[0], LOOKALIKE_MCP_CALL[1], AGENT_ID_VALUE, "designer"),
-    rule=AGENT_NO_MCP, carries=MCP_REFUSAL, lacks=AGENT_NO_REMOTE)
+    rule=AGENT_NO_MCP, carries=MCP_REFUSAL_CARRIES)
 add("agent-no-mcp-tools: %s from the session itself gets no verdict from this rule" % LOOKALIKE_MCP_CALL[0],
     "allow", raw=mcp_call(LOOKALIKE_MCP_CALL[0], LOOKALIKE_MCP_CALL[1]), silent=True)
 
@@ -81,10 +93,10 @@ def build_mcp_copies():
 lazy_fixture([mcp_copy_guard(_name) for _name in MCP_COPY_TEXT], build_mcp_copies)
 add("agent-no-mcp-tools: %s from a designer agent is refused when settings.json has no permissions key" % LISTED_MCP_CALL[0],
     "deny", raw=mcp_call(LISTED_MCP_CALL[0], LISTED_MCP_CALL[1], AGENT_ID_VALUE, "designer"),
-    rule=AGENT_NO_MCP, carries=MCP_REFUSAL, lacks=AGENT_NO_REMOTE, guard=mcp_copy_guard("nokey"))
+    rule=AGENT_NO_MCP, carries=MCP_REFUSAL_CARRIES, guard=mcp_copy_guard("nokey"))
 add("agent-no-mcp-tools: %s from a designer agent is refused when settings.json does not parse" % LISTED_MCP_CALL[0],
     "deny", raw=mcp_call(LISTED_MCP_CALL[0], LISTED_MCP_CALL[1], AGENT_ID_VALUE, "designer"),
-    rule=AGENT_NO_MCP, carries=MCP_REFUSAL, lacks=AGENT_NO_REMOTE, guard=mcp_copy_guard("badjson"))
+    rule=AGENT_NO_MCP, carries=MCP_REFUSAL_CARRIES, guard=mcp_copy_guard("badjson"))
 add("agent-no-mcp-tools: %s from a designer agent is allowed by the control copy whose settings.json lists the server"
     % LISTED_MCP_CALL[0], "allow", raw=mcp_call(LISTED_MCP_CALL[0], LISTED_MCP_CALL[1], AGENT_ID_VALUE, "designer"),
     guard=mcp_copy_guard("allowed"), silent=True)
