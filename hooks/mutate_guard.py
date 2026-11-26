@@ -4090,6 +4090,8 @@ GUARD_MODULE_FAMILIES = {
     "hooks/guard_write.py": ["write"],
     # hooks/guard_impeccable.py holds the impeccable family moved out of guard.py. Its mutants meet the impeccable section.
     "hooks/guard_impeccable.py": ["impeccable"],
+    "hooks/guard_workflow_args.py": ["workflow-args"],
+    "hooks/guard_ci_wait.py": ["ci-wait-cap"],
     # hooks/guard_cite.py holds the cite family moved out of guard.py. Its mutants meet the cite and scratchpad-message sections.
     "hooks/guard_cite.py": ["cite", "scratchpad-message"],
     # hooks/guard.py holds the rules that no guard_<x>.py module owns. A mutant of it meets six families that read those rules.
@@ -4116,8 +4118,6 @@ GUARD_MODULE_EXEMPT = {
     "hooks/guard_scratchpad_owner.py": EMPTY_MOVE_REASON,
     "hooks/guard_pages.py": EMPTY_MOVE_REASON,
     "hooks/guard_simulator.py": EMPTY_MOVE_REASON,
-    "hooks/guard_workflow_args.py": EMPTY_MOVE_REASON,
-    "hooks/guard_ci_wait.py": EMPTY_MOVE_REASON,
 }
 # The gold standard: the guard's own suite against the same mechanical mutants, so the comparison is
 # one engine to one engine. The hand-written MUTATIONS above kill 100% by construction (any survivor
