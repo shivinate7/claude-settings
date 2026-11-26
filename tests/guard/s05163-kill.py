@@ -395,6 +395,46 @@ if sys.platform == "darwin":
 else:
     skip_case(LIMIT_LABEL, "the Apple platform binary's hidden environment is a macOS read, so this "
                            "limit is not reached on this host")
+# THE APPLE SHAPE OF A `yes` JOB. A background Apple platform binary, re-parented to init, reads untagged
+# on macOS, so its kill is refused. This holder is direct, with no stub: the pid `&` and `echo $!` capture.
+# The python job of the cases above is allowed.
+APPLE_LABEL = ("kill: a background /bin/sleep this session started, re-parented to pid 1, is refused on macOS "
+               "(the shape of the refused yes jobs, debt kill-tag-platform-binary-blind)")
+if sys.platform == "darwin":
+    tag_case(APPLE_LABEL, "deny", env_entries=[TAG + "=" + SUB_SESSION], holder=["/bin/sleep", "300"],
+             carries="did not start")
+else:
+    skip_case(APPLE_LABEL, "the Apple platform binary's hidden environment is a macOS read, so this "
+                           "limit is not reached on this host")
+# THE JOB STILL PARENTED TO ITS SHELL, AND ITS CHILD (the walk, no environment read). A job the session
+# started under its own shell is owned while that shell lives, and so is a child of that job. The walk
+# owns both, so the Apple read gap does not reach them. FORK_SRC is a python job that forks one child.
+FORK_SRC = ("import subprocess, sys, time; "
+            "subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(300)']); time.sleep(300)")
+if os.name != "nt":   # Windows has no `ps`: ownership reads unknown, so these allow
+    SHELL_JOB = subprocess.Popen(["sh", "-c", '"$@" & wait', "sh", sys.executable, "-c", FORK_SRC],
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    JOB_PID = child_of(SHELL_JOB.pid)   # the job, parented to the session's shell
+    CHILD_PID = child_of(JOB_PID) if JOB_PID else None   # the job's own child
+    if JOB_PID is None:
+        skip_case("kill: a job this session started, still parented to its own shell, passes", NO_ORPHAN)
+    else:
+        sh("kill: a job this session started, still parented to its own shell, passes",
+           "kill %d" % JOB_PID, "allow", cwd=NOGIT)
+    if CHILD_PID is None:
+        skip_case("kill: a child of a job this session started, alive, passes", NO_ORPHAN)
+    else:
+        sh("kill: a child of a job this session started, alive, passes", "kill %d" % CHILD_PID,
+           "allow", cwd=NOGIT)
+else:
+    skip_case("kill: a job this session started, still parented to its own shell, passes", NO_PS)
+    skip_case("kill: a child of a job this session started, alive, passes", NO_PS)
+# TWELVE `&` JOBS WITH ONE `$!`. The bare-& test is skipped when `$!`
+# appears anywhere in the command (decision detached-launch-refused: "unless the command captures the pid
+# with `$!`"). `$!` names only the last job, so eleven of the twelve pids cannot be named. A pin of that
+# exemption as written; the fix waits for the owner's grant.
+sh("detached: twelve background jobs in a loop, one echo $! after them, pass (the $! exemption)",
+   "for i in $(seq 12); do yes >/dev/null 2>&1 & done; echo $!", "allow", cwd=NOGIT)
 
 sh("kill: a pid list made by pgrep", "kill $(pgrep -f node)", "deny", "machine-wide-kill",
    cwd=NOGIT)
