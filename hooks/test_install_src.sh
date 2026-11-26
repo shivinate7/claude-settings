@@ -115,8 +115,15 @@ normalize_path() {
 # (landed-dirs.txt at the repo root), not a hand-kept list here. Keeps case8 honest about
 # every landed directory, not just the two it happened to name by hand.
 landed_dirs() {
-  sed 's/#.*//; s/^[[:space:]]*//; s/[[:space:]]*$//' "$REPO_ROOT/landed-dirs.txt" | grep -v '^$'
+  manifest_lines "$REPO_ROOT/landed-dirs.txt"
 }
+
+# The entries of manifest file $1, one per line, read as the installers read one: CR, `#` comments, outer blanks and
+# empty lines dropped. landed-dirs.txt and hooks/guard-set.txt are the two manifests.
+manifest_lines() {
+  tr -d '\r' < "$1" | sed 's/#.*//; s/^[[:space:]]*//; s/[[:space:]]*$//' | grep -v '^$'
+}
+GUARD_SET_MANIFEST="$REPO_ROOT/hooks/guard-set.txt"  # the one list of the guard set's files: the installers and ci-scope.sh read it
 
 # One run folder per test run (test-temp-standard): lint/_test_temp.py makes it under the repo's one temp
 # root and sweeps sibling run folders older than a day. Every temp path in this file sits under it.
@@ -4629,12 +4636,13 @@ mergepin5() {
 # copy is the other way in, and the config watch is a flat hook that must find the set's copy the way
 # guard.py finds the set. hooks/git_reads.py is the one home of the git and session reads the guard and
 # the janitor share. guard_core.py imports it the same way, so the set holds it too, equal to the flat copy.
-guardset_install() {
+guardset_install() {  # $1 the case name; $2, when given, a function run on the clone's hooks folder before the install (the manifest edits of guardset10 to guardset13)
   install_set_setup
   h=$(new_home); cfg="$h/.claude-cfg"; swap_bin="$work/$1-bin"
   make_swap_bin "$swap_bin"
   make_guard_clone "$work/$1-clone" one
   cp "$REPO_ROOT/hooks/config_watch.py" "$work/$1-clone/hooks/config_watch.py"
+  [ -z "${2:-}" ] || "$2" "$work/$1-clone/hooks"
   ev="$work/$1-ev"; : > "$ev"
   run_cloud "$work/$1-clone" "$cfg" "$ev" > "$work/$1-run" 2>&1; rc=$?
   set_id=$(sed -n 's/^INSTALL_ID = "\([^"]*\)".*/\1/p' "$cfg/hooks/guard.py" 2>/dev/null | head -n1)
@@ -4678,12 +4686,13 @@ guardset3() {
   rm -rf "$h"
 }
 
-# guardset4: the guard set's lists. A flat module that a guard file imports must be in each list that
-# copies the guard set, or the shipped guard cannot import. guard_merge.py imports own_session.py at load,
-# guard_stream.py imports merge_options.py. The modules come from the imports of guard.py and of each
+# guardset4: the guard set's list. A flat module that a guard file imports must be in the one list that
+# names the guard set, hooks/guard-set.txt, or the shipped guard cannot import. guard_merge.py imports own_session.py
+# at load, guard_stream.py imports merge_options.py. The modules come from the imports of guard.py and of each
 # guard_*.py outside a try block, at module level or in a def body (a def body runs on each call), read
 # with the Python parser, so a new import needs no edit here. The try-block imports are guardset5's.
-# The check reads the list line only (the loop or the case line), never the comments above it.
+# The check reads the manifest's entries only, never its comments. install.sh, install.ps1 and ci-scope.sh read the
+# manifest and hold no list of their own (lint/check_guardset_lists.py checks that).
 guard_set_modules() {  # $1 "try" prints each flat module a guard file imports in a try block; "closure" prints each flat module the guard reaches through any import, at any depth, transitively; else outside one. One per line
   python3 -I - "$REPO_ROOT" "${1:-outside}" <<'PY'
 import ast, glob, os, sys
@@ -4761,35 +4770,24 @@ print("\n".join(sorted(found)))
 PY
 }
 
-# A name counts only as a whole name. Splitting the line at each character a file name cannot hold
-# leaves the names as tokens, so shared_names.py does not list names.py.
-line_has_name() {  # $1 a line, $2 a file name: true when the name is a whole token of the line
-  printf '%s\n' "$1" | tr -c '[:alnum:]_.-' '\n' | grep -Fx -- "$2" >/dev/null
-}
-
-listed_in() {  # $1 file, $2 sed address of the one list line, $3 label, $4 module
-  lines=$(sed -n "$2" "$1")
-  if [ "$(printf '%s\n' "$lines" | grep -c .)" -ne 1 ]; then bad "$name" "$4: $3 is not one list line"; nmiss=$((nmiss + 1)); return; fi
-  if ! line_has_name "$lines" "$4"; then
-    bad "$name" "$4 is not in $3"; nmiss=$((nmiss + 1))
-  fi
-}
-
-guard_set_lists_hold() {  # $1 the check's name, $2... the modules: each is in the four guard-set lists
+# A name counts only as a whole entry: grep -Fx matches whole lines, so shared_names.py does not list names.py.
+guard_set_lists_hold() {  # $1 the check's name, $2... the modules: each is a whole entry of the manifest. The scope is read first: no manifest, no verdict on a module
   name=$1; shift
   nmiss=0
+  if [ ! -r "$GUARD_SET_MANIFEST" ]; then
+    bad "$name" "hooks/guard-set.txt is not readable, so no module can be in the guard-set list"
+    return
+  fi
   for m in "$@"; do
-    listed_in "$REPO_ROOT/install.sh" '/^  for gf in .*question_form\.py/p' "install.sh copy loop" "$m"
-    listed_in "$REPO_ROOT/install.ps1" '/^  for gf in .*question_form\.py/p' "install.ps1 copy loop" "$m"
-    listed_in "$REPO_ROOT/install.ps1" '/^    foreach (\$shared in /p' "install.ps1 set loop" "$m"
-    # The guard-set case line is the one that sets `code guard sweep`; the shoot list also names question_form.py.
-    listed_in "$REPO_ROOT/.github/scripts/ci-scope.sh" '/hooks\/question_form\.py|.*code guard sweep /p' "ci-scope.sh case" "$m"
+    if ! manifest_lines "$GUARD_SET_MANIFEST" | grep -Fx -- "$m" >/dev/null; then
+      bad "$name" "$m is not in the manifest hooks/guard-set.txt"; nmiss=$((nmiss + 1))
+    fi
   done
   if [ "$nmiss" -eq 0 ]; then ok "$name"; fi
 }
 
 guardset4() {
-  name="guardset4: each module a guard file imports at load is in each guard-set list: install.sh, the install.ps1 copy and set loops, and ci-scope.sh"
+  name="guardset4: each module a guard file imports at load is in the guard-set manifest, hooks/guard-set.txt"
   mods=$(guard_set_modules); mrc=$?
   if [ "$mrc" -ne 0 ] || [ -z "$mods" ]; then
     bad "$name" "the guard files' load-time imports read to no module list (exit $mrc)"
@@ -4798,12 +4796,12 @@ guardset4() {
   guard_set_lists_hold "$name" $mods
 }
 
-# guardset5: a flat module a guard file imports inside a try block is in each guard-set list too. The try
+# guardset5: a flat module a guard file imports inside a try block is in the guard-set manifest too. The try
 # falls back when its import fails, and no guard-crash follows, so a module the set leaves out fails open,
 # silently (decision install-hooks-whole: the guard set lands whole). The modules come from the try bodies of
 # guard.py and of each guard_*.py, read with the Python parser, so a new try import needs no edit here.
 guardset5() {
-  name="guardset5: each module a guard file imports in a try block is in each guard-set list: install.sh, the install.ps1 copy and set loops, and ci-scope.sh"
+  name="guardset5: each module a guard file imports in a try block is in the guard-set manifest, hooks/guard-set.txt"
   mods=$(guard_set_modules try); mrc=$?
   if [ "$mrc" -ne 0 ] || [ -z "$mods" ]; then
     bad "$name" "the guard files' try-block imports read to no module list (exit $mrc)"
@@ -4812,17 +4810,20 @@ guardset5() {
   guard_set_lists_hold "$name" $mods
 }
 
-# guardset6: listed_in counts a name only as a whole name. names.py is a substring of the listed shared_names.py,
-# so it is missing from each guard-set list. A substring match would find it in each list that carries
-# shared_names.py. shared_names.py, listed in each, is the control.
+# guardset6: a module counts only as a whole manifest entry. names.py is a substring of the entry shared_names.py,
+# so it is missing from hooks/guard-set.txt. A substring match would find it there. shared_names.py, an entry, is the control.
 guardset6() {
-  name="guardset6: listed_in counts a name only as a whole name: names.py, inside the listed shared_names.py, is missing from each guard-set list"
+  name="guardset6: a module counts only as a whole manifest entry: names.py, inside the entry shared_names.py, is missing from hooks/guard-set.txt"
+  if [ ! -r "$GUARD_SET_MANIFEST" ]; then
+    bad "$name" "hooks/guard-set.txt is not readable, so no module can be in the guard-set list"
+    return
+  fi
   probe=$(guard_set_lists_hold "guardset6 probe" names.py)
   ctl=$(guard_set_lists_hold "guardset6 control" shared_names.py)
-  if [ "$(printf '%s\n' "$probe" | grep -c ' names.py is not in ')" -ne 4 ]; then
-    bad "$name" "names.py matched inside shared_names.py in a list: $(printf '%s' "$probe" | tr '\n' ' ')"
+  if [ "$(printf '%s\n' "$probe" | grep -c ' names.py is not in ')" -ne 1 ]; then
+    bad "$name" "names.py matched inside shared_names.py in the manifest: $(printf '%s' "$probe" | tr '\n' ' ')"
   elif [ "$ctl" != "ok   - guardset6 control" ]; then
-    bad "$name" "shared_names.py is not found in each guard-set list: $(printf '%s' "$ctl" | tr '\n' ' ')"
+    bad "$name" "shared_names.py is not an entry of the manifest: $(printf '%s' "$ctl" | tr '\n' ' ')"
   else
     ok "$name"
   fi
@@ -4834,7 +4835,7 @@ guardset6() {
 # at any depth, so a lazy import needs no edit here. A module outside the set loads from the flat copy, which
 # install.sh replaces file by file, so one guard run can judge with a mix of old and new modules.
 guardset7() {
-  name="guardset7: each flat module the guard reaches through its imports, transitively and at any depth, is in each guard-set list: install.sh, the install.ps1 copy and set loops, and ci-scope.sh"
+  name="guardset7: each flat module the guard reaches through its imports, transitively and at any depth, is in the guard-set manifest, hooks/guard-set.txt"
   mods=$(guard_set_modules closure); mrc=$?
   if [ "$mrc" -ne 0 ] || [ -z "$mods" ]; then
     bad "$name" "the guard's import closure reads to no module list (exit $mrc)"
@@ -4846,9 +4847,9 @@ guardset7() {
 # guardset8: the closure through lint/. guardset7 stops at lint/, so a flat module that a lint/ module imports is
 # in no list. lint/report_guard.py imports route_match and reply_judge inside functions, and question_form reaches
 # report_guard lazily (question_form._option_keys), so the guard's static graph reaches both. The walk here follows
-# lint/ modules too, and each module it reaches must be in each guard-set list.
+# lint/ modules too, and each module it reaches must be in the guard-set manifest.
 guardset8() {
-  name="guardset8: each flat module that a lint/ module the guard's static graph reaches imports is in each guard-set list: install.sh, the install.ps1 copy and set loops, and ci-scope.sh"
+  name="guardset8: each flat module that a lint/ module the guard's static graph reaches imports is in the guard-set manifest, hooks/guard-set.txt"
   mods=$(guard_set_modules lintclosure); mrc=$?
   if [ "$mrc" -ne 0 ] || [ -z "$mods" ]; then
     bad "$name" "the guard's import closure through lint/ reads to no module list (exit $mrc)"
@@ -4859,22 +4860,22 @@ guardset8() {
 
 # guardset9: a guard-set module that reads a file beside itself needs that file in the set too. guard.py puts
 # guard.d/<id>/ first on sys.path, so the module loads the set's copy, and the file beside it is the set's copy.
-# A file no list copies is missing there, so the module's read fails (ruling own-896-897-glued-amp-b, the CI-wait
+# A file the manifest leaves out is missing there, so the module's read fails (ruling own-896-897-glued-amp-b, the CI-wait
 # cap). The pairs are hand-kept: a new sidecar read needs its pair here. A read through `..` is not beside the
-# module and is not listed. A pair counts only when its module is in the install.sh copy loop, so a module the
+# module and is not listed. A pair counts only when its module is in the manifest, so a module the
 # set does not ship is not asked of.
 GUARDSET_SIDECARS="ci_wait_cap.py:ci_wait_cap.json route_match.py:route_rows.json precompact_handoff.py:precompact_handoff_prompt.md"
 
-in_copy_loop() {  # $1 a file name: true when the install.sh copy loop names it
-  line_has_name "$(sed -n '/^  for gf in .*question_form\.py/p' "$REPO_ROOT/install.sh")" "$1"
+in_manifest() {  # $1 a file name: true when it is a whole entry of the manifest
+  [ -r "$GUARD_SET_MANIFEST" ] && manifest_lines "$GUARD_SET_MANIFEST" | grep -Fx -- "$1" >/dev/null
 }
 
 guardset9() {
-  name="guardset9: each guard-set module that reads a file beside itself has that file in each guard-set list: install.sh, the install.ps1 copy and set loops, and ci-scope.sh"
+  name="guardset9: each guard-set module that reads a file beside itself has that file in the guard-set manifest, hooks/guard-set.txt"
   sidecars=""; bad_scope=""
   for pair in $GUARDSET_SIDECARS; do
     sc_mod=${pair%%:*}; sc_file=${pair#*:}
-    in_copy_loop "$sc_mod" || continue
+    in_manifest "$sc_mod" || continue
     if [ ! -f "$REPO_ROOT/hooks/$sc_file" ] || ! grep -Fq -- "$sc_file" "$REPO_ROOT/hooks/$sc_mod"; then
       bad_scope="$bad_scope $sc_mod does not read $sc_file beside itself, or the file is missing;"
     fi
@@ -4885,6 +4886,83 @@ guardset9() {
     return
   fi
   guard_set_lists_hold "$name" $sidecars
+}
+
+# guardset10 to guardset13: the installer reads the guard set from hooks/guard-set.txt and holds no list of its own. Each case
+# edits the manifest of a clone whose hooks folder is this repo's, runs the cloud install, and reads the generation's
+# guard.d/<id>/ folder (guardset_install). On a clone with no manifest, a prep that edits one makes it from the edit alone,
+# so the install that ignores the manifest (and lands its own list) is what each subject case catches.
+guardset_probe_prep() {  # a module named only in the manifest: the file, and its entry, last in the sorted list
+  printf '# a flat module that only the manifest names\n' > "$1/zz_manifest_probe.py"
+  printf 'zz_manifest_probe.py\n' >> "$1/guard-set.txt"
+}
+guardset_drop_prep() {  # the entry mail.py out of the manifest
+  [ -f "$1/guard-set.txt" ] || return 0
+  grep -vx 'mail.py' "$1/guard-set.txt" > "$1/guard-set.tmp"; mv "$1/guard-set.tmp" "$1/guard-set.txt"
+}
+guardset_crlf_prep() {  # the probe prep, then every line end of the manifest a CRLF, as a Windows checkout with autocrlf has it
+  guardset_probe_prep "$1"
+  awk '{ printf "%s\r\n", $0 }' "$1/guard-set.txt" > "$1/guard-set.tmp"; mv "$1/guard-set.tmp" "$1/guard-set.txt"
+}
+guardset_empty_prep() {  # a manifest with no entry
+  : > "$1/guard-set.txt"
+}
+
+guardset_lands() {  # $1 the case id, $2 its name, $3 the prep, $4 a module that must be in the set, $5 what is wrong when it is not. The install is the scope: it lands a stamped set, with git_reads.py in it
+  name=$2
+  guardset_install "$1" "$3"
+  set_dir="$cfg/hooks/guard.d/$set_id"
+  if [ "$rc" -ne 0 ] || [ -z "$set_id" ]; then
+    bad "$name" "setup: install exit $rc, stamped id [$set_id]: $(tail -n 3 "$work/$1-run")"
+  elif [ ! -f "$set_dir/git_reads.py" ]; then
+    bad "$name" "guard.d/$set_id holds [$(ls "$set_dir" | tr '\n' ' ')], no git_reads.py"
+  elif [ ! -f "$set_dir/$4" ]; then
+    bad "$name" "guard.d/$set_id holds [$(ls "$set_dir" | tr '\n' ' ')], no $4: $5"
+  else ok "$name"
+  fi
+  rm -rf "$h"
+}
+
+guardset10() {
+  guardset_lands guardset10 "guardset10: a module named only in hooks/guard-set.txt lands in the guard set, with git_reads.py beside it" guardset_probe_prep zz_manifest_probe.py "the manifest does not decide what lands"
+}
+
+guardset11() {
+  name="guardset11: a module the manifest leaves out is not in the guard set, and the rest are"
+  guardset_install guardset11 guardset_drop_prep
+  set_dir="$cfg/hooks/guard.d/$set_id"
+  if [ "$rc" -ne 0 ] || [ -z "$set_id" ]; then
+    bad "$name" "setup: install exit $rc, stamped id [$set_id]: $(tail -n 3 "$work/guardset11-run")"
+  elif [ ! -f "$set_dir/git_reads.py" ]; then
+    bad "$name" "guard.d/$set_id holds [$(ls "$set_dir" | tr '\n' ' ')], no git_reads.py"
+  elif [ -f "$set_dir/mail.py" ]; then
+    bad "$name" "guard.d/$set_id holds mail.py, which the manifest does not name: the installer lands a list of its own"
+  else ok "$name"
+  fi
+  rm -rf "$h"
+}
+
+guardset12() {
+  guardset_lands guardset12 "guardset12: a manifest with CRLF line ends lands each entry in the guard set" guardset_crlf_prep zz_manifest_probe.py "a manifest with CRLF line ends is read with the CR in each name"
+}
+
+# A manifest with no entry leaves the guard set unwritten and the run failed (decision install-hooks-whole: the set lands whole).
+# The set's files are guard.py's imports, so a set built from no entry would land a guard that cannot import. A manifest that is
+# missing is not pinned here: fixtures that write a guard.py by hand (install-no-gap.test.ps1) carry none.
+guardset_refused() {  # $1 the case id, $2 its name, $3 the prep, $4 what the manifest is
+  name=$2
+  guardset_install "$1" "$3"
+  if [ "$rc" -eq 0 ]; then
+    bad "$name" "the install exited 0 with $4, want a failed run"
+  elif [ -n "$set_id" ]; then
+    bad "$name" "a guard.py stamped $set_id landed with $4"
+  else ok "$name"
+  fi
+  rm -rf "$h"
+}
+
+guardset13() {
+  guardset_refused guardset13 "guardset13: an empty hooks/guard-set.txt fails the install and lands no guard set" guardset_empty_prep "an empty guard-set manifest"
 }
 
 guardset2() {
@@ -7232,6 +7310,10 @@ run guardset6
 run guardset7
 run guardset8
 run guardset9
+run guardset10
+run guardset11
+run guardset12
+run guardset13
 run win_sh1
 run win_sh2
 run win_sh3
