@@ -1,0 +1,1 @@
+- test-ci-job-run-unknown: lint/test_ci_job.py was not run to the end at head 9699224947 (the run stopped at 10 minutes with no failure seen), so its result is unknown. A full run settles it. Seen: 2026-11-25 x1

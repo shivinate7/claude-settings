@@ -50,7 +50,7 @@ Reported, not read from a CI log or a run:
 - Built: the checker, its fixture suite (44 cases), the CI step that runs the suite, and a `.tool-versions` row in the code-check standard (not code).
 - Not built:
   - No CI job runs the check. Only its fixture suite runs.
-  - The check must also run in one Windows job and one macOS job.
+  - The check must also run in one Windows job and one macOS job. On a skipped daily, the macOS run is decided by the owner ruling in decision `push-skip-on-proven-tree` (2026-11-25 18:22 CST).
   - Other repos take the check through the lint action they already call.
   - Where the check runs: the 11:05 CST ruling above. None of that wiring exists yet.
   - Read (plan and refuter, Nov 25): a red daily run blames no PR and does not stop `stable` (`actions/ci-alarm/clear_rule.py` `blames`; `.github/workflows/stable.yml`).

@@ -1,0 +1,1 @@
+- checks-yml-skip-comments-stale: three comments in .github/workflows/checks.yml are inexact after the skipped-daily change: the nightly-skip comment ("a skip reaches every job through needs", about line 44), and the shell-macos and checks-macos comments ("on a daily that runs", about lines 1909 and 1980). A builder fixes them. Seen: 2026-11-25 x1
