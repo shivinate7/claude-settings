@@ -41,9 +41,9 @@ Lane picks the owner may reverse:
 
 ## Cost
 
-- One guard process start per MCP tool call in every session, from the matcher above. The cost cases in tests/guard/s43811-agent-no-mcp-tools.py and class `McpGuardStarts` in lint/test_settings_matcher.py pin it.
-- settings.json is read once per MCP call, and twice when the first copy cannot be read or has no permissions key. The same cost cases pin it.
-- A refused call appends one line to `guard.log` (`refuse` in hooks/guard_core.py), and an allowed call writes no file. The same cost cases pin it.
+- One guard process start per MCP tool call in every session, from the matcher above; class `McpGuardStarts` in `lint/test_settings_matcher.py` pins that one start.
+- An agent MCP call reads settings.json at most twice: once, or twice when the first copy cannot be read or has no permissions key. The cost case `agent_mcp_cost_case` pins it. Its file is tests/guard/s43811-agent-no-mcp-tools.py.
+- A refused call appends a line to the guard log (`refuse`), and an allowed call writes no file. The same cost case pins both.
 
 ## Gaps
 
