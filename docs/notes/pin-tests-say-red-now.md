@@ -1,0 +1,1 @@
+- pin-tests-say-red-now: Four docstrings in `LintPythonPin` in lint/test_ci_job.py (:5573, :5584, :5595, :5607) say "Red now". All four cases pass at this head. Decision: lanes-run-no-full-ci-job (lanes run no full CI job). Seen: 2026-11-24 x1

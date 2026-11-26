@@ -139,7 +139,7 @@
                           without it, one `all` section. A failed read prints `unknown` on stderr and exits 1, with no count. Stands alone; takes no lock, merges and posts nothing.
                           Cost: the one comment list read (one call per 100 comments); no file, process or timer.
   merge --main-run SHA    one line, `main run <sha9>: <outcome>. <detail>`: the verdict on the push run of commit SHA (7 to 40 hex) on main, judged against the push run before it
-                          (main_run_verdict). Outcomes: green; no verdict (a run that ran no suite); carried (red with nothing new, or a red job skipped, marked `not re-run`);
+                          (main_run_verdict). Outcomes: green; no verdict (a run that ran no suite); superseded (a push run cancelled before any job started, which a newer push run replaced, when that newest run is green: exit 0; any other state of the newest run is the line's outcome); carried (red with nothing new, or a red job skipped, marked `not re-run`);
                           first red (a new red check or test on a first attempt, or a red job that names no test: prints `gh run rerun <id> --failed`, blames nothing); new break
                           (the new name red again on the re-run: names this run's commit and pull request); cleared or did not clear (the run is a revert of a red main);
                           unknown (a failed read, a run still going, no earlier run: exit 1). Stands alone; takes no lock and no merge role, merges and writes nothing.
@@ -387,9 +387,13 @@ RERUN_IN_FLIGHT = "is a re-run still going"  # base_state words an unknown re-ru
 BREAKING_MERGE = "breaking merge:"  # base_state words the first red run with a green parent, once its re-run is red again, with it
 MAIN_RUNS_READ = 50  # the runs of the base one read holds: base_state and main_run_verdict read one page, never every page
 MAIN_RUN_BASE = "main"  # the branch `merge --main-run` judges
-RUN_OUTCOMES = RUN_GREEN, RUN_NO_VERDICT, RUN_CARRIED, RUN_FIRST_RED, RUN_NEW_BREAK, RUN_UNKNOWN, RUN_CLEARED, RUN_DID_NOT_CLEAR = (
-    "green", "no verdict", "carried", "first red", "new break", "unknown", "cleared", "did not clear")  # the outcome words of a main run's verdict line; one spelling each
+RUN_OUTCOMES = RUN_GREEN, RUN_NO_VERDICT, RUN_CARRIED, RUN_FIRST_RED, RUN_NEW_BREAK, RUN_UNKNOWN, RUN_CLEARED, RUN_DID_NOT_CLEAR, RUN_SUPERSEDED = (
+    "green", "no verdict", "carried", "first red", "new break", "unknown", "cleared", "did not clear", "superseded")  # the outcome words of a main run's verdict line; one spelling each
 CLEAR_RULE_NO_EVIDENCE = "workflow_dispatch"  # an event that carries no push-skip evidence: clear_rule.empty_without_evidence then asks only whether a suite ran
+
+def replaced_note(replaced):
+    """-> the words that name each run a breaking merge's span holds that was replaced (clear_rule.replaced_in_span), or "". base_state and main_run_verdict print the one text."""
+    return "".join(f"; run {r['id']} at {str(r.get('head_sha'))[:9]} was replaced inside that span, so its commit may be the cause too" for r in replaced)
 
 def load_clear_rule():
     """The module of actions/ci-alarm/clear_rule.py, beside events.json: the one home of the failed-run clear, the empty-run rule and the judgment of main's runs (`judge`, `red_jobs`), which the CI alarm calls too. Loaded when asked, not at the top, as the records generator is not: a copy of this file alone still loads."""
@@ -516,6 +520,14 @@ def merge_dates(wt, *shas):
         return None
     date = f"@{when} +0000"
     return {**os.environ, "GIT_AUTHOR_DATE": date, "GIT_COMMITTER_DATE": date}
+
+MAIN_MERGE_WINDOW = 50  # first-parent merges of the base that Host.main_merge_of reads
+
+
+def branch_refspec(branch):
+    """The refspec that fetches origin's `branch` into refs/remotes/origin/<branch>: the home of that string for Host.holds_head and Host.main_merge_of."""
+    return f"+refs/heads/{branch}:refs/remotes/origin/{branch}"
+
 
 def ancestor(cwd, tip, base):
     """True when `tip` is reachable from `base`, False when it is not, None when git could not tell. A shallow clone
@@ -1674,7 +1686,7 @@ class Host:
                     refs.append(x)
                     continue
                 if x not in self.branches_fetched:
-                    self.branches_fetched[x] = git(root, "fetch", "-q", "origin", f"+refs/heads/{x}:refs/remotes/origin/{x}")
+                    self.branches_fetched[x] = git(root, "fetch", "-q", "origin", branch_refspec(x))
                 if self.branches_fetched[x][0]:
                     raise Stop(f"{why}: git fetch of {x} failed: {' '.join(self.branches_fetched[x][1].split())[:300]}")
                 refs.append(f"refs/remotes/origin/{x}")
@@ -1962,12 +1974,12 @@ class Host:
         The judgment is clear_rule.judge, the one home of the selection (which runs of the base decide, what clears a red run, what makes a job red, which run broke the base, what an
         empty run is); the CI alarm calls the same file. Here: one page of the base's runs read from GitHub (`flows` are the workflow paths on the base), the jobs and the workflow file
         at a run's head read when the judgment asks (one read each; a failed read is unknown, with GitHub's own words), and the verdict's words. One page of runs, never every page: the
-        base's history is long. A run that did not succeed costs one jobs read, and a clear candidate one more. A newest-first walk of the push group's green runs costs one jobs read each,
+        base's history is long. A run that did not succeed costs one jobs read, and a clear candidate one more; so does a cancelled run that a newer run of its group is above (superseded_run). A newest-first walk of the push group's green runs costs one jobs read each,
         down to the first that is not empty.
         A cancelled run with no red job that nothing clears keeps its line, in the unknown detail and beside a red verdict. It is named with `gh run rerun <id>` only when its
         `head_sha` is the head_sha of the newest run on the page read (any status, any event in BASE_EVENTS, from the unfiltered list): runs on the base start at its head, and a re-run tests the run's own commit. Never named for a run with a red job or a re-run in flight.
         A red verdict's detail also holds breaking_line's segment for each red run judged (one per file and group), the head group's first: the first red run with a green parent, as a re-run to try (a first red) or as the breaking merge (red again on its re-run).
-        A red verdict also leaves `self.base_facts` for revert_proven, as data the prose cannot carry: `blamed` (the full head shas of the breaking merges), `red` (red runs judged),
+        A red verdict also leaves `self.base_facts` for revert_proven, as data the prose cannot carry: `blamed` (the full head shas of the breaking merges, each with the heads of the replaced runs between it and its green parent), `red` (red runs judged),
         `others` (red entries without a run, cancelled runs and re-runs in flight beside the red), `head` (the head sha of the newest run read) and `red_heads` (the head sha of each red run judged), `red_ids` (the id of each red run judged) and `red_jobs` (per red run, the names of its red jobs; empty for a run that ended red with no red job). Every other verdict leaves it None."""
         self.base_facts = None  # a red verdict sets it below; any other verdict, and any stop, leaves it None
         if waits_on_no_check(self.required):  # a repo with "none" runs no CI, so the base's runs are not read, whatever they hold (decision private-repos-no-ci); "first-proof" reads no run of the base either
@@ -2008,7 +2020,7 @@ class Host:
             unknown = [f"run {r['id']} of {r['name']} {RERUN_IN_FLIGHT} (attempt {r['run_attempt']}, {r['status']}) at {str(r.get('head_sha'))[:9]} ({r.get('html_url')})" for r in judgment.unknown]
             cancelled = [f"{where(r)} {CANCELLED_NO_RED}" + (f". `{RERUN_REMEDY} {r['id']}` re-runs that run's own commit, which is the base's head"
                                                              if r.get("head_sha") and r["head_sha"] == judgment.base_head else "") for r in judgment.cancelled]
-            blame = [s for s in (self.breaking_line(judgment.judged, r) for r in judgment.order) if s]
+            blame = [s for s in (self.breaking_line(judgment.judged, r, judgment.replaced.get(r["id"], ())) for r in judgment.order) if s]
         except (Stop, ValueError, KeyError, TypeError, AttributeError, ImportError) as e:
             return "unknown", " ".join(str(e).split())
         if red:
@@ -2022,13 +2034,14 @@ class Host:
         The one home of what makes a job of a main run red is clear_rule: base_state and main_run_verdict both read it."""
         return load_clear_rule().red_jobs(job_rows, self.cap_minutes(), self.ignore)
 
-    def breaking_line(self, judged, newest_red):
+    def breaking_line(self, judged, newest_red, replaced=()):
         """The breaking merge of a red base (decision no-merge-onto-red-main, the revert route), read from the page base_state already read: -> a detail
         segment, or None. `judged` is newest first. The first red run with a green parent is clear_rule.breaking_run's walk from `newest_red`; a run not completed (a re-run in flight)
         stops the walk with a segment that says the breaking run is unknown. With no green parent on the page (a lone red run, or a page that is red to its end) nothing is named.
         A first red (`run_attempt` 1) is not blamed: its segment names `gh run rerun <id> --failed`, and red_base puts that before the reason flag, because a
         flaky run is the likelier cause. Red again on a re-run (`run_attempt` above 1), the segment names the run's commit and its pull request, read from
-        the number in the head commit's first line: `Merge pull request #N` for a merge commit, `(#N)` last for a squash. A schedule run names neither, and its first-red text promises no blame: it tests the head at run time."""
+        the number in the head commit's first line: `Merge pull request #N` for a merge commit, `(#N)` last for a squash. A schedule run names neither, and its first-red text promises no blame: it tests the head at run time.
+        `replaced` is the runs replaced inside the breaking merge's span (clear_rule.replaced_in_span, from the judgment); a blamed segment names each one's commit (replaced_note)."""
         clear_rule = load_clear_rule()
         first, going = clear_rule.breaking_run(judged, newest_red)
         if going:
@@ -2044,7 +2057,7 @@ class Host:
             return (f"run {first['id']} is a schedule run, red again on its re-run: it tested the base's head when it ran, so no commit or pull request is named for it")
         head = (first.get("head_commit") or {}).get("message") or first.get("display_title") or ""
         n = pull_number_in_title(head.splitlines()[0] if head else "")
-        return f"{BREAKING_MERGE} commit {sha} (run {first['id']}, red again on its re-run), " + (f"pull request #{n}" if n else "no pull request number in its message")
+        return f"{BREAKING_MERGE} commit {sha} (run {first['id']}, red again on its re-run), " + (f"pull request #{n}" if n else "no pull request number in its message") + replaced_note(replaced)
 
     @staticmethod
     def settle(red, pending, r_red, r_pending):
@@ -2213,11 +2226,44 @@ class Host:
         c, out = self.gh(["pr", "ready", str(n), "--undo", *self._repo_args()], self.cwd, idempotent=True)
         return (False, out) if c else (True, "")
 
+    def main_merge_of(self, base, head):
+        """-> the oid of the merge commit on `base` whose second parent is `head` (this run's merge landed), False when `base` holds none, None when the read failed.
+        A full window with no match is None too when main holds the head (or the read cannot tell): the head's merge may lie older than the window. A lost or refused merge reply with the pull request still OPEN may have landed (the Nov 25 2026 outage: HTTP 405 and 502, merge commit on main). The one home of that read.
+        A first read with no merge is read once more after one NET_PAUSE through self.pause: a merge in progress reaches main a moment after the reply, so a single read of main is no proof of a refusal.
+        Cost: one `git fetch` of `base`, then one `git rev-list` of its newest MAIN_MERGE_WINDOW (50) first-parent merges, plus two git reads when the window is full with no match; a read that finds no merge repeats once after the pause. No gh call, once per call; never cached, since `base` moves. A failed fetch or read is None: unknown, never merged."""
+        held = self._read_main_merge(base, head)
+        if held is not False:
+            return held
+        self.pause(NET_PAUSE)
+        return self._read_main_merge(base, head)
+
+    def _read_main_merge(self, base, head):
+        """One read of `base` for main_merge_of: the same three answers."""
+        root = self.cwd or "."
+        ref = f"refs/remotes/origin/{base}"
+        c, out = git(root, "fetch", "-q", "origin", branch_refspec(base))
+        if c:
+            return None
+        c, out = git(root, "rev-list", "--parents", "--merges", "--first-parent", f"--max-count={MAIN_MERGE_WINDOW}", ref)
+        if c:
+            return None
+        lines = out.splitlines()
+        for line in lines:
+            oid, *parents = line.split()
+            if len(parents) > 1 and parents[1] == head:
+                return oid
+        if len(lines) < MAIN_MERGE_WINDOW:
+            return False
+        # A full window may cut off the head's merge. Main cannot hold it when this clone lacks the head, or when the head is no ancestor of main: False. Held or unread: None.
+        if git(root, "cat-file", "-e", f"{head}^{{commit}}")[0] or ancestor(root, head, ref) is False:
+            return False
+        return None
+
     def merge(self, n, method, sha):
         """`PUT pulls/<n>/merge` with `sha`, so GitHub refuses (409) a head that moved. `self.commit_message`, when set, is the merge commit's message. Never --admin, never --delete-branch (cut_branch does that).
         -> (merge commit oid or None, message). The reply is never trusted: after any reply the PR state is read.
-        MERGED at head `sha` is this run's merge. merge_commit_sha proves nothing alone: GitHub sets it on an open pull request too. MERGED at another head is not: Stop, no revert. An unreadable state,
-        or OPEN after a reply lost to the network, is a NetStop (no revert). Only a proven refusal returns None (revert)."""
+        MERGED at head `sha` is this run's merge. merge_commit_sha proves nothing alone: GitHub sets it on an open pull request too. MERGED at another head is not: Stop, no revert. OPEN with a merge commit on the base whose second parent is `sha` is this run's merge too (main_merge_of). An unreadable state,
+        or OPEN after a reply lost to the network, or OPEN with the base unread, is a NetStop (no revert). Only a proven refusal returns None (revert)."""
         say(f"merge: merging #{n} ...")  # the merge call can block
         # The old `gh pr merge` (no --admin) refused a BLOCKED or BEHIND pull request itself. The REST PUT does not: a token that may bypass branch
         # protection merges it. So read the pull request right before the PUT; blocked or behind is a proven refusal, and no PUT is sent. Clean, unstable and the rest go on.
@@ -2229,13 +2275,16 @@ class Host:
         if state_now == "BEHIND" or (state_now == "BLOCKED" and not self.pending_lifted):  # GitHub reads a pending required check as BLOCKED: that one cause goes on to the PUT, and GitHub refuses it or not
             return None, (f"#{n} reads {state_now}: its base rules are not met or its branch is behind the base {GRANT_CITE}. gh's merge refuses it the same way, so no merge call was sent."
                           + (" " + HEAL_BLOCKED if state_now == "BLOCKED" and waits_on_no_check(self.required) else ""))  # under none the tool read no protection, so the text names the cause itself
-        def merged_at_sha():  # a lost reply may still have merged: True when the PR reads merged at this run's head, False when it reads open, None when unread or merged elsewhere
+        def merged_at_sha():  # a lost reply may still have merged: True when the PR reads merged at this run's head or reads open while main holds its merge, False when it reads open and main does not, None when unread or merged elsewhere
             c4, v = self.api(f"pulls/{n}", memo=False)
             try:
                 d = json.loads(v) if not c4 else None
                 if d["merged"]:
                     return True if d["head"]["sha"] == sha else None  # merged at another head is not this run's merge: no resend
-                return False if d["state"].upper() == "OPEN" else None
+                if d["state"].upper() != "OPEN":
+                    return None
+                held = self.main_merge_of(taken, sha)  # the PR reads OPEN, yet the merge may sit on main: resend only when it does not
+                return None if held is None else bool(held)
             except (ValueError, KeyError, TypeError, AttributeError):
                 return None
         lost = False
@@ -2256,6 +2305,13 @@ class Host:
             if head == sha:
                 return oid, ""
             raise Stop(f"#{n} is merged at {str(head)[:9]}, not at the proven head {sha[:9]}: not this run's merge. Nothing was reverted {REFUSED_CITE}.\n{out}")
+        if state == "OPEN":
+            held = self.main_merge_of(taken, sha)
+            if held:
+                return held, ""  # main holds this head's merge though the pull request still reads OPEN: merged, no claim revert
+            if held is None:
+                raise NetStop(f"the merge call of #{n} did not merge it by the pull request's read, and main cannot be read to tell whether the merge landed. Nothing was reverted. Check {taken} for the merge of #{n}: "
+                              f"if it is there, do the after-merge steps by hand; if not, run again {REFUSED_CITE}.\n{out}")
         if lost:
             raise NetStop(f"network error on the merge call of #{n}, and the pull request is not merged. Nothing was reverted. Run again {REFUSED_CITE}.\n{out}")
         if not c:  # exit 0 and still OPEN: not a refusal (a queued merge, or a lagging read). The claim stays.
@@ -5044,7 +5100,7 @@ def revert_proven(root, host, base, beside_ok=False):
     """True when a red base is lifted by a revert already merged with its tree proven (ruling own-823-b-revert-merge-lifts-red, decision no-merge-onto-red-main).
     Merges resume when the revert merges, with its run still going (ruling own-745-b-resume-at-revert), and stay resumed while unrelated commits land above it.
     Read from the facts base_state left on the host (`base_facts`), never from its prose. All must hold:
-    - exactly one red run, no cancelled run, no re-run in flight and no other red read beside it, and exactly one breaking merge B, named by its full sha;
+    - exactly one red run, no cancelled run, no re-run in flight and no other red read beside it, and exactly one blamed sha B (the breaking merge, with no replaced run in its span), named by its full sha;
     - origin/<base> is the head the runs were read at, and B is its ancestor;
     - of every commit from B up to the head (any parent, so a revert under a catch-up merge counts; at most REVERT_WALK_MAX), exactly one, R, says `This reverts commit <B>`;
     - no commit there names R, or the commit that landed R, as reverted (a re-land);
@@ -5162,7 +5218,7 @@ def red_line(host):
     return (f"Red checks: {', '.join(checks) or 'none named (the run ended red with no red job)'} (run {', '.join(str(i) for i in ids)}). "
             f"Failing tests: {shown or 'none named'}{why}")
 
-def main_run_verdict(host, sha, base=MAIN_RUN_BASE):
+def main_run_verdict(host, sha, base=MAIN_RUN_BASE, run_id=None):
     """-> (outcome, line): the verdict on the push run of commit `sha` on `base`, judged against the push run before it. `line` is `main run <sha9>: <outcome>. <detail>`, and `outcome` is one of RUN_OUTCOMES.
     It reads and writes nothing else: no merge, no re-run, no API write. The one home of that verdict (decision no-merge-onto-red-main, the red-main check); no git read. Host.api reads the repo from the working directory, so run it inside the repo's checkout: elsewhere every read fails and the verdict is unknown.
     - green: the run ran a suite and every red job of the run before passed or never was red.
@@ -5171,9 +5227,13 @@ def main_run_verdict(host, sha, base=MAIN_RUN_BASE):
     - first red: a new red job or test on a first attempt, or a red job that names no test (a step timeout). The line names `gh run rerun <id> --failed`; nothing is blamed.
     - new break: a new name red again on the re-run (`blames`, the one home of when a merge is blamed). The line names this run's commit, never an earlier one.
     - cleared or did not clear: the run is a revert (a line of its commit message says `This reverts commit`, REVERT_OF_LINE) of a red base, and it is green with every red job re-run, or it is not.
-    - unknown: a failed read, the run or the run before still going, a cancelled run, no run of `sha` on the page, or no earlier run to tell new from carried. Unknown never reads green, first red or carried.
+    - superseded: a cancelled push run with no job started that a newer run of its group replaced (clear_rule.superseded_run, the one home of that test), and the newest run of the group, which covers it, is green or ran no suite. Exit 0.
+      Its commit has no verdict of its own; the covering run decides. Any other verdict of the covering run (unknown, first red, carried, new break, cleared, did not clear) is the line's outcome, with the covering run's own words, and exits as that outcome does.
+      A new break names each run replaced inside its span (replaced_note). `run_id` picks the run by id, for the covering run's own verdict; with it, `sha` is that run's head.
+    - unknown: a failed read, the run or the run before still going, a cancelled run that is not superseded, no run of `sha` on the page, or no earlier run to tell new from carried. Unknown never reads green, first red or carried.
     Job rules: Host.red_jobs (what makes a job red) and clear_rule (what a suite is). Failing names: Host.failed_lines and failing_names, as red_line prints them.
-    Cost: one runs read (one page) and one jobs read for the run; on a red run one log read per failed job. The run before costs one jobs read, and a run stepped over (cancelled, or with no suite) one more each; when it was red and the run is not a revert,
+    Cost: one runs read (one page) and one jobs read for the run (a cancelled run with a newer run of its group costs that one read to tell it superseded, then the covering run's verdict: one more runs read and its own reads); on a red run one log read per failed job.
+    A new break also reads the jobs of each cancelled run it stepped over that a newer run is above. The run before costs one jobs read, and a run stepped over (cancelled, or with no suite) one more each; when it was red and the run is not a revert,
     one log read per failed job of it. Nothing else."""
     sha9 = sha[:9]
 
@@ -5188,7 +5248,7 @@ def main_run_verdict(host, sha, base=MAIN_RUN_BASE):
         if c:
             return unknown(out or "Stop")
         runs = [r for r in json.loads(out)["workflow_runs"] if r["event"] in host.BASE_EVENTS and r["name"] not in host.ignore]
-        at = next((i for i, r in enumerate(runs) if r["event"] == "push" and str(r.get("head_sha")).startswith(sha)), None)
+        at = next((i for i, r in enumerate(runs) if (r["id"] == run_id if run_id else r["event"] == "push" and str(r.get("head_sha")).startswith(sha))), None)
         if at is None:
             return line(RUN_UNKNOWN, f"no push run of that commit is among the newest {len(runs)} runs of {base}")
         now = runs[at]
@@ -5211,7 +5271,18 @@ def main_run_verdict(host, sha, base=MAIN_RUN_BASE):
                 return failing_names(e.lines), True
         if now["status"] != "completed":
             return line(RUN_UNKNOWN, f"run {now['id']} (attempt {attempt}) is still {now['status']}, so it has no verdict yet")
+        def group(r):
+            return (r["path"], host.BASE_EVENTS[r["event"]])
         if now["conclusion"] == "cancelled":
+            if clear_rule.superseded_run(now, runs, jobs_of, group):
+                # The newest run of the group covers this commit (ruling of 12:38 CST Nov 25 2026): its verdict is the one that decides. A covering run is never itself replaced, so this recurses once.
+                cover = max((r for r in runs if r["id"] > now["id"] and group(r) == group(now)), key=lambda r: r["id"])
+                got, said = main_run_verdict(host, cover["head_sha"], base, cover["id"])
+                cover_says = said[len(f"main run {cover['head_sha'][:9]}: {got}. "):]
+                told = f"run {now['id']} was cancelled before any job started, and run {cover['id']} (now {cover['conclusion'] or cover['status']}) replaced it, so this commit has no verdict of its own"
+                if got in (RUN_GREEN, RUN_NO_VERDICT):
+                    return line(RUN_SUPERSEDED, f"{told}; run {cover['id']} covers it: {cover_says}")
+                return line(got, f"{told}; run {cover['id']} covers it, and reads: {cover_says}")
             return line(RUN_UNKNOWN, f"run {now['id']} was cancelled, so it has no verdict")
         jobs = jobs_of(now)
         passed = now["conclusion"] in ("success", "skipped", "neutral")
@@ -5219,12 +5290,15 @@ def main_run_verdict(host, sha, base=MAIN_RUN_BASE):
             return line(RUN_NO_VERDICT, f"run {now['id']} ran no suite (push-skip or scope skipped every check), so it says nothing about {base}")
         key = (now["path"], host.BASE_EVENTS["push"])
         before_state, before = "none", None  # the newest earlier run of this file and group that is a verdict: green with a suite, or red
+        stepped = []  # the cancelled runs between this run and that verdict: its span, when it breaks main
         for r in runs[at + 1:]:
             if (r["path"], host.BASE_EVENTS[r["event"]]) != key:
                 continue
             if r["status"] != "completed":
                 before_state, before = "unfinished", r
             elif r["conclusion"] in ("cancelled", "skipped", "neutral") or (r["conclusion"] == "success" and ran_no_suite(r)):
+                if r["conclusion"] == "cancelled":
+                    stepped.append(r)
                 continue
             else:
                 before_state, before = ("green" if r["conclusion"] == "success" else "red"), r
@@ -5259,8 +5333,9 @@ def main_run_verdict(host, sha, base=MAIN_RUN_BASE):
         if not clear_rule.blames(now):
             return line(RUN_FIRST_RED, f"run {now['id']}: {fresh}. Nothing is blamed until it is red again on a re-run: `{RERUN_REMEDY} {now['id']} --failed` re-runs its failed jobs")
         number = pull_number_in_title(message.splitlines()[0] if message else "")
+        replaced = [r for r in stepped if clear_rule.superseded_run(r, runs, jobs_of, group)]
         return line(RUN_NEW_BREAK, f"run {now['id']}: {fresh}, red again on its re-run (attempt {attempt}). {BREAKING_MERGE} commit {sha9}, "
-                    + (f"pull request #{number}" if number else "no pull request number in its message"))
+                    + (f"pull request #{number}" if number else "no pull request number in its message") + replaced_note(replaced))
     except (Stop, subprocess.TimeoutExpired, OSError, ValueError, KeyError, TypeError, AttributeError, ImportError) as e:
         return unknown(e)
 
@@ -6326,6 +6401,11 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
             except (subprocess.TimeoutExpired, OSError):
                 c, names = 1, ""
             rule_files = [x for x in names.split("\0") if x.lower() in RULE_FILES or x.lower().startswith(RULE_PREFIX)] if c == 0 else None
+            try:  # the base tip before the merge call: a read of main after a lost reply, or ff_main's fetch, moves origin/<base> onto the merge and would empty the plan's range. Any failure leaves the base unknown and never holds the merge
+                tip_c, tip = git(wt, "rev-parse", "--verify", "-q", base_ref + "^{commit}")
+            except (subprocess.TimeoutExpired, OSError):
+                tip_c, tip = 1, ""
+            plan_base = tip.strip() if tip_c == 0 and tip.strip() else None
             host.commit_message = lift_message(lifts)
             merging = True
             with timed_phase("merge-call"):
@@ -6349,11 +6429,6 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
             say(f"merge: #{n} UNKNOWN: the changed paths could not be read, so whether {PAGE_FILE} changed is unknown. Republish each live page if it did.")
         elif PAGE_FILE in names.split("\0"):
             say(f'merge: #{n} changes {PAGE_FILE}: republish each live waiting page now (skill waiting-page, "Update a repo\'s pages"), and put "republished: <pages>" or a reason in the report.')
-        try:  # ff_main's fetch moves origin/<base> onto the merge, which would empty the plan's diff; any failure leaves the base unknown and never holds the merge
-            tip_c, tip = git(wt, "rev-parse", "--verify", "-q", base_ref + "^{commit}")
-        except (subprocess.TimeoutExpired, OSError):
-            tip_c, tip = 1, ""
-        plan_base = tip.strip() if tip_c == 0 and tip.strip() else None
         ok = True
         try:
             ff_main(root, base, commit)

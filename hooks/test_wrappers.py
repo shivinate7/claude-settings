@@ -56,6 +56,7 @@ from mutate_shared import guard_tree  # run as a script, so hooks/ is on sys.pat
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "lint"))
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
+import case_runner_test  # noqa: E402  the one zero-case check for a hand runner (hooks/case_runner_test.py)
 SETTINGS = os.environ.get("WRAPPERS_SETTINGS_UNDER_TEST") or os.path.join(HERE, "..", "settings.json")
 HELPER = os.environ.get("REFRESH_HELPER_UNDER_TEST") or os.path.join(HERE, "..", "merge", "install_from_main.sh")
 SH = shutil.which("sh")
@@ -642,6 +643,8 @@ def build_cases():
 
 def main():
     cases = build_cases()
+    if case_runner_test.no_cases_exit(cases, "test_wrappers"):
+        return 1
     failed = 0
     for name, fn in cases:
         try:

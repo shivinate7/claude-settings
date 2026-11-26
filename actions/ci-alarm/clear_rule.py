@@ -257,6 +257,33 @@ def empty_without_evidence(jobs, event):
     return not (event == "push" and concluded("push-skip", jobs, "success") and concluded("scope", jobs, "skipped"))
 
 
+def job_started(job):
+    """True when a job row shows the job ran. Measured on GitHub (Nov 2026, the `stable` workflow's job-level concurrency group, cancel-in-progress false: a pending job a newer run replaced):
+    the row has `started_at` (the cancel time), `runner_id` 0 and `steps` []. A job that ran has a runner, or has steps: a runner that took the job and died at setup left `steps` [].
+    Unmeasured: the shape of a pending workflow-level run that a newer run of its group replaced (no jobs, or rows like that one). A row with no `runner_id` and no `steps` key
+    is judged by `started_at`, a shape only the test fixtures give."""
+    if job.get("runner_id"):
+        return True
+    if "steps" in job:
+        return bool(job["steps"])
+    return bool(job.get("started_at"))
+
+
+def superseded_run(run, runs, jobs, key):
+    """True when `run` is a cancelled push run that no job started in and that a newer run of its file and group replaced (decision test-strategy-reset, the replaced push run). GitHub cancels a pending
+    run of a concurrency group when a newer run of the group arrives; the run proves nothing, and the verdict is the one the newer run's turn gives. Only a push run is replaced: a schedule run
+    keeps its own group, and a dispatch run shares the push group in events.json but is never replaced. A cancel with no newer run is a human cancel,
+    and a cancel after a job started is a real cancel: neither is superseded. `runs` is the page, any status; a run is newer when its id is larger. `key(r)` is r's (file, group), the same
+    key the caller judges by, and None for a run the caller does not judge. `jobs(run)` is the run's jobs, called only for a cancelled run that has a newer run, and it raises or gives None on a failed read."""
+    if run.get("status") != "completed" or run.get("conclusion") != "cancelled" or run.get("event") != "push":
+        return False
+    mine = key(run)
+    if mine is None or not any(n["id"] > run["id"] and key(n) == mine for n in runs):
+        return False
+    rows = jobs(run)
+    return rows is not None and not any(job_started(j) for j in rows)
+
+
 def red_stays(r_jobs, n_jobs):
     """Step one, needs no workflow file: True when a red job of R is missing from N or not passed in N. Such a red is certain, whatever any
     job's `if:` says, so a caller that finds it never reads the workflow file."""
@@ -358,8 +385,27 @@ def breaking_run(judged, newest_red, events=None):
     return first, None
 
 
+def replaced_in_span(judged, newest_red, events, jobs, key):
+    """-> the superseded runs (`superseded_run`) in the span of the breaking merge walked from `newest_red`: the runs of its file and group between the breaking run and the green parent, newest first.
+    `judged` is the runs of main newest first, so `newest_red` is a newer run of the group for each of them. A replaced run proved nothing, so its commit may be the one that broke the base.
+    The walk is breaking_run's: each failed run restarts the list, so the failed run it ends on is the breaking run, and a replaced run above it is outside the span.
+    Call it only once `breaking_run` found a first red run: the walk then ends at a green run. `jobs(run)` and `key(run)` are superseded_run's."""
+    mine = (newest_red["path"], events[newest_red["event"]])
+    found = []
+    for r in judged[judged.index(newest_red):]:
+        if (r["path"], events[r["event"]]) != mine:
+            continue
+        if r["status"] != "completed" or r["conclusion"] == "success":
+            break
+        if r["conclusion"] not in ("skipped", "neutral", "cancelled"):
+            found = []
+        elif superseded_run(r, judged, jobs, key):
+            found.append(r)
+    return found
+
+
 Red = collections.namedtuple("Red", "run lines names")  # a red run: the run, its red jobs' lines (empty when it ended red with no red job), their names (empty then too)
-Judgment = collections.namedtuple("Judgment", "verdict red cancelled unknown judged order blamed base_head")
+Judgment = collections.namedtuple("Judgment", "verdict red cancelled unknown judged order blamed base_head replaced", defaults=({},))
 
 
 class ReadFailed(Exception):
@@ -371,7 +417,7 @@ def judge(runs, flows, ignore, caps, jobs_of, text_of, detail=True):
     `runs` is the page of workflow runs newest first, `flows` the workflow paths on main, `ignore` the names left out (a workflow name, a job name), `caps` the jobs' timeout-minutes,
     and `jobs_of(run)` and `text_of(run)` the jobs of a run and the workflow file at its head, each None on a failed read. Each is read at most once.
     verdict: green, red or unknown. red: a Red per red run, newest first, one per file and group. cancelled: the cancelled runs with no red job that no run cleared. unknown: the re-runs in flight.
-    judged: the runs the verdict is taken from, newest first. order: the red runs, the head group's first, each the start of a walk to its breaking run. blamed: the full head shas of the breaking merges.
+    judged: the runs the verdict is taken from, newest first. order: the red runs, the head group's first, each the start of a walk to its breaking run. blamed: the full head shas of the breaking merges, each with the head shas of the runs replaced inside its span (`replaced_in_span`). replaced: {id of the red run a walk starts from: the runs replaced in its span}.
     base_head: the head sha of the newest run on the page. A failed read gives unknown with nothing else.
     `detail=False` (the CI alarm, which names runs and no jobs, and passes no caps): a run that did not succeed and that no run could clear (`candidates`) is red with no jobs read.
 
@@ -380,11 +426,12 @@ def judge(runs, flows, ignore, caps, jobs_of, text_of, detail=True):
     failed push (one group). A failed run R with at least one red job is cleared by a run N of the same file and another group only when N is newer than R, is the newest completed run of its
     own group, concluded success, and `clears` holds (the workflow file read at N's head: one read per such N, none for a cancelled R). So a green nightly that ran other jobs never clears a failed push,
     and a newer green push run clears a red nightly. An R with no red job is never cleared by that rule. N's jobs are read only when R has a red job or is cancelled with no red job, and such an N exists.
-    A run that did not succeed with no red job: a timed-out job explains it; else a cancelled run R is unknown, never swapped for an older run, unless a run N clears it. R is then on a commit older
+    A superseded run (`superseded_run`: cancelled, no job started, a newer run of its file and group on the page in any status) is stepped over like an empty run: the older run of its group is the verdict.
+    A run that did not succeed with no red job: a timed-out job explains it; else a cancelled run R is unknown, never swapped for an older run unless it is superseded, or a run N clears it. R is then on a commit older
     than the base's head. N clears it when it is such a candidate on another head than R's, every job R ran (not skipped) is in N by exact name with every entry of that name success, and every job R
     skipped is in N. An R with no jobs stays unknown. Any other run that did not succeed is red (a broken workflow file runs no job).
     An empty run is no verdict (empty_without_evidence): the newest run of a group that is not empty is the group's verdict, so an older red run stays red; a page with no run of the group that is not
-    empty keeps the newest run. A schedule run is judged as it is. A newest-first walk of the push group's green runs costs one jobs read each, down to the first that is not empty."""
+    empty keeps the newest run. A schedule run is judged as it is. A newest-first walk of the push group's green runs costs one jobs read each, down to the first that is not empty. A cancelled run that has a newer run of its group on the page costs one jobs read, to see whether a job started."""
     events = base_events()
     judged = [r for r in runs if (r["status"] == "completed" or (r.get("run_attempt") or 1) > 1)
               and r["event"] in events and r["name"] not in ignore and r["path"].split("@")[0] in flows]
@@ -411,13 +458,15 @@ def judge(runs, flows, ignore, caps, jobs_of, text_of, detail=True):
 
         def empty(r):  # a green run of the push group that ran no suite and carries no evidence: no verdict; one jobs read, cached
             return r["conclusion"] == "success" and r["event"] in rule and empty_without_evidence(jobs(r), r["event"])
-        newest, settled = {}, set()  # per (file, group): the newest run, but never an empty one while an older run of the group is not; with none, the newest run
+        def group(r):  # (file, group) of a run the judgment reads, else None
+            return (r["path"], events[r["event"]]) if r["event"] in events and r["name"] not in ignore and r["path"].split("@")[0] in flows else None
+        newest, settled = {}, set()  # per (file, group): the newest run, but never an empty or superseded one while an older run of the group is not; with none, the newest run
         for r in judged:  # newest first
             key = (r["path"], events[r["event"]])
             if key in settled:
                 continue
             newest.setdefault(key, r)
-            if not empty(r):
+            if not empty(r) and not superseded_run(r, runs, jobs, group):
                 newest[key] = r
                 settled.add(key)
         age = {r["id"]: i for i, r in enumerate(judged)}  # `judged` is newest first
@@ -478,11 +527,16 @@ def judge(runs, flows, ignore, caps, jobs_of, text_of, detail=True):
         # One walk per red group (red_runs holds one run per file and group): a red nightly or a red run of another file never hides the
         # push run that broke the base. The head group (push, dispatch) goes first, so its breaking merge or re-run leads the detail.
         order = sorted(red_runs, key=lambda r: (events[r["event"]] != events["push"], age[r["id"]]))
-        blamed = [first["head_sha"] for first in (breaking_run(judged, r, events)[0] for r in order) if first and first.get("head_sha") and blames(first)]  # full shas, as data
+        blamed, replaced = [], {}
+        for r in order:  # full shas, as data
+            first = breaking_run(judged, r, events)[0]
+            if first and first.get("head_sha") and blames(first):
+                replaced[r["id"]] = replaced_in_span(judged, r, events, jobs, group)
+                blamed += [first["head_sha"]] + [x["head_sha"] for x in replaced[r["id"]] if x.get("head_sha")]
     except ReadFailed:
-        return Judgment("unknown", [], [], [], judged, [], [], base_head)
+        return Judgment("unknown", [], [], [], judged, [], [], base_head, {})
     verdict = "red" if red else "unknown" if unknown or cancelled else "green"
-    return Judgment(verdict, red, cancelled, unknown, judged, order, blamed, base_head)
+    return Judgment(verdict, red, cancelled, unknown, judged, order, blamed, base_head, replaced)
 
 
 def judge_main(runs, flows, ignore, caps, jobs_of, text_of):

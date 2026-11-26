@@ -805,8 +805,8 @@ while True:
         )
         _loading = "guard_kill"
         from guard_kill import (
-            DETACHED_LAUNCH_REASON, GIT_ENV_REASON, KILL_PID_REASON, KILL_REASON,
-            PLAYWRIGHT_INSTALL_REASON, PLAYWRIGHT_PATH_REASON, detached_launch_hit, foreign_pid_kill,
+            DETACHED_LAUNCH_REASON, GIT_ENV_REASON, KILL_PID_REASON, KILL_PID_UNKNOWN_REASON, KILL_REASON,
+            PLAYWRIGHT_INSTALL_REASON, PLAYWRIGHT_PATH_REASON, detached_launch_hit, foreign_pid_kill, pid_tag_unreadable,
             git_env_command_hit, kill_fed_by_name, kill_fed_by_pipe, kill_hit, kills_group_pid,
             lsof_pids_reach_kill, playwright_command_hit, playwright_install_hit,
         )
@@ -899,9 +899,9 @@ while True:
             raise ImportError("reread_check has no unread_handoff")
         # The rest of what judge() and main() take from it: a stale copy that lacks one would raise mid-judge, and main()
         # fails open on a raise, so the refusal it was loaded for would turn into an allow.
-        _missing = [_name for _name in ("unread_note", "too_big_estimate", "agent_rewrite") if not callable(getattr(reread_check, _name, None))]
+        _missing = [_name for _name in ("unread_note", "too_big_estimate", "agent_rewrite", "audit_helper_command") if not callable(getattr(reread_check, _name, None))]
         _missing += [_name for _name in ("HANDOFF_MAX_TOKENS", "READ_CAP_TOKENS", "READ_MAX_LINES") if not isinstance(getattr(reread_check, _name, None), int)]
-        _missing += [_name for _name in ("AUDIT_OWED", "AUDIT_REMEDY") if not isinstance(getattr(reread_check, _name, None), str)]
+        _missing += [_name for _name in ("AUDIT_OWED", "AUDIT_REMEDY", "AUDIT_HELPER_HEAD") if not isinstance(getattr(reread_check, _name, None), str)]
         if _missing:
             raise ImportError("reread_check lacks %s" % ", ".join(_missing))
 
@@ -1244,6 +1244,16 @@ def handoff_unread_fields(path, payload):
 # The cite is a literal here, since the refusal-cite scan reads literals; reread_check.AUDIT_CITE is its twin.
 COMPACTION_AUDIT_REASON = "Rule (compaction audit): " + reread_check.AUDIT_OWED + reread_check.AUDIT_REMEDY + (
     " (decision precompact-handoff, item 16)")
+# The refusal ends with the session's transcript path, which an `Audit:` brief must name (reread_check.audit_spawn).
+COMPACTION_AUDIT_TRANSCRIPT = " This session's transcript path, which the brief must name: "
+
+
+def audit_helper_hit(tool: str, tool_input, handoff: str) -> bool:
+    """True when the call is the audit helper command the compaction-audit remedy prints, in that exact text: the
+    helper under its own path, the handoff path filled in, nothing chained, piped or added."""
+    command = tool_input.get("command") if isinstance(tool_input, dict) else None
+    return tool == "Bash" and isinstance(command, str) and command == reread_check.audit_helper_command(handoff)
+
 
 HANDOFF_SECTIONS_REASON = (
     "Rule (handoff-sections): this write would leave the session handoff without a section the "
@@ -1951,6 +1961,9 @@ AUTHOR_BASENAMES = {"requirements-dev.txt"}
 # `is_test_rel`.
 AUTHOR_MUTATION_TESTS = {"hooks/mutate_guard.py", "hooks/mutate_shared.py", "janitor/mutate_sweep.py"}
 MUTATION_TEST_NAMES = {name.rsplit("/", 1)[-1] for name in AUTHOR_MUTATION_TESTS}
+# A mutant row file: a direct child .py of hooks/mutants/, read by hooks/mutate_guard.py. Matched by path, since
+# every row file has its own name.
+MUTANT_FILE_REL = re.compile(r"^hooks/mutants/[^/]+\.py$")
 TEST_CONFIG = re.compile(
     r"^(?:pytest\.ini|tox\.ini|setup\.cfg|pyproject\.toml|package\.json"
     r"|(?:jest|vitest|playwright|karma)\.conf(?:ig)?\.\w+|vitest\.workspace\.\w+|\.mocharc(?:\.\w+)?|[^/]+\.xctestplan)$")
@@ -2043,7 +2056,10 @@ def is_test_config_rel(rel: str) -> bool:
 
 
 def is_mutation_test_rel(rel: str) -> bool:
-    """True when a repository-relative path is one of the three mutation tests (`AUTHOR_MUTATION_TESTS`)."""
+    """True when a repository-relative path is one of the three mutation tests (`AUTHOR_MUTATION_TESTS`), or a
+    direct child `.py` file of `hooks/mutants/` (one file of mutant rows per rule)."""
+    if MUTANT_FILE_REL.match(norm(rel).lstrip("/").lower()):
+        return True
     return norm(rel).lstrip("/").lower() in AUTHOR_MUTATION_TESTS
 
 
@@ -2263,7 +2279,8 @@ def workflow_runs_test(path: str) -> bool:
     """A run of this path is a test run: a test path, or a mutation test (also a test path for edit ownership).
     A mutation test counts by file name, so `cd hooks && python3 mutate_guard.py` and a `working-directory`
     step are runs too."""
-    return is_test_rel(path) or basename(norm(path).lower()) in MUTATION_TEST_NAMES
+    return (is_test_rel(path) or basename(norm(path).lower()) in MUTATION_TEST_NAMES
+            or bool(MUTANT_FILE_REL.match(norm(path).lstrip("/").lower())))
 
 
 def workflow_command_tests(command: str) -> set:
@@ -5808,7 +5825,8 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
             # Every agent shares the main session's id, so only the main session may own by tag.
             matched = foreign_pid_kill(tokens, transcript, "" if agent else session_id)
             if matched:
-                refuse(tool, "deny", "machine-wide-kill", KILL_PID_REASON, matched)
+                unreadable = pid_tag_unreadable(matched, "" if agent else session_id)
+                refuse(tool, "deny", "machine-wide-kill", KILL_PID_UNKNOWN_REASON if unreadable else KILL_PID_REASON, matched)
     # The whole call, not one segment: an `lsof -t` pid list reaches a kill across a filter, a loop or a file.
     matched = lsof_pids_reach_kill(call_tokens)
     if matched:
@@ -6669,8 +6687,9 @@ def _sim_route_remedy(rest: list) -> str:
 
 
 def sim_lease_holds(session: str, udids: list) -> bool:
-    """True when SESSION holds a live sim-lease whose slot maps to every UDID in UDIDS (decision
-    sim-test-is-the-one-boot-path, ruling 5). The slot map, the liveness test and the read live in bin/sim-lease,
+    """True when SESSION holds a live sim-lease whose recorded `udid` is every UDID in UDIDS (decision
+    sim-test-is-the-one-boot-path, ruling 5). The take that granted the lease found that device by name and wrote its
+    udid; a lease with no string udid holds nothing. The liveness test and the read live in bin/sim-lease,
     loaded by path as it has no .py name. An empty session or UDIDS, or any failure to load or read, is False:
     the refusal stands. The read takes no lock and writes nothing, and no bytecode file is written for the load."""
     if not session or not udids:
@@ -6683,8 +6702,8 @@ def sim_lease_holds(session: str, udids: list) -> bool:
         spec = importlib.util.spec_from_loader("sim_lease", loader)
         lease = importlib.util.module_from_spec(spec)
         loader.exec_module(lease)
-        held = {lease.SLOT_UDID[e["slot"]].casefold() for e in lease.live_leases()
-                if session == e.get("session") and e.get("slot") in lease.SLOT_UDID}
+        held = {e["udid"].casefold() for e in lease.live_leases()
+                if session == e.get("session") and isinstance(e.get("udid"), str)}
     except Exception:
         return False
     finally:
@@ -6696,7 +6715,7 @@ def sim_boot_refusal(tool: str, names: list, remedies: dict = None, session: str
     """Refuse a boot of any of NAMES when two devices are booted, or an idle twin is booted. After those two
     rules, an `xcodebuild -destination` boot (REMEDIES maps a name to its remedy) is refused as
     simulator-boot-route, and an MCP launch as simulator-boot-lease, unless SESSION holds a live sim-lease whose
-    slot is the launched device (sim_lease_holds)."""
+    recorded udid is the launched device (sim_lease_holds)."""
     try:
         sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "janitor"))
         import sweep
@@ -6742,6 +6761,8 @@ def sim_boot_refusal(tool: str, names: list, remedies: dict = None, session: str
                    "A launch of the shut-down simulator %s boots it outside the one lock: the Mac "
                    "shares one simulator across repos, and `sim-test` holds that lock. Run `sim-test`, "
                    "which boots it under the lock, or launch a simulator that is already booted. "
+                   "A lease taken before leases held a device grants no launch: take it again with "
+                   "`sim-lease take --device duo|pro --pid PID --session ID`. "
                    "(decision sim-test-is-the-one-boot-path)" % name, name)
         elif (remedies or {}).get(name):
             refuse(tool, "deny", "simulator-boot-route",
@@ -8174,8 +8195,12 @@ def judge(payload) -> None:
     if pending:
         if audit_spawn(payload, SPAWN_TOOLS):
             AUDIT_SPAWN_PASSED.append(True)
+        elif audit_helper_hit(tool, tool_input, pending):   # the printed remedy passes and leaves the audit owed
+            pass
         elif not audit_disk_cleanup_hit(tool, tool_input):   # a disk cleanup passes and leaves the audit owed
-            refuse(tool, "deny", "compaction-audit", COMPACTION_AUDIT_REASON % pending, pending)
+            transcript = payload.get("transcript_path")
+            note = COMPACTION_AUDIT_TRANSCRIPT + transcript if isinstance(transcript, str) and transcript else ""
+            refuse(tool, "deny", "compaction-audit", COMPACTION_AUDIT_REASON % pending + note, pending)
     # 0. Each agent stays inside its own worktree.
     home_hit = worktree_home_hit(payload, tool, tool_input, cwd)
     if home_hit:

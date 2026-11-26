@@ -1010,7 +1010,7 @@ for _label, _cmd in (
        "deny", "shared-tree", cwd=GITWT)
 sh("per-file deny: late probe, env -vC names the shared checkout, from a worktree, denies by other-checkout",
    "env -vC " + _SH + " " + VCS + " restore f.txt", "deny", "other-checkout", cwd=GITWT)
-sh("per-file deny: late probe, env --ch= abbreviation names the shared checkout, from a worktree",
+sh("per-file deny: late probe, env --ch= abbreviation names the shared checkout, from a worktree, written out",
    "env --ch=" + _SH + " " + VCS + " restore f.txt", "deny", "shared-tree", cwd=GITWT)
 sh("per-file allow: late probe control, a harmless GIT_TRACE prefix in the lane",
    "GIT_TRACE=1 " + VCS + " restore f.txt", "allow", cwd=GITWT)
