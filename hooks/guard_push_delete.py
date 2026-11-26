@@ -1692,7 +1692,9 @@ ARCHIVE_GUARD_REASON = (
 
 PUSH_REASON = (
     "Rule (Git): a forced push can overwrite newer remote work with a stale copy. "
-    "Remedy: retry with --force-with-lease --force-if-includes."
+    "The sha is the tip your own last push left, so record it when you push; never one read after a "
+    "fetch, which accepts whatever the fetch brought in. "
+    "Remedy: retry with --force-with-lease=<branch>:<sha>."
 )
 # The remedy both force-push reasons give in a repo with no merge tool: a push to the lane's own branch.
 PUSH_BRANCH_REMEDY = (

@@ -19,7 +19,9 @@ each `git push` call. Quoted text, heredocs and `git log --grep=--force` are not
 | Any forced push whose destination is the default branch | deny, with a remedy |
 | Any forced push whose destination cannot be resolved | deny, with a remedy |
 
-The remedy reads "retry with --force-with-lease --force-if-includes". It never names the target
+The remedy reads "retry with --force-with-lease=<branch>:<sha>", where the sha is the tip your own last
+push left, never one read after a fetch. A sha read after a fetch accepts whatever the fetch
+brought in. It never names the target
 (`git-remedy-never-names-target`).
 
 - A deletion at the default branch is denied under `force-push`, and its reason names a forced push (note `push-delete-main-wrong-reason`). A deletion elsewhere is allowed.
