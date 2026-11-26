@@ -1461,10 +1461,13 @@ HANDOFF_READ_CAP = 1 << 20   # a source file is read to this many bytes: a hando
 
 
 def _read_text(path):
-    """The text of a file, up to HANDOFF_READ_CAP bytes, or None when it is missing, a folder or unreadable."""
+    """The text of a file, up to HANDOFF_READ_CAP bytes, or None when it is missing, a folder or unreadable. A line end
+    reads as LF, as a text-mode read gives it (the Edit reader here reads so), so one file gives one estimate on every
+    host: a CRLF file read as it is would count a byte more a line on Windows."""
     try:
         with open(path, "rb") as handle:
-            return handle.read(HANDOFF_READ_CAP + 1).decode("utf-8", "replace")
+            text = handle.read(HANDOFF_READ_CAP + 1).decode("utf-8", "replace")
+        return text.replace("\r\n", "\n").replace("\r", "\n")
     except OSError:
         return None
 
