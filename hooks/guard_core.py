@@ -28,6 +28,10 @@ from git_reads import (  # noqa: F401
     worktree_locked,
 )
 
+# The folder the guard files sit in: the one home a family module reads to find a file beside the hooks (the same
+# folder guard.py's own `_HERE` names, since the installer copies every guard file together).
+HOOKS_HOME = os.path.dirname(os.path.realpath(__file__))
+
 
 def is_cloud() -> bool:
     """True in a Claude Code cloud session: CLAUDE_CODE_REMOTE is exactly "true". Read at each call. The one home of the
