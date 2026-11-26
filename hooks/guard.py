@@ -40,6 +40,8 @@ set_override_veto and session_home_keep):
                        later rule (main() clears it after judge() returns, or fails open on a crash); a refused, asked or
                        override-lifted spawn clears nothing. The reason names the remedy. A payload with `agent_id` passes and
                        clears nothing. An override lifts it and keeps the flag. A failed import allows.
+                       The printed remedy (`precompact_handoff.py --audit-brief --handoff <path>`, from this
+                       guard's own hooks folder, nothing chained) passes and clears nothing.
                        While the handoff is unread, handoff-unread speaks first. Cost: one flag-file
                        existence check on a call with no flag; one small file written at compaction
                        (reread_check --post-compact); no log line, hook, timer or process start on an
@@ -5711,6 +5713,35 @@ def audit_cleanup_form(tool: str, tool_input) -> bool:
     return False
 
 
+def audit_remedy_hit(tool: str, tool_input, handoff: str) -> bool:
+    """True when this call is the command the compaction-audit refusal prints: the helper from this guard's own hooks
+    folder with exactly --audit-brief --handoff <the session's handoff>, and nothing chained, piped or redirected. The
+    printed text is the exact form (reread_check.audit_remedy_command, the one home). Otherwise the words must read
+    back the same: python3 or python, the same script by realpath (a symlinked or hash-suffixed folder), quotes
+    optional, and no shell syntax anywhere. A pass clears nothing: the audit stays owed."""
+    command = tool_input.get("command") if isinstance(tool_input, dict) else None
+    if tool != "Bash" or not isinstance(command, str) or not isinstance(handoff, str) or not handoff:
+        return False
+    command = command.strip()
+    if command == reread_check.audit_remedy_command(handoff):
+        return True
+    try:
+        words = shlex.split(command)
+    except ValueError:
+        return False
+    if len(words) != 2 + len(reread_check.AUDIT_BRIEF_ARGS) + 1 or words[0] not in ("python3", "python"):
+        return False
+    script, args = words[1], words[2:]
+    if args != list(reread_check.AUDIT_BRIEF_ARGS) + [handoff]:
+        return False
+    if AUDIT_CLEANUP_SHELL_BAD.search(script) or AUDIT_CLEANUP_SHELL_BAD.search(handoff):
+        return False
+    if AUDIT_CLEANUP_SHELL_BAD.search(command.replace(script, "", 1).replace(handoff, "", 1)):
+        return False
+    own = os.path.join(os.path.dirname(__file__), reread_check.AUDIT_SCRIPT_NAME)
+    return os.path.realpath(script) == os.path.realpath(own)
+
+
 def audit_disk_cleanup_hit(tool: str, tool_input) -> bool:
     """True when the compaction audit lets this call through: it is a disk cleanup (audit_cleanup_form), and the load
     brake's own verdict on the audit spawn is a refusal for disk (one read, in load_hit). The form is judged first, so
@@ -8505,7 +8536,8 @@ def judge(payload) -> None:
     if pending:
         if audit_spawn(payload, SPAWN_TOOLS):
             AUDIT_SPAWN_PASSED.append(True)
-        elif not audit_disk_cleanup_hit(tool, tool_input):   # a disk cleanup passes and leaves the audit owed
+        elif not (audit_disk_cleanup_hit(tool, tool_input) or audit_remedy_hit(tool, tool_input, pending)):
+            # A disk cleanup and the printed remedy pass and leave the audit owed.
             refuse(tool, "deny", "compaction-audit", COMPACTION_AUDIT_REASON % pending, pending)
     # 0. Each agent stays inside its own worktree.
     home_hit = worktree_home_hit(payload, tool, tool_input, cwd)

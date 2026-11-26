@@ -297,10 +297,21 @@ def _esc(text):
 # The one remedy text for an owed audit. The Stop block uses it, and so does the guard's compaction-audit refusal
 # (guard.COMPACTION_AUDIT_REASON), so the two cannot drift. It holds one `%s`: the handoff path.
 AUDIT_OWED = "context was compacted and the handoff audit is still owed. "
+# The helper command the remedy prints. The guard's compaction-audit rule lets exactly this command through while the
+# audit is owed (guard.audit_remedy_hit), so the printed text and the allowance read these three names and cannot drift.
+AUDIT_SCRIPT_NAME = "precompact_handoff.py"
+AUDIT_SCRIPT = os.path.join(os.path.dirname(os.path.realpath(__file__)), AUDIT_SCRIPT_NAME)
+AUDIT_BRIEF_ARGS = ("--audit-brief", "--handoff")
+
+
+def audit_remedy_command(handoff, script=AUDIT_SCRIPT):
+    """The command the remedy prints, as the shell reads it: the helper's path and the handoff path in double quotes."""
+    return 'python3 "%s" %s "%s"' % (script, " ".join(AUDIT_BRIEF_ARGS), handoff)
+
+
 AUDIT_REMEDY = (
-    "Remedy: print the brief with `python3 \"" + _esc(os.path.join(os.path.dirname(os.path.realpath(__file__)),
-                                                                    "precompact_handoff.py"))
-    + "\" --audit-brief --handoff \"%s\"`, then spawn one Explore agent on Sonnet with exactly that brief, whose "
+    "Remedy: print the brief with `" + _esc(audit_remedy_command("\0")).replace("\0", "%s")
+    + "`, then spawn one Explore agent on Sonnet with exactly that brief, whose "
     "first line is `" + _esc(EXPLORE_AUDIT_MARKER or "Audit:") + "` (step 3 of the handoff prompt). The brief names "
     "this session's transcript path, and a spawn whose brief does not name it clears nothing. That spawn clears this "
     "check. Then repeat the call.")
