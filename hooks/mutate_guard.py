@@ -4062,6 +4062,8 @@ GUARD_MODULE_FAMILIES = {
     "hooks/guard_browser.py": ["browser-keychain"],
     # hooks/guard_write.py holds the silent-write family moved out of guard.py. Its mutants meet the write section.
     "hooks/guard_write.py": ["write"],
+    # hooks/guard_cite.py holds the cite family moved out of guard.py. Its mutants meet the cite and scratchpad-message sections.
+    "hooks/guard_cite.py": ["cite", "scratchpad-message"],
     # hooks/guard.py holds the rules that no guard_<x>.py module owns. A mutant of it meets six families that read those rules.
     "hooks/guard.py": ["write", "paths", "diff", "model-cap", "cite", "hook-bypass"],
 }
@@ -4080,7 +4082,6 @@ GUARD_MODULE_EXEMPT = {
     "hooks/guard_core.py": "shared by every family, so a mutant of it needs the whole test_guard.py, which takes minutes",
     "hooks/guard_readonly.py": EMPTY_MOVE_REASON,
     "hooks/guard_model_cap.py": EMPTY_MOVE_REASON,
-    "hooks/guard_cite.py": EMPTY_MOVE_REASON,
     "hooks/guard_checkout.py": EMPTY_MOVE_REASON,
     "hooks/guard_handoff.py": EMPTY_MOVE_REASON,
     "hooks/guard_paths.py": EMPTY_MOVE_REASON,
