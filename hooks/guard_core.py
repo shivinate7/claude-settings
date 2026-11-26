@@ -2498,9 +2498,12 @@ class FamilyCall:
             self.cmd = cmd
 
 
-def run_family_hits(names, attr, call) -> None:
-    """Call `attr` (`hit` or `shell_hit`) on each module in `names` that defines it, in the order given. Each module is
-    looked up in sys.modules at call time. A refusal exits inside the function; a raise is main()'s fail-open path."""
+def run_family_hits(names, attr, payload, tool, tool_input, cwd, session_id, role, transcript,
+                    raw=None, stripped=None, cmd=None) -> None:
+    """Build one FamilyCall from the arguments, then call `attr` (`hit` or `shell_hit`) on each module in `names` that
+    defines it, in the order given. Each module is looked up in sys.modules at call time. A refusal exits inside the
+    function; a raise is main()'s fail-open path."""
+    call = FamilyCall(payload, tool, tool_input, cwd, session_id, role, transcript, raw, stripped, cmd)
     for name in names:
         function = getattr(sys.modules.get(name), attr, None)
         if function is not None:

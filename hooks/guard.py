@@ -6462,8 +6462,8 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         if change:
             ask_command("agent-model-cap", cap_ask_reason(change, matched),
                      log_path_and_text(matched, change), "settings write")
-    guard_core.run_family_hits(_FAMILY_MODULES, "shell_hit", guard_core.FamilyCall(
-        payload, tool, (payload or {}).get("tool_input") or {}, cwd, session_id, role, transcript, raw, stripped, cmd))
+    guard_core.run_family_hits(_FAMILY_MODULES, "shell_hit", payload, tool, (payload or {}).get("tool_input") or {},
+                               cwd, session_id, role, transcript, raw, stripped, cmd)
     settle_ask(tool, raw)
 
 # ------------------------------------------------------------------ a waiting-page item states the question form
@@ -8726,9 +8726,8 @@ def judge(payload) -> None:
 
     # Family hits: every judged call, after the rules above and before each tool's own tail below.
     trail = payload.get("transcript_path")
-    guard_core.run_family_hits(_FAMILY_MODULES, "hit", guard_core.FamilyCall(
-        payload, tool, tool_input, cwd, session_id_of(payload), agent_role(payload),
-        trail if isinstance(trail, str) else ""))
+    guard_core.run_family_hits(_FAMILY_MODULES, "hit", payload, tool, tool_input, cwd, session_id_of(payload),
+                               agent_role(payload), trail if isinstance(trail, str) else "")
 
     if tool == "Skill":
         matched = impeccable_skill_hit(tool_input)
