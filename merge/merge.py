@@ -1284,6 +1284,7 @@ class Host:
         self.budget = {}  # remaining, limit, reset (epoch seconds) from the newest reply that had a header block; None for each one the reply lacks or garbles, so an unknown budget never refuses
         self.memo = {}  # (route, query, flags) -> the reply of this run's GET, kept until any write (api)
         self.route_counts = {}  # (method, route template) -> gh calls made, retries included (route_template)
+        self.head_rows = {}  # head sha -> the check rows of head_state's newest read of it, so confirm reads whether a job ran without a second read (ran_job)
 
     batch_brake = None  # the guard sets it to merge.ignoreChecks ({} for none): head_read then also reads the other ready pull requests on the base (batch_running). The merge tool never sets it
     commit_message = None  # set by confirm just before the merge: one line per reason flag that lifted a check. None leaves GitHub's default message
@@ -2074,6 +2075,7 @@ class Host:
             sha = sha or self.pr(n)["head"]
             got = self.checks(n, warn=False, sha=sha)
             names = [ROLLUP_JOB] if needs_proof else self.required_names()
+            self.head_rows[sha] = got
             red, pending, ignored = self.classify(got, names, self.ignore, self.branch)
             r_red, r_pending = self.run_state(sha)
         except Stop as e:
@@ -5181,6 +5183,11 @@ def head_check_red(state):
     others = [e for e in rest.split("; ") if e and not (e.startswith("workflow ") and e.endswith(NO_JOB_RAN))]
     return "a check is " + state if others else None
 
+def ran_job(host, sha, job):
+    """True when the check rows `host` read for `sha` (Host.head_state, no new read) hold a passing row of `job`. A skipped row is no run: checks.yml skips its `checks` job on a
+    records-only delta, so a green rollup over that skip proves no suite. A host that kept no rows for `sha` (a fake, or a read that failed) is False, so the head stays unproven."""
+    return any(b == "pass" for b, _ in (getattr(host, "head_rows", None) or {}).get(sha, {}).get(job, []))
+
 CANCELLED = "cancelled"  # GitHub's conclusion of a cancelled run or job: judge_runs words a cancelled run with it, and it is the key of clear_rule.CONCLUSION_BUCKET
 
 @functools.lru_cache(maxsize=None)
@@ -6008,11 +6015,12 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
             own = None  # the live head's own state, read once when this tool's commits sit on the proof
             if proof != info["head"]:
                 own = host.head_state(n, info["head"], **proof_kw(needs_proof))
-                if head_not_green(own) is None and not state.startswith("unknown (") and not head_check_failed(state):  # a green run of the live head itself proves it over a pending or skipped read of the head under it (a draft's skipped rollup is no failure of this head). A proof that failed (ruling R1: a red parent refuses a clean main merge) or could not be read still refuses, as before; one red only from cancelled checks and runs is no failure and reads like a pending one
-                    earlier = host.failed_attempts(proof) if head_check_red(state) else []  # a cancel-only proof: its latest rows hold no failure, but an earlier attempt whose re-run the next push cancelled may have failed
+                failed_proof = head_check_failed(state)
+                if head_not_green(own) is None and not state.startswith("unknown (") and (not failed_proof or ran_job(host, info["head"], LINT_JOB)):  # a green run of the live head itself proves it over a pending or skipped read of the head under it (a draft's skipped rollup is no failure of this head). A proof that could not be read still refuses; one red only from cancelled checks and runs is no failure and reads like a pending one. A proof that failed a job is covered only by a live run that ran its checks job (owner, 20:31 CST Nov 25 2026, reversing ruling R1 for that case)
+                    earlier = host.failed_attempts(proof) if head_check_red(state) and not failed_proof else []  # a cancel-only proof: its latest rows hold no failure, but an earlier attempt whose re-run the next push cancelled may have failed. A proof whose latest rows failed is already read, and needs no second read
                     if earlier:
                         raise Stop(f"the checks of the proven head {proof[:9]} hold a failed attempt that a later one cancelled, so the own run of {info['head'][:9]} does not cover it, and nothing was claimed or pushed {GREEN_CITE}: {'; '.join(earlier)}.")
-                    say(f"merge: the own run of {info['head'][:9]} is green, so it is the proof, not the checks of {proof[:9]} under it.")
+                    say(f"merge: the own run of {info['head'][:9]} is green, so it is the proof, not the checks of {proof[:9]} under it" + (f", which failed ({failed_proof}); the own run ran its {LINT_JOB} job." if failed_proof else "."))
                     proof, state, not_green = info["head"], own, None
                 else:
                     say(f"merge: {info['head'][:9]} is only this tool's own page and base-merge commits on {proof[:9]}, so the checks of {proof[:9]} are the proof.")
