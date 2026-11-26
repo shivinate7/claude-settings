@@ -2161,8 +2161,9 @@ def _open_file_holders(path: str):
 def _open_files_under(roots):
     """`[(pid, name)]` for every open file at or under each of ROOTS from ONE `lsof -Fpn +D A +D B ...`
     (one `+D` per folder, so no folder outside the list is scanned), or `None` when that cannot be
-    read. macOS only: the caller reads other systems per folder. No open file is exit code 1 and
-    empty, which is a clear read."""
+    read. macOS only: the caller reads other systems per folder. No open file is exit code 1 with
+    nothing printed, which is a clear read. Exit code 1 with a message on stderr and no open file
+    listed (a folder that went missing, a usage error, a warning) is not a clear read: it is `None`."""
     argv = ["lsof", "-Fpn"]
     for root in roots:
         argv += ["+D", root]
@@ -2171,6 +2172,8 @@ def _open_files_under(roots):
     except Exception:
         return None
     if answer.returncode not in (0, 1):
+        return None
+    if answer.returncode == 1 and answer.stderr.strip() and not answer.stdout.strip():
         return None
     found = []
     pid = None
@@ -2215,7 +2218,9 @@ def _busy_reasons(paths):
         else:
             waiting.append(path)
     if waiting and sys.platform == "darwin":
-        table = _open_files_under(waiting)
+        # A folder that no longer exists makes `lsof +D` fail for the whole batch, and it has no holder.
+        present = [path for path in waiting if os.path.exists(path)]
+        table = _open_files_under(present) if present else []
         for path in waiting:
             holders = None if table is None else [pid for pid, name in table if _cwd_under_checkout(name, path)]
             answers[path] = _busy_reason([], holders)
