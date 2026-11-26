@@ -1,0 +1,1 @@
+- fully-run-checks-job-skip: The gate reads "fully run" as the checks job passed (merge/merge.py:6019, ran_job). A comment-only records run starts its checks job, skips every suite step, and passes (.github/workflows/checks.yml:202), so the gate passes it. That is reachable only if the live diff loses the code the proven head failed on. Seen: 2026-11-25 x1
