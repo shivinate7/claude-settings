@@ -2236,6 +2236,43 @@ class CostTests(unittest.TestCase):
                         "the two reads, back to back, end before the row's hook timeout")
 
 
+# ------------------------------------------------------------------ past ruling: a cite must be a record the judge was shown
+#
+# The judge may cite only a record that the block it reads shows. A record the cap cut out of that block was not shown, so a
+# reason that cites it is a bogus cite (question_form.ruling_cite). The cite ids come from the same call that builds the
+# block (call_judge.past_ruling_context), so the case reads the ids the judge is given.
+CUT_QUESTION = "Merge the pull now?"  # the step rulings share two words with it, the records one, so records are cut first
+CUT_RECORDS = 40  # every record is a candidate (RECORD_TOP keeps forty), and about 820 characters each
+CUT_STEPS = 30  # step rulings of about 1,670 characters: with the records, more than CANDIDATES_CAP holds
+
+
+def case_past_ruling_cite_of_a_record_cut_from_the_block_is_bogus():
+    import call_judge  # the one judge (hooks/call_judge.py)
+    import question_form  # the one form check (hooks/question_form.py)
+    fn = getattr(call_judge, "past_ruling_context", None)
+    check("past ruling cut cite: call_judge.past_ruling_context exists", callable(fn), "missing function")
+    if not callable(fn):
+        return
+    repo = make_repo("past-cut-cite",
+                     decisions={"rq-%03d" % i: "Owner ruling: merge item %03d. " % i + "stays pinned as recorded " * 36
+                                for i in range(CUT_RECORDS)},
+                     steps={"st-%02d" % i: "Ruling (owner): merge and pull item %02d, %s." % (
+                         i, "stays pinned as recorded " * 65) for i in range(CUT_STEPS)})
+    units = [("", CUT_QUESTION)]
+    with mock.patch("guard_pointer.pointer_checkout", return_value=repo):
+        block, ids, _unreadable, _candidates = fn({"cwd": repo}, units)
+    shown = {i for i in ids if ("%s: " % i) in block}
+    cut = sorted(i for i in set(ids) - shown if i.startswith("decisions/"))
+    check("past ruling cut cite (scope): the cap cuts some sharing records out of the block",
+          bool(cut), "%d ids, %d shown in the block" % (len(ids), len(shown)))
+    if not cut:
+        return
+    reason = "%s: the ruling settles it." % cut[0]
+    check("past ruling cut cite: a reason that cites a record cut from the block is a bogus cite, not a valid one",
+          question_form.ruling_cite(reason, ids) == "bogus",
+          "%s is cut from the block, but the cite is accepted as a valid one" % cut[0])
+
+
 def main():
     for case in (case_agent_refusal, case_spawn_prompt_bars_a_lane_waiting_page_write, case_agent_override, case_explore_row_is_vetoed,
                  case_explore_remedy_names_marker, case_agent_fallback_names_marker, case_question,
@@ -2260,6 +2297,7 @@ def main():
                  case_fail_open, case_settings_row, case_past_ruling_replay_item_145,
                  case_past_ruling_replay_item_133, case_past_ruling_cited_passes,
                  case_past_ruling_explained_premise, case_past_ruling_unknown_is_named,
+                 case_past_ruling_cite_of_a_record_cut_from_the_block_is_bogus,
                  case_past_ruling_cost, case_unvetted_marker, case_unvetted_page_marker,
                  case_unvetted_not_for_closed_items, case_past_ruling_debt_candidates,
                  case_unshown_id_takes_the_unvetted_path, case_marker_does_not_skip_the_check,
