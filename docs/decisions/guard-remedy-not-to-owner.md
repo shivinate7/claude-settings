@@ -151,9 +151,9 @@ Text: `past_ruling_text` in `hooks/question_form.py`, wrapped by `RELAY_RULE_REA
 - The remedy line reads `Based on (ruling): <id> (<time>), may be stale: <why>`.
 - The Stop-path refusal appends one `guard.log` line, rule `past-ruling`, with the session id. Cost: at most one line per refusal, no new file, no process. Reader: the guard cull (the `guard_log_report` script in `lint/`).
 - Control: a question with no `Based on (ruling)` line that names the cited ruling is refused when the judge cites the ruling and its list is missing, empty, bad or names the question; a rewrite that keeps it is refused again.
-- Owner, 10:36 and 10:42 CST 2026-11-24: a hook that cites a past ruling must not stop a question that updates that ruling; it carries a "may be stale" note; "forbids is too strong a word".
+- Owner, 10:36 and 10:42 CST 2026-11-24, on the refusal's wording: "forbids is too strong a word". The refusal says the ruling may be stale, and gives the way to ask anyway: a `Based on (ruling)` line that names the ruling.
 - Incident, 22:31 CST 2026-11-24: a session dropped five owner questions after a refusal that gave only a ruling id.
-- Open: the guard still refuses, and refuses again on a rewrite that keeps the question. Whether that refusal should be a note only is asked of the owner (00:43 CST 2026-11-25). Not ruled.
+- Owner, 2026-11-25 10:02 CST, on the merged change that makes it refuse with "may be stale" and a remedy line: "perfect yes the goal was to get the model to just ponder for a moment longer this is great". The guard stays a refusal, and refuses again on a rewrite that keeps the question. The option "note only" is closed.
 
 ### Unvetted guard (any reply with a question)
 
