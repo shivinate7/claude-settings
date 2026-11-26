@@ -877,12 +877,20 @@ MUTATIONS = [
      '    if False:\n        return "recently-edited',
      'test_an_uncommitted_edit_newer_than_30_minutes_keeps_the_build_folders'),
 
+    # The re-read before a removal runs only where the shared table is on (macOS), so its case reads darwin.
     ('build dirs: the build pass uses no fresh process read',
      'agent_end_reap',
      '            again = all_cwds(max(1, min(BATCH_TIMEOUT, deadline - time.monotonic())))',
      '            again = []',
-     'test_a_build_started_during_the_hook_keeps_its_build_folders',
+     'test_a_build_started_during_the_hook_keeps_its_build_folders_on_macos',
      "posix"),
+    # The first read is the only process read where sharing is off (Linux). Its case runs on this platform.
+    ('build dirs: the first process read is skipped where sharing is off',
+     'agent_end_reap',
+     '    cwds = all_cwds(max(1, min(BATCH_TIMEOUT, deadline - time.monotonic())))',
+     '    cwds = []',
+     'test_a_build_started_during_the_hook_keeps_its_build_folders',
+     "linux"),
 
     ('build dirs: an unreadable stat or a spent deadline in the edit read reaps',
      'agent_end_reap',
@@ -1349,6 +1357,21 @@ MUTATIONS = [
      '            holders = None if table is None else [pid for pid, name in table if _cwd_under_checkout(name, path)]',
      '            holders = None if table is None else []',
      "test_a_holder_in_the_batch_read_keeps_its_folder_and_leaves_the_other_a_candidate",
+     "posix"),
+    # The two rules that hide each other: an open-files read that exits 1 with a message and lists
+    # nothing is unknown (an existing folder reaches it only through this rule), and a folder that does
+    # not exist stays out of the batch read (else its failed read makes every folder of the batch unknown).
+    ("open files: an exit 1 with a message and no listing reads as clear",
+     "sweep",
+     '    if answer.returncode == 1 and answer.stderr.strip() and not answer.stdout.strip():\n        return None',
+     '    if False:\n        return None',
+     "test_an_unreadable_folder_is_kept_and_never_a_candidate",
+     "posix"),
+    ("open files: a folder that does not exist is sent to the batch read",
+     "sweep",
+     '        elif sys.platform == "darwin" and not os.path.exists(path):',
+     '        elif False:',
+     "test_a_missing_folder_in_the_batch_leaves_a_clear_folder_a_candidate",
      "posix"),
     # The parallel preview (ParallelPreviewTests). only_on="posix" on all but "all at once": a
     # Windows preview stays serial (PREVIEW_THREADS), so no test can see these there.

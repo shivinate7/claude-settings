@@ -5313,8 +5313,9 @@ _SPONSOR = ("import os, subprocess, sys, time\n"
 # `-p`, so no case scans every process on the machine. `$LSOF_LATE` adds table lines from start number
 # `$LSOF_FROM` on: a process that enters a tree after the first read. `$LSOF_FAIL` fails every cwd read.
 # An open-files read (`+D`) lists nothing, as a clear read does, unless `$LSOF_OPEN` names a file of lines
-# to print: a holder inside a folder of the batch. As real lsof does, a `+D` folder that does not exist
-# makes the read print nothing and exit 1, so the other folders of that batch read as clear too.
+# to print: a holder inside a folder of the batch. A `+D` folder that does not exist makes the read warn
+# on stderr, list nothing and exit 1. `$LSOF_UNREADABLE` names one existing folder whose read fails the
+# same way, with `Permission denied`.
 # `$LSOF_REAL_OPEN` sends the open-files read to the real lsof. A per-pid read goes to the real lsof unchanged.
 LSOF_STUB = r"""#!/bin/sh
 printf '%s\n' "$*" >> "${LSOF_COUNT:-/dev/null}"
@@ -5324,6 +5325,7 @@ case "$*" in
     prev=""
     for arg in "$@"; do
       if [ "$prev" = "+D" ] && [ ! -e "$arg" ]; then echo "lsof: WARNING: can't stat($arg)" >&2; exit 1; fi
+      if [ "$prev" = "+D" ] && [ -n "$LSOF_UNREADABLE" ] && [ "$arg" = "$LSOF_UNREADABLE" ]; then echo "lsof: WARNING: can't opendir($arg): Permission denied" >&2; exit 1; fi
       prev="$arg"
     done
     if [ -n "$LSOF_OPEN" ]; then cat "$LSOF_OPEN"; fi
@@ -5640,11 +5642,15 @@ class _AgentEndFixture(unittest.TestCase):
 class OneLsofPerRunTests(_AgentEndFixture):
     """A run reads the process table once, not once per tree it judges. A whole-machine `lsof -d cwd`
     takes seconds on a real Mac, so one agent-end reap or one sweep that judges several trees must not
-    start one per tree, and one leftover-temp pass must not open one `lsof +D` per folder. Cases 1, 2 and
-    5 are the shared-read pins: they fail on the code as it stands. Cases 3 and 4 are the safety rules the
-    shared read must keep, and they hold now: a tree the run removes gets a fresh read just before its
-    removal, and a failed or timed-out read removes nothing. Each case reads sys.platform as darwin,
-    where the cwd table and the open-files read are taken."""
+    start one per tree, and one leftover-temp pass must not open one `lsof +D` per folder.
+
+    The read-count cases pin that shared read. The safety cases pin what the shared read must keep: a
+    tree the run removes gets a fresh read just before its removal, and a failed or timed-out read
+    removes nothing. The open-files cases pin how one batch open-files read is judged: a holder keeps
+    its folder, a folder that does not exist never makes a held folder clear, a folder whose read fails
+    is kept and never a candidate, and a clear folder in the same batch still gets its own answer.
+
+    Each case reads sys.platform as darwin, where the cwd table and the open-files read are taken."""
 
     def darwin(self):
         return mock.patch.object(sys, "platform", "darwin")
@@ -5834,6 +5840,45 @@ class OneLsofPerRunTests(_AgentEndFixture):
             answers = sweep._busy_reasons([held, missing])
         self.assertIsNotNone(answers[held], "a folder with a real open file was read as clear because another "
                              "folder of the batch does not exist: %r" % answers)
+
+    def test_an_unreadable_folder_is_kept_and_never_a_candidate(self):
+        unreadable = os.path.join(self.root, "unreadable")
+        os.makedirs(unreadable)
+        with self.darwin():
+            control = sweep._busy_reasons([unreadable])  # no fault injected: the folder is clear
+            self.assertIsNone(control[unreadable], "control: the folder with no fault was not clear: %r" % control)
+        with self.darwin(), mock.patch.dict(os.environ, {"LSOF_UNREADABLE": unreadable}):
+            answers = sweep._busy_reasons([unreadable])
+        self.assertIsNotNone(answers[unreadable], "an existing folder whose open-files read exited 1 with a "
+                             "message and listed nothing was read as clear: %r" % answers)
+
+    def test_an_unreadable_folder_in_the_batch_leaves_a_clear_folder_a_candidate(self):
+        unreadable = os.path.join(self.root, "unreadable")
+        clear = os.path.join(self.root, "clear")
+        os.makedirs(unreadable)
+        os.makedirs(clear)
+        with self.darwin():
+            alone = sweep._busy_reasons([clear])  # the clear folder's own read, with no fault injected
+            self.assertIsNone(alone[clear], "control: the clear folder alone was not clear: %r" % alone)
+        with self.darwin(), mock.patch.dict(os.environ, {"LSOF_UNREADABLE": unreadable}):
+            answers = sweep._busy_reasons([unreadable, clear])
+        self.assertIsNotNone(answers[unreadable], "an unreadable folder of the batch was read as clear: %r"
+                             % answers)
+        self.assertIsNone(answers[clear], "a clear folder was kept because another folder of its batch could "
+                          "not be read: %r" % answers)
+
+    def test_a_missing_folder_in_the_batch_leaves_a_clear_folder_a_candidate(self):
+        clear = os.path.join(self.root, "clear")
+        missing = os.path.join(self.root, "missing")  # never created: a folder gone before the batch read
+        os.makedirs(clear)
+        with self.darwin():
+            alone = sweep._busy_reasons([clear])  # control: the clear folder alone reads clear
+            self.assertIsNone(alone[clear], "control: the clear folder alone was not clear: %r" % alone)
+            self.assertFalse(os.path.exists(missing), "fixture: the missing folder exists")
+            answers = sweep._busy_reasons([clear, missing])
+        self.assertIsNone(answers[clear], "a clear folder was kept because a folder of its batch does not "
+                          "exist: %r" % answers)
+        self.assertIsNone(answers[missing], "a folder that does not exist was kept: %r" % answers)
 
 
 class AgentEndOwnWorktreeTests(_AgentEndFixture):
@@ -7745,6 +7790,15 @@ class BuildDirReapTests(unittest.TestCase):
             self.assertIsNone(self.reap.edit_idle(tree, spent))
 
     def test_a_build_started_during_the_hook_keeps_its_build_folders(self):
+        # Native platform: on Linux the first read is the only process read, so this case pins it there.
+        self.check_build_started_during_the_hook()
+
+    def test_a_build_started_during_the_hook_keeps_its_build_folders_on_macos(self):
+        # The shared read and its re-read before a removal run only on macOS, so this case reads darwin.
+        with mock.patch.object(sys, "platform", "darwin"):
+            self.check_build_started_during_the_hook()
+
+    def check_build_started_during_the_hook(self):
         # A build that starts after the hook's first process read must still keep its folders.
         primary = self.make_primary("late-build")
         late, quiet = self.add_agent(primary, "bdrLateBuild"), self.add_agent(primary, "bdrQuiet")
