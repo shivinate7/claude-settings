@@ -5333,7 +5333,7 @@ class GhHalf(Env):
         self.assertEqual(rc, 1, out)
         self.assertEqual(self.calls().count(MERGE_CALL), 4, out)  # one try and three retries
         if rate:
-            self.rate_waits_the_whole_ladder(out)
+            self.rate_waits_the_whole_ladder(out, trailing=(merge.NET_PAUSE,))  # the merge reply left the PR open: one re-read of main, one NET_PAUSE
         self.assertIn(STATE_READ, self.calls())
         self.assertIn("Claim record numbers", self.feat_subjects())  # the claim stays
         self.assertFalse(self.lock_ref())
@@ -5452,11 +5452,13 @@ class GhHalf(Env):
 
     LOCK_MARGIN = 300  # seconds, written as a literal so these cases do not read merge.LOCK_MARGIN
 
-    def rate_waits_the_whole_ladder(self, out):
+    def rate_waits_the_whole_ladder(self, out, trailing=()):
         """A rate limit that never clears, under the lock (a rate wait is the exception to the lock's take expiry). The run waits
         the whole ladder, 60 + 300 + 900 s, and only then stops as a network error: it never stops for the lock. As each wait starts, the lock on origin
-        (read there, never lock.until) already expires LOCK_MARGIN after the wait ends. The caller counts the gh calls: 4. A settle pause is no rate wait."""
-        self.assertEqual([s for s in self.paused if s != merge.SETTLE_SECONDS], RATE_LADDER, out)
+        (read there, never lock.until) already expires LOCK_MARGIN after the wait ends. The caller counts the gh calls: 4. A settle pause is no rate wait.
+        `trailing`: the pauses this path takes after the ladder, in order. Only a merge reply that leaves the PR open takes one, the NET_PAUSE re-read
+        of main (Host.main_merge_of); the other paths take none. Named, never filtered: a stray retry pause still fails the list."""
+        self.assertEqual([s for s in self.paused if s != merge.SETTLE_SECONDS], RATE_LADDER + list(trailing), out)
         self.assertEqual([w[0] for w in self.at_pause], RATE_LADDER, out)
         for wait, ends, expiry in self.at_pause:
             self.assertIsNotNone(expiry, f"no lock on origin at the {wait} s wait")
