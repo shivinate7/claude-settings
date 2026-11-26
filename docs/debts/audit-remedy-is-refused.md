@@ -6,4 +6,4 @@
 
 **Decision.** `precompact-handoff`, its audit rule (item 16) and the `compaction-audit` row of its check table.
 
-**Retire.** The printed remedy runs under the guard. A case in `hooks/test_handoff_wave2.py` runs the printed remedy under the guard with the audit owed, and the call passes.
+**Retire.** The printed remedy runs under the guard. The cases in `tests/guard/s43732-compaction-audit-remedy.py` run the printed remedy under the guard with the audit owed, and the call passes. They run as the `compaction-audit` family of `hooks/test_guard.py` (`GUARD_FAMILY=compaction-audit`); no test file here runs that family on its own, so the close cites a green guard run.
