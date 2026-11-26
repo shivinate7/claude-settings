@@ -6,14 +6,14 @@ writer from the repo's extras key `page-writer` (layout.page_writer_key). Withou
 sessions send to the page writer is refused as "the page writer is not known to this session", though the send was
 delivered in the same turn.
 
-These cases read this repo's real .claude/layout-extras.json, at the root the guard finds from lint/ (report_guard's
-repo_root). No fixture stands in for it. The run folder, the send and transcript helpers come from
-lint/test_report_guard.py, the one home. Run with:
+The same-turn cases run on a fixture repo whose extras file names FIXTURE_WRITER, so they hold whatever this repo's own
+extras file names. The one case that reads this repo's real .claude/layout-extras.json reads only its key. The run
+folder, the send and transcript helpers come from lint/test_report_guard.py, the one home. Run with:
 
     python3 lint/test_report_guard_page_writer.py -v
 """
+import json
 import os
-import re
 import shutil
 import sys
 import tempfile
@@ -26,8 +26,8 @@ import test_report_guard as trg  # noqa: E402  the run folder, the send and tran
 import test_report_guard_stalled as trs  # noqa: E402  the triage session's own record and remote id (one home)
 
 layout = trg.RG.layout  # the module the guard reads the writer key from, so this file reads the same key
-SESSION_ID = re.compile(r"session_[A-Za-z0-9]+")
-OTHER_ID = "session_notthewriter"  # a delivered send's target that is not this repo's page writer
+FIXTURE_WRITER = "session_pagewriter1"  # the fixture repo's page writer: no live session holds this id
+OTHER_ID = "session_notthewriter"  # a delivered send's target that is not the page writer
 PARENT_ID = "session_parent1"  # the parent id a triage session's own record names
 REMOTE_ENV = "CLAUDE_CODE_REMOTE_SESSION_ID"  # set only in a lane; unset here, so the check reads an owner-facing session
 
@@ -41,8 +41,8 @@ def tearDownModule():
 
 
 class PageWriterTests(trg.SameTurnWriter, unittest.TestCase):
-    """This repo's extras file names a page writer that the pick check can match a same-turn send against. The send
-    is SameTurnWriter.send, and the check is question_problem, the function the Stop hook calls."""
+    """A fixture repo whose extras file names FIXTURE_WRITER, checked against a same-turn send. The send is
+    SameTurnWriter.send, and the check is question_problem, the function the Stop hook calls."""
 
     PICK = trg.QuestionReachesPageTests.PICK
     reply = trg.QuestionReachesPageTests.reply
@@ -54,15 +54,31 @@ class PageWriterTests(trg.SameTurnWriter, unittest.TestCase):
         env.start()
         self.addCleanup(env.stop)
         os.environ.pop(REMOTE_ENV, None)
+        self.root = self.fixture_repo()
 
-    def repo_and_writer(self):
-        """This repo's root and the page writer its extras file names. The scope is checked first: the root must
-        hold the extras file, else a writer read says nothing about this repo."""
-        root = trg.RG.repo_root(HERE)
-        self.assertIsNotNone(root, "scope: no git entry above lint/, so the guard finds no repo root")
+    def fixture_repo(self):
+        """A repo folder with a git entry, whose extras file names FIXTURE_WRITER and the waiting page of these tests."""
+        root = os.path.join(self.run_dir, "repo")
+        os.makedirs(os.path.join(root, ".git"))
+        os.makedirs(os.path.join(root, ".claude"))
+        keys = {"kinds": {}, "page-writer": FIXTURE_WRITER, "waiting-page": trg.QuestionReachesPageTests.PAGE}
+        with open(os.path.join(root, ".claude", "layout-extras.json"), "w", encoding="utf-8") as handle:
+            json.dump(keys, handle)
+        return root
+
+    def real_root(self):
+        """This repo's root, the folder above lint/. Its extras file is read as it stands, and only its key is read."""
+        root = os.path.dirname(HERE)
         self.assertTrue(os.path.isfile(os.path.join(root, ".claude", "layout-extras.json")),
                         "scope: this repo has no .claude/layout-extras.json")
-        return root, layout.page_writer_key(root)
+        return root
+
+    def repo_and_writer(self):
+        """The fixture repo's root and the page writer its extras file names. The key is read back first, so a
+        writer read says nothing about another file."""
+        writer = layout.page_writer_key(self.root)
+        self.assertEqual(writer, FIXTURE_WRITER, "scope: the fixture's extras file does not name its page writer")
+        return self.root, writer
 
     def items_write(self, url):
         """An ArtifactData set to the items collection of the page at `url`: the write a question makes on the page."""
@@ -81,36 +97,34 @@ class PageWriterTests(trg.SameTurnWriter, unittest.TestCase):
         refusal, _note = trg.RG.question_problem(records, records[1:], self.reply(self.PICK), hook)
         return refusal
 
-    def test_rw_key_names_a_session_id_for_this_repo(self):
-        # Catches: this repo's layout-extras.json with no page-writer key, or with a blank, parent-alias or non-session
-        # value, so the pick check has no writer to match a same-turn send against.
-        _root, writer = self.repo_and_writer()
-        self.assertIsNotNone(writer, "this repo's layout-extras.json names no usable page-writer key")
-        self.assertNotIn(writer, layout.PARENT_TARGETS, "the page-writer key names a parent alias, which reaches no one")
-        self.assertIsNotNone(SESSION_ID.fullmatch(writer), "the page-writer key is not a session id: %r" % writer)
+    def test_rw_key_is_none_for_this_repo(self):
+        # Catches: this repo's layout-extras.json naming a page-writer session that no longer exists. A question sent
+        # to it comes back undelivered, and the Stop check blocks on that. The owner ruled the page writer N/A, so the
+        # key names no writer.
+        writer = layout.page_writer_key(self.real_root())
+        self.assertIsNone(writer, "this repo's layout-extras.json names a page writer, but the page writer is N/A: %r" % writer)
 
     def test_rw_green_send_to_the_key_writer_is_not_refused(self):
-        # Catches: a delivered send to this repo's page writer refused as "the page writer is not known to this
-        # session" when the repo's extras file names that writer, the cloud false alarm.
+        # Catches: a delivered send to the page writer refused as "the page writer is not known to this session" when
+        # the extras file names that writer, the cloud false alarm.
         root, writer = self.repo_and_writer()
-        self.assertIsNotNone(writer, "this repo's layout-extras.json names no page writer, so there is no id to send to")
         refusal = self.question_refusal(root, self.send(session_id=writer, result=self.DELIVERED))
-        self.assertEqual(refusal, "", "a delivered send to this repo's page writer was refused: %s" % refusal)
+        self.assertEqual(refusal, "", "a delivered send to the page writer was refused: %s" % refusal)
 
     def test_rw_red_send_to_another_id_still_blocks(self):
         # Catches: the writer key passing any delivered send, so a question sent to a session that is not the page
         # writer counts as one that reached the page.
         root, writer = self.repo_and_writer()
-        self.assertNotEqual(OTHER_ID, writer, "scope: the other id is this repo's page writer, so the case proves nothing")
+        self.assertNotEqual(OTHER_ID, writer, "scope: the other id is the page writer, so the case proves nothing")
         refusal = self.question_refusal(root, self.send(session_id=OTHER_ID, result=self.DELIVERED))
         self.assertNotEqual(refusal, "", "a delivered send to a session that is not the page writer passed the pick check")
 
     def test_rw_green_triage_items_write_to_the_page_is_not_refused(self):
-        # Catches: the page writer's own question, an items write to this repo's waiting page, refused as a lane's
-        # question sent to no parent, because its own record names a parent id. The record tags the session as triage.
+        # Catches: the page writer's own question, an items write to the waiting page, refused as a lane's question
+        # sent to no parent, because its own record names a parent id. The record tags the session as triage.
         root, _writer = self.repo_and_writer()
         page = layout.waiting_page(root)
-        self.assertTrue(str(page).startswith("https://"), "scope: this repo's extras file names no waiting page url: %r" % page)
+        self.assertTrue(str(page).startswith("https://"), "scope: the fixture's extras file names no waiting page url: %r" % page)
         os.environ[REMOTE_ENV] = trs.TRIAGE_ENV  # the session is the triage session: its own record is read from the transcript
         acts = [*trs.own_record(trs.TRIAGE_ID, ["cs-build:triage"], parent=PARENT_ID), *self.items_write(page)]
         refusal = self.question_refusal(root, acts)
@@ -142,7 +156,7 @@ class PageWriterTests(trg.SameTurnWriter, unittest.TestCase):
         # first: it shows the call reaches the items check at all.
         root, _writer = self.repo_and_writer()
         page = layout.waiting_page(root)
-        self.assertTrue(str(page).startswith("https://"), "scope: this repo's extras file names no waiting page url: %r" % page)
+        self.assertTrue(str(page).startswith("https://"), "scope: the fixture's extras file names no waiting page url: %r" % page)
         control = self.question_refusal(root, self.claude_artifacts_items("mcp__claude-artifacts__db_write", page))
         self.assertEqual(control, "", "scope: a claude-artifacts db_write of items was refused, so the read case proves nothing: %s" % control)
         refusal = self.question_refusal(root, self.claude_artifacts_items("mcp__claude-artifacts__db_get", page))

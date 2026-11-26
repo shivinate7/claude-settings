@@ -443,17 +443,17 @@ MUTATIONS = [
      'refuse(tool, verdict, "force-push", PUSH_REASON, "git push " + " ".join(args))',
      'refuse(tool, verdict, "force-push", PUSH_ASK_REASON, "git push " + " ".join(args))',
      "guard", 'the long force flag'),
-    # push-main and push-stray-branch (owner rulings 207 a and 206 a).
-    ("push-main: a colon-less main is not a destination",
+    # force-push and push-stray-branch (owner rulings 207 a and 206 a).
+    ("force-push: a colon-less main is not a destination",
      '            elif source.removeprefix("refs/heads/") in DEFAULT_BRANCH_FALLBACK:\n                # A local origin makes main() empty; the other refspecs are still read for agent.\n                if main():\n                    to_main = True',
      '            elif False:\n                if main():\n                    to_main = True', "guard", 'a push of main from a feature branch denies'),
-    ("push-main: a refspec target of main is not a destination",
+    ("force-push: a refspec target of main is not a destination",
      '                if target.removeprefix("refs/heads/") in DEFAULT_BRANCH_FALLBACK and main():\n                    to_main = True',
      '                if False:\n                    to_main = True', "guard", 'HEAD:main from a feature branch denies'),
-    ("push-main: a main refspec ends the read on a local origin",
+    ("force-push: a main refspec ends the read on a local origin",
      '                if main():\n                    to_main = True\n            elif source in ("HEAD", "@")',
      '                return main()\n            elif source in ("HEAD", "@")', "guard", 'push: local origin, main then the agent name asks the agent rule'),
-    ("push-main: a main refspec before an agent name asks push-main",
+    ("force-push: a main refspec before an agent name asks force-push",
      'if not agent and (to_main or',
      'if (to_main or', "guard", 'network origin, main then the agent name asks the agent rule'),
     ("push-all-main: --all no longer refuses",
@@ -509,30 +509,30 @@ MUTATIONS = [
      'refuse(tool, "deny", "push-all-main", PUSH_ALL_REASON,',
      'refuse(tool, "deny", "push-all-main", PUSH_AGENT_REASON,', "guard",
      '--all from a main checkout, local main ahead of origin/main, refuses'),
-    ("push-main: a bare push that writes main no longer asks",
+    ("force-push: a bare push that writes main no longer asks",
      '        if dest in DEFAULT_BRANCH_FALLBACK:\n            return main()',
      '        if False:\n            return main()', "guard", 'main tracking origin/main, a bare push denies'),
-    ("push-main: HEAD on main no longer asks",
+    ("force-push: HEAD on main no longer asks",
      '(to_main or (implied and current() in DEFAULT_BRANCH_FALLBACK and main())):',
      '(to_main or False):', "guard", 'main tracking origin/main, HEAD denies'),
-    ("push-main: push.default upstream is not read for a bare push",
+    ("force-push: push.default upstream is not read for a bare push",
      '            dest = merge or None',
      '            dest = None', "guard", 'a branch tracking main denies'),
-    ("push-main: a bare push under simple ignores git's own refusal",
+    ("force-push: a bare push under simple ignores git's own refusal",
      '            dest = cur if merge == cur or (not merge and auto.lower() in ("true", "yes", "on", "1")) else None',
      '            dest = cur', "guard", 'a bare push on main with no upstream is git'),
-    ("push-main: a remote with no URL no longer stays silent",
+    ("force-push: a remote with no URL no longer stays silent",
      '    if not url:\n        return False\n    if _is_local_path(url):',
      '    if not url:\n        return True\n    if _is_local_path(url):', "guard",
      'main, no remote in the repo is silent'),
-    ("push-main: a local path or file URL no longer stays silent",
+    ("force-push: a local path or file URL no longer stays silent",
      '    if _is_local_path(url):\n        return False',
      '    if False:\n        return False', "guard", 'main, a file URL named as the remote is silent'),
-    ("push-main: a remote the shell has not expanded reads as no remote, so it no longer asks",
+    ("force-push: a remote the shell has not expanded reads as no remote, so it no longer asks",
      '    if _PUSH_SHELL_EXPANSION.search(remote):\n        return True',
      '    if False:\n        return True', "guard",
-     'main, a double-quoted shell variable as the remote denies push-main'),
-    ("push-main: an scp-like remote no longer asks",
+     'main, a double-quoted shell variable as the remote denies force-push'),
+    ("force-push: an scp-like remote no longer asks",
      'return bool(_PUSH_URL_SCHEME.match(url) or _PUSH_URL_SCP.match(url))',
      'return bool(_PUSH_URL_SCHEME.match(url))', "guard", 'main, an scp-form origin denies'),
     ("push-agent-branch: @ is not an implied destination",
@@ -1309,7 +1309,7 @@ MUTATIONS = [
     ("role-model: the reviewer lift drops its rank test, so a reviewer on a model the table does not rank walks past with the marker",
      'any(role_model_rank(word) >= named\n',
      'any(True or role_model_rank(word) >= named\n', "guard",
-     'role-model: fix check: reviewer on claude-fable-5-1 with the marker on line one is denied, the lift does not reach an unranked model'),
+     'role-model: fix check: reviewer on claude-mystery-9 with the marker on line one is denied under agent-role-model, the lift does not reach an unranked model'),
     ("role-model: the guard marker lifts nothing, so a reviewer on sonnet with it is denied",
      '    if review_guard_marked(prompt):\n        words.append(',
      '    if False:\n        words.append(', "guard",
@@ -2283,8 +2283,8 @@ MUTATIONS = [
      'repo, "")\n        if verdict != "green":\n            refuse(tool, "deny", "merge-checks", merge_check_reason(verdict, detail),\n                   "merge tool "',
      "guard", 'merge-checks: the host merge tool reads the repo of the call'),
     ("merge-checks: the read gets no folder",
-     'host = module.Host(required=pinned_required(where) or "protection", repo=repo or None, cwd=where or None)',
-     'host = module.Host(required=pinned_required(where) or "protection", repo=repo or None)', "guard",
+     'host = module.Host(required=pinned or "protection", repo=repo or None, cwd=where or None)',
+     'host = module.Host(required=pinned or "protection", repo=repo or None)', "guard",
      'merge-checks: a cd names the repo the read runs in'),
     ("merge-checks: help is guarded like a merge",
      '    if "-h" in args or "--help" in args:\n        return None   # help merges nothing',
@@ -2293,9 +2293,12 @@ MUTATIONS = [
      'return "unknown", "the merge tool\'s check reader could not be loaded"',
      'return "green", ""', "guard", 'merge-checks: a merge tool that cannot load'),
     ("merge-checks: the repo is never passed to the read",
-     'host = module.Host(required=pinned_required(where) or "protection", repo=repo or None, cwd=where or None)',
-     'host = module.Host(required=pinned_required(where) or "protection", cwd=where or None)', "guard",
+     'host = module.Host(required=pinned or "protection", repo=repo or None, cwd=where or None)',
+     'host = module.Host(required=pinned or "protection", cwd=where or None)', "guard",
      'merge-checks: the pull request and repo of the call are the ones read'),
+    ("merge-checks: an unknown requiredChecks string reads as no pin",
+     'else UnknownPin(names)', 'else None', "guard",
+     'a stamp requiredChecks string the merge tool does not pin is refused unknown'),
     ("merge-checks: the pull request is never passed to the read",
      'return host.head_read(selector, nothing_is_green',
      'return host.head_read("", nothing_is_green', "guard",
@@ -3047,7 +3050,7 @@ MUTATIONS = [
     ("hand-made-worktree: the early exit is dropped, so every segment re-resolves its variables",
      '    if "worktree" not in segments[number]:\n        return ""',
      '    if False:\n        return ""',
-     "guard", "rm-var: 4000 bindings and 4000 flagged deletes scale linearly in CPU"),
+     "guard", "rm-var: counted segment reads and rewrites for 50 and 100 bindings grow at most 3x"),
     ("hand-made-worktree: the help flag no longer ends the read",
      '        elif arg in ("-h", "--help"):\n            return None\n',
      '        elif arg in ("-hh",):\n            return None\n',
@@ -3085,7 +3088,28 @@ MUTATIONS = [
     ("opus override: the end instant still lifts",
      '    if at >= until or (role is not None',
      '    if at > until or (role is not None',
-     "override", 'opus override: `opus 2h` lets an Opus spawn through'),
+     "override", 'opus override: a held Opus lifts an Opus spawn through'),
+    # THE OWNER'S MODEL HOLD (hooks/override.py). Each row names the case that kills it.
+    ("owner-model-word: the hold reader drops `end`, so a hold that ends at the report outlives it",
+     '"end": data.get("end"),',
+     '"end": None,',
+     "override", "owner-model-word: control, an Agent spawn on haiku is refused after a report ends the haiku hold"),
+    ("owner-model-word: take() has no `until` check, so a held model lifts a spawn past its 2 h end",
+     '    if at >= until or (role is not None and role != str(spawn_role).lower()):',
+     '    if role is not None and role != str(spawn_role).lower():',
+     "override", "opus override: a held Opus lifts an Opus spawn through, an agent's too, until it ends"),
+    ("owner-model-word: take() lets a held sonnet lift the Opus ceiling, since the model check is dropped",
+     'if hold["model"] != ("opus" if model is None else _family(model)):',
+     'if False:',
+     "override", "owner-model-word: a held sonnet does not lift the Opus ceiling for a spawn with no role"),
+    ("owner-model-word: the role hold skips the ceiling for a named role, so a round-2 reviewer on sonnet walks past",
+     'or (hold.get("role") is None and hold_exempt(spawn, role, rounds))):',
+     'or hold.get("role") is not None):',
+     "guard", "owner-model-word: a round-2 reviewer spawn on sonnet is refused under agent-role-model when the owner's haiku hold names reviewer"),
+    ("owner-model-word: the role hold reads an unjudged Opus file as a ceiling, so a sonnet role spawn is refused",
+     'if (not hold.get("judged") or not hold_covers_role(hold, role)',
+     'if (not hold_covers_role(hold, role)',
+     "guard", "owner-model-word: a model-less Opus file (a keyword-era file) refuses a test-author on sonnet under agent-role-model, as on main"),
     # THE VETO AND THE TAKE (decision owner-override). never_lifted names the acts an override may not lift, and
     # override.take reads the one-act override. A mutant that lifts a never-lifted act, or reads no override, must go red.
     ("never-lifted: a shell kill of pid 1 is liftable, so an override reaches it",
@@ -3128,9 +3152,9 @@ MUTATIONS = [
      '            "(decision guard-hooks-fail-closed, a guard with a missing part refuses the call)")}}))',
      '"then retry.")}}))',
      "guard", 'override: a missing-module deny says that no override lifts it'),
-    ("override line: the Opus spawn ask no longer names the Opus word",
-     'if rule == OPUS_RULE and spawn_role is not None:\n        role = opus_role(str(spawn_role))',
-     'if False:\n        role = opus_role(str(spawn_role))',
+    ("override line: the Opus spawn refusal's offer drops its own branch, so it ends with the generic line",
+     '    if rule == OPUS_RULE and spawn_role is not None:\n        return ("The owner lifts this by naming',
+     '    if False:\n        return ("The owner lifts this by naming',
      "override", 'override: a refusal an override lifts ends with the opus override line'),
     ("override line: an agent's refusal offers the main session's line",
      '    if agent_id:\n        return ("To allow this act',
@@ -3493,17 +3517,17 @@ MUTATIONS = [
      "lease: an MCP launch naming the shut-down device in lowercase is refused by the lease"),
     # The lease allow (ruling 5): one mutant per arm of guard.sim_lease_holds and of bin/sim-lease's read.
     ("simulator-boot-lease: the lease's session is not compared",
-     '                if session == e.get("session") and e.get("slot") in lease.SLOT_UDID}',
-     '                if e.get("slot") in lease.SLOT_UDID}', "guard",
+     '                if session == e.get("session") and isinstance(e.get("udid"), str)}',
+     '                if isinstance(e.get("udid"), str)}', "guard",
      "lease: another session's live slot 1 lease on Duo 1 does not allow this session", "posix"),
     ("simulator-boot-lease: an empty session may match an empty lease session",
      '    if not session or not udids:\n        return False',
      '    if not udids:\n        return False', "guard",
      "lease: a lease with an empty session does not match a payload with no session", "posix"),
     ("simulator-boot-lease: every slot maps to Duo 1",
-     'held = {lease.SLOT_UDID[e["slot"]].casefold()',
-     'held = {lease.SLOT_UDID["1"].casefold()', "guard",
-     "lease allow: this session's live slot 2 lease", "posix"),
+     '        name = SLOT_NAME[slot]',
+     '        name = SLOT_NAME["1"]', "simlease",
+     "lease names: a duo take resolves slot 1 and slot 2 each to its own device's udid", "posix"),
     ("simulator-boot-lease: any held device allows a launch of any device",
      '    return all(u.casefold() in held for u in udids)',
      '    return bool(held)', "guard",
@@ -3534,9 +3558,13 @@ MUTATIONS = [
      '    return [e for e in data["leases"] if isinstance(e, dict) and is_live(e)]', "simlease",
      "the lease read writes nothing", "posix"),
     ("sim-lease: the pro slot maps to another device",
-     '"pro": "86F9268A-A905-4B82-9BC0-D7EBB682D341",',
-     '"pro": "86F9268A-A905-4B82-9BC0-D7EBB682D342",', "simlease",
-     "lease allow: this session's live pro lease", "posix"),
+     '"pro": "iPhone 18 Pro"}',
+     '"pro": "iPhone Duo"}', "simlease",
+     "lease names: the pro take resolves to the iPhone 18 Pro's udid, not another device's", "posix"),
+    ("sim-lease: resolve() takes the first of two devices with one name",
+     '        if len(hits) == 1:',
+     '        if hits:', "simlease",
+     "lease names: a name with two devices refuses the take, it does not take the first", "posix"),
     # ---- handoff-unread (decision precompact-handoff, item 9): one mutant per arm. The anchors sit in
     # guard.py and in reread_check.py; a "guard" mutant lands in whichever module holds the anchor.
     ("handoff-unread: the refusal is never printed",
@@ -3551,7 +3579,9 @@ MUTATIONS = [
      '                "unread_note": staticmethod(lambda payload: ""), "too_big_estimate": staticmethod(lambda result, path: 0),\n'
      '                "agent_rewrite": staticmethod(lambda payload: None),\n'
      '                "HANDOFF_MAX_TOKENS": 10000, "READ_CAP_TOKENS": 25000, "READ_MAX_LINES": 2000,\n'
-     '                "AUDIT_OWED": "", "AUDIT_REMEDY": ""})\n',
+     '                "AUDIT_OWED": "", "AUDIT_REMEDY": "", "AUDIT_HELPER_HEAD": "", "AUDIT_HELPER_SCRIPT": "",\n'
+     '                "audit_helper_command": staticmethod(lambda payload: ""),\n'
+     '                "audit_helper_allows": staticmethod(lambda command, handoff: False)})\n',
      "guard", "a guard copy without reread_check.py refuses as guard-crash"),
     ("handoff-unread: a reread_check without its precompact_handoff sibling is let load again",
      '        if reread_check.ph is None:',
@@ -3572,12 +3602,30 @@ MUTATIONS = [
      '        sid = payload.get("session_id")\n'
      '        if not sid or not isinstance(sid, str) or not os.path.isfile(ph.reread_flag_path(sid)):',
      "guard", "handoff-unread: a payload that carries agent_id is allowed"),
+    # agent-no-mcp-tools (hooks/guard.py 8c, tests/guard/s43811-agent-no-mcp-tools.py): with the agent-and-MCP test off, an
+    # agent's call to an unlisted MCP tool passes, so the "refused" cases fail. The required name is one of them.
+    ("agent-no-mcp-tools: the agent MCP call is not judged, so an unlisted MCP tool is allowed",
+     'payload.get("agent_id") and tool.startswith("mcp__")', 'False and tool.startswith("mcp__")',
+     "guard", "agent-no-mcp-tools: mcp__computer-use__app_click from a general-purpose agent is refused"),
+    # agent-no-mcp-tools, fail closed (hooks/guard.py mcp_allow_entries): when no settings.json yields an allow list, nothing is
+    # covered. The mutant covers every MCP tool then, so an agent's listed call is allowed; the copy case names that call.
+    ("agent-no-mcp-tools: with no readable allow list every MCP tool is covered, so an agent's listed call is allowed",
+     '    return ()\n\n\ndef mcp_allow_covers', '    return ("mcp__*",)\n\n\ndef mcp_allow_covers',
+     "guard", "agent-no-mcp-tools: mcp__Claude_Browser__navigate from a designer agent is refused when settings.json has no permissions key"),
     # ---- compaction-audit (decision precompact-handoff, item 16): one mutant per arm the rule needs. Each is
     # judged by test_handoff_wave2.py part 4 (target "audit"), so its required name is one of that suite's checks.
     ("compaction-audit: the refusal is never printed",
-     '            refuse(tool, "deny", "compaction-audit", COMPACTION_AUDIT_REASON % pending, pending)',
+     '            refuse(tool, "deny", "compaction-audit", COMPACTION_AUDIT_REASON % pending + note, pending)',
      '            pass',
      "audit", "after the read, a Bash call is refused by compaction-audit"),
+    ("compaction-audit: the audit helper allows any command that names the helper, so a chained or copied call passes",
+     '    return tool == "Bash" and isinstance(command, str) and reread_check.audit_helper_allows(command, handoff)',
+     '    return tool == "Bash" and isinstance(command, str) and "precompact_handoff.py" in command',
+     "audit", "the helper command with a chained rm stays refused"),
+    ("compaction-audit: the refusal drops the session's transcript path, so an Audit: brief cannot name it",
+     "COMPACTION_AUDIT_REASON % pending + note",
+     "COMPACTION_AUDIT_REASON % pending",
+     "audit", "the refusal holds the session's transcript path"),
     ("compaction-audit: the Audit: spawn does not clear the audit flag",
      "        judge(payload)\n        audit_flag_clear_after_allow(payload)",
      "        judge(payload)\n        pass",
@@ -4062,6 +4110,12 @@ GUARD_MODULE_FAMILIES = {
     "hooks/guard_browser.py": ["browser-keychain"],
     # hooks/guard_write.py holds the silent-write family moved out of guard.py. Its mutants meet the write section.
     "hooks/guard_write.py": ["write"],
+    # hooks/guard_impeccable.py holds the impeccable family moved out of guard.py. Its mutants meet the impeccable section.
+    "hooks/guard_impeccable.py": ["impeccable"],
+    "hooks/guard_workflow_args.py": ["workflow-args"],
+    "hooks/guard_ci_wait.py": ["ci-wait-cap"],
+    # hooks/guard_cite.py holds the cite family moved out of guard.py. Its mutants meet the cite and scratchpad-message sections.
+    "hooks/guard_cite.py": ["cite", "scratchpad-message"],
     # hooks/guard.py holds the rules that no guard_<x>.py module owns. A mutant of it meets six families that read those rules.
     "hooks/guard.py": ["write", "paths", "diff", "model-cap", "cite", "hook-bypass"],
 }
@@ -4080,16 +4134,12 @@ GUARD_MODULE_EXEMPT = {
     "hooks/guard_core.py": "shared by every family, so a mutant of it needs the whole test_guard.py, which takes minutes",
     "hooks/guard_readonly.py": EMPTY_MOVE_REASON,
     "hooks/guard_model_cap.py": EMPTY_MOVE_REASON,
-    "hooks/guard_cite.py": EMPTY_MOVE_REASON,
     "hooks/guard_checkout.py": EMPTY_MOVE_REASON,
     "hooks/guard_handoff.py": EMPTY_MOVE_REASON,
     "hooks/guard_paths.py": EMPTY_MOVE_REASON,
     "hooks/guard_scratchpad_owner.py": EMPTY_MOVE_REASON,
     "hooks/guard_pages.py": EMPTY_MOVE_REASON,
-    "hooks/guard_impeccable.py": EMPTY_MOVE_REASON,
     "hooks/guard_simulator.py": EMPTY_MOVE_REASON,
-    "hooks/guard_workflow_args.py": EMPTY_MOVE_REASON,
-    "hooks/guard_ci_wait.py": EMPTY_MOVE_REASON,
 }
 # The gold standard: the guard's own suite against the same mechanical mutants, so the comparison is
 # one engine to one engine. The hand-written MUTATIONS above kill 100% by construction (any survivor
@@ -4996,25 +5046,27 @@ GUARD_READ_FOLDERS = ("lint", "janitor", "skills", "testing")
 # The files a copied guard reads, relative to the checkout: the simulator lease, the merge tool, and the two CI alarm
 # files the merge tool reads beside it. guard_merge.py loads merge/merge.py (MERGE_TOOL_REL), which reads
 # actions/ci-alarm/events.json (ALARM_EVENTS) and imports actions/ci-alarm/clear_rule.py (load_clear_rule). A copy without
-# clear_rule.py fails that import, so the merge read ends early and never reaches its time limit.
+# clear_rule.py fails that import, so the merge read ends early and never reaches its time limit. settings.json is the
+# guard's allow list for an agent's MCP call (guard.py mcp_allow_entries reads it beside the hooks folder, and
+# test_call_judge.py reads the checkout's copy). Without it a copy reads an empty allow list and covers no MCP tool.
 # lay_out_guard_reads copies them, and the saved-verdict key digests the same files.
 GUARD_READ_FILES = (os.path.join("bin", "sim-lease"), os.path.join("merge", "merge.py"),
                     os.path.join("actions", "ci-alarm", "events.json"),
-                    os.path.join("actions", "ci-alarm", "clear_rule.py"))
-# The folder and file the suites read from the checkout and no copy holds: test_guard.py reads its section files from
-# tests/guard, and test_call_judge.py reads settings.json. lay_out copies neither. The saved-verdict key digests both, so an
-# edit to either misses the saved verdicts.
+                    os.path.join("actions", "ci-alarm", "clear_rule.py"),
+                    os.path.join("settings.json"))
+# The folder the suites read from the checkout and no copy holds: test_guard.py reads its section files from tests/guard.
+# lay_out copies no folder of it. The saved-verdict key digests it, so an edit to it misses the saved verdicts.
 KEY_ONLY_FOLDERS = ("tests/guard",)
-KEY_ONLY_FILES = ("settings.json",)
 
 
 def lay_out_guard_reads(root: str) -> None:
     """Copy into `root` the files of GUARD_READ_FILES, from the checkout, that a copied guard family reads from beside its
-    hooks folder: bin/sim-lease, the merge tool and the CI alarm's events and clear rule. The folders of GUARD_READ_FOLDERS come from the
+    hooks folder: bin/sim-lease, the merge tool, the CI alarm's events and clear rule, and settings.json (the allow list
+    the guard reads for an agent's MCP call). The folders of GUARD_READ_FOLDERS come from the
     callers, through `tracked_tree.copy_tracked` (git's own list, so no file is hand-picked). The simulator refusal imports
     janitor/sweep.py and fails open without it.
     A guard copy gets its own `root`. The override copies sit one folder below `work`, so `main` calls this
-    once on `work`. Cost (rule outcomes-mechanize-rules): per guard-family copy, four files (about 713 KB), and
+    once on `work`. Cost (rule outcomes-mechanize-rules): per guard-family copy, five files (about 761 KB), and
     `main` makes one more under `work`. The folders copy_tracked lays out add git's list (253 files, about 5.4 MB,
     at this commit) to each copy. They stay until the run ends, when `work` is removed. Without these, arms that
     read them fail on every mutant alike, and the clean-layout control (`run_controls`) reads red."""
@@ -5139,6 +5191,13 @@ def control_case(target: str, entries) -> str:
     raise ValueError("no mutation of target %s has a required case to run here" % target)
 
 
+# The mutant folder (decision mutants-one-file-per-rule): each hooks/mutants/<rule-slug>.py adds its rows after the table.
+# The literal above takes deletes only. MUTATIONS is the one list every reader gets. The slice assignment fills that same
+# list in place: the name keeps one top-level binding, and no reader sees the bare table.
+MUTANT_FOLDER = os.path.join(HERE, "mutants")
+MUTATIONS[:] = mutate_shared.assemble_mutations(MUTATIONS, MUTANT_FOLDER)
+
+
 def run_control(sources, work: str, target: str, entries=None):
     """Run one filtered case of `target`'s suite on the unmutated layout. Return run_suite's result tuple.
     `entries` defaults to MUTATIONS."""
@@ -5181,11 +5240,11 @@ def verdict_digest(sources):
     """The key this run's saved verdicts are filed under. It digests the guarded text and the suite text of each target
     the run judges, and every file a copied guard can read: the hooks folder the copies come from (mutate_shared.HOOKS_DIR,
     read now so a test can point it elsewhere), then GUARD_READ_FOLDERS and GUARD_READ_FILES under the checkout, the roots
-    lay_out copies from, then KEY_ONLY_FOLDERS and KEY_ONLY_FILES, which the suites read there and no copy holds. An edit to
-    any of them misses the saved verdicts. Each file is keyed by its path relative to its root, never an absolute path, so
-    two checkouts with the same files share verdicts. Cost: a named run reads about 20 MB (511 files under hooks, lint,
-    janitor, skills and testing, plus four files), plus tests/guard (113 files, about 3.4 MB) and settings.json (48 KB) at
-    this commit, once, before its first mutant. None when no verdict folder is named: nothing is digested, saved or reused."""
+    lay_out copies from, then KEY_ONLY_FOLDERS, which the suites read there and no copy holds. An edit to any of them misses
+    the saved verdicts. Each file is keyed by its path relative to its root, never an absolute path, so two checkouts with
+    the same files share verdicts. Cost: a named run reads about 20 MB (511 files under hooks, lint, janitor, skills and
+    testing, plus five files, settings.json among them), plus tests/guard (113 files, about 3.4 MB) at this commit, once,
+    before its first mutant. None when no verdict folder is named: nothing is digested, saved or reused."""
     if not os.environ.get(mutate_shared.VERDICT_DIR_ENV):
         return None
     digest = hashlib.sha256()
@@ -5201,8 +5260,6 @@ def verdict_digest(sources):
         mutate_shared.digest_tree(digest, rel.replace(os.sep, "/"), os.path.join(checkout, rel))
     for folder in KEY_ONLY_FOLDERS:
         mutate_shared.digest_tree(digest, folder, os.path.join(checkout, folder))
-    for rel in KEY_ONLY_FILES:
-        mutate_shared.digest_tree(digest, rel, os.path.join(checkout, rel))
     return digest.hexdigest()
 
 

@@ -433,7 +433,7 @@ without a restart is unmeasured; a lane measures it first.
 - **R12.** Owner 16:10 CST Nov 10: "yes this statement of opus 4h etc also feels super arbitrary". And: "i dont
   want to do such rigid word grants moreso like if i say send a swarm of opus agents that just works too
   yanno? A is good though but it should be override <anytime> or override not just override and
-  override 4h". One route reads the owner's own typed words for overrides and Opus asks alike, judged
+  override 4h". One route reads the owner's own typed words for overrides and model asks alike, judged
   and fail closed. Agent or pasted text never grants, except a relay in R18 point 5's form (owner 09:10
   CST Nov 11, below). Fast path, no model call: `override` (one act) or
   `override` with any length (15, 15m, 90 minutes, 2 hours, 4h). Any other wording is judged. Every

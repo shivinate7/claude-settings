@@ -19,13 +19,15 @@ on:
 permissions:
   contents: read
 
-# A PR shares one group per ref, so a new push cancels the old run. Every other run gets its own
-# group: GitHub keeps one pending run per group and replaces it, even without cancel-in-progress,
-# so a shared group on main can leave a merged commit with no verdict. The draft state is in the
-# group: `gh pr create --draft` then `gh pr ready` fires two runs, and the draft run (skips every
-# job) must not cancel the ready run (decision draft-until-reviewed).
+# A PR shares one group per ref, so a new push cancels the old run. Main's push runs share one group:
+# GitHub keeps one run going and one pending, and a newer push replaces the pending run, cancelled
+# with no job started. cancel-in-progress stays false, so a running job is never cancelled. The judge,
+# push-skip's base walk and `merge --main-run` step over such a replaced run (clear_rule.superseded_run).
+# Every other run (schedule, dispatch) gets its own group. The draft state is in the PR group:
+# `gh pr create --draft` then `gh pr ready` fires two runs, and the draft run (skips every job) must
+# not cancel the ready run (decision draft-until-reviewed).
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('{0}-{1}', github.ref, github.event.pull_request.draft) || github.run_id }}
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('{0}-{1}', github.ref, github.event.pull_request.draft) || github.event_name == 'push' && github.ref || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 # Git's auto gc runs detached and writes into a test repo's .git/objects while the test deletes it.
@@ -293,6 +295,10 @@ jobs:
         if: ${{ !cancelled() && (needs.scope.outputs.code == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_report_guard_handoff.py
 
+      - name: Stop-hook model line suite
+        if: ${{ !cancelled() && (needs.scope.outputs.code == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
+        run: python3 lint/test_report_guard_model_line.py
+
       - name: Clause parser suite
         if: ${{ !cancelled() && (needs.scope.outputs.code == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_clause.py
@@ -348,6 +354,22 @@ jobs:
       - name: Pace numbers fixture suite
         if: ${{ !cancelled() && (needs.scope.outputs.code == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_pace_numbers.py
+
+      - name: Case runner suite
+        if: ${{ !cancelled() && (needs.scope.outputs.code == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
+        run: python3 hooks/test_case_runner.py
+
+      - name: Zero-case runs suite
+        if: ${{ !cancelled() && (needs.scope.outputs.code == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
+        run: python3 lint/test_zero_case_runs.py
+
+      - name: Suites have main suite
+        if: ${{ !cancelled() && (needs.scope.outputs.code == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
+        run: python3 lint/test_suites_have_main.py
+
+      - name: Suites have main check
+        if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}
+        run: python3 lint/check_suites_have_main.py
 
       - name: Guard outcome claims fixture suite
         if: ${{ !cancelled() && (needs.scope.outputs.code == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
@@ -513,9 +535,17 @@ jobs:
         if: ${{ !cancelled() && (needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_any == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_check_cost_pins.py
 
+      - name: Tool pin fixture suite
+        if: ${{ !cancelled() && needs.scope.outputs.records_only_skip != 'true' }}
+        run: python3 lint/test_check_tool_pins.py
+
       - name: Red-run trailer fixture suite
         if: ${{ !cancelled() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_check_red_run.py
+
+      - name: Conflict hotspots fixture suite
+        if: ${{ !cancelled() && needs.scope.outputs.records_only_skip != 'true' }}
+        run: python3 lint/test_conflict_hotspots.py
 
       - name: Red-run command fixture suite
         if: ${{ !cancelled() && needs.scope.outputs.records_only_skip != 'true' }}
@@ -744,6 +774,27 @@ jobs:
           git archive "origin/$BASE_REF" $(git ls-tree --name-only "origin/$BASE_REF" lint hooks) | tar -x -C "$scratch"
           (cd "$scratch" && python3 lint/check_debt_retire.py --repo "$OLDPWD" --upstream "origin/$BASE_REF" --head "$HEAD_SHA")
 
+      - name: Stable readers fixture suite
+        if: ${{ !cancelled() && needs.scope.outputs.records_only_skip != 'true' }}
+        run: python3 lint/test_check_stable_readers.py
+
+      # The merge tool is installed from branch stable, which lags main, so its readers must read this tree as main's readers do (decision stable-branch).
+      # Stable's copy of the code runs on this tree. This tree's script drives it, because stable may not hold the script yet.
+      # A change that only edits a reader passes while stable reads the data as it stands the way the changed reader does. It is red when the changed reader
+      # reads the existing data differently from stable, or when stable already misreads it: land that reader alone, move stable, then land the data that needs it.
+      # A pull request that changes no data file (stamp.json, the workflows, the records page) gets a stable-versus-head difference waived, with one printed line per key.
+      # Cost per run: one git archive and tar, then four python starts (this script, a probe of each tree's readers, and the stable records generator), plus one temporary
+      # worktree and one more python start (a generator run) when this pull request changed the records page. Measured on this repo: 2.8 s, or 7.8 s with the page proof (n=1 each, a laptop).
+      - name: Stable readers accept this tree
+        if: ${{ !cancelled() && github.event_name == 'pull_request' }}
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          scratch="$(mktemp -d)"
+          trap 'rm -rf "$scratch"' EXIT
+          git archive origin/stable merge lint hooks actions | tar -x -C "$scratch"
+          python3 lint/check_stable_readers.py --stable-tree "$scratch" --head-tree "$PWD" --base-ref "origin/$BASE_REF"
+
       - name: Comment narration fixture suite
         if: ${{ !cancelled() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_check_comment_narration.py
@@ -753,6 +804,10 @@ jobs:
         env:
           BASE_REF: ${{ github.base_ref }}
         run: python3 lint/check_comment_narration.py --base "origin/$BASE_REF"
+
+      - name: List lines fixture suite
+        if: ${{ !cancelled() && needs.scope.outputs.records_only_skip != 'true' }}
+        run: python3 lint/test_check_list_lines.py
 
       - name: Cheap-lints fixture suite
         if: ${{ !cancelled() && needs.scope.outputs.records_only_skip != 'true' }}
@@ -870,6 +925,14 @@ jobs:
       - name: guard_merge import suite
         if: ${{ !cancelled() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_guard_merge_imports.py
+
+      - name: Case timing helper suite
+        if: ${{ !cancelled() && needs.scope.outputs.records_only_skip != 'true' }}
+        run: python3 lint/test_case_times.py
+
+      - name: Case timing report suite
+        if: ${{ !cancelled() && needs.scope.outputs.records_only_skip != 'true' }}
+        run: python3 lint/test_case_times_report.py
 
       # Last step, so a red test here skips none of the steps above, and a red step above does not hide
       # a mod test (!cancelled() runs it anyway). The script is the one home of the mod tests and the
@@ -1076,6 +1139,10 @@ jobs:
         if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_proc_env.py
 
+      - name: Kill guard unknown suite
+        if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
+        run: python3 hooks/test_guard_kill.py
+
       - name: Simulator boot-record fixture suite
         if: ${{ (needs.scope.outputs.code == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_sim_boot_record.py
@@ -1164,6 +1231,10 @@ jobs:
       - name: Mutation verdict fixture suite
         if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_mutate_shared.py
+
+      - name: Mutant folder fixture suite
+        if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
+        run: python3 hooks/test_mutate_mutants.py
 
       - name: Mutation report-mode fixture suite
         if: ${{ (needs.scope.outputs.code == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
@@ -2337,6 +2408,10 @@ jobs:
       - name: Proc env read suite
         if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python3 hooks/test_proc_env.py
+
+      - name: Kill guard unknown suite
+        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        run: python3 hooks/test_guard_kill.py
 
       - name: Janitor triggers fixture suite (SessionEnd hook)
         if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() && needs.scope.outputs.code == 'true' }}

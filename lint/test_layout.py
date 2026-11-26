@@ -1303,7 +1303,8 @@ class PageWriterKey(Tree):
 
     def test_null_empty_or_not_a_string_is_none(self):
         # Catches: a key holding no session id read as a writer id, so a send to any id would pass the Stop check.
-        for bad in (None, "", 5, ["session_013NEJL1nAsHBKJTpeHV1sJN"], {"id": "session_013NEJL1nAsHBKJTpeHV1sJN"}):
+        for bad in (None, "", 5, ["session_013NEJL1nAsHBKJTpeHV1sJN"], {"id": "session_013NEJL1nAsHBKJTpeHV1sJN"},
+                    "null", "NULL"):
             with self.subTest(bad=bad):
                 self.put(EXTRAS, json.dumps({"kinds": {}, "page-writer": bad}))
                 self.assertIsNone(self.layout.page_writer_key(self.tree), "a key that holds no session id has a writer")
@@ -1335,6 +1336,22 @@ class PageWriterKey(Tree):
     def test_a_normal_session_id_still_reads(self):
         # Catches: the blank, padded and alias rules refusing a normal session id, so a real writer is lost.
         for sid in ("session_01ABC", self.SESSION):
+            with self.subTest(sid=sid):
+                self.put(EXTRAS, json.dumps({"kinds": {}, "page-writer": sid}))
+                self.assertEqual(self.layout.page_writer_key(self.tree), sid)
+
+    def test_na_strings_are_none(self):
+        # Catches: the page writer set to N/A read as a session id, so the Stop check names a session "none" that
+        # does not exist.
+        for na in ("none", "None", "N/A", "n/a"):
+            with self.subTest(na=na):
+                self.put(EXTRAS, json.dumps({"kinds": {}, "page-writer": na}))
+                self.assertTrue(os.path.isfile(os.path.join(self.tree, *EXTRAS.split("/"))), "scope: the checkout holds the extras file")
+                self.assertIsNone(self.layout.page_writer_key(self.tree), "the page writer %r is N/A, not a session id" % na)
+
+    def test_a_session_id_with_none_in_it_still_reads(self):
+        # Catches: a substring match on "none" that drops a real session id containing those letters.
+        for sid in ("session_none1ABC", "session_013NoneXYZ"):
             with self.subTest(sid=sid):
                 self.put(EXTRAS, json.dumps({"kinds": {}, "page-writer": sid}))
                 self.assertEqual(self.layout.page_writer_key(self.tree), sid)
@@ -1623,6 +1640,7 @@ class ConstantCheck(Tree):
         tracked_tree.copy_tracked(self.tree, "lint", "actions")  # the lint readers, the actions and the stamp examples
         os.makedirs(os.path.join(self.tree, "hooks"))  # the check parses hooks/ text and imports none of it
         shutil.copyfile(os.path.join(REPO, "hooks", "guard.py"), os.path.join(self.tree, "hooks", "guard.py"))
+        shutil.copyfile(os.path.join(REPO, "hooks", "guard_cite.py"), os.path.join(self.tree, "hooks", "guard_cite.py"))  # RECORD_LAYOUT_FILE
         shutil.copyfile(os.path.join(REPO, "hooks", "git_reads.py"), os.path.join(self.tree, "hooks", "git_reads.py"))
         for name in ("layout.py", "layout.json", "check_layout.py"):  # the files under test, from LINT
             shutil.copyfile(os.path.join(LINT, name), os.path.join(self.tree, "lint", name))
@@ -1717,7 +1735,7 @@ class ConstantCheck(Tree):
         self.assertEqual((rc, out), (0, ""))
 
     def test_guard_literal_that_drifts_is_red(self):
-        self.edit("hooks/guard.py", 'RECORD_LAYOUT_FILE = os.path.join("lint", "layout.json")',
+        self.edit("hooks/guard_cite.py", 'RECORD_LAYOUT_FILE = os.path.join("lint", "layout.json")',
                   'RECORD_LAYOUT_FILE = os.path.join("lint", "check_record_slugs.py")')
         self.assert_red("RECORD_LAYOUT_FILE")
 
@@ -1782,7 +1800,7 @@ class Identity(Tree):
         """A tree with the layout, the guard and the layout reader, and no actions/: a child repo, or ~/.claude with `installed`."""
         for name in ("layout.py", "layout.json"):
             self.copy(os.path.join(LINT, name), "lint/" + name)
-        self.copy(os.path.join(REPO, "hooks", "guard.py"), "hooks/guard.py")
+        self.copy(os.path.join(REPO, "hooks", "guard_cite.py"), "hooks/guard_cite.py")
         if installed:
             self.copy(os.path.join(LINT, "check_layout.py"), "lint/check_layout.py")
 

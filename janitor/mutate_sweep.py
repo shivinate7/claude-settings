@@ -328,13 +328,14 @@ MUTATIONS = [
      '            if False:\n'
      '                under = False\n',
      "test_clean_merged_tree_is_reaped_beside_a_record_whose_folder_is_gone"),
-    # The default of the opt-in. Defaulting it to True lets the orphan reap and trash_verdict, which have no
-    # dirty check and must keep a folder beside such a record, read the removed folder as out and act.
+    # The default of the opt-in. Defaulting it to True lets the husk read, the husk verdict and the branch-cut
+    # holder reads, which pass no flag, read a removed record's folder as out and act. The killer is the case that
+    # reads a flagless call beside such a record and expects unknown.
     ("liveness: worktree_live_session defaults the absent_is_out opt-in to True",
      "git_reads",
      'def worktree_live_session(target: str, absent_is_out: bool = False):',
      'def worktree_live_session(target: str, absent_is_out: bool = True):',
-     "test_orphaned_listener_stays_kept_beside_such_a_record"),
+     "test_a_read_with_no_flag_beside_a_gone_record_answers_unknown"),
     # only_on="linux": AgentEndDeadHostLockTests is skipped off Linux (the live lock's start ticks are
     # read from /proc), so this suite's case cannot prove this mutant on Windows or macOS.
     # The finish gate on a live-form lock whose host is dead (decision when-a-worktree-may-be-removed,
@@ -749,6 +750,33 @@ MUTATIONS = [
      '    if False:\n'
      '        return {**base, "action": "keep", "reason": "not-current-user"}',
      "test_owner_mismatch_is_kept"),
+    # The listener's dirty, process and own-pid checks, and a failed dirty read (decide_listener in janitor/sweep.py).
+    # Each mutant is killed by the case that keeps the listener for exactly that reason.
+    ("listener dirty: a checkout with uncommitted work no longer keeps its listener",
+     "sweep",
+     '    if dirty:\n        return {**base, "action": "keep", "reason": "dirty"}',
+     '    if False:\n        return {**base, "action": "keep", "reason": "dirty"}',
+     "test_orphaned_listener_is_kept_for_uncommitted_work_beside_such_a_record"),
+    ("listener process: another process inside the checkout no longer keeps its listener",
+     "sweep",
+     '    if others:\n        return {**base, "action": "keep", "reason": process_inside_reason(others)}',
+     '    if False:\n        return {**base, "action": "keep", "reason": process_inside_reason(others)}',
+     "test_orphaned_listener_is_kept_for_a_process_inside_beside_such_a_record"),
+    ("listener own pid: the listener's own process counts as a process inside its checkout",
+     "sweep",
+     '    others = _pids_but_listener(inside, pid)\n',
+     '    others = list(inside)\n',
+     "test_orphaned_listener_is_reaped_beside_such_a_record_when_its_checkout_is_clean"),
+    ("listener descendant: a process under the listener counts as a process inside its checkout",
+     "sweep",
+     ' and not _descends_from(p, listener_pid)]',
+     ']',
+     "test_orphaned_listener_is_reaped_beside_its_own_descendant_when_its_checkout_is_clean"),
+    ("listener failed read: a failed dirty read of the checkout reads as clean",
+     "sweep",
+     '    dirty = read_dirty(entry["checkout"])\n    if dirty is None:\n',
+     '    dirty = bool(read_dirty(entry["checkout"]))\n    if False:\n',
+     "test_orphaned_listener_is_kept_unreadable_when_the_dirty_read_returns_none"),
 
     ("dead-rooted: a script missing from a live directory is judged dead, and reaps",
      "sweep",
@@ -897,12 +925,20 @@ MUTATIONS = [
      '    if False:\n        return "recently-edited',
      'test_an_uncommitted_edit_newer_than_30_minutes_keeps_the_build_folders'),
 
+    # The re-read before a removal runs only where the shared table is on (macOS), so its case reads darwin.
     ('build dirs: the build pass uses no fresh process read',
+     'agent_end_reap',
+     '            again = all_cwds(max(1, min(BATCH_TIMEOUT, deadline - time.monotonic())))',
+     '            again = []',
+     'test_a_build_started_during_the_hook_keeps_its_build_folders_on_macos',
+     "posix"),
+    # The first read is the only process read where sharing is off (Linux). Its case runs on this platform.
+    ('build dirs: the first process read is skipped where sharing is off',
      'agent_end_reap',
      '    cwds = all_cwds(max(1, min(BATCH_TIMEOUT, deadline - time.monotonic())))',
      '    cwds = []',
      'test_a_build_started_during_the_hook_keeps_its_build_folders',
-     "posix"),
+     "linux"),
 
     ('build dirs: an unreadable stat or a spent deadline in the edit read reaps',
      'agent_end_reap',
@@ -982,10 +1018,57 @@ MUTATIONS = [
 
     ('build dirs: the janitor deletes a trash name with a process inside',
      'sweep',
-     '    if inside:\n        return False, "process-inside: pid %s" % ", ".join(str(p) for p in sorted(inside))\n    return True, "leftover trash"',
+     '    if inside:\n        return False, process_inside_reason(inside)\n    return True, "leftover trash"',
      '    return True, "leftover trash"',
      'test_the_janitor_deletes_a_leftover_trash_name_and_keeps_one_with_a_live_process',
      "posix"),
+
+    # The trash sweep's dirty check and its failed read (trash_verdict in janitor/sweep.py). A trash name holding
+    # tracked or staged work must keep; a failed read of that work must keep too.
+    ('build dirs trash dirty: the janitor deletes a trash name that holds moved tracked work',
+     'sweep',
+     '    if dirty:\n        return False, "dirty"',
+     '    if False:\n        return False, "dirty"',
+     'test_trash_folder_is_kept_for_uncommitted_work_beside_such_a_record'),
+    ('build dirs trash failed read: a failed dirty read of a trash name reads as clean',
+     'sweep',
+     '    if dirty is None or live is None or inside is None:\n        return False, "unreadable-subject"\n    if dirty:',
+     '    if live is None or inside is None:\n        return False, "unreadable-subject"\n    if dirty:',
+     'test_trash_folder_is_kept_unreadable_when_the_dirty_read_returns_none'),
+
+    # The trash sweep's nested-repo walk (has_nested_git) and the status-line placement (_own_trash_lines).
+    ('build dirs trash nested git: has_nested_git never finds a .git, so a nested repo reads clean',
+     'sweep',
+     '            return True\n    return None if unreadable else False',
+     '            pass\n    return None if unreadable else False',
+     'test_trash_folder_is_kept_for_a_nested_repo_with_uncommitted_work_beside_such_a_record'),
+    ('build dirs trash nested git: has_nested_git never finds a bare repo, so a bare repo reads clean',
+     'sweep',
+     '".git" in filenames\n                or ("HEAD" in filenames and "objects" in dirnames and "refs" in dirnames)):',
+     '".git" in filenames):',
+     'test_trash_folder_is_kept_as_dirty_for_a_bare_repo_directory_inside_it_beside_such_a_record'),
+    ('build dirs trash nested git: the walk follows a symlink out of the folder',
+     'sweep',
+     'os.walk(path, followlinks=False, onerror=unreadable.append)',
+     'os.walk(path, followlinks=True, onerror=unreadable.append)',
+     'test_trash_folder_with_a_link_to_an_outside_repo_is_deleted_beside_such_a_record',
+     "posix"),
+    ('build dirs trash nested git: an unreadable folder in the walk reads as clean',
+     'sweep',
+     '    return None if unreadable else False',
+     '    return False',
+     'test_trash_folder_is_kept_unreadable_when_a_folder_under_it_cannot_be_read',
+     "posix"),
+    ('build dirs trash lines: a deletion at the original name that a sibling holds counts for this folder',
+     'sweep',
+     '        if not any(os.path.lexists(os.path.join(parent, n, rel)) for n in siblings):\n            mine.append(line)',
+     '        if True:\n            mine.append(line)',
+     'test_a_trash_folder_is_judged_on_its_own_lines_beside_a_sibling_from_the_same_name'),
+    ('build dirs trash lines: a line that cannot be placed is skipped instead of kept',
+     'sweep',
+     '        text = line[3:]\n',
+     '        text = line[3:]\n        if text.startswith(\'"\') or " -> " in text:\n            continue\n',
+     'test_trash_folder_is_kept_for_a_quoted_path_it_cannot_place_beside_such_a_record'),
 
     ('build dirs: the hook deletes in its own process before it returns',
      'agent_end_reap',
@@ -1027,8 +1110,10 @@ MUTATIONS = [
     # only_on="posix": the sleep fixture is POSIX only.
     ("husks: a process inside no longer keeps the husk",
      "sweep",
-     '    if inside:\n        return {"path": path, "action": "keep", "reason": "process-inside',
-     '    if False:\n        return {"path": path, "action": "keep", "reason": "process-inside',
+     '    if inside:\n        return {"path": path, "action": "keep", "reason": process_inside_reason(inside)}\n'
+     '    return {"path": path, "action": "husk"',
+     '    if False:\n        return {"path": path, "action": "keep", "reason": process_inside_reason(inside)}\n'
+     '    return {"path": path, "action": "husk"',
      "test_a_process_inside_keeps_the_husk",
      "posix"),
 
@@ -1036,11 +1121,11 @@ MUTATIONS = [
     ("pre-check: a process sitting inside the worktree no longer keeps it",
      "sweep",
      '    if inside:\n'
-     '        return {"path": path, "action": "keep",\n'
-     '                "reason": "process-inside: pid %s" % ", ".join(str(p) for p in sorted(inside))}',
+     '        return {"path": path, "action": "keep", "reason": process_inside_reason(inside)}\n'
+     '    if host_lock:\n',
      '    if False:\n'
-     '        return {"path": path, "action": "keep",\n'
-     '                "reason": "process-inside: pid %s" % ", ".join(str(p) for p in sorted(inside))}',
+     '        return {"path": path, "action": "keep", "reason": process_inside_reason(inside)}\n'
+     '    if host_lock:\n',
      "test_a_process_inside_the_worktree_keeps_it_and_names_the_pid"),
 
     # ---- the stale agent lock (a dead or reused pid frees a clean, fully pushed worktree) ----
@@ -1343,6 +1428,47 @@ MUTATIONS = [
      '            return _uid_is_mine(row[1] if row else "")',
      '            return _uid_is_mine(str(os.getuid()))',
      "test_one_ps_table_answers_command_orphan_owner_and_pid_list_on_macos",
+     "posix"),
+    # One process-table read per run (OneLsofPerRunTests): the shared cwd table, the fresh read a
+    # removal takes first, and one open-files read for the leftover folders. Each anchor is unique.
+    ("one read: the shared cwd table is read again on every judgement",
+     "sweep",
+     '        if "table" not in share:',
+     '        if True:',
+     "test_one_agent_end_reap_reads_the_process_table_once_for_three_kept_trees",
+     "posix"),
+    ("one read: a removal skips its fresh process read before it is removed",
+     "sweep",
+     '    with fresh_process_reads():\n        return processes_in(path)',
+     '    return processes_in(path)',
+     "test_a_tree_the_run_removes_gets_a_fresh_read_before_its_removal",
+     "posix"),
+    ("one read: leftover temp folders read open files once per folder",
+     "sweep",
+     '        table = _open_files_under(waiting)',
+     '        table = (lambda reads: None if None in reads else [row for read in reads for row in read])([_open_files_under([p]) for p in waiting])',
+     "test_leftover_temp_reads_the_process_table_and_open_files_once_for_three_candidates",
+     "posix"),
+    ("one read: the batch open-files read drops its holders",
+     "sweep",
+     '            holders = None if table is None else [pid for pid, name in table if _cwd_under_checkout(name, path)]',
+     '            holders = None if table is None else []',
+     "test_a_holder_in_the_batch_read_keeps_its_folder_and_leaves_the_other_a_candidate",
+     "posix"),
+    # The two rules that hide each other: an open-files read that exits 1 with a message and lists
+    # nothing is unknown (an existing folder reaches it only through this rule), and a folder that does
+    # not exist stays out of the batch read (else its failed read makes every folder of the batch unknown).
+    ("open files: an exit 1 with a message and no listing reads as clear",
+     "sweep",
+     '    if answer.returncode == 1 and answer.stderr.strip() and not answer.stdout.strip():\n        return None',
+     '    if False:\n        return None',
+     "test_an_unreadable_folder_is_kept_and_never_a_candidate",
+     "posix"),
+    ("open files: a folder that does not exist is sent to the batch read",
+     "sweep",
+     '        elif sys.platform == "darwin" and not os.path.exists(path):',
+     '        elif False:',
+     "test_a_missing_folder_in_the_batch_leaves_a_clear_folder_a_candidate",
      "posix"),
     # The parallel preview (ParallelPreviewTests). only_on="posix" on all but "all at once": a
     # Windows preview stays serial (PREVIEW_THREADS), so no test can see these there.

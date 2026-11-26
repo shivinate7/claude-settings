@@ -1,0 +1,1 @@
+- status-sweep-misses-late-run: Gap, round 1 review of branch cancel-run-on-back-to-draft (PASS). `list_active_runs` reads each status in turn. A run created after the queued read that moves to in_progress after the in_progress read is in neither read, so the sweep misses it. The closed path has the same gap. Seen: 2026-11-25 x1

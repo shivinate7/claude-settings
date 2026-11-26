@@ -5,6 +5,7 @@ a listed module renamed off the list is red, a shrink against --main (current ma
 Swift, .entitlements and zsh files have rows and zsh skips ShellCheck, web app data and image files have rows, archive, sheet, model and node config files have rows, an excluded folder is not scanned, an .astro type error is red and a clean Astro project green, and the
 standard's table is whole (every layer runs or has a one-line reason). The comment check reads only added
 lines; with no base it is skipped with a reason, and with a base outside the clone it is unknown, never red.
+Every package.json and package-lock.json in the repo states the typescript version lint/code_check_standard.json pins, exactly, and no overrides or resolutions entry names typescript at another version.
 A .mjs file's broken or extensionless relative import, and TS-only syntax in it, is red; its builtin, bare, JSON, .cjs and type-error imports, a JSDoc type, and npm notice lines on stderr are not; a .js or .cjs file is not checked, and a clean .mjs with no tsc on PATH is red.
 The tools run from PATH (CODE_CHECK_TOOLS=path), so ruff, mypy, shellcheck (the --pins specs, via pipx) and
 astro-check (the tools/ lockfile, via npm ci, bin on PATH) must be installed. Without astro-check the Astro tests
@@ -30,6 +31,55 @@ NEEDS_TSC = unittest.skipUnless(shutil.which("tsc") or os.environ.get("CI"),
                                 "tsc not on PATH; npm ci --ignore-scripts --prefix actions/code-check/tools (CI does)")
 with open(STANDARD, encoding="utf-8") as f:
     TS_PIN = json.load(f)["tools"]["typescript"]
+REPO = os.path.normpath(os.path.join(HERE, "..", ".."))
+# Where a package file may state typescript. The walk skips node_modules and other checkouts' files (.claude);
+# .github stays in, since .github/shoot is tracked.
+PIN_KEYS = ("dependencies", "devDependencies", "optionalDependencies", "peerDependencies")
+# npm overrides and resolutions force a version with no dependency entry, so the case reads them too.
+OVERRIDE_KEYS = ("overrides", "resolutions")
+PIN_SKIP = ("node_modules", ".git", ".claude")
+
+
+def pin_files(root):
+    """The package.json and package-lock.json files under root, relative to it. Walks the tree, not git: bin/red-run's copy has no .git."""
+    found = []
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if d not in PIN_SKIP]
+        found += [os.path.relpath(os.path.join(dirpath, n), root) for n in filenames if n in ("package.json", "package-lock.json")]
+    return sorted(found)
+
+
+def stated_typescript(path):
+    """The typescript versions one package file states: the declared ranges, and for a lock the root's installed copy."""
+    with open(path, encoding="utf-8") as f:
+        doc = json.load(f)
+    if os.path.basename(path) == "package-lock.json":
+        packages = doc.get("packages", {})
+        top = packages.get("", {})
+        stated = [top[k]["typescript"] for k in PIN_KEYS if "typescript" in top.get(k, {})]
+        if "node_modules/typescript" in packages:
+            stated.append(packages["node_modules/typescript"]["version"])
+        return stated
+    return [doc[k]["typescript"] for k in PIN_KEYS if "typescript" in doc.get(k, {})]
+
+
+def overridden_typescript(path):
+    """Each typescript key under a package file's overrides or resolutions, at any depth, as (dotted key path, value). A nested object can name typescript too."""
+    with open(path, encoding="utf-8") as f:
+        doc = json.load(f)
+    found = []
+
+    def walk(node, where):
+        if not isinstance(node, dict):
+            return
+        for key, value in node.items():
+            if key == "typescript":
+                found.append((".".join(where + [key]), value))
+            walk(value, where + [key])
+
+    for section in OVERRIDE_KEYS:
+        walk(doc.get(section, {}), [section])
+    return found
 
 
 def git(cwd, *a):
@@ -56,11 +106,12 @@ def head(d):
     return subprocess.run(["git", "rev-parse", "HEAD"], cwd=d, capture_output=True, text=True).stdout.strip()
 
 
-def check(files, base_files=None, base=None, main_files=None, main=None, send_base=True, path_tools=True, unset=(), **env):
+def check(files, base_files=None, base=None, main_files=None, main=None, send_base=True, path_tools=True, unset=(), extra=(), **env):
     """Commit base_files (when given) as the base, then files on top (None deletes); run the runner.
     main_files (when given) are a commit on top of the base that the PR does not hold, passed as --main;
     the PR's files then go on the base. `base` and `main` name a ref outright; send_base=False omits --base.
-    unset names are dropped from the run env; env adds or replaces variables there. Returns (exit, output)."""
+    extra is more argv for the runner, such as a flag. unset names are dropped from the run env; env adds or
+    replaces variables there. Returns (exit, output)."""
     with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as d:
         git(d, "init", "-q", "-b", "main")
         if base_files is not None:
@@ -74,7 +125,7 @@ def check(files, base_files=None, base=None, main_files=None, main=None, send_ba
             git(d, "checkout", "-q", base)
         put(d, files)
         git(d, "add", "-A"); git(d, "commit", "-qm", "head", "--allow-empty")
-        args = [sys.executable, RUNNER, "--root", d] + (["--base", base] if base and send_base else []) + (["--main", main] if main else [])
+        args = [sys.executable, RUNNER, "--root", d] + (["--base", base] if base and send_base else []) + (["--main", main] if main else []) + list(extra)
         run_env = dict(os.environ, **env)
         for name in unset:
             run_env.pop(name, None)
@@ -83,6 +134,15 @@ def check(files, base_files=None, base=None, main_files=None, main=None, send_ba
             run_env["CODE_CHECK_TOOLS"] = "path"
         p = subprocess.run(args, capture_output=True, text=True, env=run_env)
         return p.returncode, p.stdout + p.stderr
+
+
+# The dark list-lines switch (--list-lines, off by default; decision source-prose-lint-ships-dark). The judgment's own cases
+# are in lint/test_check_list_lines.py; these two prove the Code check runs it only when the switch is on.
+LIST_LINES_ARM = ["item%02d" % n for n in range(1, 20)]
+LIST_LINES_BASE = '#!/bin/sh\ncase "$1" in\n  %s) echo hit ;;\n  *) echo miss ;;\nesac\n' % "|".join(LIST_LINES_ARM)
+LIST_LINES_HEAD = '#!/bin/sh\ncase "$1" in\n  %s) echo hit ;;\n  *) echo miss ;;\nesac\n' % "|".join(LIST_LINES_ARM + ["item20"])
+LIST_LINES_LINE = ("scripts/arm.sh:3: list-lines: 20 items on one line, and this change adds one. Rule: claude-settings "
+                   "decision lists-one-line-per-item. Fix: python3 ~/.claude/lint/check_list_lines.py --fix scripts/arm.sh")
 
 
 class CodeCheck(unittest.TestCase):
@@ -163,22 +223,22 @@ class CodeCheck(unittest.TestCase):
         rc, out = check({".code-check.json": config(["a.py", "b.py"]), "b.py": GOOD_PY}, base_files=base)
         self.assertEqual(rc, 0, out)
 
-    def test_added_exclude_entry_is_red(self):
+    def test_added_exclude_item_is_red(self):
         base = {".code-check.json": config([], ["vendor/"]), "vendor/x.rs": "x\n"}
         rc, out = check({".code-check.json": config([], ["vendor/", "src/"]), "src/y.rs": "x\n"}, base_files=base)
         self.assertNotEqual(rc, 0, out)
         self.assertIn("exclude grew", out)
         self.assertIn("src/", out)
 
-    def test_removed_exclude_entry_is_green(self):
+    def test_removed_exclude_item_is_green(self):
         base = {".code-check.json": config([], ["vendor/", "old/"])}
         rc, out = check({".code-check.json": config([], ["vendor/"])}, base_files=base)
         self.assertEqual(rc, 0, out)
 
-    def test_empty_or_slash_exclude_entry_is_red(self):
-        for entry in ("", "/", " "):
-            rc, out = check({".code-check.json": config([], [entry]), "main.rs": "x\n"})
-            self.assertNotEqual(rc, 0, repr(entry) + out)
+    def test_empty_or_slash_exclude_item_is_red(self):
+        for item in ("", "/", " "):
+            rc, out = check({".code-check.json": config([], [item]), "main.rs": "x\n"})
+            self.assertNotEqual(rc, 0, repr(item) + out)
             self.assertIn("empty exclude", out)
 
     def test_deleted_module_may_leave_the_list(self):
@@ -198,7 +258,7 @@ class CodeCheck(unittest.TestCase):
         self.assertEqual(rc, 0, out)
 
     def test_branch_behind_main_is_green(self):
-        # main listed b.py after the fork; the branch never touched the list, so a merge keeps main's entry.
+        # main listed b.py after the fork; the branch never touched the list, so a merge keeps main's item.
         base = {".code-check.json": config(["a.py"]), "a.py": GOOD_PY, "b.py": GOOD_PY}
         rc, out = check({"c.py": GOOD_PY}, base_files=base, main_files={".code-check.json": config(["a.py", "b.py"])})
         self.assertEqual(rc, 0, out)
@@ -249,6 +309,21 @@ class CodeCheck(unittest.TestCase):
         rc, out = check({".code-check.json": config(["a.py"]), "a.py": GOOD_PY}, base="1" * 40)
         self.assertEqual(rc, 0, out)
         self.assertIn("unknown", out)
+
+    def test_list_lines_switch_off_runs_no_judgment(self):
+        """Control: with --list-lines left off (the default), the Code check judges no list, so a shell arm that the
+        change crowds gets no list-lines line. Scope first: the shell layer ran and passed the file."""
+        rc, out = check({"scripts/arm.sh": LIST_LINES_HEAD},
+                        base_files={".code-check.json": config([]), "scripts/arm.sh": LIST_LINES_BASE})
+        self.assertIn("code-check: shell lint: shellcheck pass", out, "the Code check did not reach the shell file: " + out)
+        self.assertNotIn("list-lines", out, "the switch-off run judged a list: " + out)
+
+    def test_list_lines_switch_on_refuses_crowded_shell_arm(self):
+        """With --list-lines, the Code check prints the list-lines failure line for a shell arm the change crowds."""
+        rc, out = check({"scripts/arm.sh": LIST_LINES_HEAD},
+                        base_files={".code-check.json": config([]), "scripts/arm.sh": LIST_LINES_BASE}, extra=("--list-lines",))
+        self.assertIn(LIST_LINES_LINE, out, "the Code check run with --list-lines does not refuse the crowded shell arm: " + out)
+        self.assertNotEqual(rc, 0, out)
 
     def test_pins_flag_prints_install_specs_from_the_standard(self):
         std = json.load(open(STANDARD, encoding="utf-8"))
@@ -317,6 +392,36 @@ class CodeCheck(unittest.TestCase):
         self.assertEqual(lock[""]["dependencies"], want)
         for name, version in want.items():
             self.assertEqual(lock["node_modules/" + name]["version"], version, name)
+
+    def test_every_package_file_states_the_standard_typescript(self):
+        files = pin_files(REPO)
+        # Scope first: the walk must reach both the root and the tools pins, or an empty mismatch list proves nothing.
+        self.assertIn("package.json", files)
+        self.assertIn(os.path.join("actions", "code-check", "tools", "package.json"), files)
+        stated = {f: stated_typescript(os.path.join(REPO, f)) for f in files}
+        self.assertTrue(any(stated.values()), "no package file states typescript")
+        mismatches = [f + " states typescript " + v for f, vs in stated.items() for v in vs if v != TS_PIN]
+        overridden = {f: overridden_typescript(os.path.join(REPO, f)) for f in files}
+        mismatches += [f + " pins " + key + " to " + json.dumps(v) for f, found in overridden.items() for key, v in found if v != TS_PIN]
+        self.assertEqual(mismatches, [], "every typescript pin must be exactly lint/code_check_standard.json's " + TS_PIN)
+
+    def test_agreeing_tools_package_files_state_the_standard_typescript(self):
+        tools = os.path.join(REPO, "actions", "code-check", "tools")
+        for name in ("package.json", "package-lock.json"):
+            with self.subTest(name=name):
+                stated = stated_typescript(os.path.join(tools, name))
+                self.assertTrue(stated)
+                self.assertEqual(set(stated), {TS_PIN})
+
+    def test_package_file_with_no_typescript_entry_states_none(self):
+        with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as d:
+            for name, text in (("empty", "{}"), ("other", '{"dependencies": {"ruff": "0.17.3"}}')):
+                path = os.path.join(d, name, "package.json")
+                os.makedirs(os.path.dirname(path))
+                with open(path, "w", encoding="utf-8") as f:
+                    f.write(text)
+                with self.subTest(name=name):
+                    self.assertEqual(stated_typescript(path), [])
 
     def test_format_layer_waits_for_o2(self):
         std = json.load(open(STANDARD, encoding="utf-8"))

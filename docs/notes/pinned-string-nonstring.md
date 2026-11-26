@@ -1,0 +1,1 @@
+- pinned-string-nonstring: pinned_required (hooks/guard_merge.py) returns None for a requiredChecks that is neither a string nor a list of strings, such as ["ci", 5] or {"a": 1}, so the guard reads the branch protection, while merge/merge.py:2955 refuses that config. Pre-existing, from review findings F3 and F11. Seen: 2026-11-25 x1

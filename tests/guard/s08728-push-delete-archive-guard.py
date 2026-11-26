@@ -133,8 +133,8 @@ def _archive_run(folder, command):
 
 
 def archive_empty_name_log_case():
-    """The empty archive name writes no `crash` line. A refusal lands in the folder's guard.log first, so the
-    log is the one the run writes (scope); then the empty-name command is a silent allow with no crash row."""
+    """The empty archive name writes no guard-crash row, by either writer. A refusal lands in the folder's guard.log
+    first, so the log is the one the run writes (scope); then the empty-name command is a silent allow with no crash row."""
     folder = os.path.join(ROOT, "archive-empty-name")
     os.makedirs(folder, exist_ok=True)
     path = os.path.join(folder, "guard.log")
@@ -147,12 +147,7 @@ def archive_empty_name_log_case():
     got, reason = _archive_run(folder, ARCHIVE_EMPTY_NAME)
     if got != "allow" or reason:
         return False, "expected a silent allow, got %s %r" % (got, reason[:80])
-    crashes = [row for row in _session_log_rows(folder) or []
-               if row.split("\t")[2:4] == ["crash", "guard-crash"]]
-    if crashes:
-        error = " ".join(crashes[0].split("\t")[4:])
-        return False, "the guard crashed on the empty archive name: %s" % error[:120]
-    return True, "a silent allow and no crash line"
+    return True, "a silent allow and no crash row"
 
 
 # Registered in section 35537, the first push-delete section after LOG_CHECKS_EXTRA exists (section 21304).

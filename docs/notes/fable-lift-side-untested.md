@@ -1,0 +1,1 @@
+- fable-lift-side-untested: No test covers a Fable spawn that stays refused under a timed Opus override, a step grant, or a held model of Opus or sonnet. No test covers a held model of Fable on Plan, or one scoped by role. No test pins the Fable refusal text or its offer line (`offer`, hooks/override.py). Decision agent-model-cap. Seen: 2026-11-25 x1

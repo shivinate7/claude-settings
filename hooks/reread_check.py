@@ -54,6 +54,7 @@ import importlib
 import json
 import os
 import re
+import shlex
 import sys
 
 try:
@@ -297,13 +298,44 @@ def _esc(text):
 # The one remedy text for an owed audit. The Stop block uses it, and so does the guard's compaction-audit refusal
 # (guard.COMPACTION_AUDIT_REASON), so the two cannot drift. It holds one `%s`: the handoff path.
 AUDIT_OWED = "context was compacted and the handoff audit is still owed. "
+# The audit helper's command, in the form the remedy prints. The guard's compaction-audit rule lets that exact text
+# through, and the spellings audit_helper_allows reads as the same call.
+AUDIT_HELPER_SCRIPT = os.path.join(os.path.dirname(os.path.realpath(__file__)), "precompact_handoff.py")
+AUDIT_HELPER_HEAD = 'python3 "' + AUDIT_HELPER_SCRIPT + '" --audit-brief --handoff "'
+# Any character a shell would act on outside plain words: chaining, pipes, redirects, substitution, subshells, a new line.
+_AUDIT_SHELL_ACTIVE = re.compile(r"[;&|<>$`()\r\n]")
+
+
+def audit_helper_command(handoff):
+    """The helper command with the handoff path filled in: the exact text the remedy prints."""
+    return AUDIT_HELPER_HEAD + handoff + '"'
+
+
+def audit_helper_allows(command, handoff):
+    """True when `command` is the remedy's helper call: the printed text, or the same four words spelled with other
+    quotes or through a symlink to the helper. Argv is exactly `python3 <script> --audit-brief --handoff <handoff>`, the
+    script's real path is this folder's precompact_handoff.py, and the handoff is this session's. No shell operator or
+    substitution may appear anywhere in the text, so nothing else runs."""
+    if not isinstance(command, str) or not isinstance(handoff, str) or not handoff:
+        return False
+    if command == audit_helper_command(handoff):
+        return True
+    if _AUDIT_SHELL_ACTIVE.search(command):
+        return False
+    try:
+        words = shlex.split(command)
+    except ValueError:
+        return False
+    if len(words) != 5 or words[0] != "python3" or words[2:4] != ["--audit-brief", "--handoff"] or words[4] != handoff:
+        return False
+    return os.path.isabs(words[1]) and os.path.realpath(words[1]) == os.path.realpath(AUDIT_HELPER_SCRIPT)
+
+
 AUDIT_REMEDY = (
-    "Remedy: print the brief with `python3 \"" + _esc(os.path.join(os.path.dirname(os.path.realpath(__file__)),
-                                                                    "precompact_handoff.py"))
-    + "\" --audit-brief --handoff \"%s\"`, then spawn one Explore agent on Sonnet with exactly that brief, whose "
-    "first line is `" + _esc(EXPLORE_AUDIT_MARKER or "Audit:") + "` (step 3 of the handoff prompt). The brief names "
-    "this session's transcript path, and a spawn whose brief does not name it clears nothing. That spawn clears this "
-    "check. Then repeat the call.")
+    "Remedy: print the brief with `" + _esc(AUDIT_HELPER_HEAD) + "%s\"`, then spawn one Explore agent on Sonnet with "
+    "exactly that brief, whose first line is `" + _esc(EXPLORE_AUDIT_MARKER or "Audit:") + "` (step 3 of the handoff "
+    "prompt). The brief names this session's transcript path, and a spawn whose brief does not name it clears nothing. "
+    "That spawn clears this check. Then repeat the call.")
 # The cite closes each message that prints the remedy. The guard's refusal spells it as a literal, because the
 # refusal-cite scan reads literals only.
 AUDIT_CITE = " (decision precompact-handoff, item 16)"
@@ -335,19 +367,26 @@ def _text(content):
     return ""
 
 
+def _item_tokens(heading, line):
+    """The backticked tokens one item line adds to its list. The audit brief asks for exactly one token per item, so a
+    MISSING item requires its first token only: a second span is prose, not a required token."""
+    tokens = [t.strip() for t in _TICKS.findall(line) if t.strip()]
+    return tokens[:1] if heading == "MISSING" else tokens
+
+
 def parse_audit(text):
     """{heading: [backticked tokens]} for the audit's reply: a line that is a MISSING, STALE or DONE heading (see
     _HEADING) starts a list, and each token in backticks after it, on the heading line or the lines below, joins that
-    list. None when the text has no heading."""
+    list (a MISSING line adds its first token only). None when the text has no heading."""
     lists, cur = {}, None
     for line in text.splitlines():
         found = _HEADING.match(line)
         if found:
             cur = found.group(1).upper()
             lists.setdefault(cur, [])
-            lists[cur] += [t.strip() for t in _TICKS.findall(found.group("inline") or "") if t.strip()]
+            lists[cur] += _item_tokens(cur, found.group("inline") or "")
         elif cur:
-            lists[cur] += [t.strip() for t in _TICKS.findall(line) if t.strip()]
+            lists[cur] += _item_tokens(cur, line)
     return lists or None
 
 

@@ -1993,6 +1993,24 @@ class GuardModuleFamilyTests(unittest.TestCase):
         self.assertIn("write", families, "hooks/guard_write.py needs a GUARD_MODULE_FAMILIES row that names the write "
                                          "family, the family of its silent-write mutants")
 
+    def test_guard_impeccable_has_a_row_that_names_the_impeccable_family(self):
+        """The impeccable family moved to hooks/guard_impeccable.py, so its mutants meet the impeccable section from its own row."""
+        families = guard_table().get("hooks/guard_impeccable.py") or []
+        self.assertIn("impeccable", families, "hooks/guard_impeccable.py needs a GUARD_MODULE_FAMILIES row that names the "
+                                              "impeccable family, the family of its review-only rule")
+
+    def test_guard_workflow_args_has_a_row_that_names_the_workflow_args_family(self):
+        """The workflow-args family moved to hooks/guard_workflow_args.py, so its mutants meet the Workflow args section from its own row."""
+        families = guard_table().get("hooks/guard_workflow_args.py") or []
+        self.assertIn("workflow-args", families, "hooks/guard_workflow_args.py needs a GUARD_MODULE_FAMILIES row that names "
+                                                 "the workflow-args family, the family of its placeholder-args mutants")
+
+    def test_guard_ci_wait_has_a_row_that_names_the_ci_wait_cap_family(self):
+        """The ci-wait cap family moved to hooks/guard_ci_wait.py, so its mutants meet the send_later CI-wait section from its own row."""
+        families = guard_table().get("hooks/guard_ci_wait.py") or []
+        self.assertIn("ci-wait-cap", families, "hooks/guard_ci_wait.py needs a GUARD_MODULE_FAMILIES row that names the "
+                                               "ci-wait-cap family, the family of its CI-wait cap mutants")
+
     def test_every_row_is_a_non_empty_list(self):
         table = guard_table()
         self.assertIn("hooks/guard_kill.py", table, "GUARD_MODULE_FAMILIES has no row for hooks/guard_kill.py")
@@ -2012,9 +2030,10 @@ class GuardModuleFamilyTests(unittest.TestCase):
         code, out, err = run_cli(["--tests-for", "hooks/guard_kill.py"])
         self.assertEqual(code, 0, "exit %d\n%s%s" % (code, out, err))
         self.assertEqual(out.splitlines(), ["hooks/test_checks_never_raise.py", "hooks/test_guard.py::git-env",
-                                            "hooks/test_guard.py::kill"],
+                                            "hooks/test_guard.py::kill", "hooks/test_guard_kill.py"],
                          "guard_kill.py's suites are the git-env and kill family lines, plus the import walk's "
-                         "test_checks_never_raise.py, which reaches the kill checks the families miss, sorted")
+                         "test_checks_never_raise.py, which reaches the kill checks the families miss, and "
+                         "hooks/test_guard_kill.py, the suite beside it, sorted")
 
     def test_tests_for_guard_env_prints_its_family_lines_and_its_import_walk_suite(self):
         code, out, err = run_cli(["--tests-for", "hooks/guard_env.py"])

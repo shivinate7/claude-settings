@@ -14,6 +14,9 @@ FAMILY = "owner-judge"   # the family the cases after this section have always r
 from shared_names import LANE_GRANT_MARKER, is_lane_create_session  # noqa: E402  the one reading of the lane tag and the Grant line
 from guard import BRIEF_CLAIM_ROLES, SPAWN_TOOLS, role_key  # noqa: E402  the guard's own spawn tools, build roles and role reader
 from guard_merge import BRIEF_TOOL, PRIOR_WORK_LINE, _BRIEF_MARKER_LINE  # noqa: E402  the guard's own lane brief tool, lane brief line and marker word
+from probe import crash_reason  # noqa: E402  the one reader of a guard-crash row, whichever writer logged it (hooks/probe.py)
+import shutil  # noqa: E402
+import tempfile  # noqa: E402
 
 PRIOR_WORK_RULE = "spawn-searches-existing-builds"
 PRIOR_WORK_DEFAULT = "Prior work: none found"
@@ -136,6 +139,55 @@ def decide(case):
         # the case names one (`load`). Only the load-brake family sets a busy or full reading.
         command = [sys.executable, "-c", LB_PROBE, guard_file, os.devnull,
                    json.dumps({"mode": "judge", "reading": case.get("load") or LB_NORMAL})]
+    # A crash row this run appended to its config's guard.log is a failure, unless the case declares one (`crash=True`).
+    # Both writers log one under rule `guard-crash`: the fail-open write (decision `crash`) and the fail-closed refusal
+    # (decision `deny`). crash_reason reads either by that rule. The log is read only where this run wrote.
+    # A case that unsets CLAUDE_CONFIG_DIR (None above) leaves no key in `env`, so the folder is the guard's own
+    # default, read from the case's HOME as hooks/guard.py does: $CLAUDE_CONFIG_DIR, else ~/.claude. shared_names
+    # config_dir() reads the runner's environment, not this case's, so it cannot stand in here.
+    config = env.get("CLAUDE_CONFIG_DIR") or os.path.join(env.get("HOME") or os.path.expanduser("~"), ".claude")
+    log = os.path.join(config, "guard.log")
+    before = _log_size(log)
+    got, reason = _judged(case, command, payload, env)
+    crashed = _crash_reason_since(log, before)
+    if crashed is not None and not case.get("crash"):
+        return "crash", "the guard logged a crash row this case does not declare, guard-crash: %s" % crashed[:120]
+    return got, reason
+
+
+def _log_size(path):
+    try:
+        return os.path.getsize(path)
+    except OSError:
+        return 0
+
+
+def _crash_reason_since(path, before):
+    """The reason of the first guard-crash row the log at `path` gained after it was `before` bytes long, else None. A log
+    now shorter than that was rewritten, so all of it is read. crash_reason reads one whole log, so the new bytes go to a
+    folder of their own first: a crash row an earlier case left in the shared config folder is never this run's. A run
+    that appends nothing costs two stats and no read."""
+    after = _log_size(path)
+    if after == before:
+        return None
+    try:
+        with open(path, "rb") as handle:
+            handle.seek(0 if after < before else before)
+            added = handle.read()
+    except OSError:
+        return None
+    folder = tempfile.mkdtemp(dir=ROOT)
+    try:
+        with open(os.path.join(folder, "guard.log"), "wb") as handle:
+            handle.write(added)
+        return crash_reason(folder)
+    finally:
+        shutil.rmtree(folder, ignore_errors=True)
+
+
+def _judged(case, command, payload, env):
+    """The (decision, reason) of one guard run: "slow" past the case's limit, "error" on a nonzero exit, else what the
+    guard printed."""
     started = time.monotonic()
     limit = case.get("max_seconds")
     try:

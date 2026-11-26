@@ -187,7 +187,7 @@ def reap_scratchpad(hook) -> None:
         root = os.path.realpath(scratch)
         if os.path.dirname(root) == root:
             return
-        tagged = [pid for pid in _orphan_pids() if proc_env.holds_session_tag(pid, session)]
+        tagged = [pid for pid in _orphan_pids() if proc_env.holds_session_tag(pid, session) is True]   # None (unreadable) keeps the process
         if not tagged:
             return
         if sys.platform == "darwin":

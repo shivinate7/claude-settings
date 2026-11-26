@@ -8,16 +8,17 @@ Stop: when this turn ran `git commit`, `git push`, `git merge`, `git revert` or 
 (not with --abort, --quit, -n, --no-commit, -h or --help; --skip and --continue commit), `gh pr merge`,
 `gh pr create` or `gh pr update-branch` (not with --help or -h, nor `--disable-auto` on merge or `--web` on create),
 or a landing GitHub MCP tool (LANDING_TOOLS, which includes delete_file, update_pull_request_branch
-and enable_pr_auto_merge) after the last human message, block once unless the reply ends with one blockquote holding
+and enable_pr_auto_merge) after the last human message, refuse once unless the reply ends with one blockquote holding
 the bold labels Done, Deviations, Input Needed, Next, in that order (CLAUDE.md, "Reports, in
 order"; the blockquote and no-fence rule lives in the `shiv-stylisms` output style). Prose may sit above the report on any turn. Nothing may follow the report.
 When stop_hook_active is set, the reply is already a rewrite, so the guard stays quiet, with one
-exception: a block that asked for the missing report leaves a marker file (local_time.report_marker_path,
-holding the index of the turn's human record). The next stop_hook_active Stop consumes it and checks
-the rewrite once for model names, the `Unstarted:` line, an unsourced "answered" line, an unsourced recovered
-item and the plain-form faults (a bare id, a UTC time, a contradiction with no question). A failure blocks with a correction.
-Cost: one small file per missing-report block, written at that block, deleted at the next Stop with
-stop_hook_active; no process, timer or log. A correction block leaves no marker, so no loop follows.
+exception: a refusal for the missing report or a wrong model name leaves a marker file
+(local_time.report_marker_path, holding the index of the turn's human record, and for a wrong name the word
+"names"). The next stop_hook_active Stop consumes it and checks the rewrite once for model names (a "names"
+marker: the wrong name alone), the `Unstarted:` line, an unsourced "answered" line, an unsourced recovered
+item and the plain-form faults (a bare id, a UTC time, a contradiction with no question). A failure is refused with a correction.
+Cost: one small file per missing-report or wrong-name refusal, written at that refusal, deleted at the next Stop with
+stop_hook_active; no process, timer or log. A correction's refusal leaves no marker, so no loop follows.
 
 On landed turns whose report has the right shape, it also blocks a Deviations item that admits a mistake
 the writer made ("I broke ...", a first-person clause with a fault word and no negator before it) and names no
@@ -190,7 +191,7 @@ import sys
 HERE = os.path.dirname(os.path.realpath(__file__))
 sys.path.insert(0, HERE)
 from _transcript import (  # noqa: E402
-    ARTIFACT_DATA, SEND_TOOLS, delivered_tool_use_ids, inactive_tool_use_ids, is_last_human, items_write, last_incoming_index, last_reply, page_read_ran, page_writer_id, peer_sender, tool_verb,
+    ARTIFACT_DATA, SEND_TOOLS, delivered_tool_use_ids, inactive_tool_use_ids, is_incoming, is_last_human, is_stop_feedback, items_write, last_incoming_index, last_reply, page_read_ran, page_writer_id, peer_sender, tool_verb,
     read_transcript, records_after_last_human, send_targets, tool_results, tool_uses)
 import layout  # noqa: E402
 import _clause  # noqa: E402
@@ -257,6 +258,7 @@ def _hooks_on_path():
 
 _hooks_on_path()
 from shared_names import CONSULTANT_TAG, LANE_TAG  # noqa: E402  the one home of the lane and consultant tags, shared with hooks/guard.py
+from shared_names import MODEL_FAMILIES  # noqa: E402  the one home of the model list, shared with hooks/guard.py and hooks/override.py
 
 # guard.py owns the one shell parser this repo trusts: quote-aware segment splitting,
 # heredoc-body stripping, and `git_calls`, which resolves each `git` invocation past `sudo`
@@ -405,8 +407,9 @@ BLOCK_REASON = owner_line(
 # The owner has read the report before a refusal lands, so a resent report doubles it. The missing-report refusal
 # asks for the report itself; every other refusal asks for a short correction. Both asks live in the record.
 # A Stop hook cannot read a reply before it is shown. The correction runs with stop_hook_active
-# set, so this guard stays quiet on it. The rewrite after a missing-report refusal is the one
-# exception: rewrite_problems() checks it once, and its own refusal leaves no marker.
+# set, so this guard stays quiet on it. The rewrite after a missing-report refusal is one
+# exception, as is the rewrite after a wrong-name refusal: rewrite_problems() checks it once, and its own refusal
+# leaves no marker.
 
 MODELS_REASON = owner_line(
     "Model-name guard",
@@ -1044,14 +1047,19 @@ def placeholder_problem(text):
 # search or a Plan spawn needs no name. A Workflow agent() is unseen: its model can sit in a variable.
 NAMED_ROLES = {"builder", "reviewer", "test-author", "record-writer"}
 SPAWN_TOOLS = {"Agent", "Task"}
-MODEL_FAMILIES = ("haiku", "sonnet", "opus", "fable")
 # A model names the roles just before it: "builder sonnet", "builder: sonnet", "builder (sonnet)",
-# and "builder and reviewer sonnet" all count.
-_ROLE = r"(?:builder|reviewer|test-author|record-writer)"
+# and "builder and reviewer sonnet" all count. A "fix check" or "fix verifier" is a reviewer's name too.
+_ROLE = r"(?:builder|reviewer|test-author|record-writer|fix[\s-]+check|fix[\s-]+verifier)"
 ROLE_MODEL_RE = re.compile(
-    r"\b(" + _ROLE + r"(?:\s*(?:,|/|&|\band\b)\s*" + _ROLE + r")*)\s*[:(]?\s*(haiku|sonnet|opus|fable)\b",
+    r"\b(" + _ROLE + r"(?:\s*(?:,|/|&|\band\b)\s*" + _ROLE + r")*)\s*[:(]?\s*(" + "|".join(MODEL_FAMILIES) + r")\b",
     re.I)
 ROLE_RE = re.compile(_ROLE, re.I)
+
+
+def _named_role(word):
+    """The spawn role a Done word names: a fix check or fix verifier is a reviewer."""
+    word = word.lower()
+    return "reviewer" if word.startswith("fix") else word
 # A test hook: REPORT_GUARD_AGENTS_DIR points agent_pin at a fixture folder. Read once at import; unset or empty keeps the
 # repo's agents folder. Cost: one environment read per process start, no process, no file.
 AGENTS_DIR = os.environ.get("REPORT_GUARD_AGENTS_DIR") or os.path.join(HERE, "..", "agents")
@@ -1124,7 +1132,7 @@ def spawn_models(records):
             if b.get("name") not in SPAWN_TOOLS or b.get("id") in failed:
                 continue
             inp = b.get("input") or {}
-            role = str(inp.get("subagent_type") or "").lower()
+            role = str(inp.get("subagent_type") or "").lower().rsplit(":", 1)[-1].strip()  # "cs-build:builder" is a builder
             if role not in NAMED_ROLES:
                 continue
             model = model_family(inp.get("model")) or model_family(agent_pin(role)) or \
@@ -1136,27 +1144,81 @@ def spawn_models(records):
     return found
 
 
-def done_models_problem(text, spawned, every=None):
+def _refused(records, i):
+    """True when the report at `records[i]` was refused: the Stop hook's feedback record comes before the next
+    assistant record or incoming message. The harness writes other records (system, isMeta, data-flow-records,
+    attachment, queue-operation) between the two, so every record that is neither is skipped."""
+    for rec in records[i + 1:]:
+        if is_stop_feedback(rec):
+            return True
+        if rec.get("type") == "user" and rec.get("isMeta") and isinstance((rec.get("message") or {}).get("content"), str):
+            continue
+        if rec.get("type") == "assistant" or is_incoming(rec):
+            return False
+    return False
+
+
+def records_since_report(records, text):
+    """The records after the session's previous report, else all of them. `text` is the reply being judged:
+    its own record is not a previous report. A report is the module's own shape test, `report_shape_ok`.
+    A report the Stop hook refused is no previous report: the session's correction answers it.
+    The scan runs backward and stops at that report, so a long transcript reads only its tail."""
+    own_pending = True  # the newest reply is the one being judged when its text is `text`
+    for i in range(len(records) - 1, -1, -1):
+        reply = _reply_text(records[i])
+        if reply is None:
+            continue
+        if own_pending:
+            own_pending = False
+            if block_text(reply) == block_text(text):
+                continue
+        if report_shape_ok(reply) and not _refused(records, i):
+            return records[i + 1:]
+    return records[:]
+
+
+# The words a wrong-name refusal carries; done_models_problem writes them and main() reads them.
+WRONG_NAME_MARK = " matches no "
+
+
+def done_models_problem(text, spawned, every=None, window=None):
     """Name what Done gets wrong about the spawned roles' models, else ''.
 
-    `spawned` is the turn's spawns and sets which roles Done must name. `every` is the whole
-    transcript's spawns: Done also reports a spawn that ran before the turn's window.
-    Only the models an earlier spawn resolved count; its unknown '' must not hide a window mismatch.
+    `spawned` is the turn's spawns and sets which roles Done must name. `every` is the whole transcript's
+    spawns, a compaction included. `window` is the spawns made since the session's previous report (the whole
+    transcript with none). Two checks judge each model Done names for a role:
+    - it must be one that role ran in the turn or anywhere in the transcript; a spawn whose model is unknown ''
+      in the turn lets any name pass, and an unknown earlier spawn is no model;
+    - when the role has spawns in the window and all are resolved, at least one model named for it must be one
+      of them, so Done cannot name only an older run's model for work this window's agents did. An unknown
+      window spawn never refuses a name, since it may have run it.
+    The missing-role check keeps the turn's spawns. A role Done names with no spawn in the window passes the
+    second check. In a turn with no spawn, Done may relay a peer's agents, so only a role with a spawn in the
+    window is judged; the others are skipped.
     """
-    if not spawned:
+    every = every or {}
+    if not spawned and not every:
         return ""
     done = " ".join(done_items(block_text(text, keep_indent=True)))
-    named = {(r.lower(), m.lower()) for roles, m in ROLE_MODEL_RE.findall(done)
+    named = {(_named_role(r), m.lower()) for roles, m in ROLE_MODEL_RE.findall(done)
              for r in ROLE_RE.findall(roles)}
+    if not spawned and window is not None:
+        named = {(r, m) for r, m in named if r in window}
     # A running role Done leaves out is not yet claimed; one Done names must carry a model.
     required = spawned.finished | {r for r in spawned if re.search(r"\b" + r + r"\b", done, re.I)}
     missing = sorted(r for r in required if not any(nr == r for nr, _ in named))
     if missing:
         return "no model named for " + ", ".join(missing)
     for role, model in sorted(named):
-        ran = set(spawned.get(role, ())) | {m for m in (every or {}).get(role, ()) if m}
+        ran = set(spawned.get(role, ())) | {m for m in every.get(role, ()) if m}
         if ran and "" not in ran and model not in ran:
-            return f"'{role} {model}' matches no {role} spawn, which ran " + ", ".join(sorted(ran))
+            return f"'{role} {model}'{WRONG_NAME_MARK}{role} spawn, which ran " + ", ".join(sorted(ran))
+    if window is not None:
+        for role in sorted({r for r, _ in named}):
+            ran = set(window.get(role, ()))
+            models = sorted(m for r, m in named if r == role)
+            if ran and "" not in ran and not ran.intersection(models):
+                return f"'{role} {models[0]}'{WRONG_NAME_MARK}{role} spawn, which ran " + ", ".join(sorted(ran))
     return ""
 
 
@@ -1464,6 +1526,7 @@ LANE_REFUSAL = owner_line(
     "a question was asked in a lane session, whose own chat does not reach the owner, and it was not sent to "
     "its parent")
 NO_PAGE_NOTE = "pick not sent: this repo has no waiting page"
+NO_WRITER_NOTE = "question not sent: this repo has no page writer"
 PARENT_TARGETS = set(layout.PARENT_TARGETS)
 # A "?" ends a question unless a word character follows it, so a URL query (a?b=1) never counts. Quoted
 # text, backticked text and a blockquoted line are past words, never a question asked now. A straight
@@ -1800,6 +1863,8 @@ def question_problem(records, turn, text, hook):
     The key's writer counts only for a send whose own result shows delivery (`delivered_tool_use_ids`) or a
     failure of `session_inactive` (`inactive_tool_use_ids`: the writer is gone, the attempt meets the duty); a
     send with no result, any other failed result or a non-delivered one does not. A transcript writer counts on the send alone.
+    A repo whose extras key `page-writer` is none or N/A (`layout.page_writer_is_none`) has no writer: with no
+    writer named in the transcript, its question passes with no send and no page item, and one note says it was not sent. A missing or null key keeps the refusal.
     A read whose result names no writer keeps the refusal's old text. The question box counts
     only in a repo with no waiting page. A send to @parent reaches no one there.
     Lane: a send to the parent or the page writer; a send to @parent counts only in a lane. A session whose own
@@ -1831,6 +1896,9 @@ def question_problem(records, turn, text, hook):
             return LANE_REFUSAL, ""
         # The triage session names a parent id in its record but is the page writer: its items write counts too.
     root = repo_root(hook.get("cwd"))
+    if not writer and root and layout.page_writer_is_none(root):
+        # The repo has no page writer, so the question owes no send and no page item; the note shows it was not sent.
+        return "", NO_WRITER_NOTE
     if not writer and root and not page_read_ran(records):
         writer = layout.page_writer_key(root)
         if writer:
@@ -3458,7 +3526,7 @@ def _marker_path(hook):
 
 
 def rewrite_problems(hook):
-    """Reasons for the rewrite that follows a missing-report block, or []. The marker is
+    """Reasons for the rewrite that follows a missing-report or a wrong-model refusal, or []. The marker is
     consumed before any check, so a second rewrite finds none and stays quiet. It holds the
     index of the turn's human record, so the spawns are read from the same turn whether or not
     the hook's feedback record counts as human. Fails open on any error."""
@@ -3467,7 +3535,8 @@ def rewrite_problems(hook):
         if marker is None:
             return []
         with open(marker, encoding="utf-8") as f:
-            idx = int(f.read().strip())
+            idx, _, kind = f.read().strip().partition(" ")
+        idx = int(idx)
         os.remove(marker)
         path = hook.get("transcript_path")
         if not path or not os.path.exists(path):
@@ -3486,7 +3555,9 @@ def rewrite_problems(hook):
         text = last_reply(hook)
         spawned = spawn_models(records[idx + 1:])
         reasons = []
-        models = done_models_problem(text, spawned, spawn_models(records))
+        models = done_models_problem(text, spawned, spawn_models(records), spawn_models(records_since_report(records, text)))
+        if kind == NAMES_MARKER:  # the correction of a wrong-name refusal: only the wrong name is judged again
+            return [MODELS_REASON % models] if WRONG_NAME_MARK in models else []
         if models:
             reasons.append(MODELS_REASON % models)
         if unstarted_problem(text, spawned):
@@ -3506,13 +3577,17 @@ def rewrite_problems(hook):
         return []
 
 
-def write_marker(hook, idx):
+# The marker's second word after a wrong-name refusal; a missing-report marker holds the index alone.
+NAMES_MARKER = "names"
+
+
+def write_marker(hook, idx, kind=""):
     try:
         marker = _marker_path(hook)
         if marker is not None:
             os.makedirs(os.path.dirname(marker), exist_ok=True)
             with open(marker, "w", encoding="utf-8") as f:
-                f.write(str(idx))
+                f.write(("%s %s" % (idx, kind)).strip())
     except Exception:
         pass
 
@@ -3883,6 +3958,36 @@ def triage_hold(hook, records, active):
         return ""
 
 
+MODEL_LINE_REASON = (
+    "The owner's model hold is on (model %s%s): open your reply with one line that says so, in this form: "
+    "`Model %s is on for %s; say \"no %s\" to end it.` Only the reply that is your report, which ends the hold, goes "
+    "without it. (rule agent-model-cap, the owner's model name)")
+MODEL_LINE_WHY_MAX = 80  # characters of the owner's words the reason offers as the line's <why>
+
+
+def model_line_problem(hook, records, reply):
+    """The reason the reply must carry the model line, or "". While the session's judged model hold is live
+    (override.model_override, the one reader the guard also uses: no write here, so the line and the guard cannot
+    disagree) the reply carries one line `Model <m> is on for <why>; say "no <m>" to end it.` A reply that is a report
+    ends the hold and needs none, and a hold a keyword grant wrote (it names no model) asks for none. A rewrite
+    (stop_hook_active) is never asked again: main checks this before that branch. Cost: one open of the pass file, none
+    when it is absent; a hold that ends at the report also reads the replies since it from `records`, in memory."""
+    if report_shape_ok(reply or ""):
+        return ""
+    import override  # the hooks folders are on sys.path (_hooks_on_path)
+    hold = override.model_override(hook.get("session_id"), hook.get("transcript_path"), records, report_shape_ok)
+    if not hold or not hold.get("judged"):
+        return ""
+    model = hold["model"]
+    if re.search(r'^Model %s is on for .+; say "no %s" to end it\.$' % (re.escape(model), re.escape(model)),
+                 reply or "", re.M):
+        return ""
+    why = " ".join((hold.get("said") or "").replace(";", ",").split()).rstrip(".!?")[:MODEL_LINE_WHY_MAX] or "<his words>"
+    import local_time  # the time line's own clock names the hour the hold ends at the latest
+    ends_at = local_time.central_hhmm(hold["until"])
+    return MODEL_LINE_REASON % (model, " until %s at the latest" % ends_at if ends_at else "", model, why, model)
+
+
 def main():
     try:
         hook = json.load(sys.stdin)
@@ -3936,6 +4041,12 @@ def main():
 
     # The hand-off cite reads the refusals file before pending_refusals settles it away.
     reply = last_reply(hook)  # one read of the reply for the hand-off cite, the refusals and the report checks
+    model_line = ""
+    try:  # the owner's model hold asks every reply for one line until the report ends it
+        model_line = model_line_problem(hook, records, reply)
+    except Exception as exc:  # a read that could not run is UNKNOWN, never a block
+        print("model-line guard: UNKNOWN, the check did not run (%s), so the hold went unchecked."
+              % type(exc).__name__, file=sys.stderr)
     hand_off, hand_note = "", ""
     try:
         _hooks_on_path()
@@ -4030,6 +4141,7 @@ def main():
         pick.append(hand_off)
         pick.append(cannot)
         pick.append(review)
+        pick.append(model_line)
         try:
             if report_shape_ok(text):
                 pick.append(recovered_problem(records, text))
@@ -4056,7 +4168,8 @@ def main():
             "a Done line does not say BUILT, RECORDED or OTHER, or says BUILT or RECORDED with no PR or commit: "
             + repr(item)))
     spawned = spawn_models(after)
-    models = done_models_problem(text, spawned, spawn_models(records)) if shape_ok else ""
+    models = (done_models_problem(text, spawned, spawn_models(records), spawn_models(records_since_report(records, text)))
+              if shape_ok else "")
     if models:
         reasons.append(MODELS_REASON % models)
     if shape_ok and unstarted_problem(text, spawned):
@@ -4083,6 +4196,8 @@ def main():
         reasons.append(cannot)
     if review:
         reasons.append(review)
+    if model_line:
+        reasons.append(model_line)
     try:
         rewrite = rewrite_stamp_problem(text, records[last_human_idx].get("timestamp"), hook.get("cwd"))
         if rewrite:
@@ -4100,8 +4215,14 @@ def main():
         reasons.append(refusal)
     if reasons:
         reason = " ".join(reasons) + " (rule reports-order-of-labels)"
+        # A wrong-name refusal leaves a marker, as a missing report does: the harness's feedback record then counts as
+        # the last human message, so only the marker lets the correction's rewrite read this turn's spawns. The
+        # marker's second word, NAMES_MARKER, limits that rewrite to the wrong name. A "no model named" refusal
+        # leaves no marker.
         if not shape_ok:
             write_marker(hook, last_human_idx)
+        elif WRONG_NAME_MARK in models:
+            write_marker(hook, last_human_idx, NAMES_MARKER)
         finish({"decision": "block", "reason": reason}, missing_report=not shape_ok)
     else:
         finish({"systemMessage": note} if note else None)

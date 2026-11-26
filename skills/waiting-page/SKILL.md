@@ -43,6 +43,7 @@ The URL is the link of the `waiting-page` role entry in the `artifacts` key of t
 - `unknown` is not an error. Ask in the reply while anything runs, else in the terminal question
   box, and say in one line that the repo has no waiting page.
 - Never guess a URL, and never use the page of another repo.
+- A session-start line `waiting page <url> is behind main's page.html` or `waiting page <url>: freshness unknown, no page-built stamp` means the page is not proven current. The writer republishes the page first, as its first act (see "Keep the page on main's code" in `reference/republish.md`). A lane that reads the line tells the writer and republishes nothing.
 
 ## Print the page link
 
@@ -257,7 +258,7 @@ Each page has one writer: triage (owner, 2026-11-10 14:30-14:32 CST). In a run w
 wears triage's hat and writes it (owner, 2026-11-10 14:33 CST). The page's name for it is `writer` in `meta/page`. Find
 it with `ArtifactData get meta/page`. With no `writer`, the session that makes the page writes it
 into `meta/page`. The writer watches the page ("Read the answers"). A repo may name the writer's session id in its
-extras key `page-writer`; the pick guard uses it when the transcript has no `meta/page` read. The key send counts only on a delivered result, or on a failure of `session_inactive` (the writer is gone; the report names the failed send). A rotation updates it.
+extras key `page-writer`; the pick guard uses it when the transcript has no `meta/page` read. A repo with no page writer sets the key to `none`. The pick guard then asks a session that faces the owner for no send and no page item, and prints a note that the question was not sent. A lane still sends its question to its parent (see below). The key send counts only on a delivered result, or on a failure of `session_inactive` (the writer is gone; the report names the failed send). A rotation updates it.
 
 - Every other session sends its question to the writer, which writes the item. A lane sends its question
   to its parent in the same turn, and triage writes the item ("Add an item", step 0). Not built: the route from a lane to triage.

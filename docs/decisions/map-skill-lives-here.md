@@ -13,7 +13,7 @@ The install links it whole into `~/.claude/skills/plain-english-map`.
   never the skill's own folder.
 - The skill's `description` asks for use only in a repository that has `map.config.json` at its
   root. No code enforces this. A run in another repository finds no config and stops.
-- `typescript` installs once, in claude-settings. `package.json` pins it to `~5.8.2`, and
+- `typescript` installs once, in claude-settings. `package.json` pins it to `5.9.3`, and
   `package-lock.json` locks it. `install.sh` and `install.ps1` run `npm ci` in the clone root.
   `scripts/lib/lazy-typescript.mjs` resolves the package from its own real path. Through the
   install link, that path is inside the clone, so the skill finds the `node_modules` of

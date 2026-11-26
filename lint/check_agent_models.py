@@ -15,8 +15,9 @@ family than its role's row in the role table (pin_row_problem), each agent body 
 model in fixed text or gives a report header a model slot with no line that names the source (body_problems),
 each agent file with no `model:` pin, or an empty one (pin_missing_problem: it would run on the session model; skill files
 carry no pin and are exempt), each agent file whose `effort:` differs from the first word of its role's Effort cell, or has
-none while the row names an effort level (pin_effort_problem; a row whose cell is no level, such as `model default`, is not compared), each agent file that can reach the claude-code-remote server (session_tools_problem: frontmatter
-`disallowedTools` must name the whole server, or `tools` must be an allow-list with no entry for it), and the model record
+none while the row names an effort level (pin_effort_problem; a row whose cell is no level, such as `model default`, is not compared), each agent file that can reach an MCP tool it may not (session_tools_problem: frontmatter
+`disallowedTools` must name `mcp__*`, or `tools` must be an allow-list with no MCP name; the designer and the design-reviewer need only the
+claude-code-remote server withheld), and the model record
 docs/decisions/agent-model-cap.md when its `lane` row's effort cell does not start
 with the guard's LANE_EFFORT.
 """
@@ -31,6 +32,7 @@ sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
 import layout  # noqa: E402  the one home of where records live (lint/layout.json)
 sys.path.insert(0, os.path.join(ROOT, "hooks"))
 from tool_lists_test import tokens, unread_list  # noqa: E402  the one reader of tool lists (hooks/tool_lists_test.py)
+from shared_names import MODEL_FAMILIES  # noqa: E402  the one home of the model list (hooks/shared_names.py)
 # One home for the role list: the guard's HAIKU_ROLES. Read it, never copy it.
 _spec = importlib.util.spec_from_file_location("guard", os.path.join(ROOT, "hooks", "guard.py"))
 _guard = importlib.util.module_from_spec(_spec)
@@ -38,13 +40,18 @@ _spec.loader.exec_module(_guard)
 HAIKU_ROLES = tuple(role.lower() for role in _guard.HAIKU_ROLES)
 LANE_EFFORT = _guard.LANE_EFFORT
 REMOTE_SERVER = _guard.REMOTE_SERVER
+# Every MCP tool, as an agent file's `disallowedTools` writes it. The designer and the design-reviewer keep the MCP tools of
+# the browser pane (agents/designer.md), so they withhold the remote server alone. The guard still refuses an agent's
+# simulator call (rule agent-no-mcp-tools).
+MCP_GLOB = "mcp__*"
+MCP_KEEPING_ROLES = ("designer", "design-reviewer")
 LANE_RECORD = os.path.join(*layout.path(ROOT, "decisions").split("/"), "agent-model-cap.md")
 LANE_ROW = re.compile(r"^\|\s*lane\b[^|]*\|[^|]*\|\s*([^|]*?)\s*\|\s*$", re.M)
 MODEL_KEY = re.compile(r"^model\s*:\s*(.*)$", re.IGNORECASE)
 # The self-model rules. An agent runs the model its spawn names, so its body must not state a model as its own. A
 # sentence is a run of text up to `.`, `!` or `?` before a space, wrapped lines included. A chunk of sentences ends at
 # a blank line or at a list, heading or table line, so one list item never joins the next.
-MODEL_NAME = re.compile(r"\b(?:haiku|sonnet|opus)\b", re.IGNORECASE)
+MODEL_NAME = re.compile(r"\b(?:%s)\b" % "|".join(MODEL_FAMILIES), re.IGNORECASE)
 OWN_MODEL = re.compile(r"\byour\b(?:(?!\byour\b).)*?\bmodel\b", re.IGNORECASE | re.DOTALL)
 HEADER_WORD = re.compile(r"\b(?:PASS|FAIL|PARTIAL)\b")
 MODEL_SLOT = re.compile(r"<model>|\bthe model\b", re.IGNORECASE)
@@ -122,21 +129,31 @@ def pin_missing_problem(text: str) -> str:
 
 
 def session_tools_problem(text: str) -> str:
-    """Why the agent can reach the claude-code-remote server, or "" when it cannot. It cannot when frontmatter
+    """Why the agent can reach an MCP tool it may not, or "" when it cannot. Every role but the two in MCP_KEEPING_ROLES
+    withholds every MCP tool (rule agent-no-mcp-tools): `disallowedTools` holds MCP_GLOB, or `tools` is an allow-list with
+    no MCP name. The two keep the browser pane and the simulator, so they withhold the claude-code-remote server alone:
     `disallowedTools` names the whole server (`<server>__*` or the bare name), or `tools` is an allow-list with no entry
-    for the server. A deny of one remote tool leaves the rest reachable, so it does not count."""
+    for it. MCP_GLOB covers the server too. A deny of one remote tool leaves the rest reachable, so it does not count."""
     keys = _guard.frontmatter_keys(frontmatter(text) or [])
     field = unread_list(keys)
     if field:
         return "the %s list sits below its key, which this check does not read. Write it on the key's line" % field
     denied = tokens(scalar(keys.get("disallowedTools", "")))
-    if REMOTE_SERVER in denied or REMOTE_SERVER + "__*" in denied:
+    if MCP_GLOB in denied:
+        return ""
+    keeps = scalar(keys.get("name", "")).lower() in MCP_KEEPING_ROLES
+    if keeps and (REMOTE_SERVER in denied or REMOTE_SERVER + "__*" in denied):
         return ""
     if "tools" in keys:
-        if any(item == REMOTE_SERVER or item.startswith(REMOTE_SERVER + "__") for item in tokens(scalar(keys["tools"]))):
+        allowed = tokens(scalar(keys["tools"]))
+        if keeps and any(item == REMOTE_SERVER or item.startswith(REMOTE_SERVER + "__") for item in allowed):
             return "the tools allow-list names the %s server. No agent role needs it" % REMOTE_SERVER
+        if not keeps and any(item.startswith("mcp__") for item in allowed):
+            return "the tools allow-list names an MCP tool. An agent cannot answer a permission prompt, so it holds none"
         return ""
-    return "frontmatter `disallowedTools` must name %s__* (or the agent needs a `tools` allow-list with no entry for it)" % REMOTE_SERVER
+    if keeps:
+        return "frontmatter `disallowedTools` must name %s__* (or the agent needs a `tools` allow-list with no entry for it)" % REMOTE_SERVER
+    return "frontmatter `disallowedTools` must name %s, so the agent reaches no MCP tool (or it needs a `tools` allow-list with no MCP name)" % MCP_GLOB
 
 
 def body_chunks(text: str):

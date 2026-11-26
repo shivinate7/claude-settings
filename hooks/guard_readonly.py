@@ -112,6 +112,12 @@ def _redirect_targets(segment: str):
     """The target of each unquoted output redirect in one segment that writes no file (`_null_device`) and is no
     descriptor duplicate (`2>&1`). An input redirect and a heredoc header (`<<`) write nothing. A comparison's `>`
     is already masked (`_mask_comparisons`)."""
+    for target, _append in _redirect_writes(segment):
+        yield target
+
+
+def _redirect_writes(segment: str):
+    """(target, append) for each redirect `_redirect_targets` counts; `append` is True for `>>`."""
     for found in REDIRECTION.finditer(segment):
         word = found.group()
         if word[0] == "<" or not unquoted_at(segment, found.start()):
@@ -136,7 +142,7 @@ def _redirect_targets(segment: str):
             except ValueError:
                 pass
         if target and not _null_device(target):
-            yield target
+            yield target, ">>" in word[:operator]
 
 
 def _mktemp_paths(args):

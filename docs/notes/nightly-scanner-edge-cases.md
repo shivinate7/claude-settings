@@ -1,0 +1,1 @@
+- nightly-scanner-edge-cases: `lint/test_no_nightly_schedule.py` has no case for a `#` inside a string, a trailing comment, or a lone quote, in its scanners `concurrency_block`, `block_value` and `tokens`. Seen: 2026-11-25 x1

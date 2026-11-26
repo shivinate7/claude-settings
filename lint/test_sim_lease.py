@@ -2,13 +2,14 @@
 """Tests for bin/sim-lease, the Mac-wide lease that bin/sim-test takes before its own boot.
 
 Run: python3 lint/test_sim_lease.py. SIM_LEASE=PATH picks the tool; the default is bin/sim-lease in this repo.
-No case reads this machine's load or OS: PATH shims for uname and sysctl read files in the case's own folder, and the
-ps shim passes through to the real ps except for a start time that a case sets. CI and GITHUB_ACTIONS are unset for
+No case reads this machine's load, OS or devices: PATH shims for uname, sysctl and xcrun read files in the case's own
+folder, and the ps shim passes through to the real ps except for a start time that a case sets. The xcrun shim answers
+`simctl list devices -j` from a device list the case writes (the fleet by default) and logs each call. The device ids
+here are fresh: no repo file holds them, and a take finds each phone by its name. CI and GITHUB_ACTIONS are unset for
 each run. A holder is a live `sleep` child or a child already reaped, so no case depends on a pid being free.
 Temp files follow decisions/test-temp-standard.md: one run folder from lint/_test_temp.py per run, removed at the end.
 """
-import importlib.machinery
-import importlib.util
+import json
 import os
 import re
 import shutil
@@ -24,10 +25,23 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 SIM_LEASE = os.environ.get("SIM_LEASE") or os.path.join(HERE, "..", "bin", "sim-lease")
 REAL_PS = shutil.which("ps") or "/bin/ps"
 RUN_FOLDER = None
-SLOT_UDID = None  # read from the tool under test in setUpModule: the one home of the device IDs
+
+RUNTIME = "com.apple.CoreSimulator.SimRuntime.iOS-27-0"
+DEVICE_TYPE = "com.apple.CoreSimulator.SimDeviceType.iPhone-Duo"
+# The fleet a take finds by name: (name, udid) pairs. The ids are fresh, and no repo file holds them.
+FLEET_PAIRS = [("iPhone Duo", "5E7A0001-0000-4000-8000-0000000000A1"),
+               ("iPhone Duo 2", "5E7A0002-0000-4000-8000-0000000000A2"),
+               ("iPhone 18 Pro", "5E7A0003-0000-4000-8000-0000000000A3")]
+FLEET = dict(FLEET_PAIRS)
+TWIN = "5E7A0004-0000-4000-8000-0000000000A4"  # a second device named iPhone Duo, for the doubled-name case
 
 UNAME_SH = '#!/bin/sh\necho "${SIM_LEASE_TEST_UNAME:-Darwin}"\n'
 SYSCTL_SH = '#!/bin/sh\necho read >> "$SIM_LEASE_TEST_LOADLOG"\ncat "$SIM_LEASE_TEST_LOAD"\n'
+# Every call is logged. A case that writes SIM_LEASE_TEST_XCRUN_RC makes the call exit with that code; the list is printed
+# from SIM_LEASE_TEST_DEVICES either way.
+XCRUN_SH = ('#!/bin/sh\necho "$*" >> "$SIM_LEASE_TEST_XCRUN_LOG"\n'
+            'if [ -f "$SIM_LEASE_TEST_XCRUN_RC" ]; then exit "$(cat "$SIM_LEASE_TEST_XCRUN_RC")"; fi\n'
+            'cat "$SIM_LEASE_TEST_DEVICES"\n')
 # A start time that a case wrote for pid P wins for `ps -o lstart= -p P`. Every other ps call is the real one.
 PS_SH = """#!/bin/sh
 pid= prev= lstart=
@@ -44,22 +58,20 @@ exec "$SIM_LEASE_TEST_REAL_PS" "$@"
 """
 
 
-def load_slot_udid(path):
-    """SLOT_UDID as the tool at PATH defines it. It is read from that file, never copied into this one."""
-    loader = importlib.machinery.SourceFileLoader("sim_lease_under_test", path)
-    module = importlib.util.module_from_spec(importlib.util.spec_from_loader(loader.name, loader))
-    loader.exec_module(module)
-    return module.SLOT_UDID
+def device_list(pairs):
+    """`xcrun simctl list devices -j` for (name, udid) PAIRS: one runtime, every device available and shut down."""
+    return json.dumps({"devices": {RUNTIME: [
+        {"name": name, "udid": udid, "state": "Shutdown", "isAvailable": True, "deviceTypeIdentifier": DEVICE_TYPE}
+        for name, udid in pairs]}})
 
 
 def setUpModule():
-    global RUN_FOLDER, SLOT_UDID
+    global RUN_FOLDER
     try:
         import fcntl  # noqa: F401  sim-lease locks with it; Windows' Python has none
     except ImportError:
         raise unittest.SkipTest("bin/sim-lease is Mac-only: it needs fcntl, which this Python lacks")
     RUN_FOLDER = _test_temp.run_folder()
-    SLOT_UDID = load_slot_udid(SIM_LEASE)
 
 
 def tearDownModule():
@@ -98,18 +110,50 @@ class LeaseCase(unittest.TestCase):
         self.ps_dir = os.path.join(base, "ps")
         self.load_file = os.path.join(base, "loadavg")
         self.load_log = os.path.join(base, "load_reads")
+        self.devices = os.path.join(base, "devices.json")
+        self.xcrun_log = os.path.join(base, "xcrun_calls")
+        self.xcrun_rc = os.path.join(base, "xcrun_rc")
         for d in (self.cfg, self.home, self.shims, self.ps_dir):
             os.makedirs(d)
-        for name, text in (("uname", UNAME_SH), ("sysctl", SYSCTL_SH), ("ps", PS_SH)):
+        for name, text in (("uname", UNAME_SH), ("sysctl", SYSCTL_SH), ("ps", PS_SH), ("xcrun", XCRUN_SH)):
             path = os.path.join(self.shims, name)
             with open(path, "w") as f:
                 f.write(text)
             os.chmod(path, 0o755)
         self.set_load("0.50", "0.50", "0.50")
+        self.set_fleet(FLEET_PAIRS)
 
     def set_load(self, one, five, fifteen):
         with open(self.load_file, "w") as f:
             f.write("{ %s %s %s }\n" % (one, five, fifteen))
+
+    def set_fleet(self, pairs):
+        """The device list the xcrun shim prints for `simctl list devices -j`: (name, udid) PAIRS."""
+        with open(self.devices, "w") as f:
+            f.write(device_list(pairs))
+
+    def set_devices_text(self, text):
+        with open(self.devices, "w") as f:
+            f.write(text)
+
+    def set_xcrun_rc(self, code):
+        with open(self.xcrun_rc, "w") as f:
+            f.write("%d\n" % code)
+
+    def xcrun_calls(self):
+        try:
+            with open(self.xcrun_log) as f:
+                return len(f.read().splitlines())
+        except FileNotFoundError:
+            return 0
+
+    def leases(self):
+        """The lease records in leases.json, or [] when the file is absent."""
+        try:
+            with open(os.path.join(self.cfg, "state", "sim-lease", "leases.json")) as f:
+                return json.load(f)["leases"]
+        except FileNotFoundError:
+            return []
 
     def load_reads(self):
         try:
@@ -124,7 +168,9 @@ class LeaseCase(unittest.TestCase):
         env.update(HOME=self.home, CLAUDE_CONFIG_DIR=self.cfg,
                    PATH=self.shims + os.pathsep + os.environ.get("PATH", ""), SIM_LEASE_POLL="1",
                    SIM_LEASE_TEST_LOAD=self.load_file, SIM_LEASE_TEST_LOADLOG=self.load_log,
-                   SIM_LEASE_TEST_PS=self.ps_dir, SIM_LEASE_TEST_REAL_PS=REAL_PS)
+                   SIM_LEASE_TEST_PS=self.ps_dir, SIM_LEASE_TEST_REAL_PS=REAL_PS,
+                   SIM_LEASE_TEST_DEVICES=self.devices, SIM_LEASE_TEST_XCRUN_LOG=self.xcrun_log,
+                   SIM_LEASE_TEST_XCRUN_RC=self.xcrun_rc)
         env.update(extra)
         return env
 
@@ -372,33 +418,115 @@ class Give(LeaseCase):
 
 
 class UdidTake(LeaseCase):
-    """take --udid prints the granted slot's device UDID (SLOT_UDID in the tool) where take prints the slot."""
+    """take --udid prints the granted slot's device UDID: the id of the device the slot names in the device list."""
 
     def test_duo_slots_print_their_own_udids(self):
         first, second = self.spawn(), self.spawn()
-        self.assertEqual(grant(self.take("duo", first.pid, udid=True)), (0, SLOT_UDID["1"]),
-                         "take --udid is not granted slot 1's UDID")
-        self.assertEqual(grant(self.take("duo", second.pid, udid=True)), (0, SLOT_UDID["2"]),
-                         "take --udid is not granted slot 2's UDID while slot 1 is held")
+        self.assertEqual(grant(self.take("duo", first.pid, udid=True)), (0, FLEET["iPhone Duo"]),
+                         "take --udid is not granted the id of the device named iPhone Duo for slot 1")
+        self.assertEqual(grant(self.take("duo", second.pid, udid=True)), (0, FLEET["iPhone Duo 2"]),
+                         "take --udid is not granted the id of the device named iPhone Duo 2 for slot 2 while slot 1 is held")
 
     def test_pro_prints_the_pro_udid(self):
         pid = self.spawn().pid
-        self.assertEqual(grant(self.take("pro", pid, udid=True)), (0, SLOT_UDID["pro"]),
-                         "take --udid for pro is not granted the pro UDID")
+        self.assertEqual(grant(self.take("pro", pid, udid=True)), (0, FLEET["iPhone 18 Pro"]),
+                         "take --udid for pro is not granted the id of the device named iPhone 18 Pro")
 
     def test_without_udid_the_take_still_prints_the_slot(self):
         pid = self.spawn().pid
         self.assertEqual(grant(self.take("duo", pid)), (0, "1"), "take without --udid no longer prints the slot")
 
     def test_each_slot_names_its_own_device(self):
-        udids = [SLOT_UDID[slot] for slot in ("1", "2", "pro")]
-        self.assertEqual(len(set(udids)), 3, "two slots name the same device UDID")
+        first, second, pro = self.spawn(), self.spawn(), self.spawn()
+        got = [self.take("duo", first.pid, udid=True), self.take("duo", second.pid, udid=True),
+               self.take("pro", pro.pid, udid=True)]
+        self.assertTrue(all(r.returncode == 0 for r in got), "a slot of the three is not granted")
+        self.assertEqual(len({r.stdout.strip() for r in got}), 3, "two slots print the same device UDID")
 
     def test_a_refused_take_udid_prints_nothing(self):
         self.set_load("0.50", "100.00", "0.50")
         r = self.take("duo", os.getpid(), udid=True)
         self.assertEqual(r.returncode, 1, "a take --udid at a 5-minute load of 100 is not refused with exit 1")
         self.assertEqual(r.stdout.strip(), "", "a refused take --udid prints a UDID")
+
+
+class NameLookup(LeaseCase):
+    """A take finds each phone by its exact name in `xcrun simctl list devices -j`. A name with no device, a name on
+    two devices, or a list that cannot be read is refused: no id is guessed, and no lease or queue place is kept."""
+
+    def test_iphone_duo_does_not_match_iphone_duo_2(self):
+        # Only iPhone Duo 2 is listed. A duo take needs the device named iPhone Duo, so it is refused, and no UDID of
+        # iPhone Duo 2 is printed for it.
+        self.set_fleet([FLEET_PAIRS[1], FLEET_PAIRS[2]])
+        pid = self.spawn().pid
+        r = self.take("duo", pid, udid=True)
+        self.assertEqual(r.returncode, 1, "a duo take with no device named iPhone Duo is not refused with exit 1")
+        self.assertEqual(r.stdout.strip(), "", "a duo take with no device named iPhone Duo prints a UDID")
+
+    def test_a_missing_pro_does_not_refuse_a_duo(self):
+        # Control: the duo names are the only ones a duo take reads.
+        self.set_fleet([FLEET_PAIRS[0], FLEET_PAIRS[1]])
+        pid = self.spawn().pid
+        self.assertEqual(grant(self.take("duo", pid)), (0, "1"),
+                         "a duo take is refused because no device is named iPhone 18 Pro")
+
+    def test_two_devices_of_one_name_refuse_with_both_ids_and_leave_no_lease(self):
+        self.set_fleet([FLEET_PAIRS[0], ("iPhone Duo", TWIN), FLEET_PAIRS[1], FLEET_PAIRS[2]])
+        pid = self.spawn().pid
+        r = self.take("duo", pid)
+        self.assertEqual(r.returncode, 1, "a duo take with two devices named iPhone Duo is not refused with exit 1")
+        self.assertTrue(FLEET["iPhone Duo"] in r.stderr and TWIN in r.stderr,
+                        "the refusal does not name both ids of the two iPhone Duo devices")
+        self.assertEqual(self.leases(), [], "a refused duo take left a lease")
+        self.assertFalse(mentions(self.status().stdout, pid), "a refused duo take left a queue place")
+
+    def test_a_missing_name_refuses_with_the_fix(self):
+        self.set_fleet([FLEET_PAIRS[0], FLEET_PAIRS[1]])
+        pid = self.spawn().pid
+        r = self.take("pro", pid)
+        self.assertEqual(r.returncode, 1, "a pro take with no device named iPhone 18 Pro is not refused with exit 1")
+        self.assertIn("iPhone 18 Pro", r.stderr, "the refusal does not name the missing device")
+        self.assertIn("simctl", r.stderr, "the refusal does not name the fix (the owner's simctl rename or create)")
+
+    def test_a_list_that_exits_non_zero_refuses_as_unknown(self):
+        self.set_xcrun_rc(1)
+        pid = self.spawn().pid
+        r = self.take("duo", pid)
+        self.assertEqual(r.returncode, 1, "a duo take whose simctl list exits non-zero is not refused with exit 1")
+        self.assertIn("unknown", r.stderr.lower(), "the refusal of an unreadable device list does not say unknown")
+
+    def test_a_list_that_prints_bad_json_refuses_as_unknown(self):
+        self.set_devices_text("not json {")
+        pid = self.spawn().pid
+        r = self.take("duo", pid)
+        self.assertEqual(r.returncode, 1, "a duo take whose simctl list prints bad JSON is not refused with exit 1")
+        self.assertIn("unknown", r.stderr.lower(), "the refusal of a bad device list does not say unknown")
+
+    def test_the_lease_entry_carries_the_udid_it_granted(self):
+        pid = self.spawn().pid
+        self.assertEqual(grant(self.take("duo", pid)), (0, "1"), "the duo take is not granted slot 1")
+        entry = next((e for e in self.leases() if e.get("pid") == pid), {})
+        self.assertEqual(entry.get("udid"), FLEET["iPhone Duo"], "the lease entry does not carry the udid it granted")
+
+    def test_a_waiting_take_reads_the_device_list_at_most_once(self):
+        # Control: the list is read once per take, before the queue, never once per poll. A wait of 2 s polls at 1 s.
+        self.set_load("0.50", "100.00", "0.50")
+        pid = os.getpid()
+        r = self.take("duo", pid, wait=2)
+        self.assertEqual(r.returncode, 1, "a duo take at a 5-minute load of 100 is not refused with exit 1")
+        self.assertLessEqual(self.xcrun_calls(), 1, "a waiting take reads the device list once per poll")
+
+    def test_a_ci_or_non_darwin_take_reads_no_device_list(self):
+        # Control: a no-op take never reaches the lookup.
+        for label, env in (("uname Linux", {"SIM_LEASE_TEST_UNAME": "Linux"}), ("CI=true", {"CI": "true"}),
+                           ("GITHUB_ACTIONS=true", {"GITHUB_ACTIONS": "true"})):
+            with self.subTest(label):
+                if os.path.exists(self.xcrun_log):
+                    os.remove(self.xcrun_log)
+                pid = self.spawn().pid
+                self.assertEqual(grant(self.take("duo", pid, env=env, udid=True)), (0, "none"),
+                                 "%s: take --udid is not a no-op that prints none" % label)
+                self.assertEqual(self.xcrun_calls(), 0, "%s: a no-op take made a simctl call" % label)
 
 
 class Usage(LeaseCase):

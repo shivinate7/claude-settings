@@ -236,7 +236,10 @@ def merge_check(selector, repo: str, where: str):
     if module is None:
         return "unknown", "the merge tool's check reader could not be loaded"
     where = os.path.normpath(where) if where else ""   # a `cd` target may carry either separator
-    host = module.Host(required=pinned_required(where) or "protection", repo=repo or None, cwd=where or None)
+    pinned = pinned_required(where)
+    if isinstance(pinned, UnknownPin):
+        return "unknown", pinned.reason()
+    host = module.Host(required=pinned or "protection", repo=repo or None, cwd=where or None)
     # No ignore list: this head counts every check, so an ignored red check on it still refuses.
     # The other ready pull requests on the base may not have CI running (decision no-merge-during-batch-ci), but an ignored check or run never counts.
     try:
@@ -254,9 +257,19 @@ MERGE_CHECK_REASON = (
     "Remedy: run the merge tool, `merge <pr> --confirm`, which waits on the required checks, then "
     "merges the head it waited on."
 )
+UNKNOWN_PIN_CAUSE = " is not a string the loaded merge tool pins"  # UnknownPin.reason's tail, the one home merge_check_reason reads it from
+MERGE_CHECK_UNKNOWN_PIN_REASON = (
+    "Rule (Git): this head is not settled: %s. A merge waits for every check and workflow run on "
+    "the head, required or not, and a read that could not run counts as not settled. "
+    "A string the merge tool cannot read is refused as unknown (decision stable-branch, the guard section). "
+    "Remedy: the merge tool the guard loaded does not know this string yet, so the merge tool refuses it too. "
+    "Wait for the installed merge tool to move to a version that pins it, or land the reader for the string first, then retry."
+)
 
 
 def merge_check_reason(verdict: str, detail: str) -> str:
+    if verdict == "unknown" and UNKNOWN_PIN_CAUSE in detail:  # `merge <pr> --confirm` fails on the same string, so it is no remedy
+        return MERGE_CHECK_UNKNOWN_PIN_REASON % ("unknown (" + cap_safe(detail, 160) + ")")
     return MERGE_CHECK_REASON % (verdict + (" (" + cap_safe(detail, 160) + ")" if detail else ""))
 
 
@@ -289,9 +302,20 @@ def uses_merge_tool(where: str) -> bool:
     return bool(_merge_configs(where))
 
 
+class UnknownPin:
+    """A stamp `merge.requiredChecks` string the loaded merge tool does not pin. The merge tool the guard loaded may be older
+    than the stamp, so the string's meaning is unread: a read that cannot run is unknown, never "no pin"."""
+
+    def __init__(self, name: str):
+        self.name = name
+
+    def reason(self) -> str:
+        return "merge.requiredChecks %r" % self.name + UNKNOWN_PIN_CAUSE
+
+
 def pinned_required(where: str):
     """The repo's pinned `merge.requiredChecks`: the string "none", another of the merge tool's PINNED_STRINGS ("first-proof"), or a non-empty list of names; else None,
-    and the batch read takes the names from the branch protection. "none" is the merge tool's value for a repo
+    and the batch read takes the names from the branch protection. Any other string is an UnknownPin, which merge_check refuses as unknown. "none" is the merge tool's value for a repo
     that requires no check (decision private-repos-no-ci), so a head with no check and no run reads green here too: it is read with no load of the tool.
     "first-proof" is its value for a repo whose CI is live: the merge tool's own head_read then needs the rollup (decision merge-needs-current-base).
     That string is the merge tool's constant, never a copy: with the tool unloadable it is not pinned, and merge_check reads that as unknown."""
@@ -302,20 +326,16 @@ def pinned_required(where: str):
             return names
         if isinstance(names, str) and names != "protection":  # the default pins nothing and loads nothing
             module = merge_module()
-            if module is not None and names in module.PINNED_STRINGS:
-                return names
+            if module is not None:  # an unloadable tool stays None: merge_check reads that as unknown
+                return names if names in getattr(module, "PINNED_STRINGS", ()) else UnknownPin(names)
         if isinstance(names, list) and names and all(isinstance(k, str) and k for k in names):
             return names
     return None
 
 
-def waits_on_no_ci(where: str) -> bool:
-    """True when the repo pins a merge.requiredChecks string that waits on no check: "none", or what the merge tool's waits_on_no_check says of the other pinned string. A repo with "none" loads no tool here."""
-    pinned = pinned_required(where)
-    if pinned == "none":
-        return True
-    module = merge_module()
-    return isinstance(pinned, str) and module is not None and module.waits_on_no_check(pinned)
+def runs_no_ci(where: str) -> bool:
+    """True when the repo pins merge.requiredChecks "none": no CI run exists, so a push has no run to cancel. "first-proof" is no such pin: CI is live, and a ready branch still merges on the first proof of its head, so a push moves the head under that proof. Reads no merge tool: "none" is the one string pinned_required returns before a load."""
+    return pinned_required(where) == "none"
 
 
 def ignored_checks(module, where: str):
@@ -480,29 +500,30 @@ READY_PAGE_UNKNOWN_REASON = (
 
 READY_PAGE_BEHIND_REASON = (
     "Rule (Git, guard-hooks-fail-closed): the records page on the head of this pull request could not be read, so it is "
-    "unknown whether it is stale: %s. The merge tool the guard loaded is behind origin/main, and a tool that old can "
+    "unknown whether it is stale: %s. The merge tool the guard loaded is behind %s, and a tool that old can "
     "fail this read. A read that cannot run refuses the ready mark. "
-    "Remedy: from the claude-settings clone, run merge/install_from_main.sh (the reinstall from main), then retry. "
+    "Remedy: from the claude-settings clone, run merge/install_from_main.sh, which moves the install to that ref, then retry. "
     "(decision guard-hooks-fail-closed, a guard that cannot run its read refuses)"
 )
 
 
-def merge_tool_behind_main() -> bool:
-    """True when the checkout that holds the loaded merge tool is behind origin/main (its HEAD is an ancestor of
-    origin/main and not equal to it). Any read that fails is False: the plain unknown reason then stands."""
+def merge_tool_behind_followed_ref() -> str:
+    """The name of the ref (stale_install.followed_ref's) when the checkout that holds the loaded merge tool is behind it
+    (its HEAD is an ancestor of that ref's local tip and not equal to it), else "". The ref is the install record's ref,
+    else the pin's own. Any read that fails is "": the plain unknown reason then stands."""
     module = merge_module()
     path = getattr(module, "__file__", None)
     if not path:
-        return False
+        return ""
     root = os.path.dirname(os.path.dirname(os.path.realpath(path)))
-    ref = resolve_default_base(root) or "origin/main"  # the short ref name already holds the remote
-    if not ref.startswith("origin/"):
-        return False
-    head, tip = _git(root, "rev-parse", "HEAD"), _git(root, "rev-parse", ref)
-    if not head or not tip or head.returncode or tip.returncode or head.stdout.strip() == tip.stdout.strip():
-        return False
-    ancestor = _git(root, "merge-base", "--is-ancestor", "HEAD", ref)
-    return ancestor is not None and ancestor.returncode == 0
+    try:
+        import stale_install  # the one home of "the ref the installed copy follows"; imported here, so a call with no unknown read loads nothing
+        record, _ = stale_install.load_record()
+        _, name, tip = stale_install.followed_ref({"source": root, "ref": record["ref"] if record else stale_install.PIN_REF})
+        head = stale_install.local_sha(root, "HEAD")
+        return name if tip and head and head != tip and stale_install.covered(root, head, tip) else ""
+    except Exception:  # an unreadable ref is the plain unknown reason
+        return ""
 
 
 def ready_page_calls(tool: str, tool_input: dict, command: str):
@@ -554,8 +575,10 @@ def ready_page_hit(tool: str, tool_input: dict, command: str, where: str):
             remedy = merge_module().stale_page_remedy(int(detail))
             return READY_PAGE_STALE_REASON % (detail, remedy), "ready on a stale page #" + detail
         if state == "unknown":
-            reason = READY_PAGE_BEHIND_REASON if merge_tool_behind_main() else READY_PAGE_UNKNOWN_REASON
-            return reason % cap_safe(detail, 200), "ready, page read unknown"
+            behind = merge_tool_behind_followed_ref()
+            cause = cap_safe(detail, 200)
+            reason = READY_PAGE_BEHIND_REASON % (cause, behind) if behind else READY_PAGE_UNKNOWN_REASON % cause
+            return reason, "ready, page read unknown"
     return None
 
 
@@ -569,18 +592,36 @@ def ready_page_hit(tool: str, tool_input: dict, command: str, where: str):
 # is out of reach. The merge tool's own pushes run as subprocesses no hook sees; a segment that runs the tool is skipped.
 # Cost: only a call that holds a `git push` reads GitHub, and only in a repo that uses the merge tool. Per such
 # push: one open-pull-request list read (a draft, no pull request or another branch ends there), and, when a ready pull request
-# holds the branch, one read of its head's check runs. Two gh calls at most, one deadline each. No other tool call reads anything.
+# holds the branch, one read of its head's check runs. Each read pages by 100 (host.pages: one gh call per 100 items), so a
+# repo with 100 open pull requests or fewer, and a head with 100 check runs or fewer, costs two gh calls; one deadline each
+# read. No other tool call reads anything.
 READY_PUSH_RED = ("failure", "timed_out", "startup_failure")  # a check run conclusion that is a red job; cancelled and skipped are not
 READY_PUSH_LIST_SECONDS = 10  # the list read's share of the hook's budget; head_read keeps its own MERGE_READ_TIMEOUT
 READY_PUSH_REASON = (
     "Rule (Git, one CI run per pull request): this push goes to the branch of #%s, a ready pull request whose CI run is %s. "
     "A push cancels that run, and the merge needs the run to finish on this head. "
-    "Remedy: wait for the run to finish. To push before then, return the pull request to draft with `gh pr ready --undo %s`, "
-    "push, and mark it ready again with the merge tool. When the run has a red job, a push may go ahead and fix it. "
+    "Remedy: %s "
+    "When the run has a red job, a push may go ahead and fix it. "
     "(decision standing-merge-grant, a ready pull request takes no push; owner ruling 13:05 CST Nov 23, 2026) "
     + COMPLY_TAIL
 )
+READY_PUSH_REMEDY_PENDING = "wait for the run to finish. To push before then, %s, push, and mark it ready again with the merge tool."
+READY_PUSH_REMEDY_GREEN = (
+    "the run has finished green, so there is nothing to wait for: merge this head with the merge tool. "
+    "To push first, %s, push, and mark it ready again with the merge tool; the push starts a new run."
+)
 READY_PUSH_WARNING = "ready-pr-push: the pull request list read failed (%s), so the push is allowed unchecked (decision standing-merge-grant)"
+READY_PUSH_PIN_WARNING = "ready-pr-push: %s, so the push was judged as under the protection pin (decision standing-merge-grant)"
+
+
+def ready_push_remedy(number, verdict: str) -> str:
+    """The remedy text for a push refused in state `verdict` ("pending" or "green"). The way back to draft is the one the merge
+    tool takes (Host.to_draft): a cloud session is refused `gh pr ready --undo` (GraphQL, HTTP 403), so it gets the merge tool's
+    own DRAFT_ROUTES text; a computer gets the command."""
+    module = merge_module()
+    routes = getattr(module, "DRAFT_ROUTES", None) if is_cloud() else None
+    way = "return the pull request to draft (%s)" % routes if routes else "return the pull request to draft with `gh pr ready --undo %s`" % number
+    return (READY_PUSH_REMEDY_PENDING if verdict == "pending" else READY_PUSH_REMEDY_GREEN) % way
 
 
 def _ready_push_branches(args, where: str, overrides):
@@ -597,6 +638,7 @@ def ready_push_hit(stripped: str, cwd: str, read_verb):
     guard.py's test for a dry run, which writes nothing. One list read serves every push of the call."""
     pulls = {}  # where -> (host, open pull requests) or the failure text: one read per folder
     warning = None
+    pin_warning = None  # an unknown pin string is reported, and never loosens the judgment
     for segment in split_segments(stripped):
         if merge_tool_args(segment) is not None:
             continue
@@ -604,10 +646,13 @@ def ready_push_hit(stripped: str, cwd: str, read_verb):
             if not where or read_verb("push", args) or not uses_merge_tool(where):
                 continue
             branches, archive_only = _ready_push_branches(args, where, overrides)
-            if archive_only or waits_on_no_ci(where):  # a repo that runs no CI has no run to cancel
+            if archive_only or runs_no_ci(where):  # a repo that runs no CI has no run to cancel
                 continue
             if where not in pulls:
                 pulls[where] = _ready_push_pulls(where)
+                pin = pinned_required(where)
+                if isinstance(pin, UnknownPin) and pin_warning is None:
+                    pin_warning = READY_PUSH_PIN_WARNING % pin.reason()
             host, rows = pulls[where]
             if host is None:
                 if warning is None:
@@ -622,7 +667,9 @@ def ready_push_hit(stripped: str, cwd: str, read_verb):
                             warning = ("warn", READY_PUSH_WARNING % cap_safe(detail, 120), "")
                     elif verdict != "red":
                         state = "running or queued" if verdict == "pending" else "finished green"
-                        return "deny", READY_PUSH_REASON % (number, state, number), "push to ready #%d" % number
+                        return "deny", READY_PUSH_REASON % (number, state, ready_push_remedy(number, verdict)), "push to ready #%d" % number
+    if pin_warning:
+        return ("warn", warning[1] + "; " + pin_warning, "") if warning else ("warn", pin_warning, "")
     return warning
 
 
@@ -631,9 +678,11 @@ def _ready_push_pulls(where: str):
     module = merge_module()
     if module is None:
         return None, "the merge tool could not be loaded"
+    pinned = pinned_required(where)
+    required = "protection" if isinstance(pinned, UnknownPin) else pinned or "protection"  # an unread pin judges the push as on main: the list read needs no pin, and ready_push_hit reports the string
     try:
         with module.shared_deadline(READY_PUSH_LIST_SECONDS):
-            host = module.Host(required=pinned_required(where) or "protection", cwd=os.path.normpath(where))
+            host = module.Host(required=required, cwd=os.path.normpath(where))
             return host, host.open_prs()
     except subprocess.TimeoutExpired:  # its text names the resolved program path
         return None, "a read timed out after %d s" % READY_PUSH_LIST_SECONDS
@@ -1133,13 +1182,67 @@ def _red_run_present():
     return True
 
 
-def _red_run_found(where, source, base, memo, is_test_rel, virtual):
+def _judge_unsent(check_red_run, where, base, source, exclude, refs, extra):
+    """`check_red_run.judge` for the commits a push sends: the range less every commit a remote-tracking ref in
+    `refs` holds (a `--remotes=<name>` option, or '' for none). A read that fails with that exclusion is read once
+    more without it, a wider range, so a failed read of the remote refs never lets a commit through."""
+    try:
+        return check_red_run.judge(where, base, source, exclude, remotes=refs, **extra)
+    except (check_red_run.Unknown, OSError):
+        if not refs:
+            raise
+        return check_red_run.judge(where, base, source, exclude, **extra)
+
+
+def _judge_range(check_red_run, where, base, source, refs, extra, memo):
+    """`(found, last)` of `_judge_unsent` over base..source. A push that carries a gap is read again without the
+    commits the default base holds, which are not the lane's: a merge or a rebase brings them in. The default base is
+    read only then, once per push in `memo`. A default base that cannot be read is no hit, for the push would judge
+    main's commits."""
+    found, last = _judge_unsent(check_red_run, where, base, source, "", refs, extra)
+    if found:
+        if "default" not in memo:
+            memo["default"] = resolve_default_base(where) or ""
+        default = memo["default"]
+        if not default:
+            return [], ""
+        if default != base.removeprefix("refs/remotes/"):
+            found, last = _judge_unsent(check_red_run, where, base, source, default, refs, extra)
+    return found, last
+
+
+def _pushed_remote(where, remote):
+    """The configured remote a push names, else ''. A plain word is taken as a configured name, with no read. A word
+    with a `/`, `:`, `\\`, `.` or `~` in it may be a URL or a path: it is a configured name when `remote.<word>.url`
+    exists, else the name of the configured remote whose url it equals, else '' (two `git config` reads at most)."""
+    if not _NOT_A_PLAIN_NAME.search(remote):
+        return remote
+    done = _git(where, "config", "--get", "remote." + remote + ".url")
+    if done is not None and done.returncode == 0:
+        return remote
+    done = _git(where, "config", "--get-regexp", r"^remote\..*\.url$")
+    for line in (done.stdout.splitlines() if done is not None and done.returncode == 0 else []):
+        key, _, url = line.partition(" ")
+        if url == remote:
+            return key[len("remote."):-len(".url")]
+    return ""
+
+
+def _red_run_found(where, source, base, memo, is_test_rel, virtual, remote, tracking=""):
     """`(found, last)` from check_red_run.judge for the commits a push of `source` sends from `base` (the one the
     conflict check accepted), else `([], '')`. `virtual` holds the commits of the same call that have not landed.
-    A push that carries a gap is read again without the commits the default base holds, which are not the
-    lane's: a merge or a rebase brings them in. The default base is read only then, once per push in `memo`. A
-    default base that cannot be read is no hit, for the push would judge main's commits. So is a failed read in
-    either pass, a message the guard cannot read, and a copy of the hooks with no check_red_run beside it."""
+    A commit that a remote-tracking ref of the pushed remote already holds (`refs/remotes/<name>/*`, and no other
+    remote's) was sent before, so it is not judged. A push by URL or path names that remote only when the URL equals a
+    configured remote's url (`_pushed_remote`); any other URL excludes nothing. The range is read first with no
+    exclusion, so a clean push costs one read. On a hit that holds a landed commit the range is read again less the
+    pushed remote's refs. A clone's tracking refs can lag the remote, or hold a branch the remote deleted, so then
+    the tracking refs of that configured remote are refreshed once per push in `memo`, with a prune
+    (`git_reads.fetch_remote`), and the range is read a third time. A refresh that fails keeps the wide hit when the
+    exclusion alone let the push through, as does a range that cannot be read after the refresh. Before the refresh,
+    `memo[("rewritten", tracking)]` takes `_rewritten` of the destination's `tracking` ref: a refresh can move that ref past `source`
+    with other people's commits, which is no rewrite of the branch.
+    A default base that cannot be read is no hit, so is a failed read before the refresh, a message the guard
+    cannot read, and a copy of the hooks with no check_red_run beside it."""
     if is_test_rel is None or virtual["unreadable"]:
         return [], ""
     try:
@@ -1148,18 +1251,28 @@ def _red_run_found(where, source, base, memo, is_test_rel, virtual):
         return [], ""
     extra = {"is_test_rel": is_test_rel, "tip": virtual["tip"], "pending": virtual["pending"]}
     try:
-        found, last = check_red_run.judge(where, base, source, **extra)
-        if found:
-            if "default" not in memo:
-                memo["default"] = resolve_default_base(where) or ""
-            default = memo["default"]
-            if not default:
-                return [], ""
-            if default != base.removeprefix("refs/remotes/"):
-                found, last = check_red_run.judge(where, base, source, default, **extra)
+        wide, wide_last = _judge_range(check_red_run, where, base, source, "", extra, memo)
+        name = _pushed_remote(where, remote) if wide else ""
+        if not name or all(row[0] == "new" for row in wide):
+            return wide, wide_last
+        refs = "--remotes=" + name
+        found, last = _judge_range(check_red_run, where, base, source, refs, extra, memo)
+        key = ("fetched", name)
+        first = key not in memo
+        if first:
+            memo[("rewritten", tracking)] = _rewritten(where, tracking, base, source)
+            import git_reads  # the one home of a git call and its timeout
+            memo[key] = git_reads.fetch_remote(where, name, prune=True)
+        if not memo[key]:
+            return (found, last) if found else (wide, wide_last)
+        if first:
+            try:
+                found, last = _judge_range(check_red_run, where, base, source, refs, extra, memo)
+            except (check_red_run.Unknown, OSError):
+                return wide, wide_last
+        return found, last
     except (check_red_run.Unknown, OSError):
         return [], ""
-    return found, last
 
 
 def red_run_reason(matched, commit=False):
@@ -1200,28 +1313,55 @@ def _rewritten(where, tracking, base, source):
     return git_reads.branch_is_ancestor(where, source, base) is False
 
 
+def _red_run_base(where, source, base, remote, memo):
+    """The base of the red-run range. The conflict check accepts the source's upstream as a base when the destination
+    has no tracking ref. An upstream on another remote than the pushed one holds commits this push does not send to
+    the pushed remote, so its tip is no base: the default base stands in for it (one `git rev-parse` more, only when the
+    base is an upstream). An upstream on the pushed remote, a local branch, or no readable default base keeps `base`."""
+    if base != source + "@{upstream}":
+        return base
+    done = _git(where, "rev-parse", "--symbolic-full-name", base)
+    full = done.stdout.strip() if done is not None and done.returncode == 0 else ""
+    if not full.startswith("refs/remotes/"):
+        return base
+    name = _pushed_remote(where, remote)
+    if name and full.startswith("refs/remotes/%s/" % name):
+        return base
+    if "default" not in memo:
+        memo["default"] = resolve_default_base(where) or ""
+    return memo["default"] or base
+
+
 def _push_hit(segment, stripped, cwd, args, is_test_rel=None, virtual=None):
     """Return `("push", file)` for the first file a `git push` would send with all three conflict markers,
     else `("red-run", (found, last, rewritten))` for the first ref that sends a test commit with no valid Red-run trailer
     (`_red_run_found`), else `("", "")`. For each ref the push names, the range is the merge base with the
     destination's remote-tracking tip, else the source's upstream, else the default base, up to the local
     source ref: in the usual case one `git diff --check`, with no read of the top folder, the source or a base
-    first. The red-run check then adds one `git log` over the same base, and on a hit one `git rev-parse` of the
-    source (the tip an amend reaches) and one `git merge-base --is-ancestor`, plus one shallow probe when that says
-    no: a destination tracking ref the source no longer holds is a branch rewritten since its push."""
+    first. The red-run check then adds one `git log` over the same base (`_red_run_base`: the source's upstream on another
+    remote is no base), and when it hits, a second less the pushed remote's refs (`_red_run_found`, with `_pushed_remote`:
+    one `git config` more for a remote named by a URL or a path). A hit that holds a landed commit also runs one `git fetch
+    --prune` of the remote and a third read, then one `git rev-parse` of the
+    source (the tip an amend reaches) and one `git merge-base --is-ancestor` (before that fetch, so a ref the fetch moves is no rewrite), plus one shallow
+    probe when that says no: a destination tracking ref the source no longer holds is a branch rewritten since its push."""
     virtual = virtual or {"tip": None, "pending": [], "unreadable": False}
-    for where, source, _dest, tracking, _remote, memo in _push_refs(segment, stripped, cwd, args):
+    for where, source, _dest, tracking, remote, memo in _push_refs(segment, stripped, cwd, args):
         done, source, base = _checked_range(where, source, tracking, memo)
         if done is None:
             continue
         name = _triplet_file(_kinds_of(done, where, source))
         if name:
             return "push", name
-        found, last = _red_run_found(where, source, base, memo, is_test_rel, virtual)
+        base = _red_run_base(where, source, base, remote, memo)
+        found, last = _red_run_found(where, source, base, memo, is_test_rel, virtual, remote, tracking)
         if found:
             # `last` is the newest non-merge commit, which a merge at the tip sits above; an amend reaches only the tip.
             tip = last if last == "new" else _ref_sha(where, source)[:7]
-            return "red-run", (found, tip, _rewritten(where, tracking, base, source))
+            # Read before any refresh: a refresh that moves the tracking ref past `source` is not a rewrite.
+            rewritten = memo.get(("rewritten", tracking), None)
+            if rewritten is None:
+                rewritten = _rewritten(where, tracking, base, source)
+            return "red-run", (found, tip, rewritten)
     return "", ""
 
 
@@ -1260,7 +1400,7 @@ def _octopus_hit(segment, stripped, cwd, args):
     hit, and only then, the tracking refs of a configured remote are refreshed once (`git_reads.fetch_remote`, once per
     directory and remote in the call) and the range is read again; the refusal stands only when the hit survives. A
     refresh that fails or times out keeps the refusal, with `stale` True so the reason says so. A destination named
-    like the default branch is skipped before any read: push-main asks about that push, and a deny from here would
+    like the default branch is skipped before any read: force-push refuses that push, and a deny from here would
     win over the ask. One `git rev-list` for each ref, one `git config` more for a remote named by a URL or a path
     (`_remote_refs`), and on a hit one `git fetch` of a plain remote name (a URL or a path has no tracking refs)."""
     refreshed = {}

@@ -53,6 +53,7 @@ tree entirely.
 import argparse
 import calendar
 import concurrent.futures
+import contextlib
 import hashlib
 import json
 import math
@@ -982,7 +983,7 @@ def decide_worktree(where: str, entry: dict, attended: bool = False, agent_rule:
     # machine where many processes belong to another account. Same on POSIX and Windows: both
     # dispatch through `process_cwd`. Only the WHOLE enumeration failing (`processes_in`
     # returning `(None, None)`) means keep-everything.
-    inside, _unreadable = processes_in(path)
+    inside, _unreadable = processes_in_before_removal(path, recheck_inside=host_lock)
     if inside is None:
         return {"path": path, "action": "keep", "reason": "unreadable-subject"}
     if inside and host_lock:
@@ -993,8 +994,7 @@ def decide_worktree(where: str, entry: dict, attended: bool = False, agent_rule:
                     "host_lock": True, "lock_reason": host_holder,
                     "reason": "removable: finished agent's marked processes stopped, host lock lifted"}
     if inside:
-        return {"path": path, "action": "keep",
-                "reason": "process-inside: pid %s" % ", ".join(str(p) for p in sorted(inside))}
+        return {"path": path, "action": "keep", "reason": process_inside_reason(inside)}
     if host_lock:
         return {"path": path, "action": "reap", "unlock": True, "host_lock": True,
                 "lock_reason": host_holder, "reason": "removable: finished agent, host lock lifted"}
@@ -1815,10 +1815,12 @@ def decide_listener(entry: dict):
     "reap"|"keep", "reason"}. ENTRY is one of `find_swept_listeners`'s own results, already
     matched to a checkout this sweep covers.
 
-    Reapable only when ALL three of these answer a confirmed yes, in this order: orphaned; no
-    live Claude session has a cwd in the same checkout (git_reads.py's own tested oracle, reused
-    verbatim, never re-derived here); owned by the current user. Any `None` along the way
-    means keep, reported as `unreadable-subject`."""
+    Reapable only when ALL of these answer a confirmed yes, in this order: orphaned; the checkout
+    holds no uncommitted work; no process but the listener (or its own descendants) has a cwd in
+    it; no live Claude session has a cwd in the same checkout (git_reads.py's own tested oracle,
+    reused verbatim, never re-derived here); owned by the current user. Because the dirty and
+    process checks run first, a session record whose folder is gone reads as not in the checkout
+    (`absent_is_out`). Any `None` along the way means keep, reported as `unreadable-subject`."""
     pid = entry["pid"]
     base = dict(entry, command=process_command(pid))
 
@@ -1828,7 +1830,19 @@ def decide_listener(entry: dict):
     if not orphan:
         return {**base, "action": "keep", "reason": "not-orphaned"}
 
-    live = git_reads.worktree_live_session(entry["checkout"])
+    dirty = read_dirty(entry["checkout"])
+    if dirty is None:
+        return {**base, "action": "keep", "reason": "unreadable-subject"}
+    if dirty:
+        return {**base, "action": "keep", "reason": "dirty"}
+    inside, _unreadable = processes_in(entry["checkout"])
+    if inside is None:
+        return {**base, "action": "keep", "reason": "unreadable-subject"}
+    others = _pids_but_listener(inside, pid)
+    if others:
+        return {**base, "action": "keep", "reason": process_inside_reason(others)}
+
+    live = git_reads.worktree_live_session(entry["checkout"], absent_is_out=True)
     if live is None:
         return {**base, "action": "keep", "reason": "unreadable-subject"}
     if live:
@@ -2157,14 +2171,38 @@ def _open_file_holders(path: str):
     return [int(line[1:]) for line in answer.stdout.splitlines() if line[1:].isdigit() and line[0] == "p"]
 
 
-def _live_process_inside(path: str):
-    """A reason string when a live process has its cwd or an open file inside PATH, or when that
-    cannot be read; `None` when none does. Removing a folder under a running process breaks it, so
-    a read that fails keeps the folder."""
-    inside, _unreadable = processes_in(path)
+def _open_files_under(roots):
+    """`[(pid, name)]` for every open file at or under each of ROOTS from ONE `lsof -Fpn +D A +D B ...`
+    (one `+D` per folder, so no folder outside the list is scanned), or `None` when that cannot be
+    read. macOS only: the caller reads other systems per folder. No open file is exit code 1 with
+    nothing printed, which is a clear read. Exit code 1 with a message on stderr and no open file
+    listed (a folder that went missing, a usage error, a warning) is not a clear read: it is `None`."""
+    argv = ["lsof", "-Fpn"]
+    for root in roots:
+        argv += ["+D", root]
+    try:
+        answer = _nowindow.run(argv, capture_output=True, text=True, timeout=60)
+    except Exception:
+        return None
+    if answer.returncode not in (0, 1):
+        return None
+    if answer.returncode == 1 and answer.stderr.strip() and not answer.stdout.strip():
+        return None
+    found = []
+    pid = None
+    for line in answer.stdout.splitlines():
+        if line.startswith("p"):
+            pid = int(line[1:]) if line[1:].isdigit() else None
+        elif line.startswith("n") and pid is not None:
+            found.append((pid, line[1:]))
+    return found
+
+
+def _busy_reason(inside, holders):
+    """A reason string when a live process has its cwd or an open file inside the folder, or when that
+    cannot be read; `None` when none does. INSIDE and HOLDERS are the two reads' pid lists (None: failed)."""
     if inside is None:
         return "the process list could not be read"
-    holders = _open_file_holders(path)
     if holders is None:
         return "the open files could not be read"
     pids = sorted(set(inside) | set(holders))
@@ -2173,11 +2211,49 @@ def _live_process_inside(path: str):
     return None
 
 
+def _live_process_inside(path: str):
+    """A reason string when a live process has its cwd or an open file inside PATH, or when that
+    cannot be read; `None` when none does. Removing a folder under a running process breaks it, so
+    a read that fails keeps the folder."""
+    inside, _unreadable = processes_in(path)
+    return _busy_reason(inside, _open_file_holders(path) if inside is not None else [])
+
+
+def _busy_reasons(paths):
+    """`{path: reason or None}` for leftover candidates, with one cwd table and, on macOS, ONE
+    open-files read for all the folders (a read per folder cost a `lsof +D` start each)."""
+    answers = {}
+    waiting = []
+    for path in paths:
+        inside, _unreadable = processes_in(path)
+        if inside is None or inside:
+            answers[path] = _busy_reason(inside, [])
+        elif sys.platform == "darwin" and not os.path.exists(path):
+            answers[path] = None  # gone: no holder, and one such folder would make `lsof +D` fail for the whole batch
+        else:
+            waiting.append(path)
+    if waiting and sys.platform == "darwin":
+        table = _open_files_under(waiting)
+        if table is None and len(waiting) > 1:
+            # one unreadable folder fails the whole batch: judge each folder alone, so only that one stays unknown
+            for path in waiting:
+                answers.update(_busy_reasons([path]))
+            return answers
+        for path in waiting:
+            holders = None if table is None else [pid for pid, name in table if _cwd_under_checkout(name, path)]
+            answers[path] = _busy_reason([], holders)
+    else:
+        for path in waiting:
+            answers[path] = _busy_reason([], _open_file_holders(path))
+    return answers
+
+
 def find_leftover_temp(temp_root: str, now: float):
     """One decision per folder that names an owner pid: reap when the owner is dead, the folder is
     over LEFTOVER_TEMP_MIN_AGE old and no live process runs inside it, else keep. A link, a file and
-    any other name are never listed."""
+    any other name are never listed. One pass reads the cwd table once and the open files once."""
     decisions = []
+    candidates = []  # decisions whose folder still needs the process read
     for sub, pattern in LEFTOVER_TEMP_PATTERNS:
         parent = temp_root if sub is None else os.path.join(temp_root, sub)
         if sub is not None and is_link(parent):  # listdir would follow it out of the temp root
@@ -2204,12 +2280,17 @@ def find_leftover_temp(temp_root: str, now: float):
             elif not _owner_dead(pid):
                 action, reason = "keep", "owner pid %d is alive" % pid
             else:
-                busy = _live_process_inside(path)
-                if busy:
-                    action, reason = "keep", busy
-                else:
-                    action, reason = "reap", "owner pid %d is dead, idle %d min" % (pid, age // 60)
-            decisions.append({"path": path, "action": action, "reason": reason})
+                action, reason = None, "owner pid %d is dead, idle %d min" % (pid, age // 60)
+            decision = {"path": path, "action": action, "reason": reason}
+            decisions.append(decision)
+            if action is None:
+                candidates.append(decision)
+    if candidates:
+        with shared_process_table():
+            busy = _busy_reasons([d["path"] for d in candidates])
+        for decision in candidates:
+            why = busy[decision["path"]]
+            decision["action"], decision["reason"] = ("keep", why) if why else ("reap", decision["reason"])
     return decisions
 
 
@@ -2227,6 +2308,11 @@ def leftover_temp_pass(confirm: bool):
         elif _past_deadline():
             print("  keep       %s (not reaped: deadline)" % decision["path"])
         else:
+            with fresh_process_reads():  # a removal never rests on the pass's older read
+                busy = _live_process_inside(decision["path"])
+            if busy:
+                print("  keep       %s (not reaped: %s)" % (decision["path"], busy))
+                continue
             try:
                 shutil.rmtree(decision["path"])
                 print("  REAPED     %s (%s)" % (decision["path"], decision["reason"]))
@@ -2286,8 +2372,9 @@ def print_loose_processes_report(found, out=sys.stdout):
 # one `ps` call per pid, one `git worktree list` per worktree, one session-record read per
 # worktree. Measured on a real machine: 67 of 70 s. `_RUN` is a dict only while a PREVIEW runs
 # (`main` sets it, without --confirm and outside --tier1); every read below then happens once.
-# A run that acts is never cached: the re-check right before a delete must see the machine as it
-# is NOW. Direct callers (the tests, other scripts) see `_RUN is None` and read fresh.
+# A run that acts is never cached this way: the re-check right before a delete must see the machine
+# as it is NOW. It shares one cwd table instead (`shared_process_table`) and reads a fresh one
+# before each removal. Direct callers (the tests, other scripts) see `_RUN is None` and read fresh.
 _RUN = None
 _NO_TABLE = object()  # `_ps_row`: no table to read, so the caller runs its own per-pid read
 _WORKTREE_LIST_ARGS = ("worktree", "list", "--porcelain")
@@ -2394,8 +2481,58 @@ def _first_cwd_by_pid(table):
     return found
 
 
-def _all_cwds_macos():
-    return _memo("cwds", _read_all_cwds_macos)
+# A run that acts shares ONE cwd table (`shared_process_table`): every judgement reads it, and only
+# a removal (or a stop) takes a fresh read first, so a process that enters a folder after the first
+# read still keeps it. A table that failed stays failed for the run: every judgement then keeps.
+_CWD_SHARE = None  # {} while a run shares its table; its "table" key holds the read, None if it failed
+
+
+@contextlib.contextmanager
+def shared_process_table():
+    """Within the block, the cwd table is read once and shared (macOS). Nested blocks share the outer one."""
+    global _CWD_SHARE
+    with _RUN_LOCK:
+        outer = _CWD_SHARE is not None
+        if not outer:
+            _CWD_SHARE = {}
+    try:
+        yield
+    finally:
+        if not outer:
+            with _RUN_LOCK:
+                _CWD_SHARE = None
+
+
+def table_is_shared() -> bool:
+    """True when a judgement reads a shared cwd table, so a removal must take a fresh read first."""
+    return sys.platform == "darwin" and _RUN is None and _CWD_SHARE is not None
+
+
+@contextlib.contextmanager
+def fresh_process_reads():
+    """Within the block, every cwd read is its own, not the run's shared one: a removal's check, and
+    a settle loop that waits on a stopped process. The shared read stays as it was."""
+    global _CWD_SHARE
+    with _RUN_LOCK:
+        saved, _CWD_SHARE = _CWD_SHARE, None
+    try:
+        yield
+    finally:
+        with _RUN_LOCK:
+            _CWD_SHARE = saved
+
+
+def _all_cwds_macos(timeout=60):
+    """The cwd table: the run's shared read when one is active (`shared_process_table`), else one read."""
+    if _RUN is not None:
+        return _memo("cwds", _read_all_cwds_macos)
+    with _RUN_LOCK:
+        share = _CWD_SHARE
+        if share is None:
+            return _read_all_cwds_macos(timeout)
+        if "table" not in share:
+            share["table"] = _read_all_cwds_macos(timeout)
+        return share["table"]
 
 
 def _read_all_cwds_macos(timeout=60):
@@ -2420,6 +2557,19 @@ def _read_all_cwds_macos(timeout=60):
             table.append((pid, line[1:]))
     # A running machine always has processes; an empty table is a failed read, not "nobody".
     return table or None
+
+
+def processes_in_before_removal(path: str, recheck_inside: bool = False):
+    """`processes_in` for a judgement that may end in a removal. A run that shares its table judges
+    from the shared read; a clear answer (no process inside) is then read again fresh, because a
+    removal must not rest on an old read. A process found inside keeps the tree on the shared read
+    alone, unless RECHECK_INSIDE: the caller will stop those pids, so it needs them fresh too. A
+    failed read is `(None, None)` and keeps."""
+    inside, unreadable = processes_in(path)
+    if inside is None or (inside and not recheck_inside) or not table_is_shared():
+        return inside, unreadable
+    with fresh_process_reads():
+        return processes_in(path)
 
 
 def processes_in(path: str):
@@ -2449,6 +2599,36 @@ def processes_in(path: str):
         if _cwd_under_checkout(cwd, path):
             inside.append(pid)
     return inside, unreadable
+
+
+def read_dirty(where: str, pathspecs=()):
+    """The `git status --porcelain` lines of WHERE (limited to PATHSPECS), or None when they cannot be read (a read
+    that raises included)."""
+    try:
+        return git_reads.porcelain(where, pathspecs)
+    except Exception:
+        return None
+
+
+def process_inside_reason(pids) -> str:
+    return "process-inside: pid %s" % ", ".join(str(p) for p in sorted(pids))
+
+
+def _descends_from(pid: int, ancestor: int) -> bool:
+    """True when ANCESTOR is on PID's parent chain. A parent that cannot be read ends the climb: not a descendant."""
+    current = pid
+    for _ in range(MAX_CLIMB):
+        current = _parent_pid(current)
+        if current is None or current <= 0:
+            return False
+        if current == ancestor:
+            return True
+    return False
+
+
+def _pids_but_listener(inside, listener_pid: int):
+    """INSIDE without the listener and its own descendants: the processes that still keep the checkout."""
+    return [p for p in inside if p != listener_pid and not _descends_from(p, listener_pid)]
 
 
 # ------------------------------------------------------------------ acting on a reapable listener
@@ -2717,7 +2897,7 @@ def _restore_cut_short(where: str, entry: dict):
         return
     if git_reads.worktree_live_session(path) is not False:
         return
-    inside, _unreadable = processes_in(path)
+    inside, _unreadable = processes_in_before_removal(path)
     if inside != []:
         return
     git_reads._git(path, "checkout-index", "--all", "--quiet")  # the decide below reads the result
@@ -2955,14 +3135,13 @@ def husk_verdict(root: str, path: str, entries, names):
     if not contents or not set(contents) <= set(names):
         return None
     live = git_reads.worktree_live_session(path)
-    inside, _ = processes_in(path)
+    inside, _ = processes_in_before_removal(path)
     if live is None or inside is None:
         return keep
     if live:
         return {"path": path, "action": "keep", "reason": "live-session"}
     if inside:
-        return {"path": path, "action": "keep", "reason": "process-inside: pid %s"
-                % ", ".join(str(p) for p in sorted(inside))}
+        return {"path": path, "action": "keep", "reason": process_inside_reason(inside)}
     return {"path": path, "action": "husk", "reason": "only " + ", ".join(sorted(contents))}
 
 
@@ -3066,19 +3245,107 @@ def scan_worktree(wt: str, names, stop_at=None):
     return builds, trash
 
 
+def untrash_name(basename: str):
+    """The folder name a reap renamed to BASENAME, or None when BASENAME is no trash name."""
+    return basename.rsplit(".reap-trash-", 1)[0] if is_trash_name(basename) else None
+
+
+def has_nested_git(path: str):
+    """True when a nested repo sits anywhere under the folder PATH: a `.git` folder, file or link, or a bare
+    repo (a folder holding `HEAD`, `objects` and `refs`). False when none does, None when a folder under it
+    could not be read. A nested repo or a linked worktree's pointer file holds work the parent repo's status
+    reads as one untracked line. The walk stops at the first hit and follows no link."""
+    unreadable = []
+    for _, dirnames, filenames in os.walk(path, followlinks=False, onerror=unreadable.append):
+        if (".git" in dirnames or ".git" in filenames
+                or ("HEAD" in filenames and "objects" in dirnames and "refs" in dirnames)):
+            return True
+    return None if unreadable else False
+
+
+def _trash_siblings(parent: str, base: str, original: str):
+    """The other trash names beside BASE that a reap made from ORIGINAL, or None when PARENT cannot be listed."""
+    try:
+        names = os.listdir(parent)
+    except OSError:
+        return None
+    return [n for n in names if n != base and untrash_name(n) == original]
+
+
+def _own_trash_lines(parent: str, base: str, original: str, lines):
+    """The status LINES that belong to the trash folder BASE, or None when git cannot say: the path prefix
+    read or the sibling listing failed. A line under the trash name is its own. A tracked file the rename
+    moved away from the original name is listed as deleted there, and belongs to the trash folder that now
+    holds that file. Sibling trash folders from one original name list their moved files under the same
+    original name, so a deletion whose file sits in a sibling and not in BASE is the sibling's. A line it
+    cannot place (untracked, quoted, renamed, not a deletion, outside the original name) stays BASE's: it keeps,
+    never drops."""
+    answer = git_reads._git(parent, "rev-parse", "--show-prefix")
+    if answer is None or answer.returncode != 0:
+        return None
+    prefix = answer.stdout.strip()
+    own_dir, original_dir = prefix + base + "/", prefix + original + "/"
+    siblings = None
+    mine = []
+    for line in lines:
+        text = line[3:]
+        if (line[:2] == "??" or text.startswith(own_dir) or text == own_dir[:-1] or text.startswith('"')
+                or " -> " in text or not text.startswith(original_dir) or "D" not in line[:2]):
+            mine.append(line)
+            continue
+        rel = text[len(original_dir):]
+        if os.path.lexists(os.path.join(parent, base, rel)):
+            mine.append(line)
+            continue
+        if siblings is None:
+            siblings = _trash_siblings(parent, base, original)
+            if siblings is None:
+                return None
+        if not any(os.path.lexists(os.path.join(parent, n, rel)) for n in siblings):
+            mine.append(line)
+    return mine
+
+
+def trash_dirty(path: str):
+    """True when the trash folder PATH holds work, False when it holds none, None when git cannot say.
+    The reap renames a build folder whole and deletes it whatever it holds (decision
+    build-dirs-reaped-at-agent-end), so an untracked path under the trash name is build output, not work.
+    What is work is a path git tracks: a staged or changed file, or a tracked file the rename moved away
+    from the build name (listed as deleted there), judged on this folder's own lines only. A nested repo
+    anywhere inside is work too: the parent repo cannot see it. The read is limited to the trash
+    name and the name it had before the rename."""
+    parent, base = os.path.split(os.path.normpath(path))
+    original = untrash_name(base)
+    if original is None:
+        return None
+    lines = read_dirty(parent, (base, original))
+    if lines is not None:
+        lines = _own_trash_lines(parent, base, original, lines)
+    if lines is not None and any(line[:2] != "??" for line in lines):
+        return True
+    nested = has_nested_git(path)
+    if nested:
+        return True
+    return None if lines is None or nested is None else False
+
+
 def trash_verdict(path: str):
-    """`(delete, reason)` for one trash folder. Keep on a live session, a process inside, or any
-    read that cannot tell."""
+    """`(delete, reason)` for one trash folder. Keep on uncommitted work, a live session, a process
+    inside, or any read that cannot tell. Because the dirty and process checks run here, a session
+    record whose folder is gone reads as not in the folder (`absent_is_out`)."""
     if is_link(path) or not os.path.isdir(path):
         return False, "not a real folder"
-    live = git_reads.worktree_live_session(path)
-    inside, _ = processes_in(path)
-    if live is None or inside is None:
+    dirty = trash_dirty(path)
+    inside, _ = processes_in_before_removal(path)
+    live = git_reads.worktree_live_session(path, absent_is_out=True)
+    if dirty is None or live is None or inside is None:
         return False, "unreadable-subject"
+    if dirty:
+        return False, "dirty"
     if live:
         return False, "live-session"
     if inside:
-        return False, "process-inside: pid %s" % ", ".join(str(p) for p in sorted(inside))
+        return False, process_inside_reason(inside)
     return True, "leftover trash"
 
 
@@ -3228,6 +3495,12 @@ def _fetch_prune(root: str) -> bool:
 
 def sweep_repo(root: str, confirm: bool, restore_log_path: str, mode: str = "full",
                attended: bool = False, own_lock_rule: bool = True):
+    """One repository (`_sweep_repo`), with one cwd table shared by every tree it judges."""
+    with shared_process_table():
+        return _sweep_repo(root, confirm, restore_log_path, mode, attended, own_lock_rule)
+
+
+def _sweep_repo(root, confirm, restore_log_path, mode, attended, own_lock_rule):
     """One repository. `mode` "full" is the whole sweep. "tier1" acts for real, with no
     --confirm, and only on stale registrations and husks: no worktree, branch or process work.
     "branches" reaps branches only (preview without --confirm), removes no worktree, and holds
@@ -3719,7 +3992,8 @@ def main(argv=None) -> int:
     _DEADLINE = None if n is None else _now() + (
         0 if n != n else min(JUDGE_BUDGET_SECONDS, n - DEADLINE_TAIL_SECONDS))
     try:
-        return _sweep_roots(args, roots, restore_log_path, mode)
+        with shared_process_table():  # the whole run reads the cwd table once
+            return _sweep_roots(args, roots, restore_log_path, mode)
     finally:
         _LIVE_HEADS = _DEADLINE = _FETCH_FAILED = None
         undo()

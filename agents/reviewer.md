@@ -3,7 +3,7 @@ name: reviewer
 description: Reviews a builder's work against its brief and the governing decisions. Reads, greps, and runs checks. Never edits.
 model: haiku
 effort: xhigh
-disallowedTools: Edit, Write, NotebookEdit, mcp__claude-code-remote__*
+disallowedTools: Edit, Write, NotebookEdit, mcp__*
 isolation: worktree
 ---
 

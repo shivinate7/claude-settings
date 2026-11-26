@@ -232,6 +232,9 @@ class FakeHost:
         rows = [state for row_name, state, head in self.named_checks if row_name == name and head == sha]
         return rows[-1] if rows else None
 
+    def batch_member_runs(self, members, heads):  # the fake of Host.batch_member_runs -> (kept, left): no head reads a failed run here, so every member stays; the real split is pinned by BatchMemberOwnRunGreen
+        return list(members), []
+
     def holds_head(self, head, other):  # no base holds a head this fake reads: a record's head is a past head only where a case says so
         return False
 
@@ -2019,10 +2022,11 @@ class ClaudeMdFlag(Env):
         self.assert_flagged(rc, out, "CLAUDE.md")
 
     def unreadable(self, fail):
-        """Patch merge.sh so the PR-paths read fails: `fail(args)` returns (rc, text) or raises. -> the list of args it saw."""
+        """Patch merge.sh so the PR-paths read fails: `fail(args)` returns (rc, text) or raises. -> the list of args it saw.
+        Only the `--name-only` diff with a `...` range is the PR-paths read. The head-config read is `--name-status`, so it runs for real."""
         real_sh, seen = merge.sh, []
         def stub(args, cwd=None, input=None, env=None, stdout_only=False, **kw):  # kw: other sh calls of the run pass more keywords (boot_stamp passes timeout on macOS); the real sh takes them
-            if "diff" in args and any("..." in a for a in args):
+            if "diff" in args and "--name-only" in args and any("..." in a for a in args):
                 seen.append(args)
                 return fail(args)
             return real_sh(args, cwd=cwd, input=input, env=env, stdout_only=stdout_only, **kw)
@@ -4485,7 +4489,7 @@ try:
             if S.get("state_read_fail"):
                 raise Refused(S["state_read_fail"])
             head = S.get("state_head") or head
-            merged = bool(S.get("oid"))
+            merged = bool(S.get("oid")) and not S.get("read_open_after_put")  # read_open_after_put: the merge landed on main, but the pull request still reads OPEN (the Nov 25 2026 incident)
             pr = pull(n, head, S.get("head_ref", "feat"), S.get("base", "main"), "closed" if merged else "open", merged, False, None if merged else True,
                       "unknown" if merged else "clean", S.get("body", ""), S["oid"] if merged else TEST_MERGE_SHA)
         else:  # the head read
@@ -4543,7 +4547,7 @@ try:
             raise Refused(api_error(409, "Head branch was modified. Review and try the merge again."))
         B = S.get("base", "main")
         git("fetch", "-q", "origin"); git("checkout", "-q", "-B", B, "origin/" + B)
-        git("merge", "-q", "--no-ff", "-m", "merge", sha or feat_head()); git("push", "-q", "origin", B)
+        git("merge", "-q", "--no-ff", "-m", "merge", S.get("lands_sha") or sha or feat_head()); git("push", "-q", "origin", B)  # lands_sha: the commit the merge puts on main, when a case names another commit of the branch
         S["oid"] = git("rev-parse", "HEAD"); save()
         if msg:
             finish(msg, code, include)
@@ -5348,7 +5352,7 @@ class GhHalf(Env):
         self.assertEqual(rc, 1, out)
         self.assertEqual(self.calls().count(MERGE_CALL), 4, out)  # one try and three retries
         if rate:
-            self.rate_waits_the_whole_ladder(out)
+            self.rate_waits_the_whole_ladder(out, trailing=(merge.NET_PAUSE,))  # the merge reply left the PR open: one re-read of main, one NET_PAUSE
         self.assertIn(STATE_READ, self.calls())
         self.assertIn("Claim record numbers", self.feat_subjects())  # the claim stays
         self.assertFalse(self.lock_ref())
@@ -5467,11 +5471,13 @@ class GhHalf(Env):
 
     LOCK_MARGIN = 300  # seconds, written as a literal so these cases do not read merge.LOCK_MARGIN
 
-    def rate_waits_the_whole_ladder(self, out):
+    def rate_waits_the_whole_ladder(self, out, trailing=()):
         """A rate limit that never clears, under the lock (a rate wait is the exception to the lock's take expiry). The run waits
         the whole ladder, 60 + 300 + 900 s, and only then stops as a network error: it never stops for the lock. As each wait starts, the lock on origin
-        (read there, never lock.until) already expires LOCK_MARGIN after the wait ends. The caller counts the gh calls: 4. A settle pause is no rate wait."""
-        self.assertEqual([s for s in self.paused if s != merge.SETTLE_SECONDS], RATE_LADDER, out)
+        (read there, never lock.until) already expires LOCK_MARGIN after the wait ends. The caller counts the gh calls: 4. A settle pause is no rate wait.
+        `trailing`: the pauses this path takes after the ladder, in order. Only a merge reply that leaves the PR open takes one, the NET_PAUSE re-read
+        of main (Host.main_merge_of); the other paths take none. Named, never filtered: a stray retry pause still fails the list."""
+        self.assertEqual([s for s in self.paused if s != merge.SETTLE_SECONDS], RATE_LADDER + list(trailing), out)
         self.assertEqual([w[0] for w in self.at_pause], RATE_LADDER, out)
         for wait, ends, expiry in self.at_pause:
             self.assertIsNotNone(expiry, f"no lock on origin at the {wait} s wait")
@@ -5642,9 +5648,255 @@ class GhHalf(Env):
         self.assertIn("reverted on feat", out)
         self.assertEqual(rc, 1, out)
         self.assertEqual(self.calls().count(MERGE_CALL), 1)  # a refusal is not retried
-        self.assertNotIn(merge.NET_PAUSE, self.paused)  # no network-retry pause
+        self.assertEqual(self.paused, [merge.NET_PAUSE], "the refusal reply was not read once more after one NET_PAUSE, or another wait was taken\n" + out)  # one re-read of main: the one pause before it
         self.assertTrue(self.reverted())
         self.assertFalse(self.lock_ref())
+
+    # ---- the Nov 25 2026 incident (PRs 3888 and 3909): the merge call answered 405 "Merge already in progress" or 502, the pull request read OPEN,
+    # and origin/main held the merge commit. Only a proven refusal reverts the claim (standing-merge-grant), so a reply with the PR OPEN is a refusal
+    # unless main holds this head's merge.
+
+    def merge_reply_with_pr_open(self, reply, lands, **kw):
+        """The merge call answers `reply`; the merge lands on main when `lands`; the pull request reads OPEN after the call. -> (rc, out)."""
+        self.set(merge_replies=[[reply, lands]], read_open_after_put=True, **kw)
+        return self.go()
+
+    def assert_merged_and_carries_on(self, rc, out):
+        """The merge landed on main at this head: the run reads it as merged, prints the merged-as line, cuts the branch, and keeps the claim."""
+        self.assertEqual(rc, 0, "a merge that landed on main at this head was not read as merged\n" + out)
+        self.assertNotIn("reverted on", out, "the claim was reverted though main holds this head's merge\n" + out)
+        self.assertIn("merge: #7 merged as ", out, "no merged-as line: the run did not read the merge as landed\n" + out)
+        self.assertEqual(self.calls().count(MERGE_CALL), 1, "the merge that landed on main was sent again")
+        self.assertNotIn("refs/heads/feat", self.refs(), "the after-merge step did not cut the branch")
+        self.assertEqual(self.claims("main"), 1, "the claim is not on main")
+        self.assertFalse(self.lock_ref(), "the merge lock was not released")
+
+    def test_a_405_merge_in_progress_with_the_pr_open_and_main_holding_the_head_merge_reads_merged_and_carries_on(self):
+        rc, out = self.merge_reply_with_pr_open(rest_err(405, "Merge already in progress"), True)
+        self.assert_merged_and_carries_on(rc, out)
+
+    def test_a_502_merge_reply_with_the_pr_open_and_main_holding_the_head_merge_reads_merged_and_is_not_resent(self):
+        rc, out = self.merge_reply_with_pr_open(rest_err(502, "Server Error"), True)
+        self.assert_merged_and_carries_on(rc, out)
+
+    def test_a_405_merge_in_progress_with_the_pr_open_and_main_without_the_head_stays_a_refusal(self):  # control: green now and after
+        rc, out = self.merge_reply_with_pr_open(rest_err(405, "Merge already in progress"), False)
+        self.assertEqual(rc, 1, out)
+        self.assertIn("reverted on feat", out)
+        self.assertEqual(self.calls().count(MERGE_CALL), 1, out)  # a refusal is not retried
+        self.assertTrue(self.reverted())
+        self.assertFalse(self.lock_ref())
+
+    def test_a_405_merge_in_progress_whose_main_holds_another_commit_of_the_branch_stays_a_refusal(self):  # control: green now and after
+        before = self.head()  # the branch head before the claim push: a commit of this branch that is not the proven head
+        rc, out = self.merge_reply_with_pr_open(rest_err(405, "Merge already in progress"), True, lands_sha=before)
+        self.assertEqual(rc, 1, out)
+        self.assertIn("reverted on feat", out)
+        self.assertTrue(self.reverted())
+        self.assertFalse(self.lock_ref())
+
+    def test_a_405_merge_in_progress_whose_read_of_main_fails_is_unknown_and_never_reads_merged(self):  # control: green now and after
+        self.set(merge_replies=[[rest_err(405, "Merge already in progress"), True]], read_open_after_put=True)  # the merge landed on main
+        real_git = merge.git
+        def git_fails_after_the_merge_call(cwd, *a, input=None):  # the read of main after the merge call cannot run
+            if MERGE_CALL in self.calls() and a[:1] == ("fetch",):
+                return 1, "fatal: could not read origin: the object store is unreadable"
+            return real_git(cwd, *a, input=input)
+        with unittest.mock.patch.object(merge, "git", git_fails_after_the_merge_call):
+            rc, out = self.go()
+        self.assertNotEqual(rc, 0, out)  # an unknown read refuses
+        self.assertNotIn("merge: #7 merged as ", out, "a failed read of main was read as a merge")
+        self.assertNotIn("Traceback", out, "the run crashed rather than refused")
+        self.assertNotIn("reverted on", out, "an unknown read of main reverted the claim:\n" + out)
+        self.assertFalse(self.reverted(), "an unknown read of main reverted the claim on feat")
+
+    def merge_onto_main(self, n, second=None):
+        """Adds n merges on origin/main, each on the last, and pushes main by origin. Each merge keeps main's tree. Its second parent is `second`, else the commit main's first parent names (the seed)."""
+        sh(self.other, "git", "fetch", "-q", "origin")
+        top = sh(self.other, "git", "rev-parse", "origin/main")
+        tree = sh(self.other, "git", "rev-parse", "origin/main^{tree}")
+        second = second or sh(self.other, "git", "rev-parse", "origin/main^1")
+        for i in range(n):
+            top = sh(self.other, "git", "commit-tree", tree, "-p", top, "-p", second, "-m", f"merge {i} onto main")
+        sh(self.other, "git", "push", "-q", "origin", f"{top}:refs/heads/main")
+
+    def after_the_merge_call(self, action, nth=1):
+        """A patch of merge.git: the nth fetch of main after the merge call runs `action` first, so that fetch reads main as `action` left it. nth=1 is the
+        first read of main, the one the tool makes after a 405 or 502 reply. -> the patch, a context manager."""
+        real_git = merge.git
+        reads = []
+        def git_after_the_merge_call(cwd, *a, input=None):
+            if MERGE_CALL in self.calls() and a[:1] == ("fetch",) and merge.branch_refspec("main") in a:
+                reads.append(True)
+                if len(reads) == nth:
+                    action()
+            return real_git(cwd, *a, input=input)
+        return unittest.mock.patch.object(merge, "git", git_after_the_merge_call)
+
+    def test_a_405_merge_reply_with_the_pr_open_and_a_full_window_of_main_without_the_head_is_unknown_and_never_reverts(self):
+        # The merge call lands this head on main, and 51 merges land above it before the tool reads main. The newest 50 merges are others: the window is full
+        # and holds no merge of this head, so the read is unknown. Nothing is merged, and nothing is reverted.
+        self.set(merge_replies=[[rest_err(405, "Merge already in progress"), True]], read_open_after_put=True)
+        with self.after_the_merge_call(lambda: self.merge_onto_main(51)):
+            rc, out = self.go()
+        self.assertNotEqual(rc, 0, out)
+        self.assertNotIn("merge: #7 merged as ", out, "a full window with no merge of this head was read as a merge\n" + out)
+        self.assertNotIn("reverted on", out, "a full window with no merge of this head reverted the claim:\n" + out)
+        self.assertFalse(self.reverted(), "a full window with no merge of this head reverted the claim on feat")
+        self.assertNotIn("Traceback", out, "the run crashed rather than refused")
+        self.assertEqual(self.calls().count(MERGE_CALL), 1, "the merge was sent again on an unknown read\n" + out)
+
+    def test_a_405_merge_reply_with_the_head_as_the_last_merge_of_a_full_window_reads_merged(self):  # control: green now and after
+        # The head's merge is the 50th and oldest merge in the window: a full window that holds it still reads as merged.
+        self.set(merge_replies=[[rest_err(405, "Merge already in progress"), True]], read_open_after_put=True)
+        with self.after_the_merge_call(lambda: self.merge_onto_main(49)):
+            rc, out = self.go()
+        self.assert_merged_and_carries_on(rc, out)
+
+    def test_a_405_merge_reply_with_the_pr_open_and_main_holding_a_merge_stacked_on_the_head_is_not_this_pr_merged(self):  # control: green now and after
+        # Another branch is stacked on this head: its commit is a child of the head, and main holds a merge of that child, not of the head. The merge refused, so the claim is reverted.
+        self.set(merge_replies=[[rest_err(405, "Merge already in progress"), False]], read_open_after_put=True)
+        def stacked_merge_on_main():
+            sh(self.other, "git", "fetch", "-q", "origin")
+            head = sh(self.other, "git", "rev-parse", "origin/feat")
+            stacked = sh(self.other, "git", "commit-tree", sh(self.other, "git", "rev-parse", "origin/feat^{tree}"), "-p", head, "-m", "stacked on the head")
+            sh(self.other, "git", "push", "-q", "origin", f"{stacked}:refs/heads/stacked")
+            self.merge_onto_main(1, second=stacked)
+        with self.after_the_merge_call(stacked_merge_on_main):
+            rc, out = self.go()
+        self.assertNotIn("merge: #7 merged as ", out, "a merge stacked on this head was read as this head's merge\n" + out)
+        self.assertEqual(rc, 1, out)
+        self.assertIn("reverted on feat", out, "the refused merge did not revert the claim:\n" + out)
+        self.assertTrue(self.reverted(), "the refused merge did not leave the claim reverted on feat")
+
+    def test_a_lost_merge_reply_with_main_holding_an_older_head_of_the_branch_is_not_read_as_merged(self):  # control: green now and after
+        # The merge lands an older head of this branch on main, and its reply is lost with the pull request still open. That merge is not this head's:
+        # nothing reads as merged, and the claim is kept. A lost reply is resent, so the merge call count is not asserted here.
+        before = self.head()  # the branch head before the claim push: an older head of this branch
+        rc, out = self.merge_reply_with_pr_open(NET_TLS, True, lands_sha=before)
+        self.assertNotIn("merge: #7 merged as ", out, "a merge of an older head of this branch was read as this head's merge\n" + out)
+        self.assertNotEqual(rc, 0, out)
+        self.assertNotIn("reverted on", out, "a merge of an older head of this branch reverted the claim:\n" + out)
+        self.assertFalse(self.reverted(), "a merge of an older head of this branch reverted the claim on feat")
+
+    def side_commit(self):
+        """A commit on origin/main's history that is not the PR's head: the second parent of the merges a case puts on main. -> its sha."""
+        sh(self.other, "git", "fetch", "-q", "origin")
+        return sh(self.other, "git", "commit-tree", sh(self.other, "git", "rev-parse", "origin/main^{tree}"),
+                  "-p", sh(self.other, "git", "rev-parse", "origin/main"), "-m", "a side commit, not the head")
+
+    def fixture_scope(self):
+        """-> (merges on origin/main's first-parent line, whether the PR head is an ancestor of origin/main), read after the run."""
+        sh(self.co, "git", "fetch", "-q", "origin")
+        merges = int(sh(self.co, "git", "rev-list", "--merges", "--first-parent", "--count", "origin/main"))
+        on_main = subprocess.run(["git", "-C", self.co, "merge-base", "--is-ancestor", self.head(), "origin/main"]).returncode == 0
+        return merges, on_main
+
+    @contextlib.contextmanager
+    def head_missing_after_the_merge_call(self):
+        """A patch for a clone that does not hold the PR head, after the merge call. This clone holds the head, so its id is swapped for an id the
+        clone does not hold, and the real git runs on that: `cat-file -e` fails, and the ancestor read exits 128, which branch_is_ancestor answers None.
+        Only the reads made after the merge call are swapped."""
+        missing = "0" * 40
+        real_git, real_ancestor = merge.git, merge.ancestor
+        def git_without_the_head(cwd, *a, input=None):
+            if MERGE_CALL in self.calls() and a == ("cat-file", "-e", f"{self.head()}^{{commit}}"):
+                a = ("cat-file", "-e", f"{missing}^{{commit}}")
+            return real_git(cwd, *a, input=input)
+        def ancestor_without_the_head(cwd, tip, base):
+            if MERGE_CALL in self.calls() and tip == self.head():
+                tip = missing
+            return real_ancestor(cwd, tip, base)
+        with unittest.mock.patch.object(merge, "git", git_without_the_head), unittest.mock.patch.object(merge, "ancestor", ancestor_without_the_head):
+            yield
+
+    def assert_a_refusal_off_a_full_window(self, rc, out):
+        """The fixture holds a full window of main and the head off main, so the refused head reads as not merged: the run refuses, the claim is
+        reverted as a refusal is, and the merge call is sent once."""
+        merges, on_main = self.fixture_scope()  # the scope first: the subject below holds only for a full window with the head off main
+        self.assertGreaterEqual(merges, merge.MAIN_MERGE_WINDOW, "the fixture did not fill the window, so the full-window read is not under test\n" + out)
+        self.assertFalse(on_main, "the head is an ancestor of main, so the fixture is not a head off main\n" + out)
+        self.assertEqual(rc, 1, "a refused head off a full window of main was not read as a refusal\n" + out)
+        self.assertNotIn("merge: #7 merged as ", out, "a head off main was read as merged\n" + out)
+        self.assertIn("reverted on feat", out, "a head off main read as unknown, so the claim was not reverted as a refusal\n" + out)
+        self.assertTrue(self.reverted(), "the claim is not reverted on feat\n" + out)
+        self.assertEqual(self.calls().count(MERGE_CALL), 1, "the refused merge was sent again\n" + out)
+        self.assertFalse(self.lock_ref(), "the merge lock was not released\n" + out)
+
+    def test_a_405_merge_reply_with_the_pr_open_and_a_full_window_of_main_without_the_head_reads_not_merged_and_reverts(self):
+        # The merge call lands nothing. Main's newest 50 merges are others, and the head is off main: the window is full, and the read finds the head off main.
+        self.set(merge_replies=[[rest_err(405, "Merge already in progress"), False]], read_open_after_put=True)
+        side = self.side_commit()
+        with self.after_the_merge_call(lambda: self.merge_onto_main(merge.MAIN_MERGE_WINDOW, second=side)):
+            rc, out = self.go()
+        self.assert_a_refusal_off_a_full_window(rc, out)
+
+    def test_a_405_merge_reply_with_the_pr_open_and_a_full_window_of_main_whose_clone_lacks_the_head_reads_not_merged_and_reverts(self):
+        # The same window and refused merge, and this clone does not hold the head. A head the clone lacks is not on main, so the refusal stands.
+        self.set(merge_replies=[[rest_err(405, "Merge already in progress"), False]], read_open_after_put=True)
+        side = self.side_commit()
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(self.after_the_merge_call(lambda: self.merge_onto_main(merge.MAIN_MERGE_WINDOW, second=side)))
+            stack.enter_context(self.head_missing_after_the_merge_call())
+            rc, out = self.go()
+        self.assert_a_refusal_off_a_full_window(rc, out)
+
+    def record_step(self, name, real, seen):
+        """A post-merge step that records its arguments in seen[name], then calls the real step."""
+        def step(*a, **k):
+            seen[name] = a
+            return real(*a, **k)
+        return step
+
+    def spy_post_merge_steps(self):
+        """Patches the three post-merge steps that read the base range, each recording its arguments. -> (the patches, a context manager; the
+        recorded arguments of each step by its name)."""
+        seen, patches = {}, contextlib.ExitStack()
+        for name in ("prose_judge_plan", "where_else_plan", "idle_lanes_after_merge"):
+            patches.enter_context(unittest.mock.patch.object(merge, name, self.record_step(name, getattr(merge, name), seen)))
+        return patches, seen
+
+    def assert_post_merge_steps_read_the_pr(self, seen, out):
+        """Each post-merge step that reads the base range got a base that still lacks the PR head, so its range shows the PR's own diff and commits."""
+        for name in ("prose_judge_plan", "where_else_plan", "idle_lanes_after_merge"):
+            self.assertIn(name, seen, f"{name} did not run after the merge\n{out}")
+        sha = seen["prose_judge_plan"][1]  # the PR head the run merged
+        for name in ("prose_judge_plan", "where_else_plan"):
+            base = seen[name][2]
+            self.assertTrue(base, f"{name} got no base, so its range cannot be read\n{out}")
+            files = sh(self.co, "git", "diff", "--name-only", f"{base}...{sha}").splitlines()
+            self.assertIn("docs/decisions/second.md", files, f"{name} got base {base[:9]}, whose range to the PR head lists {files}: the base already holds the head, "
+                                                             "so the range is empty and the step reads no diff\n" + out)
+        before, commit = seen["idle_lanes_after_merge"][5], seen["idle_lanes_after_merge"][1]
+        self.assertTrue(before, "idle_lanes_after_merge got no base tip before the merge, so its range cannot be read\n" + out)
+        commits = sh(self.co, "git", "rev-list", f"{before}..{commit}").split()
+        self.assertIn(sha, commits, f"idle_lanes_after_merge read {before[:9]}..{commit[:9]}, which lacks the PR head: its base already holds the merge\n" + out)
+
+    def test_a_405_merge_that_landed_leaves_the_post_merge_steps_a_base_whose_range_shows_the_pr(self):
+        # The merge call answers 405 and the merge lands on main. The pull request reads OPEN, so the tool reads main, and that read moves origin/main
+        # onto the merge. The base the post-merge steps get must still be the tip before the merge, so their range shows the PR's own diff.
+        patches, seen = self.spy_post_merge_steps()
+        with patches:
+            rc, out = self.merge_reply_with_pr_open(rest_err(405, "Merge already in progress"), True)
+        self.assertEqual(rc, 0, "the merge that landed on main was not read as merged, so the post-merge steps are not under test\n" + out)
+        self.assert_post_merge_steps_read_the_pr(seen, out)
+
+    def test_a_merge_the_pull_request_reads_as_merged_leaves_the_post_merge_steps_a_base_whose_range_shows_the_pr(self):  # control: green now and after
+        # A merge the pull request reads as merged at once never reads main, so no fetch moves origin/main before the post-merge steps read their base.
+        patches, seen = self.spy_post_merge_steps()
+        with patches:
+            rc, out = self.go()
+        self.assertEqual(rc, 0, out)
+        self.assert_post_merge_steps_read_the_pr(seen, out)
+
+    def test_a_405_merge_in_progress_whose_main_holds_the_merge_only_on_a_second_read_is_not_reverted_on_the_first(self):
+        # The merge call answers 405 "Merge already in progress", and the pull request reads OPEN. The merge reaches main only a moment after the first
+        # read of main, so the second read holds it. A first read with no merge is not a refusal: the tool must read main again before it reverts.
+        self.set(merge_replies=[[rest_err(405, "Merge already in progress"), False]], read_open_after_put=True)
+        with self.after_the_merge_call(lambda: self.merge_onto_main(1, second=self.head()), nth=2):
+            rc, out = self.go()
+        self.assertNotIn("reverted on", out, "the claim was reverted on the first read of main, which had not yet the merge: main was not read again before the refusal\n" + out)
+        self.assert_merged_and_carries_on(rc, out)
 
     def test_a_red_check_named_http_500_is_a_refusal_before_the_claim(self):
         # the head's one checks read is red; its name carries "HTTP 500". A red head is refused before any claim, so nothing is reverted
@@ -8716,6 +8968,124 @@ class ConfigFile(Env):
         put_base_config(self, json.dumps(dict(CONFIG, defaultBranch="trunk")))  # the checkout says "main"
         rc, out = self.run_merge("7")
         self.assertIn("main is not the default branch (trunk)", out)
+
+UNKNOWN_REQUIRED_CHECKS = "second-proof"  # a requiredChecks value merge.PINNED_STRINGS does not hold: the running tool refuses a stamp that sets it
+
+class HeadConfigOnConfirm(Env):
+    """`merge <pr> --confirm` on a ready pull request, with a green rollup and no lane lint: the head's .github/stamp.json is judged with the running
+    tool's parser when the diff against the base touches it (merge.head_config_refusal), as the ready path judges it. A refused head stamp stops the
+    merge before anything is claimed or merged. A head that leaves the stamp alone merges as before."""
+
+    def lane_writes_config(self, text):
+        """The lane's head gains one commit that sets .github/stamp.json to `text`. -> the head."""
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin")
+        sh(o, "git", "checkout", "-q", "-B", "feat", "origin/feat")
+        put(os.path.join(o, ".github/stamp.json"), text)
+        sh(o, "git", "add", "-A")
+        sh(o, "git", "commit", "-qm", "lane: the stamp")
+        sh(o, "git", "push", "-q", "origin", "feat")
+        return self.head("feat")
+
+    def test_a_ready_pull_request_whose_head_config_the_running_tool_refuses_is_not_merged(self):
+        self.assertNotIn(UNKNOWN_REQUIRED_CHECKS, merge.PINNED_STRINGS, "premise: the running tool takes %r, so the head stamp is one it does not refuse" % UNKNOWN_REQUIRED_CHECKS)
+        head = self.lane_writes_config(json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], requiredChecks=UNKNOWN_REQUIRED_CHECKS))) + "\n")
+        sh(self.other, "git", "fetch", "-q", "origin")
+        names = sh(self.other, "git", "diff", "--name-only", "origin/main...%s" % head).split()
+        self.assertIn(".github/stamp.json", names, "precondition: the PR's diff against origin/main does not touch the stamp, so the case probes nothing")
+        self.assertFalse(self.host.draft, "precondition: the PR is a draft, so the confirm takes the draft step, not the ready path under test")
+        self.assertEqual(self.host.state, "green", "precondition: the PR's rollup is not green, so the refusal would not be the only thing that stops the merge")
+        self.assertEqual(self.host.posted, [], "precondition: a lane lint posted a comment, so the PR had a lint of its own")
+        rc, out, err = self.run_args("7", "--confirm")
+        self.assertNotEqual(rc, 0, "the confirm of a ready PR passed a head stamp the running tool refuses: " + out + err)
+        self.assertFalse(getattr(self.host, "merged", False), "the confirm merged a ready PR whose head stamp the running tool refuses: " + out + err)
+        self.assertIn("merge.requiredChecks is not valid: '%s'" % UNKNOWN_REQUIRED_CHECKS, out + err,
+                      "the refusal does not quote the parser's reason for the head stamp: " + out + err)
+
+    def test_a_ready_pull_request_that_leaves_the_config_alone_merges(self):  # the control: passes on the old code too
+        self.assertEqual(self.host.state, "green", "precondition: the PR's rollup is not green")
+        rc, out, err = self.run_args("7", "--confirm")
+        self.assertEqual(rc, 0, "a ready PR that leaves the stamp alone was refused: " + out + err)
+        self.assertTrue(getattr(self.host, "merged", False), "a ready PR that leaves the stamp alone did not merge: " + out + err)
+
+    def head_config_read_fails(self, fail, is_read=lambda args: "diff" in args and "--name-status" in args and merge.DEFAULT_CONFIG in args):
+        """Patch merge.sh so one head-config read fails. `is_read(args)` picks that git call; by default it is the `--name-status` diff whose path is
+        the stamp (merge.head_config_refusal). `fail(args)` returns (rc, text) or raises. -> the list of args it saw. Every other git call runs for real."""
+        real_sh, seen = merge.sh, []
+        def stub(args, cwd=None, input=None, env=None, stdout_only=False, **kw):  # kw: as in ClaudeMdFlag.unreadable
+            if is_read(args):
+                seen.append(args)
+                return fail(args)
+            return real_sh(args, cwd=cwd, input=input, env=env, stdout_only=stdout_only, **kw)
+        patch = unittest.mock.patch.object(merge, "sh", stub)
+        patch.start(); self.addCleanup(patch.stop)
+        return seen
+
+    def assert_unknown_and_nothing_claimed(self, rc, out, err, claims_before):
+        """The confirm refused the head as unknown: a non-zero exit, nothing merged, no claim pushed, the merge lock free."""
+        self.assertNotEqual(rc, 0, "a head stamp that could not be read was let through: " + out + err)
+        self.assertFalse(getattr(self.host, "merged", False), "the confirm merged a head stamp that could not be read: " + out + err)
+        self.assertEqual(self.claims(), claims_before, "the confirm claimed record numbers for a head stamp that could not be read: " + out + err)
+        self.assertFalse(self.lock_ref(), "the confirm left the merge lock held after refusing an unread head stamp: " + out + err)
+        self.assertIn("could not be read", out + err, "the refusal does not say the head stamp could not be read: " + out + err)
+        self.assertIn("unknown, not clear", out + err, "the refusal does not call the head stamp unknown: " + out + err)
+
+    def test_a_failed_head_config_read_refuses_as_unknown_and_claims_nothing(self):
+        self.lane_writes_config(json.dumps(CONFIG) + "\n")  # a stamp the running tool takes: only the read is broken
+        self.assertFalse(self.host.draft, "precondition: the PR is a draft, so the confirm takes the draft step, not the ready path under test")
+        self.assertEqual(self.host.state, "green", "precondition: the PR's rollup is not green, so the refusal would not be the only thing that stops the merge")
+        seen = self.head_config_read_fails(lambda args: (128, "fatal: bad revision"))
+        claims_before = self.claims()
+        rc, out, err = self.run_args("7", "--confirm")
+        self.assertTrue(seen, "the head-config read never ran, so the stub probed nothing: " + out + err)
+        self.assert_unknown_and_nothing_claimed(rc, out, err, claims_before)
+
+    def test_a_timed_out_head_config_read_refuses_as_unknown_and_no_timeout_escapes(self):
+        self.lane_writes_config(json.dumps(CONFIG) + "\n")  # a stamp the running tool takes: only the read is broken
+        self.assertFalse(self.host.draft, "precondition: the PR is a draft, so the confirm takes the draft step, not the ready path under test")
+        self.assertEqual(self.host.state, "green", "precondition: the PR's rollup is not green, so the refusal would not be the only thing that stops the merge")
+        def slow(args):
+            raise subprocess.TimeoutExpired(args, 1)
+        seen = self.head_config_read_fails(slow)
+        claims_before = self.claims()
+        try:
+            rc, out, err = self.run_args("7", "--confirm")
+        except subprocess.TimeoutExpired as e:  # a read that times out is an unknown refusal, never an exception out of the merge tool
+            self.fail("the head-config read's TimeoutExpired escaped the confirm instead of refusing as unknown: %s" % e)
+        self.assertTrue(seen, "the head-config read never ran, so the stub probed nothing: " + out + err)
+        self.assert_unknown_and_nothing_claimed(rc, out, err, claims_before)
+
+    def test_a_timed_out_head_config_show_refuses_as_unknown_and_claims_nothing(self):
+        head = self.lane_writes_config(json.dumps(CONFIG) + "\n")  # a stamp the running tool takes: only the head's `git show` of it is broken
+        self.assertFalse(self.host.draft, "precondition: the PR is a draft, so the confirm takes the draft step, not the ready path under test")
+        self.assertEqual(self.host.state, "green", "precondition: the PR's rollup is not green, so the refusal would not be the only thing that stops the merge")
+        def slow(args):
+            raise subprocess.TimeoutExpired(args, 1)
+        def head_config_show(args):  # the read head_config_refusal makes, not the same stamp read that load_config's head_none_stamp makes first
+            return f"{head}:{merge.DEFAULT_CONFIG}" in args and any(f.function == "head_config_refusal" for f in inspect.stack()[1:])
+        seen = self.head_config_read_fails(slow, is_read=head_config_show)
+        claims_before = self.claims()
+        try:
+            rc, out, err = self.run_args("7", "--confirm")
+        except subprocess.TimeoutExpired as e:  # a read that times out is an unknown refusal, never an exception out of the merge tool
+            self.fail("the head's `git show` of the stamp timed out, and its TimeoutExpired escaped the confirm instead of refusing as unknown: %s" % e)
+        self.assertTrue(seen, "the head's `git show` of the stamp never ran, so the stub probed nothing: " + out + err)
+        self.assert_unknown_and_nothing_claimed(rc, out, err, claims_before)
+
+    def test_a_timed_out_workflow_listing_at_the_head_refuses_as_unknown_and_claims_nothing(self):
+        head = self.lane_writes_config(json.dumps(CONFIG) + "\n")  # a stamp the running tool takes: only the workflow listing parse_config reads at the head is broken
+        self.assertFalse(self.host.draft, "precondition: the PR is a draft, so the confirm takes the draft step, not the ready path under test")
+        self.assertEqual(self.host.state, "green", "precondition: the PR's rollup is not green, so the refusal would not be the only thing that stops the merge")
+        def slow(args):
+            raise subprocess.TimeoutExpired(args, 1)
+        seen = self.head_config_read_fails(slow, is_read=lambda args: "ls-tree" in args and head in args and ".github/workflows" in args)
+        claims_before = self.claims()
+        try:
+            rc, out, err = self.run_args("7", "--confirm")
+        except subprocess.TimeoutExpired as e:  # a read that times out is an unknown refusal, never an exception out of the merge tool
+            self.fail("the workflow listing at the head timed out, and its TimeoutExpired escaped the confirm instead of refusing as unknown: %s" % e)
+        self.assertTrue(seen, "the workflow listing at the head never ran, so the stub probed nothing: " + out + err)
+        self.assert_unknown_and_nothing_claimed(rc, out, err, claims_before)
 
 class ReadyChecksRun(unittest.TestCase):
     """The draft step's ready checks run through ci-job with --pinned: a child's pin names a claude-settings commit, so the
@@ -14821,6 +15191,13 @@ class RedMainBrake(Env):
         rc, out, _ = self.go([main_run(904, "cancelled"), main_run(903, "failure")], jobs)
         self.merged(rc, out)
 
+    def test_a_cancelled_run_no_job_started_in_that_a_newer_run_replaced_does_not_refuse_the_merge(self):
+        """Red on the old code: the cancelled run reads unknown and refuses the merge. Superseded (a newer push run is on the page), the green
+        run below it decides, so the merge goes through (decision no-merge-onto-red-main, the superseded cancel)."""
+        jobs = {1202: [], 1201: [main_job("scope", "success"), main_job("checks", "success", 20)]}
+        rc, out, _ = self.go([main_run(1203, None, status="in_progress"), main_run(1202, "cancelled"), main_run(1201, "success")], jobs)
+        self.assertEqual(rc, 0, "a cancelled run that a newer run replaced refuses the merge:\n" + out)
+
     # The stale-cancel shape (decision no-merge-onto-red-main): main's schedule run R was cancelled on an old head with no red job.
     # The push run N after it, on the new head, passed every job R ran; each case changes one thing of this shape.
     INC_R, INC_N = 1110, 1111
@@ -15603,6 +15980,18 @@ class RedMainBrake(Env):
         for pr in (2651, 2652):
             self.assertNotIn(f"#{pr}", detail, f"the verdict blames #{pr}, a later red run on top of the breaking merge")
 
+    def test_a_red_main_detail_names_a_replaced_commit_in_the_span_of_its_breaking_merge(self):
+        """Breaking merge 903 is red again on its re-run. Run 902 below it was cancelled and replaced, and run 901 is green. The span runs from 901's
+        commit up to 903's, so the detail names 902's commit too and says that run was replaced."""
+        runs = [self.merge_run(903, "failure", 2650, run_attempt=2), self.merge_run(902, "cancelled", 2649), self.merge_run(901, "success", 2648)]
+        jobs = {903: [main_job("scope", "success"), main_job("checks", "failure", 20)], 902: [], 901: [main_job("scope", "success"), main_job("checks", "success", 20)]}
+        rc, out, before = self.go(runs, jobs)
+        self.merged_onto_red(rc, out, "checks")
+        detail = self.red_detail()
+        self.assertIn(self.sha_of(903)[:9], detail, "the detail does not name the breaking merge commit, run 903's")
+        self.assertIn(self.sha_of(902)[:9], detail, "the detail names no commit for run 902, which was replaced inside the span of breaking merge 903:\n" + detail)
+        self.assertIn("replaced", detail, "the detail does not say that a replaced run's commit is in the span:\n" + detail)
+
     def test_a_red_main_blames_the_breaking_run_deep_in_a_full_page_of_fifty(self):
         """Re-pointed by ruling Q5 v (owner, chat, 10:42 CST Nov 20, 2026): the red main merges; the blame is the verdict's detail."""
         # a full page, newest first: 1060 to 1041 are red, and 1041 is red again on its re-run; its parent 1040 is green, and the rest are green
@@ -16226,6 +16615,26 @@ class RedMainBrake(Env):
         rc, out, _ = self.go(runs, jobs, pulls={2651: self.revert_pull(2651, R)})
         self.merged(rc, out)
 
+    def test_a_revert_of_the_breaking_merge_lifts_a_red_main_past_a_replaced_run_above_it(self):
+        """Red on the old code: run 904, cancelled and replaced by run 905, sits above breaking merge 903, so the blame names two commits, and
+        revert_proven, which needs exactly one blamed commit, refuses the lift. Fixed: the blame is 903's commit alone and the revert of 903 lifts the red main."""
+        B = self.land_breaking_merge()
+        A = sh(self.other, "git", "rev-parse", f"{B}^1")
+        C = self.commit_on_main("Lane 2652 lands on main", "lane-2652.txt")  # run 904's commit: cancelled before any job started, replaced by run 905
+        D = self.commit_on_main("Lane 2653 lands on main", "lane-2653.txt")  # run 905's commit: red again on its re-run
+        R, M = self.land_revert(2651, B)
+        self.assert_first_parent_chain(M, D, C, B, A)
+        self.assert_revert_on_main(B, R, M)
+        run906, jobs906 = self.merge_run_of(906, M, 2651)
+        runs = [run906, main_run(905, "failure", sha=D, run_attempt=2), main_run(904, "cancelled", sha=C),
+                main_run(903, "failure", sha=B, run_attempt=2, message="Merge pull request #2650 from o/lane-2650"), main_run(902, "success", sha=A, message="base files")]
+        jobs = {906: jobs906, 905: [main_job("scope", "success"), main_job("checks", "failure", 20)], 904: [],
+                903: [main_job("scope", "success"), main_job("checks", "failure", 20)], 902: self.RAN_PUSH}
+        rc, out, _ = self.go(runs, jobs, pulls={2651: self.revert_pull(2651, R)})
+        self.assertEqual(rc, 0, "the merge was refused:\n" + out)
+        self.assertFalse(printed(out, "main is RED"), "the revert of breaking merge 903 does not lift the red main: the blame names replaced run 904's commit "
+                                 "with 903's, and revert_proven needs exactly one blamed commit:\n" + out)
+
     def test_a_merge_titled_as_a_revert_onto_a_red_main_merges_when_it_reverts_nothing(self):
         """Re-pointed by ruling Q5 v (owner, chat, 10:42 CST Nov 20, 2026): a PR may merge onto a red main; a title that reverts nothing does not refuse it."""
         # class 2: the lane's own commit has a revert's title, but main's breaking merge is not reverted by anything: a title proves nothing
@@ -16808,6 +17217,27 @@ class MainRunVerdict(Env):
         self.assertIn("test_new", text, "the stacked break names no new failing test:\n" + text)
         self.assertNotIn(self.OLD_SHA[:9], line, "the stacked break names the old merge:\n" + line)
 
+    def test_a_breaking_merge_names_a_replaced_commit_in_its_span(self):
+        """Run 1003 broke main, red again on its re-run. Run 1002 below it was cancelled and replaced, and run 1001 is green. The span runs from 1001's
+        commit up to 1003's, so the line names 1002's commit too and says that run was replaced."""
+        runs = [main_run(self.LATER, "failure", sha=self.LATER_SHA, run_attempt=2), main_run(self.NOW, "cancelled", sha=self.NEW_SHA),
+                main_run(self.PREV, "success", sha=self.GREEN_SHA)]
+        jobs = {self.LATER: [main_job("scope", "success"), self.red_job("checks", 9102)], self.NOW: [],
+                self.PREV: [main_job("scope", "success"), main_job("checks", "success", 20)]}
+        _rc, text, _word, line = self.judged(self.NEW_BREAK, self.LATER_SHA, runs, jobs, job_logs={9102: self.NEW_LOG})
+        self.assertIn(self.NEW_SHA[:9], line, "the breaking merge names no commit of the run replaced inside its span:\n" + text)
+        self.assertIn("replaced", line, "the breaking merge does not say that a replaced run's commit is in its span:\n" + line)
+
+    def test_control_a_breaking_merge_names_no_commit_beside_its_own_when_the_green_run_is_next(self):
+        runs = [main_run(self.LATER, "failure", sha=self.LATER_SHA, run_attempt=2), main_run(self.NOW, "success", sha=self.NEW_SHA),
+                main_run(self.PREV, "success", sha=self.GREEN_SHA)]
+        jobs = {self.LATER: [main_job("scope", "success"), self.red_job("checks", 9102)],
+                self.NOW: [main_job("scope", "success"), main_job("checks", "success", 20)],
+                self.PREV: [main_job("scope", "success"), main_job("checks", "success", 20)]}
+        _rc, text, _word, line = self.judged(self.NEW_BREAK, self.LATER_SHA, runs, jobs, job_logs={9102: self.NEW_LOG})
+        self.assertIn(self.LATER_SHA[:9], line, "the breaking merge names no commit of its own:\n" + text)
+        self.assertNotIn(self.NEW_SHA[:9], line, "the breaking merge names the green run's commit, which is not in its span:\n" + line)
+
     def test_a_red_job_whose_log_names_no_test_is_first_red(self):
         """A step timeout or runner fault ends a job red and names no test (run 14673 in the audit). A new red job is a first red all the same."""
         runs = [main_run(self.NOW, "failure", sha=self.NEW_SHA), main_run(self.PREV, "success", sha=self.GREEN_SHA)]
@@ -16844,6 +17274,78 @@ class MainRunVerdict(Env):
     def test_a_cancelled_judged_run_is_unknown(self):
         """A run cancelled before it finished has no verdict: unknown, never green, first red or carried."""
         runs = [main_run(self.NOW, "cancelled", sha=self.NEW_SHA), main_run(self.PREV, "success", sha=self.GREEN_SHA)]
+        jobs = {self.NOW: [main_job("scope", "success"), main_job("checks", "cancelled", 20)], self.PREV: [main_job("checks", "success", 20)]}
+        self.judged(self.UNKNOWN, self.NEW_SHA, runs, jobs)
+
+    # A superseded run (the shared test in clear_rule): a push run cancelled before any job started, with a newer push run of main on the
+    # page. Its commit has no verdict of its own, so its line reads `superseded`, which is neither green nor unknown.
+    LATER, LATER_SHA = 1003, "7d1c0a52" + "4" * 32  # the newer push run, the covering run that replaces NOW
+
+    def covered(self, runs, jobs, token, exit_code, **reads):
+        """Judge NEW_SHA, a push run that the newer run LATER replaced: the line holds `token` and the exit code is `exit_code`. -> (exit code, output, line)."""
+        rc, text, _word, line = self.verdict(self.NEW_SHA, runs, jobs, **reads)
+        self.assertEqual(rc, exit_code, f"exit code {rc} for a commit whose covering run reads {token!r}, not {exit_code}:\n{text}")
+        self.assertIn(token, text, f"the line does not name the state of the covering run, {token!r}:\n{text}")
+        return rc, text, line
+
+    def test_a_replaced_push_run_whose_covering_run_is_in_progress_exits_1_still_going(self):
+        """Ruling of 12:38 CST Nov 25 2026: a replaced push run is skipped, and the run that replaced it decides. While that run is still going
+        it has not decided: the commit has no verdict yet, so exit 1, and the line says the covering run is still in progress."""
+        runs = [main_run(self.LATER, None, status="in_progress", sha=self.LATER_SHA), main_run(self.NOW, "cancelled", sha=self.NEW_SHA),
+                main_run(self.PREV, "success", sha=self.GREEN_SHA)]
+        jobs = {self.LATER: [], self.NOW: [], self.PREV: [main_job("scope", "success"), main_job("checks", "success", 20)]}
+        _rc, text, _line = self.covered(runs, jobs, "is still in_progress", 1)
+        self.assertIn(f"run {self.LATER}", text, "the line does not name the covering run:\n" + text)
+
+    def test_a_replaced_push_run_whose_covering_run_is_queued_exits_1_still_going(self):
+        """A queued covering run has not decided either: exit 1, and the line says it is still queued."""
+        runs = [main_run(self.LATER, None, status="queued", sha=self.LATER_SHA), main_run(self.NOW, "cancelled", sha=self.NEW_SHA),
+                main_run(self.PREV, "success", sha=self.GREEN_SHA)]
+        jobs = {self.LATER: [], self.NOW: [], self.PREV: [main_job("scope", "success"), main_job("checks", "success", 20)]}
+        self.covered(runs, jobs, "is still queued", 1)
+
+    def test_a_replaced_push_run_whose_covering_run_cannot_be_read_is_unknown_and_refuses(self):
+        """The covering run's jobs cannot be read, so the commit has no verdict: exit 1, with the failed read's text in the line."""
+        runs = [main_run(self.LATER, "success", sha=self.LATER_SHA), main_run(self.NOW, "cancelled", sha=self.NEW_SHA),
+                main_run(self.PREV, "success", sha=self.GREEN_SHA)]
+        jobs = {self.LATER: [main_job("scope", "success"), main_job("checks", "success", 20)], self.NOW: [],
+                self.PREV: [main_job("scope", "success"), main_job("checks", "success", 20)]}
+        self.covered(runs, jobs, "HTTP 502 Bad Gateway", 1, jobs_fail_of={self.LATER: "HTTP 502 Bad Gateway"})
+
+    def test_a_replaced_push_run_whose_covering_run_is_red_reads_the_failing_test_of_that_run(self):
+        """The covering run is red with a failing test its own verdict names. The replaced commit reads that verdict, and exits as that verdict does (0 for a first red)."""
+        runs = [main_run(self.LATER, "failure", sha=self.LATER_SHA), main_run(self.NOW, "cancelled", sha=self.NEW_SHA),
+                main_run(self.PREV, "success", sha=self.GREEN_SHA)]
+        jobs = {self.LATER: [main_job("scope", "success"), self.red_job("checks", 9102)], self.NOW: [],
+                self.PREV: [main_job("scope", "success"), main_job("checks", "success", 20)]}
+        self.covered(runs, jobs, "test_new", 0, job_logs={9102: self.NEW_LOG})
+
+    def test_control_a_replaced_push_run_whose_covering_run_is_green_reads_superseded_with_exit_0(self):
+        runs = [main_run(self.LATER, "success", sha=self.LATER_SHA), main_run(self.NOW, "cancelled", sha=self.NEW_SHA),
+                main_run(self.PREV, "success", sha=self.GREEN_SHA)]
+        jobs = {self.LATER: [main_job("scope", "success"), main_job("checks", "success", 20)], self.NOW: [],
+                self.PREV: [main_job("scope", "success"), main_job("checks", "success", 20)]}
+        self.judged("superseded", self.NEW_SHA, runs, jobs)
+
+    def test_control_a_cancelled_push_run_with_no_newer_run_reads_unknown_beside_a_replaced_one(self):
+        """Control, unknown on the old code too: a cancel that no newer run replaced has no verdict, though its own cancelled newer run exists."""
+        runs = [main_run(self.LATER, "cancelled", sha=self.LATER_SHA), main_run(self.NOW, "cancelled", sha=self.NEW_SHA),
+                main_run(self.PREV, "success", sha=self.GREEN_SHA)]
+        jobs = {self.LATER: [], self.NOW: [], self.PREV: [main_job("scope", "success"), main_job("checks", "success", 20)]}
+        self.judged(self.UNKNOWN, self.LATER_SHA, runs, jobs)
+
+    def test_control_a_run_replaced_by_a_cancelled_run_is_not_proven_green(self):
+        """Control, not green on the old code: the replacement is itself cancelled and no run replaced it, so the green run below proves nothing."""
+        runs = [main_run(self.LATER, "cancelled", sha=self.LATER_SHA), main_run(self.NOW, "cancelled", sha=self.NEW_SHA),
+                main_run(self.PREV, "success", sha=self.GREEN_SHA)]
+        jobs = {self.LATER: [], self.NOW: [], self.PREV: [main_job("scope", "success"), main_job("checks", "success", 20)]}
+        _rc, text, word, _line = self.verdict(self.NEW_SHA, runs, jobs)
+        self.assertNotEqual(word, "green", "a run replaced by a cancelled run that nothing replaced reads green, so it is proven:\n" + text)
+
+    def test_control_a_cancel_after_a_job_started_beside_a_newer_run_is_unknown(self):
+        """Control, unknown on the old code too: a job that started makes the cancel a real cancel, so a newer run does not replace it."""
+        runs = [main_run(self.LATER, None, status="in_progress", sha=self.LATER_SHA), main_run(self.NOW, "cancelled", sha=self.NEW_SHA),
+                main_run(self.PREV, "success", sha=self.GREEN_SHA)]
         jobs = {self.NOW: [main_job("scope", "success"), main_job("checks", "cancelled", 20)], self.PREV: [main_job("checks", "success", 20)]}
         self.judged(self.UNKNOWN, self.NEW_SHA, runs, jobs)
 
