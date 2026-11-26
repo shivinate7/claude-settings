@@ -1,0 +1,1 @@
+- unstarted-review-wait-refused: "Waits on review of the PR" and "lint-stub waits on PR #3916's review" are refused with no code need or measured conflict, since the check reads the PR as the thing waited on and no wording covers a review wait (decision `guard-remedy-not-to-owner`, the Unstarted guard). Seen: 2026-11-25 x1

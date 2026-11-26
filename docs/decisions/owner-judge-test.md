@@ -12,7 +12,7 @@ A question stays only when it touches one of five things: his goals, his money, 
   - It passes a task, an update with only status, rank or other fields, and a call to another artifact. A port needs the Problem line too: its Departs from line is not the stake.
   - It also passes a closed item (`status: "closed"`). A closed item asks the owner nothing, and the chat-answer flow writes one.
   - It reads after each older rule, which keep naming their own refusals.
-  - The reason names the Problem line, the five stakes, and the way out: take your own pick and say it in the reply.
+  - The reason names the Problem line, the five stakes, and the way out: take your own pick and say it in the reply. The way out also consults first, as rule `parallelism-keep-going` says. The printed reason lacks that step until debt `consult-text-two-homes-left` closes.
   - It is built against a named incident, below. It landed 2026-10-30.
   - Cost: no new process. It runs inside the guard process that every `ArtifactData` call already starts. It writes no file unless it denies.
   - Known limit: the check sees the line, not whether its stake is true. A line with a false stake passes.

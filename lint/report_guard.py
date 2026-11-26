@@ -414,8 +414,8 @@ MODELS_REASON = owner_line(
 UNSTARTED_REASON = owner_line(
     "Unstarted guard", "this turn ran a builder, and Next holds no \"Unstarted:\" line")
 UNSTARTED_FILE_REASON = owner_line(
-    "Unstarted guard", "an Unstarted item waits on another lane's merge or PR and names no code need or measured "
-    "conflict, and a shared file alone is no reason to wait")
+    "Unstarted guard", "an Unstarted item waits on another lane's merge or PR and names no code need (needs PR #N's "
+    "code: `symbol`) or measured conflict (measured conflict in <file>), and a shared file alone is no reason to wait")
 
 
 # is_last_human and tool_uses live in lint/_transcript.py, imported above.
@@ -1172,13 +1172,22 @@ UNSTARTED_RE = re.compile(
 # or landing only as a code need (`needs PR #N's code: `symbol``) or a measured conflict in a named file. A wait
 # that names only a shared file, or a code need with no symbol, is refused. No word exempts it: the owner or the
 # load brake may also be in the sentence.
-_UNSTARTED_LANE_WAIT_RE = re.compile(
-    r"\b(?:PRs?|pull requests?|merges?|merged|merging|land(?:s|ed|ing)?)\b|#\d+", re.I)
-# An item waits only when it says so: a waiting word beside a PR, merge or landing word. A PR named for context
-# with no waiting word ("not briefed yet; the PR merged") is no wait.
+# A PR is found by its reference, `PR #N`, `#N` or `pull request N`, never by the bare letters "pr", which sit in
+# lane and file names such as pr-reader or bin/pr.py. A merge or landing with no reference counts only as a
+# standalone word: "merge" inside merge-tool-refactor or bin/merge names a lane or a file.
+_PR_REF_RE = re.compile(r"\b(?:PRs?|pull\s+requests?)\s*#?\s*(\d+)\b|#(\d+)\b", re.I)
+_MERGE_WORD_RE = re.compile(
+    r"(?<![\w/.-])(?:merges?|merged|merging|land(?:s|ed|ing)?)(?![\w/-]|\.\w)"
+    r"(?!\s+(?:tool|rules?|queue|button|checks?|policy|process|conflicts?|commits?|bot|gate|script|command"
+    r"|flow|logic|strategy|order|window|guard|record|step|page|zone|pad)\b)", re.I)
+# An item waits only when it says so: a waiting word, or "dependent on" or "starts at", before a PR, merge or
+# landing word, in one clause. A PR named for context ("not briefed yet; the PR merged", "PR #N awaits review")
+# has no waiting word before it, so it is no wait. A waiting word inside a name (after-merge, wait-for-x) is no
+# waiting word.
 _UNSTARTED_WAIT_WORD_RE = re.compile(
-    r"\b(?:wait\w*|await\w*|needs?|blocked|blocks?|until|till|after|once|when|behind|before|first|follows?"
-    r"|pending|depends?|hold(?:s|ing)?|held|gated|stuck)\b", re.I)
+    r"(?<![\w/.-])(?:wait\w*|await\w*|needs?|blocked|blocks?|until|till|after|once|when|behind|before|first|follows?"
+    r"|pending|depends?|dependent|hold(?:s|ing)?|held|gated|stuck|stacked on|based on|starts?\s+(?:at|on|with))"
+    r"(?![\w/-])", re.I)
 # "none" or "nothing", bare, in bold or in parentheses, says no item waits.
 _UNSTARTED_NONE_RE = re.compile(r"[\s*(]*(?:none|nothing)\b", re.I)
 _UNSTARTED_STOP_RE = re.compile(r"\s*(?:\*\*(?:Done|Deviations|Input Needed|Next)\b|$)")
@@ -1223,16 +1232,23 @@ def _names_a_file(item):
     return False
 
 
-# A code need names the symbol it builds on in backticks: a name, with dots or call parens, never a path.
-_CODE_NEED_RE = re.compile(r"\bneeds?\b[^`;]*?\bcode\s*:\s*`([A-Za-z_][\w.]*)(?:\(\))?`", re.I)
+# A code need names the symbol it builds on in backticks: a name, with dots or call parens, never a path. The
+# symbol follows `code:` or the noun that names what it is (`helper`, `function`), as in "needs PR #N's helper `x`".
+_CODE_NEED_RE = re.compile(
+    r"\bneeds?\b[^`;]*?\b(?:code\s*:|(?:helpers?|functions?|methods?|class(?:es)?|symbols?|constants?|modules?"
+    r"|types?|apis?)\s*:?)\s*`([A-Za-z_][\w.]*)(?:\(\))?`", re.I)
+# The symbol may come first: "needs `x` from PR #N".
+_CODE_NEED_FROM_RE = re.compile(
+    r"\bneeds?\b[^`;]*?`([A-Za-z_][\w.]*)(?:\(\))?`\s+(?:from|in|of|out\s+of)\s+(?:PRs?|pull\s+requests?)\s*#?\s*\d+", re.I)
 # A measured conflict says where it was measured, then the file it names.
 _MEASURED_CONFLICT_RE = re.compile(
-    r"\b(?:measured\s+(?:a\s+)?conflicts?|merge-tree\s+shows\s+a\s+conflict)\s+in\b(.*)", re.I | re.S)
+    r"\b(?:measured\s+(?:a\s+)?conflicts?|conflicts?\s+measured|merge-tree\s+shows\s+a\s+conflict)\s+in\b(.*)",
+    re.I | re.S)
 # A file name with a source suffix, or a build file, is no symbol; nor is a common word.
 _FILE_SUFFIXES = frozenset((
     "py", "sh", "bash", "zsh", "yml", "yaml", "json", "jsonl", "toml", "md", "txt", "cfg", "ini", "js", "mjs",
     "ts", "tsx", "jsx", "html", "css", "swift", "rb", "go", "rs", "c", "h", "cpp", "java", "kt", "lock", "csv",
-    "xml", "plist", "pbxproj", "sql", "ps1", "env", "conf", "log"))
+    "xml", "plist", "pbxproj", "sql", "ps1", "env", "conf", "log", "tmpl", "cmd", "vue", "mod"))
 _NOT_A_SYMBOL = frozenset((
     "the", "a", "an", "it", "its", "this", "that", "these", "those", "they", "them", "he", "she", "we", "you",
     "i", "code", "codes", "change", "changes", "file", "files", "lane", "lanes", "pr", "prs", "branch", "work",
@@ -1249,11 +1265,110 @@ def _is_symbol(name):
     return not ("." in name and name.rsplit(".", 1)[1] in _FILE_SUFFIXES)
 
 
-def _checkable_wait(item):
-    """True when a wait on another lane names a code need with its symbol, or a measured conflict in a file."""
-    if any(_is_symbol(m.group(1)) for m in _CODE_NEED_RE.finditer(item)):
+def _pr_numbers(text):
+    return {a or b for a, b in _PR_REF_RE.findall(text)}
+
+
+# A PR is named by number (`PR #N`, `#N`, `pull request N`) or by a definite noun with no number: "the stamp PR",
+# "the stamp lane's PR". "a PR", "its own PR" and a lane name such as pr-reader name no other lane's PR.
+_PR_REF_NAMED_RE = re.compile(
+    r"\b(?:PRs?|pull\s+requests?)\s*#?\s*(?P<a>\d+)\b|#(?P<b>\d+)\b"
+    r"|(?:\b(?:the|that|this|those|these|other|another)\s+(?:[\w'’-]+\s+){0,3}|['’]s\s+)"
+    r"(?<![\w/.-])(?:PRs?|pull\s+requests?)(?![\w/#-]|\.\w)(?!\s*#?\s*\d)", re.I)
+# The PR is the subject of the clause and the clause puts it ahead of the item: "must merge", an ordering word
+# ("first", "before", "ahead") with no review or waiting word of its own before it, or "blocks it". A PR that "will
+# merge today", "awaits review" or "blocks nothing" orders nothing, and neither does one that already merged.
+_PR_DONE_RE = re.compile(
+    r"['’]?s?\s*(?:(?:was|is|got|has|had|have|already|just)\s+)*(?:merged|landed|closed)\b", re.I)
+_PR_MUST_RE = re.compile(
+    r"(?:['’]s\s+\w+\s+)?\s*(?:must|has\s+to|have\s+to|needs\s+to|is\s+to|to)\s+(?:be\s+)?"
+    r"(?:merged?|land(?:ed|s)?)\b", re.I)
+_PR_BLOCKS_RE = re.compile(
+    r"\s*(?:(?:blocks?|blocking|gates?)\b(?!\s+(?:nothing|no|none|neither|zero)\b)"
+    r"|is\s+(?:the|a|still\s+the)\s+blocker\b|is\s+blocking\b)", re.I)
+_PR_ORDER_RE = re.compile(r"(?:\W+[\w'’-]+){0,5}?\W+(?:first|before|ahead|beforehand|prior)\b", re.I)
+_PR_OWN_WAIT_RE = re.compile(r"\b(?:waits?|waiting|awaits?|awaiting|pending|reviews?|reviewed)\b", re.I)
+_MERGE_FIRST_RE = re.compile(r"(?<![\w/.-])(?:merges?|lands?)\s+(?:first|before)\b", re.I)
+# A PR that the item waits on, named after a waiting word, is no wait when it already merged and says when:
+# "(PR #N merged at 13:02)".
+_PR_MERGED_AT_RE = re.compile(
+    r"\s*(?:(?:was|is|got|already|just)\s+)*(?:merged|landed|closed)\b(?:\s+(?:at|on|today|yesterday|earlier|already|in"
+    r"|\d)|\s*\))", re.I)
+# A wait on the owner's answer, ruling or decision is no wait on a PR or merge that the answer is about.
+_PERSON_WAIT_RE = re.compile(
+    r"\b(?:owner|answers?|rulings?|decisions?|repl(?:y|ies)|verdicts?|approvals?|sign-?offs?|go-ahead|grants?"
+    r"|picks?|choices?|yes)\b", re.I)
+_JOINS_RE = re.compile(r"\b(?:and|or|then|plus)\b|[&+]", re.I)
+_ABOUT_RE = re.compile(r"\b(?:on|about|regarding|over|whether|if|re|of|for)\b", re.I)
+
+
+def _waits_on_a_person(between):
+    """True when the words between a waiting word and the merge it names say the wait is on the owner's answer."""
+    return (bool(_PERSON_WAIT_RE.search(between)) and not _JOINS_RE.search(between)
+            and not re.search(r"['’]s\s*$", between))
+
+
+def _answer_about_a_pr(between):
+    """True when the words before a PR say the wait is on the owner's answer ABOUT it: a person word, then "on",
+    "about" or "of" before the PR. "the owner merges #N", "the grant lane PR #N" and "owner-page PR #N" make the
+    person or a name the PR's neighbour, not a reader of it, so the wait is on the PR."""
+    last = None
+    for last in _PERSON_WAIT_RE.finditer(between):
+        pass
+    return (last is not None and not _JOINS_RE.search(between) and not re.search(r"['’]s\s*$", between)
+            and bool(_ABOUT_RE.search(between[last.end():])))
+
+
+def _orders_the_item(rest):
+    """True when the clause text after a PR, whose subject it is, puts that PR ahead of the item."""
+    if _PR_DONE_RE.match(rest):
+        return False
+    if _PR_MUST_RE.match(rest) or _PR_BLOCKS_RE.match(rest):
         return True
-    return any(_names_a_file(m.group(1)) for m in _MEASURED_CONFLICT_RE.finditer(item))
+    order = _PR_ORDER_RE.match(rest)
+    return bool(order and not _PR_OWN_WAIT_RE.search(order.group(0)))
+
+
+def _wait_targets(unit):
+    """What the unit waits on: each PR number the item says it waits on, None for a PR with no number and for a
+    merge or landing it waits on with no PR reference. A wait is a waiting word before the PR or merge, or the PR as
+    the subject of a clause that puts it ahead of the item ("must merge first", "blocks it"). Backticked text is
+    masked, so a symbol is no clause."""
+    masked = re.sub(r"`[^`\n]*`", lambda m: "x" * len(m.group(0)), unit)
+    targets = []
+    for clause in re.split(r"[;,\n]", masked):
+        ordered = False
+        for ref in _PR_REF_NAMED_RE.finditer(clause):
+            if _orders_the_item(clause[ref.end():]):
+                targets.append(ref.group("a") or ref.group("b"))
+                ordered = True
+        if not ordered and _MERGE_FIRST_RE.search(clause):
+            targets.append(None)
+        wait = _UNSTARTED_WAIT_WORD_RE.search(clause)
+        if not wait or any(not clause[r.end():wait.start()].strip() for r in _PR_REF_NAMED_RE.finditer(clause)
+                           if r.end() <= wait.start()):
+            continue  # no waiting word, or the PR itself is what waits ("PR #N awaits review before it merges")
+        tail = clause[wait.end():]
+        refs = list(_PR_REF_NAMED_RE.finditer(tail))
+        if refs:
+            for ref in refs:
+                if not (_answer_about_a_pr(tail[:ref.start()]) or _PR_MERGED_AT_RE.match(tail[ref.end():])):
+                    targets.append(ref.group("a") or ref.group("b"))
+        elif _MERGE_WORD_RE.search(tail) and not _waits_on_a_person(tail[:_MERGE_WORD_RE.search(tail).start()]):
+            targets.append(None)
+    return targets
+
+
+def _checkable_wait(item, targets):
+    """True when a wait on another lane names a measured conflict in a file, or a code need with its symbol for
+    each PR it waits on. A code need names its PR, and covers a wait on that PR only; one that names no PR covers
+    any wait."""
+    if any(_names_a_file(m.group(1)) for m in _MEASURED_CONFLICT_RE.finditer(item)):
+        return True
+    needs = [_pr_numbers(m.group(0))
+             for m in list(_CODE_NEED_RE.finditer(item)) + list(_CODE_NEED_FROM_RE.finditer(item))
+             if _is_symbol(m.group(1))]
+    return bool(needs) and all(t is None or any(not n or t in n for n in needs) for t in targets)
 
 
 # An item is a short lane name, then what it waits on: `bin-x waits on the batch`, `docs lane needs ...`. A clause
@@ -1307,10 +1422,6 @@ def _unstarted_units(item):
     return units
 
 
-def _is_lane_wait(unit):
-    return bool(_UNSTARTED_WAIT_WORD_RE.search(unit) and _UNSTARTED_LANE_WAIT_RE.search(unit))
-
-
 def unstarted_problem(text, spawned):
     """The refusal reason when a builder ran this turn and Next's `Unstarted:` line is missing, or an item
     waits on another lane's merge, PR or landing with no code need (a symbol) and no measured conflict (a
@@ -1322,7 +1433,8 @@ def unstarted_problem(text, spawned):
     if not found:
         return UNSTARTED_REASON
     for unit in _unstarted_units(_unstarted_item(block, found)):
-        if (not _UNSTARTED_NONE_RE.match(unit) and _is_lane_wait(unit) and not _checkable_wait(unit)):
+        targets = _wait_targets(unit)
+        if not _UNSTARTED_NONE_RE.match(unit) and targets and not _checkable_wait(unit, targets):
             return UNSTARTED_FILE_REASON
     return ""
 
