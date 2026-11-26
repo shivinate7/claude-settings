@@ -908,6 +908,30 @@ hbw_refuse("handoff-sections: a Bash cp of a scratch file that drops the tail to
            "cp %s \"${CLAUDE_CONFIG_DIR}/handoffs/%s.md\"" % (HBW_NOSEC, HS_SID))
 
 
+# ------------------------------------------------- an excused segment and a real write in one call
+# A segment that is one rm, chmod, touch or mv of the session handoff puts no text on it, so the guard excuses that
+# segment. The excuse covers that segment alone: a real write onto the handoff in another segment of the same call is
+# judged as it is judged alone. The four refusals below are pins that pass at the head. The tee reads its source
+# through `<`, which the guard does not read as a file copy, so its text is unknown and it is refused under
+# handoff-shell-write. The last call is the control: the same excused segment, with a complete handoff copied in, passes.
+hbw_refuse("handoff-sections: a Bash rm of the session handoff, then a cp of a scratch file that drops the tail onto it, "
+           "is refused, naming the three",
+           "rm %s && cp %s %s" % (HS_HANDOFF, HBW_NOSEC, HS_HANDOFF))
+hbw_refuse("handoff-shell-write: a Bash touch of the session handoff, then a printf redirect onto it, is refused, with "
+           "the Write tool as the remedy",
+           "touch %s && printf 'x' > %s" % (HS_HANDOFF, HS_HANDOFF),
+           rule=HSW_RULE, carries=(HSW_REMEDY,), lacks=HSW_LACKS)
+hbw_refuse("handoff-shell-write: a Bash chmod 600 of the session handoff, then a tee of a scratch file onto it, is refused, "
+           "with the Write tool as the remedy",
+           "chmod 600 %s && tee %s < %s" % (HS_HANDOFF, HS_HANDOFF, HBW_NOSEC),
+           rule=HSW_RULE, carries=(HSW_REMEDY,), lacks=HSW_LACKS)
+hbw_refuse("handoff-sections: a cd into the handoffs folder, an rm of the session handoff by its bare name, then a cp of "
+           "a scratch file that drops the tail onto that name, is refused, naming the three",
+           "cd %s && rm %s.md && cp %s %s.md" % (HS_FOLDER, HS_SID, HBW_NOSEC, HS_SID))
+hbw_allow("handoff-sections: a Bash rm of the session handoff, then a cp of a complete scratch file onto it, passes, silently",
+          "rm %s && cp %s %s" % (HS_HANDOFF, HBW_GOOD, HS_HANDOFF))
+
+
 # =========================================================================== handoff-checked-stamp
 # A write to a session handoff that restamps a premise's `Checked` value needs evidence in the session's own transcript: a
 # tool_use, after the last compact_boundary record, whose input holds a token of that premise's Source. A restamp with no
