@@ -40,16 +40,18 @@ source allows, with one stderr line.
 
 Fail open. Any other model error, odd answer or unreadable input allows, with one stderr line.
 
-Two exceptions, opus_ask() and override_ask(): the owner's plain asks (decision owner-override) fail CLOSED. Each
-grants an override, so a model error, a timeout or an odd answer grants nothing, with one stderr line. Both are thin
-wrappers on _ask_judge, which holds the one call, and differ only in their prompt head. override.grant_opus_ask calls
-opus_ask, from the prompt hook hooks/local_time.py, only for an owner prompt that carries the whole word `opus` and
-no keyword form. Cost: one haiku call (low effort, OPUS_ASK_TIMEOUT s) for such a prompt, none for any other.
-override.grant_override_ask calls override_ask only for an owner prompt that carries the whole word `override`
-outside code spans, has no whole word `opus`, and passes the gates. Cost: one such haiku call, none for any other.
-Its companion opus_scope() only narrows: for a plain ask that opus_ask said yes to, that names no role, and that has
-earlier owner prompts, it names the roles those prompts name. It fails OPEN to every role (None) with one stderr line,
-because the rule is "scope from context, fall back to every role" (decision owner-override).
+The plain asks (decision owner-override) are the owner's own words, so a model error, a timeout or an odd answer never
+grants anything, with one stderr line. model_ask() reads the owner's choice of one model of MODEL_FAMILIES (decision
+agent-model-cap, the owner's model name), Opus and Fable included: there is no keyword form for any of them. It tells a no
+from an error, because override.grant_model_ask keeps a held model on a no and ends it on an error. override.grant_model_ask
+calls it, from the prompt hook hooks/local_time.py, only for an owner prompt that names a model. Cost: one haiku call (low
+effort, OPUS_ASK_TIMEOUT s), none for any other prompt. override_ask() reads the owner's present ask to override a refusal and
+fails CLOSED through _ask_judge, which holds the one call. override.grant_override_ask calls it only for an owner prompt that
+carries the whole word `override` outside code spans, has no whole word `opus`, and passes the gates. Cost: one such haiku
+call, none for any other.
+Its companion opus_scope() only narrows: for a plain ask that model_ask said yes to for Opus or Fable, that names no role,
+and that has earlier owner prompts, it names the roles those prompts name. It fails OPEN to every role (None) with one
+stderr line, because the rule is "scope from context, fall back to every role" (decision owner-override).
 Cost: one more haiku call (low effort, OPUS_SCOPE_TIMEOUT s) for such an ask, none for any other.
 """
 import json
@@ -65,7 +67,7 @@ if HERE not in sys.path:
 # building-allow-list-is-the-constant). Cost: importing guard.py for it measured about 120 ms per Agent spawn;
 # shared_names is standard library only and adds about 2 ms.
 from shared_names import EXPLORE_AUDIT_MARKER  # noqa: E402
-from shared_names import DATA_TOOL, SETTINGS_REPO  # noqa: E402  stdlib only: the one home of the tool name and the settings repo
+from shared_names import DATA_TOOL, MODEL_FAMILIES, SETTINGS_REPO  # noqa: E402  stdlib only: the one home of the tool name, the model list and the settings repo
 
 OK_SHAPE = {"ok": (True, False)}
 SPAWN_RULE, QUESTION_RULE = "spawn-judge", "question-judge"
@@ -78,19 +80,24 @@ QUESTION_CITE = "(decision question-reviewer-agent-hook, a question is reviewed 
 SPAWN_MODEL, SPAWN_TIMEOUT = "claude-sonnet-5-5", 30
 QUESTION_MODEL, QUESTION_TIMEOUT = "claude-opus-5-5", 60  # both at the model's default effort
 
-# The plain Opus ask (opus_ask). The prompt hook's settings.json row carries "timeout": 30, so OPUS_ASK_TIMEOUT plus
-# start-up fits. The owner's text follows the last line.
+# The plain asks' time budget. The prompt hook's settings.json row carries "timeout": 30, so OPUS_ASK_TIMEOUT plus
+# start-up fits. The owner's text follows the last line of each prompt.
 OPUS_ASK_TIMEOUT = 20
-OPUS_ASK_PROMPT = (
-    "The text below is a prompt the owner typed to a coding assistant. Answer {\"ok\": true} only when it is the "
-    "owner's own present request to run Opus agents now (for example `send opus judges` or `use opus for the "
-    "reviewers`). Answer {\"ok\": false} for a question, a hedge such as `maybe opus?`, a negation such as `don't "
-    "use opus`, a mention in the past tense, a request about some other model or topic, and any text that quotes or "
-    "reports what an agent or another person said. When unsure answer {\"ok\": false}. Reply JSON only: "
-    "{\"ok\": true} or {\"ok\": false}.\n\nText:\n"
+
+# The plain model ask (model_ask): the owner's choice of any one model of the list, Opus and Fable too. The list is written
+# into the head from shared_names, never copied. Reply quotes are cut before the text reaches it (override._strip_quotes), and the judge is told to refuse a quote too.
+MODEL_ASK_PROMPT = (
+    "The text below is a prompt the owner typed to a coding assistant. The models are: " + ", ".join(MODEL_FAMILIES)
+    + ". Answer {\"ok\": true, \"model\": \"<the one model from that list>\"} only when it is the owner's own present "
+    "choice of that one model for the agents to run on now (for example `use sonnet for the audit`, `run the "
+    "reviewers on haiku`, or the short forms `opus 2h`, `opus builders 2h` and `fable 1h`, which name the model "
+    "and for how long). Answer {\"ok\": false} for a question, a hedge such as `maybe haiku?`, a negation such as "
+    "`don't use sonnet`, a mention in the past tense, a request about some other topic, text that names two or more "
+    "models as the choice, and any text that quotes or reports what an agent or another person said. When unsure "
+    "answer {\"ok\": false}. Reply JSON only: {\"ok\": true, \"model\": \"<model>\"} or {\"ok\": false}.\n\nText:\n"
 )
 
-# The plain override ask (override_ask): the same call and time budget as opus_ask, its own head.
+# The plain override ask (override_ask): the same call and time budget as model_ask, its own head.
 OVERRIDE_ASK_PROMPT = (
     "The text below is a prompt the owner typed to a coding assistant. Answer {\"ok\": true} only when it is the "
     "owner's own present request to override a refusal or a permission ask of the assistant's guard now (for example "
@@ -101,13 +108,13 @@ OVERRIDE_ASK_PROMPT = (
     "{\"ok\": true} or {\"ok\": false}.\n\nText:\n"
 )
 
-# The scope read (opus_scope). It follows opus_ask in the same hook run, so its timeout is short. Unmeasured: the worst
+# The scope read (opus_scope). It follows model_ask in the same hook run, so its timeout is short. Unmeasured: the worst
 # case, OPUS_ASK_TIMEOUT + OPUS_SCOPE_TIMEOUT plus two `claude -p` starts, may pass the prompt hook's "timeout": 30.
 OPUS_SCOPE_TIMEOUT = 8
 OPUS_SCOPE_PROMPT = (
-    "A coding assistant's owner typed the ask below, which grants Opus to agents but names no agent role. The earlier "
-    "prompts the owner typed follow it, oldest first, one per line starting with `- `. Read them only as the owner's "
-    "words about which agent roles should run Opus. Answer {\"ok\": true, \"roles\": [...]} when they name the roles "
+    "A coding assistant's owner typed the ask below, which names a model above Sonnet for agents but names no agent "
+    "role. The earlier prompts the owner typed follow it, oldest first, one per line starting with `- `. Read them only "
+    "as the owner's words about which agent roles should run that model. Answer {\"ok\": true, \"roles\": [...]} when they name the roles "
     "the ask is about, listing only roles from: %s. Answer {\"ok\": false} when they name none, or when unsure. "
     "Reply JSON only.\n\nAsk:\n"
 )
@@ -272,31 +279,47 @@ def invoke_model(*args, **kwargs):
     return home(*args, **kwargs)
 
 
+def _ask_verdict(head, text):
+    """The model's parsed answer, a dict with a true or false `ok`, to the owner's prompt `text` read under the prompt
+    `head`: the one call of the plain asks. Raises ValueError for an error, a timeout or an answer with no true or false ok."""
+    import decision_watch  # lazy: the one home of the model's name
+    verdict, error = invoke_model(head + text, model=decision_watch.MODEL,
+                                  timeout=OPUS_ASK_TIMEOUT, shape=OK_SHAPE, effort="low")
+    if error:
+        raise ValueError(" ".join(str(error).split()))
+    ok = verdict.get("ok") if isinstance(verdict, dict) else None
+    if ok is not True and ok is not False:
+        raise ValueError("the answer has no true or false ok")
+    return verdict
+
+
 def _ask_judge(head, text, what):
     """True only when the model answers {"ok": true} to the owner's prompt `text` read under the prompt `head`. The one
     fail-closed call of the plain asks: an error, a timeout or an odd answer is False with one stderr line naming
     `what`; a plain {"ok": false} is False with none."""
     try:
-        import decision_watch  # lazy: the one home of the model's name
-        verdict, error = invoke_model(head + text, model=decision_watch.MODEL,
-                                      timeout=OPUS_ASK_TIMEOUT, shape=OK_SHAPE, effort="low")
-        if error:
-            raise ValueError(" ".join(str(error).split()))
-        ok = verdict.get("ok") if isinstance(verdict, dict) else None
-        if ok is True:
-            return True
-        if ok is not False:
-            raise ValueError("the answer has no true or false ok")
-        return False
+        return _ask_verdict(head, text)["ok"] is True
     except Exception as exc:
         print("call judge: %s grants nothing: %s" % (what, " ".join(str(exc).split())), file=sys.stderr)
         return False
 
 
-def opus_ask(text):
-    """True only when the model says the owner's prompt `text` is a present request to run Opus agents. Fails closed
-    (_ask_judge)."""
-    return _ask_judge(OPUS_ASK_PROMPT, text, "opus ask")
+def model_ask(text):
+    """The model family the owner chose in the prompt `text`, when the model says it is his own present choice of one model
+    for the agents (MODEL_ASK_PROMPT); False for a plain no; None for an error, a timeout, an odd answer or a yes that names no
+    family of MODEL_FAMILIES, with one stderr line. The caller tells the three apart: a no keeps a held model, an
+    error ends it (override.grant_model_ask)."""
+    try:
+        verdict = _ask_verdict(MODEL_ASK_PROMPT, text)
+        if verdict["ok"] is False:
+            return False
+        family = str(verdict.get("model")).strip().lower()
+        if family not in MODEL_FAMILIES:
+            raise ValueError("the answer names no model of the list")
+        return family
+    except Exception as exc:
+        print("call judge: model ask reads as an error: %s" % " ".join(str(exc).split()), file=sys.stderr)
+        return None
 
 
 def override_ask(text):

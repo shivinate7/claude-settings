@@ -1,0 +1,1 @@
+- workflow-mixed-role-hold: `floor_spawn` (hooks/guard.py) judges a Workflow script by its first below-floor spawn only. A held model scoped to builders lets a second, other-role haiku spawn in the same script pass. Decision agent-model-cap. Seen: 2026-11-25 x1
