@@ -207,9 +207,10 @@ FG_LONG_ROSTER = (
 FG_LONG_ALL = FG_LONG + FG_LONG_ROSTER
 FG_LONG_LIMIT = {"merge --lane-lint": {"timeout": CHECK_TIMEOUT_MS}}
 FG_LONG_FOREGROUND_ALLOWED = tuple(item for item in FG_LONG_ALL if item[0] not in FG_LONG_LIMIT)
-# THE MERGE TOOL. Its short sub-commands are exempt from this rule: the preview (`merge N`), `--ready`, `--confirm`, and
-# `--confirm --head`, each also behind `env`. A foreground Bash call stops at 120 s by default (decision stall-watch,
-# line 56). The merge tool's own reader decides which segment runs the merge tool, so a git merge or a word inside a
+# THE MERGE TOOL. Its short sub-commands are exempt from this rule: the preview (`merge N`), `--ready`, `--confirm`,
+# `--confirm --head`, `-C <checkout>` (decision merge-confirm-repo), `--session NAME`, and `--express` (decision
+# no-merge-during-batch-ci), each also behind `env`. A foreground Bash call stops at 120 s by default (decision stall-watch).
+# The merge tool's own reader decides which segment runs the merge tool, so a git merge or a word inside a
 # string is not one. A lane lint is not exempt: decision fg-bash-while-bg names lint as a command the rule refuses, and a
 # lane lint is a long local test run. It is in FG_MERGE_TOOL only for the background cases, which set its check-timeout
 # limit (FG_LONG_LIMIT).
@@ -217,6 +218,9 @@ FG_MERGE_TOOL_EXEMPT = (
     ("merge N --ready", "merge 12 --ready"),
     ("merge N --confirm", "merge 3270 --confirm"),
     ("merge N --confirm --head", "merge 12 --confirm --head " + LT_HEAD),
+    ("merge -C checkout N --confirm", "~/.claude/bin/merge -C ~/Developer/example-repo 12 --confirm"),
+    ("merge N --confirm --session NAME", "merge 12 --confirm --session lane-x"),
+    ("merge N --confirm --express", "merge 12 --confirm --express"),
     ("merge N preview", "merge 12"),
     ("env-prefixed merge N --ready", "env -u AI_AGENT -u CLAUDECODE ~/.claude/bin/merge 12 --ready"),
     ("env-prefixed merge N --confirm --head",
@@ -271,6 +275,9 @@ for fg_label, fg_command in FG_MERGE_TOOL_EXEMPT:
              fg_command, fg_path("idle"))
 fg_allow("fg-bash-while-bg: a foreground merge N --ready is allowed while a background agent runs",
          "merge 12 --ready", fg_path("agent-running"))
+# One cheap case for the --head=SHA arm: the head comes as one token, and the form is exempt.
+fg_allow("fg-bash-while-bg: a foreground merge N --confirm --head=SHA is allowed while a background command runs",
+         "merge 12 --confirm --head=" + LT_HEAD, fg_path("bg-running"))
 # The lane lint is not exempt: refused in the foreground while background work runs. With none, it is allowed: check-timeout
 # judges a lane lint only when its call sets a limit, and this call sets none.
 fg_refuse("fg-bash-while-bg: a foreground merge --lane-lint is refused while a background command runs",
@@ -295,6 +302,22 @@ fg_refuse("fg-bash-while-bg: a foreground bash -c line with merge N --confirm an
 # ALLOW: a short command substitution inside a merge tool segment is quick, so it stays allowed.
 fg_allow("fg-bash-while-bg: a foreground merge N --confirm --head with a short command substitution is allowed while a background command runs",
          "merge 12 --confirm --head $(git rev-parse HEAD)", fg_path("bg-running"))
+# The merge tool's other short forms, each with a long command riding it: a chained test run, and a command substitution as
+# an argument. The merge segment is exempt, but the long part is still judged, so each form stays refused.
+fg_refuse("fg-bash-while-bg: a foreground merge -C checkout N --confirm chained with a test run is refused while a background command runs",
+          "~/.claude/bin/merge -C ~/Developer/example-repo 12 --confirm && pytest hooks/test_stall_watch.py", fg_path("bg-running"))
+fg_refuse("fg-bash-while-bg: a foreground merge -C checkout N --confirm with a command substitution running pytest is refused while a background command runs",
+          "~/.claude/bin/merge -C ~/Developer/example-repo 12 --confirm $(pytest hooks/test_stall_watch.py)", fg_path("bg-running"))
+fg_refuse("fg-bash-while-bg: a foreground merge N --confirm --session chained with a test run is refused while a background command runs",
+          "merge 12 --confirm --session lane-x && pytest hooks/test_stall_watch.py", fg_path("bg-running"))
+fg_refuse("fg-bash-while-bg: a foreground merge N --confirm --session with a command substitution running pytest is refused while a background command runs",
+          "merge 12 --confirm --session lane-x $(pytest hooks/test_stall_watch.py)", fg_path("bg-running"))
+fg_refuse("fg-bash-while-bg: a foreground merge N --confirm --express chained with a test run is refused while a background command runs",
+          "merge 12 --confirm --express && pytest hooks/test_stall_watch.py", fg_path("bg-running"))
+fg_refuse("fg-bash-while-bg: a foreground merge N --confirm --express with a command substitution running pytest is refused while a background command runs",
+          "merge 12 --confirm --express $(pytest hooks/test_stall_watch.py)", fg_path("bg-running"))
+fg_refuse("fg-bash-while-bg: a foreground merge N --confirm --lane-lint is refused while a background command runs",
+          "merge 12 --confirm --lane-lint", fg_path("bg-running"))
 fg_refuse("fg-bash-while-bg: a foreground test run is refused while a background command runs",
           "python3 hooks/test_guard.py", fg_path("bg-running"))
 fg_refuse("fg-bash-while-bg: a foreground lint run is refused while a background command runs",
