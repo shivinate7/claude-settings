@@ -5741,6 +5741,21 @@ class OneLsofPerRunTests(_AgentEndFixture):
         cwd = self.batch_cwd_starts()
         self.assertLessEqual(cwd, 1, "leftover temp folders started the batch cwd read %d times for three "
                                      "candidates; want at most once" % cwd)
+        # Only a folder with no process inside reaches the open-files read, and the three above all have
+        # one, so the read never ran for them. Two such folders, in a second pass, must share ONE read.
+        for _ in range(2):
+            folder = os.path.join(run_folders, "%d-%s" % (dead, uuid.uuid4().hex))
+            os.makedirs(folder)
+            os.utime(folder, (now - 2 * 60 * 60, now - 2 * 60 * 60))  # over the one-hour limit, no process
+        before = self.open_file_starts()
+        with self.darwin():
+            decisions = sweep.find_leftover_temp(temp, now)
+        clear = [d["path"] for d in decisions if d["action"] == "reap"]
+        self.assertEqual(len(clear), 2, "the two folders with no process inside were not both judged clear: "
+                                        "%r" % decisions)
+        shared = self.open_file_starts() - before
+        self.assertEqual(shared, 1, "two folders with no process inside started the open-files read %d times; "
+                                    "want exactly once" % shared)
 
 
 class AgentEndOwnWorktreeTests(_AgentEndFixture):

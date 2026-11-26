@@ -879,8 +879,8 @@ MUTATIONS = [
 
     ('build dirs: the build pass uses no fresh process read',
      'agent_end_reap',
-     '    cwds = all_cwds(max(1, min(BATCH_TIMEOUT, deadline - time.monotonic())))',
-     '    cwds = []',
+     '            again = all_cwds(max(1, min(BATCH_TIMEOUT, deadline - time.monotonic())))',
+     '            again = []',
      'test_a_build_started_during_the_hook_keeps_its_build_folders',
      "posix"),
 
@@ -1323,6 +1323,26 @@ MUTATIONS = [
      '            return _uid_is_mine(row[1] if row else "")',
      '            return _uid_is_mine(str(os.getuid()))',
      "test_one_ps_table_answers_command_orphan_owner_and_pid_list_on_macos",
+     "posix"),
+    # One process-table read per run (OneLsofPerRunTests): the shared cwd table, the fresh read a
+    # removal takes first, and one open-files read for the leftover folders. Each anchor is unique.
+    ("one read: the shared cwd table is read again on every judgement",
+     "sweep",
+     '        if "table" not in share:',
+     '        if True:',
+     "test_one_agent_end_reap_reads_the_process_table_once_for_three_kept_trees",
+     "posix"),
+    ("one read: a removal skips its fresh process read before it is removed",
+     "sweep",
+     '    with fresh_process_reads():\n        return processes_in(path)',
+     '    return processes_in(path)',
+     "test_a_tree_the_run_removes_gets_a_fresh_read_before_its_removal",
+     "posix"),
+    ("one read: leftover temp folders read open files once per folder",
+     "sweep",
+     '        table = _open_files_under(waiting)',
+     '        table = (lambda reads: None if None in reads else [row for read in reads for row in read])([_open_files_under([p]) for p in waiting])',
+     "test_leftover_temp_reads_the_process_table_and_open_files_once_for_three_candidates",
      "posix"),
     # The parallel preview (ParallelPreviewTests). only_on="posix" on all but "all at once": a
     # Windows preview stays serial (PREVIEW_THREADS), so no test can see these there.
