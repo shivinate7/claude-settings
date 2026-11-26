@@ -365,6 +365,10 @@ jobs:
         if: ${{ !cancelled() && (needs.scope.outputs.code == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_wait_until.py
 
+      - name: Outline helper fixture suite
+        if: ${{ !cancelled() && (needs.scope.outputs.code == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
+        run: python3 lint/test_outline.py
+
       - name: Now-central helper fixture suite
         if: ${{ !cancelled() && (needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_any == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_now_central.py
