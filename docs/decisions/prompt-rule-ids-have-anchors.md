@@ -19,7 +19,7 @@ Harm: a judge cites a rule that does not exist, or keeps judging against a stale
 
 The owner (owner, 2026-11-25, 16:14 to 16:36 CST). On the judges' own rule copies: "how does it have its own saved copy of rules, and those dont update?!?!?!" On the fix: "yeah this shd be fixed i believe". On the order, this lint first and then judges read their rules' home sentences at run time: "approved".
 
-Cost: one run in CI and one in the ready checks. It reads the hook files that its table names and the two rule files. It starts no child process and writes no log, file, hook or timer. Not pinned beyond `lint/test_check_prompt_rule_ids.py`.
+Cost: it runs in CI and in the ready checks. It reads the hook files that its table names and the rule files. It starts no child process and writes no log, file, hook or timer. Not pinned beyond `lint/test_check_prompt_rule_ids.py`.
 
 Reader: the step "Prompt rule-id lint" in CI, and its row in the ready checks.
 
