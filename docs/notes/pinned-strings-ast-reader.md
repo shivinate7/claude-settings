@@ -1,0 +1,1 @@
+- pinned-strings-ast-reader: `tests/guard/s43740-ready-pr-push.py` `_ppush_pinned_strings` reads `PINNED_STRINGS` from `merge/merge.py` with its own ast walk, because `_merge_constant` (`tests/guard/s13406-merge.py`) reads one string only. Extend `_merge_constant` to read a tuple, so the reader stays in one place. Seen: 2026-11-25 x1
