@@ -100,12 +100,12 @@ def select_runs(runs, pr, repo, default_branch, own_run_id=None):
             and run["id"] != own_run_id]
 
 
-def _utc(stamp):
-    """A GitHub UTC timestamp as a datetime, or None when it is not in that form."""
-    if not isinstance(stamp, str):
+def _utc(text):
+    """A GitHub UTC timetext as a datetime, or None when it is not in that form."""
+    if not isinstance(text, str):
         return None
     try:
-        return datetime.datetime.strptime(stamp, TIME_FORM)
+        return datetime.datetime.strptime(text, TIME_FORM)
     except ValueError:
         return None
 
