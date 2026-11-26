@@ -3020,13 +3020,14 @@ def head_config_refusal(root, head, base, path=DEFAULT_CONFIG):
         return f"{where} is not an object in its merge block: merge must be a JSON object. Every merge in the repo reads this file from the default branch, so fix it before the PR goes on."
     try:
         with contextlib.redirect_stdout(io.StringIO()):  # parse_config says its defaults and floors; only its refusal is read here
-            parse_config(root, cfg, head, f"the head {head[:9]}", path, " " + HEAD_CONFIG_CITE, fill=False)
+            parse_config(root, cfg, head, f"the head {head[:9]}", path, "", fill=False)  # no cite here: it belongs to the causes a newer tool may take, added below
     except ConfigValueStop as e:
+        cite = " " + HEAD_CONFIG_CITE
         land = f"land the tool change first, wait until stable holds it, then change {path} in a second PR"
         if e.cause == "newer":
-            return f"{e} The merge tool at stable does not know this value or key yet, so every merge in the repo would be refused once this lands. {land[0].upper() + land[1:]}."
+            return f"{e}{cite} The merge tool at stable does not know this value or key yet, so every merge in the repo would be refused once this lands. {land[0].upper() + land[1:]}."
         if e.cause == "either":
-            return (f"{e} Either the merge tool at stable does not know this value yet, so every merge in the repo would be refused once this lands: then {land}. "
+            return (f"{e}{cite} Either the merge tool at stable does not know this value yet, so every merge in the repo would be refused once this lands: then {land}. "
                     f"Or the value is a typo: then fix it in {path} and push.")
         return f"{e} No version of the merge tool takes this value, so fix it in {path} and push."
     except Stop as e:  # not a verdict on the value: parse_config could not read the workflows at the head
