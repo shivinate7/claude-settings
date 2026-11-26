@@ -1459,18 +1459,38 @@ def _fg_tokens_hit(tokens, depth: int) -> str:
     return next((hit for seg in split_segments(script) if (hit := fg_long_segment(seg, depth + 1))), "") if script else ""
 
 
-def _fg_runs_merge_tool(segment: str) -> bool:
-    """True when the segment runs the merge tool, by guard_merge's one reader (a git merge, or merge text in a
-    string or heredoc, is not one). The merge tool bounds its own calls, so this rule leaves them alone."""
+FG_MERGE_EXEMPT_FLAGS = frozenset(("--ready", "--confirm", "--head"))
+
+
+def _fg_merge_exempt(segment: str) -> bool:
+    """True when the segment runs a short merge tool call: `merge N`, with `--ready`, `--confirm` or
+    `--confirm --head SHA`. guard_merge's one reader says which segment runs the merge
+    tool (a git merge, or merge text in a string or heredoc, is not one). Any other flag, such as `--lane-lint`
+    (a long local test run), is not exempt."""
     import guard_merge  # Lazy: only a call that can run long pays to load the merge tool reader.
-    return guard_merge.merge_tool_args(segment) is not None
+    args = guard_merge.merge_tool_args(segment)
+    if not args or not args[0].isdigit():
+        return False
+    return all(arg in FG_MERGE_EXEMPT_FLAGS or arg.startswith("--head=")
+               for arg in args if arg.startswith("--"))
+
+
+def _fg_merge_inner_hit(segment: str, depth: int) -> str:
+    """The matched text when a command substitution, backtick or process substitution inside a merge tool
+    segment runs a long command, else ''. The segment's own words stay exempt; the long part does not.
+    A cut too deep to read is judged as a refusal."""
+    found, too_deep = _substitutions(segment)
+    if too_deep:
+        return "merge nested substitution"
+    return next((hit for text, _in_message in found[:-1] for part in split_segments(text)
+                 if (hit := fg_long_segment(part, depth + 1))), "")
 
 
 def fg_long_segment(segment: str, depth: int = 0) -> str:
-    """The matched text when one segment can run long, else ''. A segment that runs the merge tool is exempt;
-    the other segments of the same call are still judged."""
-    if _fg_runs_merge_tool(segment):
-        return ""
+    """The matched text when one segment can run long, else ''. A short merge tool call is exempt, but a long
+    command inside it is not; the other segments of the same call are still judged."""
+    if _fg_merge_exempt(segment):
+        return _fg_merge_inner_hit(segment, depth)
     tokens = segment_tokens(segment)
     return _fg_tokens_hit(tokens, depth) if tokens else ""
 
