@@ -1583,4 +1583,4 @@ await test("question box: GUARD_PY writes one guard.log line through the real gu
 const fails = results.filter(r => r.startsWith('FAIL')).length
 console.log(results.join('\n'))
 console.log(`session-board pins: ${results.length - fails} pass, ${fails} fail of ${results.length}`)
-if (fails) process.exitCode = 1
+if (fails || results.length === 0) process.exitCode = 1

@@ -1987,6 +1987,12 @@ class GuardModuleFamilyTests(unittest.TestCase):
         self.assertTrue(reason.strip(), "guard_core.py's exemption has a blank reason")
         self.assertNotIn("hooks/guard_core.py", guard_table(), "guard_core.py is exempt, not a family row")
 
+    def test_guard_write_has_a_row_that_names_the_write_family(self):
+        """The silent-write family moved to hooks/guard_write.py, so its mutants meet the write section from its own row."""
+        families = guard_table().get("hooks/guard_write.py") or []
+        self.assertIn("write", families, "hooks/guard_write.py needs a GUARD_MODULE_FAMILIES row that names the write "
+                                         "family, the family of its silent-write mutants")
+
     def test_every_row_is_a_non_empty_list(self):
         table = guard_table()
         self.assertIn("hooks/guard_kill.py", table, "GUARD_MODULE_FAMILIES has no row for hooks/guard_kill.py")
@@ -2006,9 +2012,10 @@ class GuardModuleFamilyTests(unittest.TestCase):
         code, out, err = run_cli(["--tests-for", "hooks/guard_kill.py"])
         self.assertEqual(code, 0, "exit %d\n%s%s" % (code, out, err))
         self.assertEqual(out.splitlines(), ["hooks/test_checks_never_raise.py", "hooks/test_guard.py::git-env",
-                                            "hooks/test_guard.py::kill"],
+                                            "hooks/test_guard.py::kill", "hooks/test_guard_kill.py"],
                          "guard_kill.py's suites are the git-env and kill family lines, plus the import walk's "
-                         "test_checks_never_raise.py, which reaches the kill checks the families miss, sorted")
+                         "test_checks_never_raise.py, which reaches the kill checks the families miss, and "
+                         "hooks/test_guard_kill.py, the suite beside it, sorted")
 
     def test_tests_for_guard_env_prints_its_family_lines_and_its_import_walk_suite(self):
         code, out, err = run_cli(["--tests-for", "hooks/guard_env.py"])

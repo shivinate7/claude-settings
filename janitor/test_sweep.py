@@ -1345,8 +1345,9 @@ class WorktreeDecisionTests(unittest.TestCase):
 class StaleCwdRecordTests(unittest.TestCase):
     """A session record whose folder is gone stands in no tree, for a removal that the dirty, locked and unmerged keeps
     also guard (owner, 20:53 CST 11-24, 2026). Only the removal verdicts opt in. The orphan-process reap and
-    `trash_verdict` have no dirty check and act at once, so beside such a record they keep their old answer. This class
-    has its own config folder, so its record reaches no other class's read."""
+    `trash_verdict` pass that record as absent only after their own dirty and process checks (owner, 21:19 CST 11-24;
+    consultant pick QAB c, 03:08 CST 11-25). Beside a gone record, a clean target with no process is acted on, and
+    anything else is kept. This class has its own config folder, so its record reaches no other class's read."""
 
     @classmethod
     def setUpClass(cls):
@@ -1355,7 +1356,8 @@ class StaleCwdRecordTests(unittest.TestCase):
         cls.env = mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": cls.cfg})
         cls.env.start()
         cls.root = os.path.join(cls.base, "stale-repo")
-        make_repo(cls.root, {"f.txt": "base\n"})
+        # The build folders below are git-ignored, as a real repo's are: the trash cases rename one the way the reap does.
+        make_repo(cls.root, {"f.txt": "base\n", ".gitignore": "native/build/\n.build/\n"})
         give_remote(cls.root)
         cls.removable = os.path.join(cls.base, "wt-stale-removable")
         run_vcs(cls.root, "worktree", "add", "-q", cls.removable, "-b", "lane-stale-removable")
@@ -1393,24 +1395,28 @@ class StaleCwdRecordTests(unittest.TestCase):
                          "a clean merged tree was kept, so a record whose folder is gone still stands in it")
         self.assertEqual(decision["action"], "reap")
 
-    def test_orphaned_listener_stays_kept_beside_such_a_record(self):
-        """The orphan-process reap stops a process and has no dirty check. Both its orphan and its owner reads say yes,
-        so only the session read can keep it: a removed folder must not reach that read."""
+    def test_orphaned_listener_is_reaped_beside_such_a_record_when_its_checkout_is_clean(self):
+        """Case 1 for the orphan reap. Its orphan and owner reads say yes. Its dirty and process checks pass on a clean
+        checkout whose only process is the listener itself, so the gone record must not keep it."""
         self.assert_record_stands_nowhere()
+        self.assertEqual(sweep.git_reads.porcelain(self.removable), [],
+                         "scope: the checkout must be clean")
         entry = {"pid": os.getpid(), "port": 1, "cwd": self.removable, "checkout": self.removable}
         with mock.patch.object(sweep, "is_orphan", return_value=True), \
-                mock.patch.object(sweep, "is_current_user_process", return_value=True):
+                mock.patch.object(sweep, "is_current_user_process", return_value=True), \
+                mock.patch.object(sweep, "processes_in", return_value=([os.getpid()], [])):
             decision = sweep.decide_listener(entry)
-        self.assertEqual(decision["reason"], "unreadable-subject",
-                         "the orphan reap opted in to a record whose folder is gone; it must keep the listener")
-        self.assertEqual(decision["action"], "keep")
+        self.assertEqual(decision["action"], "reap",
+                         "a clean checkout with only its listener inside was kept beside a record whose folder is gone")
+        self.assertEqual(decision["reason"], "orphaned-listener")
 
     def test_trash_folder_stays_kept_beside_such_a_record(self):
-        """`trash_verdict` deletes a folder with no dirty check. Beside a record whose folder is gone it keeps the
-        folder as unreadable, as before."""
+        """`trash_verdict` on a trash-named folder that no git checkout holds. Its dirty read is unknown, so the folder is
+        kept as unreadable whatever the record says."""
         self.assert_record_stands_nowhere()
-        folder = os.path.join(self.base, "trash-leftover")
+        folder = sweep.trash_name(os.path.join(self.base, "trash-leftover"))
         os.makedirs(folder)
+        self.assertTrue(sweep.is_trash_name(os.path.basename(folder)), "scope: the folder must carry a trash name")
         delete, reason = sweep.trash_verdict(folder)
         self.assertEqual(reason, "unreadable-subject",
                          "trash_verdict opted in to a record whose folder is gone; it must keep the folder")
@@ -1434,6 +1440,518 @@ class StaleCwdRecordTests(unittest.TestCase):
         self.assertEqual(decision["reason"], "unreadable-subject",
                          "a clean merged tree was reaped beside a record whose parent folder is gone; it must be kept")
         self.assertEqual(decision["action"], "keep")
+
+    def test_a_read_with_no_flag_beside_a_gone_record_answers_unknown(self):
+        """The default of `absent_is_out` is off. The husk read and verdict and the branch-cut holder reads in
+        janitor/sweep.py pass no flag, so beside a removed record's folder they must read unknown, never out. The
+        flagged read of the same target answers out, which shows the record is the gone one."""
+        self.assert_record_stands_nowhere()
+        self.assertIs(sweep.git_reads.worktree_live_session(self.removable, absent_is_out=True), False,
+                      "scope: the flagged read must answer out for the gone record")
+        self.assertIsNone(sweep.git_reads.worktree_live_session(self.removable),
+                          "a flagless read beside a gone record answered out; the default must keep it unknown")
+
+    # Helpers for the two acts beside a gone record. Each case builds its own worktree, so no case dirties `self.removable`.
+
+    def new_worktree(self, name):
+        path = os.path.join(self.base, "wt-" + name)
+        run_vcs(self.root, "worktree", "add", "-q", path, "-b", "lane-" + name)
+        self.assertTrue(os.path.isdir(path), "scope: the worktree must be a folder")
+        return path
+
+    def no_records(self):
+        """A config folder with no sessions folder in it, so `session_records` reads no record."""
+        return mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": os.path.join(self.base, "cfg-no-records")})
+
+    def live_record_inside(self, folder):
+        """A live record (this process) whose cwd is FOLDER, written beside the gone record in this class's config."""
+        name = "stale-cwd-live-inside.json"
+        write(os.path.join(self.cfg, "sessions", name),
+              json.dumps({"pid": os.getpid(), "startedAt": this_process_start_ms(), "cwd": folder}))
+        self.addCleanup(os.remove, os.path.join(self.cfg, "sessions", name))
+
+    def trash_from_build(self, wt):
+        """A build folder that git ignores, renamed to a trash name the way the agent-end reap renames it."""
+        build = os.path.join(wt, "native", "build")
+        write(os.path.join(build, "out.o"), "object\n")
+        self.assertEqual(sweep.git_reads.porcelain(wt), [],
+                         "scope: the build output must be git-ignored before the rename")
+        trash = sweep.trash_name(build)
+        os.rename(build, trash)
+        self.assertTrue(sweep.is_trash_name(os.path.basename(trash)), "scope: the folder must carry a trash name")
+        return trash
+
+    def empty_trash(self, wt):
+        """An empty trash folder under WT. Git cannot see an empty folder, so it reads clean."""
+        trash = sweep.trash_name(os.path.join(wt, "native", "build"))
+        os.makedirs(trash)
+        return trash
+
+    def bare_remote_with_main(self, remote, name):
+        """A bare repo at REMOTE that holds one commit on main, pushed from a source repo in this case's folder."""
+        source = os.path.join(self.base, "src-" + name)
+        make_repo(source, {"f.txt": "base\n"})
+        init = run_vcs(self.base, "init", "-q", "--bare", "-b", "main", remote)
+        self.assertEqual(init.returncode, 0, "scope: the bare remote must be made: %s" % init.stderr.strip())
+        add = run_vcs(source, "remote", "add", "origin", remote)
+        self.assertEqual(add.returncode, 0, "scope: the source must name the remote: %s" % add.stderr.strip())
+        push = run_vcs(source, "push", "-q", "origin", "main")
+        self.assertEqual(push.returncode, 0,
+                         "scope: the source must push main to the remote: %s" % push.stderr.strip())
+        return remote
+
+    def clone_from_remote(self, dest, name):
+        """A clone at DEST of a bare remote beside this case's base, which holds one commit on main."""
+        remote = self.bare_remote_with_main(os.path.join(self.base, "remote-" + name + ".git"), name)
+        clone = run_vcs(self.base, "clone", "-q", remote, dest)
+        self.assertEqual(clone.returncode, 0, "scope: the clone must be made: %s" % clone.stderr.strip())
+        return dest
+
+    def decide_orphan(self, checkout, processes=([], [])):
+        """`decide_listener` with the orphan and owner reads saying yes, so only the session, dirty and process
+        reads can keep the listener."""
+        entry = {"pid": os.getpid(), "port": 1, "cwd": checkout, "checkout": checkout}
+        with mock.patch.object(sweep, "is_orphan", return_value=True), \
+                mock.patch.object(sweep, "is_current_user_process", return_value=True), \
+                mock.patch.object(sweep, "processes_in", return_value=processes):
+            return sweep.decide_listener(entry)
+
+    # The orphan-process reap, beside a record whose folder is gone. Case 1 is the test above, re-pointed.
+
+    def test_orphaned_listener_is_kept_for_uncommitted_work_beside_such_a_record(self):
+        """Case 2. An untracked file in the checkout keeps the listener as `dirty`, the reason decide_worktree gives."""
+        self.assert_record_stands_nowhere()
+        wt = self.new_worktree("listener-dirty")
+        write(os.path.join(wt, "notes.txt"), "uncommitted\n")
+        self.assertTrue(sweep.git_reads.porcelain(wt), "scope: the checkout must hold uncommitted work")
+        decision = self.decide_orphan(wt)
+        self.assertEqual(decision["action"], "keep")
+        self.assertEqual(decision["reason"], "dirty",
+                         "the orphan reap kept a checkout with uncommitted work, but the reason does not name it")
+
+    def test_orphaned_listener_is_kept_for_a_process_inside_beside_such_a_record(self):
+        """Case 3. Another process has its cwd in the checkout, so the keep names its pid."""
+        self.assert_record_stands_nowhere()
+        wt = self.new_worktree("listener-process")
+        self.assertEqual(sweep.git_reads.porcelain(wt), [], "scope: the checkout must be clean")
+        other = 987654
+        decision = self.decide_orphan(wt, processes=([os.getpid(), other], []))
+        self.assertEqual(decision["action"], "keep")
+        self.assertIn(str(other), decision["reason"],
+                      "the orphan reap kept a checkout with another process inside, but the reason does not name it")
+
+    def test_orphaned_listener_is_kept_for_a_live_session_inside_beside_such_a_record(self):
+        """Case 4, a control. A live session whose folder sits inside the checkout keeps it, with the gone record beside it."""
+        self.assert_record_stands_nowhere()
+        wt = self.new_worktree("listener-live")
+        inside = os.path.join(wt, "sub")
+        os.makedirs(inside)
+        self.live_record_inside(inside)
+        self.assertTrue(os.path.isdir(inside), "scope: the live record's folder must exist inside the checkout")
+        decision = self.decide_orphan(wt)
+        self.assertEqual(decision["action"], "keep")
+        self.assertEqual(decision["reason"], "live-session")
+
+    def test_orphaned_listener_is_reaped_beside_its_own_descendant_when_its_checkout_is_clean(self):
+        """The listener's own descendant, two levels down, has its cwd in the checkout. It does not keep the listener:
+        `_pids_but_listener` drops each pid whose parent chain reaches the listener."""
+        self.assert_record_stands_nowhere()
+        wt = self.new_worktree("listener-descendant")
+        self.assertEqual(sweep.git_reads.porcelain(wt), [], "scope: the checkout must be clean")
+        child, grandchild = 987661, 987662
+        parents = {grandchild: child, child: os.getpid()}
+        with mock.patch.object(sweep, "_parent_pid", side_effect=parents.get):
+            self.assertTrue(sweep._descends_from(grandchild, os.getpid()),
+                            "scope: the grandchild's parent chain must reach the listener")
+            decision = self.decide_orphan(wt, processes=([os.getpid(), child, grandchild], []))
+        self.assertEqual(decision["action"], "reap",
+                         "the orphan reap kept a listener for its own descendant, which is no process that keeps the checkout")
+        self.assertEqual(decision["reason"], "orphaned-listener")
+
+    def test_orphaned_listener_is_kept_for_an_unrelated_process_inside_beside_such_a_record(self):
+        """The control for the descendant case. A process inside the checkout whose parent chain runs to init, not to the
+        listener, keeps the listener, and the keep names its pid."""
+        self.assert_record_stands_nowhere()
+        wt = self.new_worktree("listener-unrelated")
+        self.assertEqual(sweep.git_reads.porcelain(wt), [], "scope: the checkout must be clean")
+        other, other_parent = 987671, 987670
+        parents = {other: other_parent, other_parent: 1}
+        with mock.patch.object(sweep, "_parent_pid", side_effect=parents.get):
+            self.assertFalse(sweep._descends_from(other, os.getpid()),
+                             "scope: the unrelated process's parent chain must not reach the listener")
+            decision = self.decide_orphan(wt, processes=([os.getpid(), other], []))
+        self.assertEqual(decision["action"], "keep")
+        self.assertIn(str(other), decision["reason"],
+                      "the orphan reap kept a checkout for an unrelated process, but the reason does not name its pid")
+
+    def test_orphaned_listener_is_kept_unreadable_when_its_checkout_is_not_a_git_folder(self):
+        """Case 5, not a git folder. No dirty read is possible, so the keep reason is unknown. No session record is
+        read here, so the old code reaps it."""
+        folder = os.path.join(self.base, "listener-not-git")
+        os.makedirs(folder)
+        self.assertIsNone(sweep.git_reads.porcelain(folder), "scope: the folder must not be a git checkout")
+        with self.no_records():
+            decision = self.decide_orphan(folder)
+        self.assertEqual(decision["action"], "keep")
+        self.assertEqual(decision["reason"], "unreadable-subject")
+
+    def test_orphaned_listener_is_kept_unreadable_when_the_dirty_read_returns_none(self):
+        """Case 5, the dirty read returns unknown on a clean checkout. Unknown is never clean."""
+        wt = self.new_worktree("listener-unknown")
+        with self.no_records(), mock.patch.object(sweep.git_reads, "porcelain", return_value=None):
+            decision = self.decide_orphan(wt)
+        self.assertEqual(decision["action"], "keep")
+        self.assertEqual(decision["reason"], "unreadable-subject")
+
+    def test_orphaned_listener_is_kept_unreadable_when_the_dirty_read_raises(self):
+        """Case 5, the dirty read raises. The keep is unknown, not a reap."""
+        wt = self.new_worktree("listener-raise")
+        with self.no_records(), \
+                mock.patch.object(sweep.git_reads, "porcelain", side_effect=OSError("status could not run")):
+            decision = self.decide_orphan(wt)
+        self.assertEqual(decision["action"], "keep")
+        self.assertEqual(decision["reason"], "unreadable-subject")
+
+    def test_orphaned_listener_is_kept_unreadable_when_the_process_read_fails(self):
+        """Case 6. The process list cannot be read, so the keep is unknown, not a reap."""
+        wt = self.new_worktree("listener-process-read")
+        with self.no_records():
+            decision = self.decide_orphan(wt, processes=(None, None))
+        self.assertEqual(decision["action"], "keep")
+        self.assertEqual(decision["reason"], "unreadable-subject")
+
+    # `trash_verdict`, beside a record whose folder is gone. A trash folder is a renamed build folder inside a worktree.
+
+    def test_trash_folder_is_deleted_beside_such_a_record_when_it_holds_only_ignored_build_output(self):
+        """Case 1 for the trash sweep. The renamed build folder holds only what git ignored under its build name, so it
+        holds no uncommitted work, and the gone record must not keep it."""
+        self.assert_record_stands_nowhere()
+        wt = self.new_worktree("trash-clean")
+        trash = self.trash_from_build(wt)
+        with mock.patch.object(sweep, "processes_in", return_value=([], [])):
+            delete, reason = sweep.trash_verdict(trash)
+        self.assertTrue(delete, "trash_verdict kept a renamed build folder that holds only ignored output: %s" % reason)
+        self.assertEqual(reason, "leftover trash")
+
+    def test_trash_folder_is_kept_for_uncommitted_work_beside_such_a_record(self):
+        """Case 2 for the trash sweep. A tracked file that the rename moved away from the build name is uncommitted
+        work: git lists it as deleted under the original name, so the keep names it `dirty`. Decision
+        `build-dirs-reaped-at-agent-end` deletes an untracked build folder by name, so only tracked work counts."""
+        self.assert_record_stands_nowhere()
+        wt = self.new_worktree("trash-dirty")
+        build = os.path.join(wt, "native", "build")
+        write(os.path.join(build, "keep.txt"), "tracked\n")
+        self.assertEqual(run_vcs(wt, "add", "-f", os.path.join("native", "build", "keep.txt")).returncode, 0,
+                         "scope: the build file must be tracked")
+        self.assertEqual(run_vcs(wt, *IDENT, "commit", "-q", "-m", "track a build file").returncode, 0,
+                         "scope: the build file must be committed")
+        trash = sweep.trash_name(build)
+        os.rename(build, trash)
+        self.assertTrue(os.path.isfile(os.path.join(trash, "keep.txt")), "scope: the tracked file must move to the trash name")
+        self.assertTrue(sweep.git_reads.porcelain(trash), "scope: the folder must hold uncommitted work")
+        with mock.patch.object(sweep, "processes_in", return_value=([], [])):
+            delete, reason = sweep.trash_verdict(trash)
+        self.assertFalse(delete)
+        self.assertEqual(reason, "dirty", "the trash sweep kept a folder with a moved tracked file, but the reason does not name it")
+
+    def test_trash_folder_is_kept_for_a_staged_file_beside_such_a_record(self):
+        """Case 2b for the trash sweep. A file staged under the trash name is uncommitted work, so the keep names it `dirty`."""
+        self.assert_record_stands_nowhere()
+        wt = self.new_worktree("trash-staged")
+        trash = self.trash_from_build(wt)
+        staged = os.path.join(trash, "staged.txt")
+        write(staged, "staged\n")
+        self.assertEqual(run_vcs(wt, "add", "-f", staged).returncode, 0, "scope: the file must be staged")
+        with mock.patch.object(sweep, "processes_in", return_value=([], [])):
+            delete, reason = sweep.trash_verdict(trash)
+        self.assertFalse(delete)
+        self.assertEqual(reason, "dirty", "the trash sweep kept a folder with a staged file, but the reason does not name it")
+
+    def test_trash_folder_with_only_an_untracked_file_is_deleted_beside_such_a_record(self):
+        """Case 2c, a control for the trash sweep. An untracked file in the folder is build output: decision
+        `build-dirs-reaped-at-agent-end` deletes a build folder by name whatever it holds, so the gone record must not
+        keep it. The old code deletes it too."""
+        self.assert_record_stands_nowhere()
+        wt = self.new_worktree("trash-untracked")
+        trash = self.trash_from_build(wt)
+        write(os.path.join(trash, "notes.txt"), "untracked\n")
+        self.assertTrue(sweep.git_reads.porcelain(trash), "scope: the folder must hold an untracked file")
+        with mock.patch.object(sweep, "processes_in", return_value=([], [])):
+            delete, reason = sweep.trash_verdict(trash)
+        self.assertTrue(delete, "trash_verdict kept a build folder for an untracked file: %s" % reason)
+        self.assertEqual(reason, "leftover trash")
+
+    def test_trash_folder_is_kept_for_a_nested_repo_with_uncommitted_work_beside_such_a_record(self):
+        """Case 2d for the trash sweep. A nested git repo inside the renamed folder holds work the parent repo cannot
+        see: the parent lists the whole folder as one `??` line, and the dirty read skips those. The keep names the
+        folder `dirty` whatever the record says."""
+        self.assert_record_stands_nowhere()
+        wt = self.new_worktree("trash-nested-repo")
+        trash = self.trash_from_build(wt)
+        inner = os.path.join(trash, "inner")
+        os.makedirs(inner)
+        self.assertEqual(run_vcs(inner, "init", "-q").returncode, 0, "scope: the nested folder must be a git repo")
+        write(os.path.join(inner, "work.txt"), "uncommitted\n")
+        self.assertTrue(os.path.isdir(os.path.join(inner, ".git")), "scope: the nested repo must hold a .git folder")
+        with mock.patch.object(sweep, "processes_in", return_value=([], [])):
+            delete, reason = sweep.trash_verdict(trash)
+        self.assertFalse(delete, "trash_verdict deleted a trash folder that holds a nested git repo with uncommitted work")
+        self.assertEqual(reason, "dirty", "a trash folder with a nested git repo was kept, but not as dirty: %s" % reason)
+
+    def test_trash_folder_is_kept_for_a_linked_worktree_pointer_beside_such_a_record(self):
+        """Case 2e for the trash sweep. A linked worktree keeps its checkout under a `.git` FILE, a pointer to the main
+        repo's worktree data. The checkout is work the parent repo cannot see, so the keep names the folder `dirty`
+        whatever the record says. The pointer's target need not exist: the check reads the file's presence."""
+        self.assert_record_stands_nowhere()
+        wt = self.new_worktree("trash-nested-pointer")
+        trash = self.trash_from_build(wt)
+        linked = os.path.join(trash, "linked")
+        write(os.path.join(linked, ".git"), "gitdir: %s\n" % os.path.join(self.base, "main-repo", ".git", "worktrees", "linked"))
+        write(os.path.join(linked, "work.txt"), "uncommitted\n")
+        self.assertTrue(os.path.isfile(os.path.join(linked, ".git")), "scope: the nested .git must be a file")
+        with mock.patch.object(sweep, "processes_in", return_value=([], [])):
+            delete, reason = sweep.trash_verdict(trash)
+        self.assertFalse(delete, "trash_verdict deleted a trash folder that holds a linked worktree's .git pointer")
+        self.assertEqual(reason, "dirty", "a trash folder with a linked worktree pointer was kept, but not as dirty: %s" % reason)
+
+    # A nested `.git` folder keeps its trash folder as dirty, whatever the clone holds. The clean clone below sits two
+    # levels down, at checkouts/pkg, so it pins a repo below the first level too.
+
+    def test_trash_folder_is_kept_for_a_clean_nested_clone_two_levels_down_beside_such_a_record(self):
+        """A SwiftPM build keeps `checkouts/<package>/.git` for each dependency. The clone is clean, and its `.git`
+        folder alone keeps the trash folder as dirty."""
+        self.assert_record_stands_nowhere()
+        wt = self.new_worktree("trash-clean-clone")
+        trash = self.trash_from_build(wt)
+        clone = self.clone_from_remote(os.path.join(trash, "checkouts", "pkg"), "clean")
+        self.assertEqual(sweep.git_reads.porcelain(clone), [], "scope: the clone must be clean")
+        with mock.patch.object(sweep, "processes_in", return_value=([], [])):
+            delete, reason = sweep.trash_verdict(trash)
+        self.assertFalse(delete, "trash_verdict deleted a trash folder whose only nested repo is a clean clone")
+        self.assertEqual(reason, "dirty", "a trash folder with a clean nested clone was kept, but not as dirty: %s" % reason)
+
+    def test_trash_folder_is_kept_as_dirty_for_a_bare_repo_directory_inside_it_beside_such_a_record(self):
+        """A bare repo has no `.git` entry, so the nested-repo walk keeps it by its `HEAD`, `objects` and `refs` together.
+        The bare repo holds commits the parent repo cannot see, so the folder is kept as dirty."""
+        self.assert_record_stands_nowhere()
+        wt = self.new_worktree("trash-bare-dir")
+        trash = self.trash_from_build(wt)
+        # Built beside the case's base and moved in, so the setup push never runs inside the trash folder.
+        built = self.bare_remote_with_main(os.path.join(self.base, "dep-bare-dir.git"), "bare-dir")
+        bare = os.path.join(trash, "checkouts", "dep.git")
+        os.makedirs(os.path.dirname(bare))
+        shutil.move(built, bare)
+        self.assertTrue(os.path.isfile(os.path.join(bare, "HEAD")), "scope: the bare repo must hold a HEAD file")
+        self.assertTrue(os.path.isdir(os.path.join(bare, "objects")), "scope: the bare repo must hold an objects folder")
+        self.assertFalse(os.path.exists(os.path.join(bare, ".git")), "scope: the bare repo must hold no .git entry")
+        self.assertEqual(run_vcs(bare, "rev-parse", "--verify", "-q", "main").returncode, 0,
+                         "scope: the bare repo must hold a commit on main")
+        with mock.patch.object(sweep, "processes_in", return_value=([], [])):
+            delete, reason = sweep.trash_verdict(trash)
+        self.assertFalse(delete, "trash_verdict deleted a trash folder that holds a bare repo with commits")
+        self.assertEqual(reason, "dirty", "a trash folder holding a bare repo was kept, not as dirty: %s" % reason)
+
+    # The allowed side of the bare-repo check: a folder is a bare repo only with `HEAD`, `objects` and `refs` together.
+
+    def test_trash_folder_with_objects_and_refs_but_no_head_is_deleted_beside_such_a_record(self):
+        """A folder holding `objects/` and `refs/` but no `HEAD` file is no bare repo. The trash folder that holds it is
+        build output, so it is deleted as leftover trash."""
+        self.assert_record_stands_nowhere()
+        wt = self.new_worktree("trash-no-head")
+        trash = self.trash_from_build(wt)
+        dep = os.path.join(trash, "checkouts", "dep.git")
+        os.makedirs(os.path.join(dep, "objects"))
+        os.makedirs(os.path.join(dep, "refs"))
+        self.assertFalse(os.path.exists(os.path.join(dep, "HEAD")), "scope: the folder must hold no HEAD file")
+        with mock.patch.object(sweep, "processes_in", return_value=([], [])):
+            delete, reason = sweep.trash_verdict(trash)
+        self.assertTrue(delete, "trash_verdict kept a trash folder whose objects and refs folders hold no HEAD: %s" % reason)
+        self.assertEqual(reason, "leftover trash")
+
+    def test_trash_folder_with_head_and_refs_but_no_objects_is_deleted_beside_such_a_record(self):
+        """A folder holding `HEAD` and `refs/` but no `objects/` folder is no bare repo either. The trash folder that
+        holds it is deleted as leftover trash."""
+        self.assert_record_stands_nowhere()
+        wt = self.new_worktree("trash-no-objects")
+        trash = self.trash_from_build(wt)
+        dep = os.path.join(trash, "checkouts", "dep.git")
+        write(os.path.join(dep, "HEAD"), "ref: refs/heads/main\n")
+        os.makedirs(os.path.join(dep, "refs"))
+        self.assertFalse(os.path.exists(os.path.join(dep, "objects")), "scope: the folder must hold no objects folder")
+        with mock.patch.object(sweep, "processes_in", return_value=([], [])):
+            delete, reason = sweep.trash_verdict(trash)
+        self.assertTrue(delete, "trash_verdict kept a trash folder whose HEAD and refs hold no objects folder: %s" % reason)
+        self.assertEqual(reason, "leftover trash")
+
+    def test_a_trash_folder_is_judged_on_its_own_lines_beside_a_sibling_from_the_same_name(self):
+        """Case 2f for the trash sweep. Two trash folders come from one original name, `build`, as two reaps of one build
+        folder make. The first holds a moved tracked file; the second holds only untracked output. The pathspec for the
+        original name also reads the first folder's tracked deletion, so the second read dirty and was kept. Each folder
+        is judged on its own lines: the second is deleted."""
+        self.assert_record_stands_nowhere()
+        wt = self.new_worktree("trash-twins")
+        build = os.path.join(wt, "native", "build")
+        write(os.path.join(build, "keep.txt"), "tracked\n")
+        self.assertEqual(run_vcs(wt, "add", "-f", os.path.join("native", "build", "keep.txt")).returncode, 0,
+                         "scope: the build file must be tracked")
+        self.assertEqual(run_vcs(wt, *IDENT, "commit", "-q", "-m", "track a build file").returncode, 0,
+                         "scope: the build file must be committed")
+        first = sweep.trash_name(build)
+        os.rename(build, first)
+        second = sweep.trash_name(build)
+        write(os.path.join(second, "notes.txt"), "untracked\n")
+        self.assertNotEqual(first, second, "scope: two reaps must name two trash folders")
+        self.assertEqual(sweep.untrash_name(os.path.basename(first)), sweep.untrash_name(os.path.basename(second)),
+                         "scope: both trash folders must come from one original name")
+        with mock.patch.object(sweep, "processes_in", return_value=([], [])):
+            first_delete, first_reason = sweep.trash_verdict(first)
+            delete, reason = sweep.trash_verdict(second)
+        self.assertFalse(first_delete, "scope: the first folder must be kept for its moved tracked file")
+        self.assertEqual(first_reason, "dirty", "scope: the first folder must read dirty from its moved tracked file")
+        self.assertTrue(delete, "the second trash folder was kept for its sibling's tracked deletion: %s" % reason)
+        self.assertEqual(reason, "leftover trash", "the second trash folder was not judged as leftover trash: %s" % reason)
+
+    def test_trash_folder_with_only_untracked_output_in_nested_folders_is_deleted_beside_such_a_record(self):
+        """Case 2g, a control for the nested-repo keeps. The folder holds untracked output in subfolders, a `.github`
+        folder and a `.gitignore` file. None of them is a git repo, and the folder has no `.git` entry, so the gone
+        record must not keep it."""
+        self.assert_record_stands_nowhere()
+        wt = self.new_worktree("trash-nested-output")
+        trash = self.trash_from_build(wt)
+        write(os.path.join(trash, "out", "deep", "log.txt"), "untracked\n")
+        write(os.path.join(trash, ".github", "ci.yml"), "name: ci\n")
+        write(os.path.join(trash, ".gitignore"), "*.o\n")
+        self.assertFalse(os.path.exists(os.path.join(trash, ".git")), "scope: the folder must hold no .git entry")
+        self.assertTrue(sweep.git_reads.porcelain(trash), "scope: the folder must hold untracked output")
+        with mock.patch.object(sweep, "processes_in", return_value=([], [])):
+            delete, reason = sweep.trash_verdict(trash)
+        self.assertTrue(delete, "trash_verdict kept a build folder for untracked output in nested folders: %s" % reason)
+        self.assertEqual(reason, "leftover trash")
+
+    @unittest.skipIf(os.name == "nt", "a symlink needs a privilege on Windows")
+    def test_trash_folder_with_a_link_to_an_outside_repo_is_deleted_beside_such_a_record(self):
+        """Case 2h for the trash sweep. A link inside the renamed folder points at a repo outside it. The nested-repo walk
+        follows no link, so the outside `.git` is not work in this folder, and the leftover folder is deleted."""
+        self.assert_record_stands_nowhere()
+        wt = self.new_worktree("trash-link-outside")
+        trash = self.trash_from_build(wt)
+        outside = os.path.join(self.base, "outside-repo")
+        make_repo(outside, {"x.txt": "outside\n"})
+        link = os.path.join(trash, "ext")
+        os.symlink(outside, link)
+        self.assertTrue(os.path.islink(link), "scope: the link must be a symlink")
+        self.assertTrue(os.path.isdir(os.path.join(outside, ".git")), "scope: the outside repo must hold a .git folder")
+        with mock.patch.object(sweep, "processes_in", return_value=([], [])):
+            delete, reason = sweep.trash_verdict(trash)
+        self.assertTrue(delete, "trash_verdict kept a trash folder for a link to a repo outside it: %s" % reason)
+        self.assertEqual(reason, "leftover trash")
+
+    @unittest.skipIf(os.name == "nt" or (hasattr(os, "geteuid") and os.geteuid() == 0),
+                     "a folder with mode 0 still lists for root, and Windows has no mode 0")
+    def test_trash_folder_is_kept_unreadable_when_a_folder_under_it_cannot_be_read(self):
+        """Case 2i for the trash sweep. A folder under the renamed folder cannot be listed, so the nested-repo walk cannot
+        rule out a `.git` inside it. The folder is kept as unreadable, whatever the record says."""
+        self.assert_record_stands_nowhere()
+        wt = self.new_worktree("trash-unreadable-sub")
+        trash = self.empty_trash(wt)
+        locked = os.path.join(trash, "locked")
+        os.makedirs(locked)
+        os.chmod(locked, 0)
+        self.addCleanup(os.chmod, locked, 0o755)
+        with self.assertRaises(PermissionError):
+            os.listdir(locked)
+        with mock.patch.object(sweep, "processes_in", return_value=([], [])):
+            delete, reason = sweep.trash_verdict(trash)
+        self.assertFalse(delete, "trash_verdict deleted a trash folder with a folder under it it could not read")
+        self.assertEqual(reason, "unreadable-subject", "a trash folder with an unreadable folder under it was kept, but not as unreadable: %s" % reason)
+
+    def test_trash_folder_is_kept_for_a_quoted_path_it_cannot_place_beside_such_a_record(self):
+        """Case 2j for the trash sweep. A tracked file whose name holds a non-ASCII letter is moved under the trash name. Git
+        quotes the path of its deletion at the original name, so the status line starts with a double quote and cannot be
+        placed by its plain path. A line the sweep cannot place counts as this folder's, so the folder is kept as dirty."""
+        self.assert_record_stands_nowhere()
+        wt = self.new_worktree("trash-quoted")
+        build = os.path.join(wt, "native", "build")
+        name = "café.txt"
+        write(os.path.join(build, name), "tracked\n")
+        self.assertEqual(run_vcs(wt, "add", "-f", os.path.join("native", "build", name)).returncode, 0,
+                         "scope: the build file must be tracked")
+        self.assertEqual(run_vcs(wt, *IDENT, "commit", "-q", "-m", "track a quoted build file").returncode, 0,
+                         "scope: the build file must be committed")
+        trash = sweep.trash_name(build)
+        os.rename(build, trash)
+        self.assertTrue(any(line[3:].startswith('"') for line in sweep.git_reads.porcelain(wt)),
+                        "scope: git must list the moved file's deletion with a quoted path")
+        with mock.patch.object(sweep, "processes_in", return_value=([], [])):
+            delete, reason = sweep.trash_verdict(trash)
+        self.assertFalse(delete, "trash_verdict deleted a trash folder whose moved file git lists with a quoted path")
+        self.assertEqual(reason, "dirty", "a trash folder whose moved file git quoted was kept, but not as dirty: %s" % reason)
+
+    def test_trash_folder_is_kept_for_a_process_inside_beside_such_a_record(self):
+        """Case 3. An empty trash folder reads clean, so the process is the only cause, and the keep names its pid."""
+        self.assert_record_stands_nowhere()
+        wt = self.new_worktree("trash-process")
+        trash = self.empty_trash(wt)
+        other = 987654
+        with mock.patch.object(sweep, "processes_in", return_value=([other], [])):
+            delete, reason = sweep.trash_verdict(trash)
+        self.assertFalse(delete)
+        self.assertIn(str(other), reason, "the trash sweep kept a folder with a process inside, but the reason does not name it")
+
+    def test_trash_folder_is_kept_for_a_live_session_inside_beside_such_a_record(self):
+        """Case 4, a control. A live session whose folder sits inside the trash folder keeps it as live-session."""
+        self.assert_record_stands_nowhere()
+        wt = self.new_worktree("trash-live")
+        trash = self.empty_trash(wt)
+        inside = os.path.join(trash, "sub")
+        os.makedirs(inside)
+        self.live_record_inside(inside)
+        with mock.patch.object(sweep, "processes_in", return_value=([], [])):
+            delete, reason = sweep.trash_verdict(trash)
+        self.assertFalse(delete)
+        self.assertEqual(reason, "live-session")
+
+    def test_trash_folder_outside_any_checkout_is_kept_unreadable_with_no_session_record(self):
+        """Case 5, not a git folder. The folder is no checkout's content, so no dirty read is possible and the keep is
+        unknown. No session record is read here, so the old code deletes it."""
+        folder = sweep.trash_name(os.path.join(self.base, "build-not-git"))
+        os.makedirs(folder)
+        self.assertIsNone(sweep.git_reads.porcelain(folder), "scope: the folder must not be inside a git checkout")
+        with self.no_records(), mock.patch.object(sweep, "processes_in", return_value=([], [])):
+            delete, reason = sweep.trash_verdict(folder)
+        self.assertFalse(delete)
+        self.assertEqual(reason, "unreadable-subject")
+
+    def test_trash_folder_is_kept_unreadable_when_the_dirty_read_returns_none(self):
+        """Case 5, the dirty read returns unknown on an empty trash folder. Unknown is never clean."""
+        wt = self.new_worktree("trash-unknown")
+        trash = self.empty_trash(wt)
+        with self.no_records(), mock.patch.object(sweep.git_reads, "porcelain", return_value=None), \
+                mock.patch.object(sweep, "processes_in", return_value=([], [])):
+            delete, reason = sweep.trash_verdict(trash)
+        self.assertFalse(delete)
+        self.assertEqual(reason, "unreadable-subject")
+
+    def test_trash_folder_is_kept_unreadable_when_the_dirty_read_raises(self):
+        """Case 5, the dirty read raises. The keep is unknown, not a delete."""
+        wt = self.new_worktree("trash-raise")
+        trash = self.empty_trash(wt)
+        with self.no_records(), \
+                mock.patch.object(sweep.git_reads, "porcelain", side_effect=OSError("status could not run")), \
+                mock.patch.object(sweep, "processes_in", return_value=([], [])):
+            delete, reason = sweep.trash_verdict(trash)
+        self.assertFalse(delete)
+        self.assertEqual(reason, "unreadable-subject")
+
+    def test_trash_folder_is_kept_unreadable_when_the_process_read_fails(self):
+        """Case 6, a control. `trash_verdict` already reads processes, so this passes on the old code too. It pins the
+        unknown keep for the new dirty check to keep alongside."""
+        wt = self.new_worktree("trash-process-read")
+        trash = self.empty_trash(wt)
+        with self.no_records(), mock.patch.object(sweep, "processes_in", return_value=(None, None)):
+            delete, reason = sweep.trash_verdict(trash)
+        self.assertFalse(delete)
+        self.assertEqual(reason, "unreadable-subject")
 
 
 class StaleAgentLockTests(unittest.TestCase):
@@ -5308,12 +5826,95 @@ _SPONSOR = ("import os, subprocess, sys, time\n"
             "time.sleep(120)\n")
 
 
+# The stub `lsof` the agent-end fixture puts first on PATH. It logs every start, so a case counts the
+# reads a run makes. The cwd table lists this user's processes only, read through the real lsof with
+# `-p`, so no case scans every process on the machine. `$LSOF_LATE` adds table lines from start number
+# `$LSOF_FROM` on: a process that enters a tree after the first read. `$LSOF_FAIL` fails every cwd read.
+# An open-files read (`+D`) lists nothing, as a clear read does, unless `$LSOF_OPEN` names a file of lines
+# to print: a holder inside a folder of the batch. A `+D` folder that does not exist makes the read warn
+# on stderr, list nothing and exit 1. `$LSOF_UNREADABLE` names one existing folder whose read fails the
+# same way, with `Permission denied`.
+# `$LSOF_REAL_OPEN` sends the open-files read to the real lsof. A per-pid read goes to the real lsof unchanged.
+# `$LSOF_TABLE` names a file of `-Fpn` lines that stands for the whole cwd table: the stub prints it and runs
+# no real lsof, so a case needs none on PATH. The file holds at least one line: an empty table reads as failed.
+LSOF_STUB = r"""#!/bin/sh
+printf '%s\n' "$*" >> "${LSOF_COUNT:-/dev/null}"
+case "$*" in
+  *"+D"*)
+    if [ -n "$LSOF_REAL_OPEN" ]; then exec "@REAL@" "$@"; fi
+    prev=""
+    for arg in "$@"; do
+      if [ "$prev" = "+D" ] && [ ! -e "$arg" ]; then echo "lsof: WARNING: can't stat($arg)" >&2; exit 1; fi
+      if [ "$prev" = "+D" ] && [ -n "$LSOF_UNREADABLE" ] && [ "$arg" = "$LSOF_UNREADABLE" ]; then echo "lsof: WARNING: can't opendir($arg): Permission denied" >&2; exit 1; fi
+      prev="$arg"
+    done
+    if [ -n "$LSOF_OPEN" ]; then cat "$LSOF_OPEN"; fi
+    exit 1 ;;
+  *"-d cwd"*) ;;
+  *) exit 1 ;;
+esac
+case "$*" in
+  *"-p "*) exec "@REAL@" "$@" ;;
+esac
+if [ -n "$LSOF_FAIL" ]; then exit 2; fi
+if [ -n "$LSOF_TABLE" ]; then
+  cat "$LSOF_TABLE"
+  status=0
+else
+  pids=$(ps -axo pid=,uid= | awk -v me="$(id -u)" '$2 == me { printf "%s%s", sep, $1; sep = "," }')
+  if [ -z "$pids" ]; then exit 1; fi
+  "@REAL@" -a -d cwd -Fpn -p "$pids" 2>/dev/null
+  status=$?
+fi
+if [ -n "$LSOF_LATE" ]; then
+  count=$(wc -l < "${LSOF_COUNT:-/dev/null}" | tr -d ' ')
+  if [ "$count" -ge "${LSOF_FROM:-1}" ]; then cat "$LSOF_LATE"; fi
+fi
+exit $status
+"""
+
+def install_lsof_stub(test, cwd_table=None):
+    """Put the stub `lsof` first on PATH for TEST, so every read a hook or an in-process run makes goes
+    through it. Its starts are logged to `test.lsof_count`. `cwd_table`, a list of `-Fpn` lines, sets the
+    whole cwd table through `set_lsof_table`, so the read runs no real lsof. Windows reads no lsof here: no stub."""
+    test.lsof_count = os.path.join(test.root, "lsof-starts.txt")
+    test.real_lsof = shutil.which("lsof")  # None when the machine has no lsof: a real-read case skips
+    if sys.platform.startswith("win"):
+        return
+    folder = os.path.join(test.root, "lsof-bin")
+    os.makedirs(folder)
+    stub = os.path.join(folder, "lsof")
+    write(stub, LSOF_STUB.replace("@REAL@", test.real_lsof or ""))
+    os.chmod(stub, 0o755)
+    env = {"PATH": folder + os.pathsep + os.environ.get("PATH", ""), "LSOF_COUNT": test.lsof_count}
+    if cwd_table is not None:
+        test.lsof_table = os.path.join(test.root, "lsof-table.txt")
+        env["LSOF_TABLE"] = test.lsof_table
+        set_lsof_table(test, cwd_table)
+    patch = mock.patch.dict(os.environ, env)
+    patch.start()
+    test.addCleanup(patch.stop)
+
+
+def set_lsof_table(test, lines):
+    """Rewrite the cwd table the stub prints: `lines` are `-Fpn` lines, one entry each."""
+    write(test.lsof_table, "".join(line + "\n" for line in lines))
+
+
+# A process that opens one file for writing and keeps it open while it sleeps: the open file a `+D` read lists.
+_HOLD = ("import sys, time\n"
+         "handle = open(sys.argv[1], 'w', encoding='utf-8')\n"
+         "handle.write('held')\n"
+         "handle.flush()\n"
+         "time.sleep(120)\n")
+
+
 class _AgentEndFixture(unittest.TestCase):
     """Shared fixture for the agent-end worktree cases below. Real repo with a bare remote, real
     worktrees under `.claude/worktrees/`, and the SubagentStop hook run as the harness runs it."""
 
     def setUp(self):
-        self.root = tempfile.mkdtemp(prefix="agent_end_wt_")
+        self.root = tempfile.mkdtemp(prefix="agent_end_wt_", dir=_test_temp.run_folder())
         self.addCleanup(shutil.rmtree, self.root, True)
         self.cfg = os.path.join(self.root, "cfg")  # the config dir the hook process reads and writes
         self.primary = os.path.join(self.root, "repo")
@@ -5321,6 +5922,7 @@ class _AgentEndFixture(unittest.TestCase):
         give_remote(self.primary)
         import agent_end_reap
         self.reap = agent_end_reap
+        install_lsof_stub(self)
 
     def add(self, name):
         """A worktree at `.claude/worktrees/agent-NAME` on a new lane branch cut from main. HEAD sits
@@ -5517,12 +6119,18 @@ class _AgentEndFixture(unittest.TestCase):
         commit = run_vcs(path, *IDENT, "commit", "-q", "-m", "unpushed lane work")
         require(commit.returncode == 0, "commit in %s failed: %s" % (path, commit.stderr.strip()))
 
-    def sleeper(self, cwd):
-        """A plain sleeping process with its cwd in CWD, started by this test process (the host)."""
-        proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)"], cwd=cwd,
-                                stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+    def sleeper(self, cwd, holds=None):
+        """A plain sleeping process with its cwd in CWD, started by this test process (the host). With HOLDS,
+        it first opens that file for writing and keeps it open, so the file is an open file whatever the cwd;
+        this returns once the file is written, so the open is visible to lsof."""
+        argv = [sys.executable, "-c", _HOLD if holds else "import time; time.sleep(120)"]
+        if holds:
+            argv.append(holds)
+        proc = subprocess.Popen(argv, cwd=cwd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                                 stderr=subprocess.DEVNULL)
         self.addCleanup(self.stop, proc)
+        if holds:
+            _read_when_ready(holds)
         return proc
 
     @staticmethod
@@ -5564,6 +6172,249 @@ class _AgentEndFixture(unittest.TestCase):
         for pid in children:
             self.addCleanup(sweep.send_signal, pid)
         return shell, children
+
+
+@unittest.skipIf(sys.platform.startswith("win"), "the stub lsof is a POSIX shell script")
+class OneLsofPerRunTests(_AgentEndFixture):
+    """A run reads the process table once, not once per tree it judges. A whole-machine `lsof -d cwd`
+    takes seconds on a real Mac, so one agent-end reap or one sweep that judges several trees must not
+    start one per tree, and one leftover-temp pass must not open one `lsof +D` per folder.
+
+    The read-count cases pin that shared read. The safety cases pin what the shared read must keep: a
+    tree the run removes gets a fresh read just before its removal, and a failed or timed-out read
+    removes nothing. The open-files cases pin how one batch open-files read is judged: a holder keeps
+    its folder, a folder that does not exist never makes a held folder clear, a folder whose read fails
+    is kept and never a candidate, and a clear folder in the same batch still gets its own answer.
+
+    Each case reads sys.platform as darwin, where the cwd table and the open-files read are taken."""
+
+    def darwin(self):
+        return mock.patch.object(sys, "platform", "darwin")
+
+    def keep_tree(self, name):
+        """An agent's tree the run may only keep: idle past the rule, clean and pushed, so a process
+        inside it is the only reason it stays."""
+        tree = self.add(name)
+        _age_admin_files(tree, 31 * 60)
+        return tree
+
+    def rows_by_path(self, record):
+        return {_norm_path(str(row["path"])): row for row in record.get("worktrees") or [] if "path" in row}
+
+    def count_starts(self, wanted):
+        if not os.path.exists(self.lsof_count):
+            return 0
+        with open(self.lsof_count, encoding="utf-8") as handle:
+            return sum(1 for line in handle if wanted(line))
+
+    def batch_cwd_starts(self):
+        """Batch `lsof -d cwd` starts: a per-pid read (`-p PID`) is not counted."""
+        return self.count_starts(lambda argv: "-d cwd" in argv and "-p " not in argv)
+
+    def open_file_starts(self):
+        return self.count_starts(lambda argv: "+D" in argv)
+
+    def open_file_argv_lines(self):
+        """The logged argv of every open-files (`+D`) start, in order."""
+        if not os.path.exists(self.lsof_count):
+            return []
+        with open(self.lsof_count, encoding="utf-8") as handle:
+            return [line for line in handle if "+D" in line]
+
+    def test_one_agent_end_reap_reads_the_process_table_once_for_three_kept_trees(self):
+        own = self.add("ending")
+        trees = [self.keep_tree(name) for name in ("one", "two", "three")]
+        for tree in trees:
+            self.sleeper(tree)  # a live process inside each tree: the reap keeps all three
+        with self.darwin():
+            record = self.run_in_process("ending", own)
+        self.assertIsNone(record.get("reason"), "the reap did not run: %s" % record.get("reason"))
+        rows = self.rows_by_path(record)
+        for tree in trees:
+            self.assertIn(_norm_path(tree), rows, "the reap wrote no row for %s" % tree)
+            self.assertEqual(rows[_norm_path(tree)]["action"], "keep",
+                             "a tree with a process inside was not kept: %s" % rows[_norm_path(tree)].get("reason"))
+        starts = self.batch_cwd_starts()
+        self.assertLessEqual(starts, 1, "one agent-end reap of three kept trees started the batch cwd read %d "
+                                        "times; want at most once" % starts)
+
+    def test_one_acting_sweep_reads_the_process_table_once_for_three_kept_trees(self):
+        trees = [self.keep_tree(name) for name in ("one", "two", "three")]
+        for tree in trees:
+            self.sleeper(tree)  # a live process inside each tree: the sweep keeps all three
+        with self.darwin(), mock.patch.object(sweep, "reap_listener"):  # no real listener is reaped
+            sweep.sweep_repo(self.primary, True, os.path.join(self.root, "restore.log"), attended=True)
+        for tree in trees:
+            self.assertKept(tree)
+        starts = self.batch_cwd_starts()
+        self.assertLessEqual(starts, 1, "one acting sweep over three kept trees started the batch cwd read %d "
+                                        "times; want at most once" % starts)
+
+    def test_a_tree_the_run_removes_gets_a_fresh_read_before_its_removal(self):
+        own = self.add("ending")
+        late = self.keep_tree("late")  # a process enters this tree after the run's first read
+        control = self.keep_tree("ctl")  # no process: the run must remove it
+        table = os.path.join(self.root, "late-table.txt")
+        write(table, "p2147483\nn%s\n" % os.path.realpath(late))
+        with self.darwin(), mock.patch.dict(os.environ, {"LSOF_LATE": table, "LSOF_FROM": "2"}):
+            record = self.run_in_process("ending", own)
+        self.assertIsNone(record.get("reason"), "the reap did not run: %s" % record.get("reason"))
+        self.assertRemoved(control, " (the clean control tree: the run must remove a tree with no process inside)")
+        self.assertKept(late)
+
+    def test_a_failed_read_keeps_every_tree_and_removes_none(self):
+        own = self.add("ending")
+        tree = self.add("gone")  # clean, pushed and removable, so only the failed read can keep it
+        with self.darwin(), mock.patch.dict(os.environ, {"LSOF_FAIL": "1"}):
+            _age_admin_files(tree, 31 * 60)
+            record = self.run_in_process("ending", own)
+        self.assertIsNotNone(record.get("reason"), "a failed process-table read did not stop the reap")
+        self.assertKept(tree)
+        with self.darwin():
+            _age_admin_files(tree, 31 * 60)
+            self.run_in_process("ending", own)
+        self.assertRemoved(tree, " (the same tree goes once the read works, so the keep came from the failed read)")
+
+    def test_a_timed_out_read_keeps_every_tree_and_removes_none(self):
+        own = self.add("ending")
+        tree = self.add("gone")
+        real_run = subprocess.run
+
+        def timing_out(argv, *args, **kwargs):
+            if argv and argv[0] == "lsof":
+                raise subprocess.TimeoutExpired(argv, kwargs.get("timeout"))
+            return real_run(argv, *args, **kwargs)
+        with self.darwin(), mock.patch.object(subprocess, "run", timing_out):
+            _age_admin_files(tree, 31 * 60)
+            record = self.run_in_process("ending", own)
+        self.assertIsNotNone(record.get("reason"), "a timed-out process-table read did not stop the reap")
+        self.assertKept(tree)
+        with self.darwin():
+            _age_admin_files(tree, 31 * 60)
+            self.run_in_process("ending", own)
+        self.assertRemoved(tree, " (the same tree goes once the read works, so the keep came from the timeout)")
+
+    def test_leftover_temp_reads_the_process_table_and_open_files_once_for_three_candidates(self):
+        temp = os.path.join(self.root, "tmp")
+        run_folders = os.path.join(temp, "claude-settings-test-temp")
+        os.makedirs(run_folders)
+        dead = temp_dead_pid()
+        now = time.time()
+        for _ in range(3):
+            folder = os.path.join(run_folders, "%d-%s" % (dead, uuid.uuid4().hex))
+            os.makedirs(folder)
+            os.utime(folder, (now - 2 * 60 * 60, now - 2 * 60 * 60))  # over the one-hour limit
+            self.sleeper(folder)  # a live process inside each folder: every candidate is kept
+        with self.darwin():
+            decisions = sweep.find_leftover_temp(temp, now)
+        self.assertEqual(sorted(d["action"] for d in decisions), ["keep"] * 3,
+                         "the three candidates were not all judged and kept: %r" % decisions)
+        cwd = self.batch_cwd_starts()
+        self.assertLessEqual(cwd, 1, "leftover temp folders started the batch cwd read %d times for three "
+                                     "candidates; want at most once" % cwd)
+        # Only a folder with no process inside reaches the open-files read, and the three above all have
+        # one, so the read never ran for them. Two such folders, in a second pass, must share ONE read.
+        for _ in range(2):
+            folder = os.path.join(run_folders, "%d-%s" % (dead, uuid.uuid4().hex))
+            os.makedirs(folder)
+            os.utime(folder, (now - 2 * 60 * 60, now - 2 * 60 * 60))  # over the one-hour limit, no process
+        before = self.open_file_starts()
+        with self.darwin():
+            decisions = sweep.find_leftover_temp(temp, now)
+        clear = [d["path"] for d in decisions if d["action"] == "reap"]
+        self.assertEqual(len(clear), 2, "the two folders with no process inside were not both judged clear: "
+                                        "%r" % decisions)
+        shared = self.open_file_starts() - before
+        self.assertEqual(shared, 1, "two folders with no process inside started the open-files read %d times; "
+                                    "want exactly once" % shared)
+
+    def test_a_holder_in_the_batch_read_keeps_its_folder_and_leaves_the_other_a_candidate(self):
+        held = os.path.join(self.root, "held")
+        clear = os.path.join(self.root, "clear")
+        os.makedirs(held)
+        os.makedirs(clear)
+        open_file = os.path.join(self.root, "open-files.txt")
+        write(open_file, "p2147483\nn%s\n" % os.path.join(os.path.realpath(held), "held.txt"))  # one holder, in HELD
+        with self.darwin(), mock.patch.dict(os.environ, {"LSOF_OPEN": open_file}):
+            answers = sweep._busy_reasons([held, clear])
+        reads = self.open_file_argv_lines()
+        self.assertEqual(len(reads), 1, "the two folders made %d open-files reads; want one batch read: %r"
+                         % (len(reads), reads))
+        self.assertTrue(all(folder in reads[0] for folder in (held, clear)),
+                        "the one open-files read does not name both folders: %r" % reads[0])
+        self.assertIsNotNone(answers[held], "a folder with a live holder in the batch read was not kept: %r"
+                             % answers)
+        self.assertIsNone(answers[clear], "a folder with no holder in the batch read was kept: %r" % answers)
+
+    def test_a_missing_folder_in_the_batch_never_reads_a_held_folder_as_clear(self):
+        held = os.path.join(self.root, "held")
+        missing = os.path.join(self.root, "missing")  # never created: a folder gone before the batch read
+        os.makedirs(held)
+        open_file = os.path.join(self.root, "open-files.txt")
+        write(open_file, "p2147483\nn%s\n" % os.path.join(os.path.realpath(held), "held.txt"))  # one holder, in HELD
+        with self.darwin(), mock.patch.dict(os.environ, {"LSOF_OPEN": open_file}):
+            control = sweep._busy_reasons([held])  # the same holder read alone, so the batch below is the only change
+            self.assertIsNotNone(control[held], "control: a holder alone in its folder was not read as busy: %r"
+                                 % control)
+            self.assertFalse(os.path.exists(missing), "fixture: the missing folder exists")
+            answers = sweep._busy_reasons([held, missing])
+        self.assertIsNotNone(answers[held], "a folder with a live holder was read as clear because another folder "
+                             "of the batch does not exist: %r" % answers)
+
+    def test_a_real_open_file_stays_busy_when_a_missing_folder_is_in_the_batch(self):
+        if self.real_lsof is None:
+            self.skipTest("no lsof on PATH: the real open-files read cannot run here")
+        held = os.path.join(self.root, "held")
+        missing = os.path.join(self.root, "missing")  # never created
+        os.makedirs(held)
+        self.sleeper(self.root, holds=os.path.join(held, "held.txt"))  # cwd outside HELD: the open file is the only holder
+        with self.darwin(), mock.patch.dict(os.environ, {"LSOF_REAL_OPEN": "1"}):
+            control = sweep._busy_reasons([held])
+            self.assertIsNotNone(control[held], "control: a real open file in its folder was not read as busy: %r"
+                                 % control)
+            self.assertFalse(os.path.exists(missing), "fixture: the missing folder exists")
+            answers = sweep._busy_reasons([held, missing])
+        self.assertIsNotNone(answers[held], "a folder with a real open file was read as clear because another "
+                             "folder of the batch does not exist: %r" % answers)
+
+    def test_an_unreadable_folder_is_kept_and_never_a_candidate(self):
+        unreadable = os.path.join(self.root, "unreadable")
+        os.makedirs(unreadable)
+        with self.darwin():
+            control = sweep._busy_reasons([unreadable])  # no fault injected: the folder is clear
+            self.assertIsNone(control[unreadable], "control: the folder with no fault was not clear: %r" % control)
+        with self.darwin(), mock.patch.dict(os.environ, {"LSOF_UNREADABLE": unreadable}):
+            answers = sweep._busy_reasons([unreadable])
+        self.assertIsNotNone(answers[unreadable], "an existing folder whose open-files read exited 1 with a "
+                             "message and listed nothing was read as clear: %r" % answers)
+
+    def test_an_unreadable_folder_in_the_batch_leaves_a_clear_folder_a_candidate(self):
+        unreadable = os.path.join(self.root, "unreadable")
+        clear = os.path.join(self.root, "clear")
+        os.makedirs(unreadable)
+        os.makedirs(clear)
+        with self.darwin():
+            alone = sweep._busy_reasons([clear])  # the clear folder's own read, with no fault injected
+            self.assertIsNone(alone[clear], "control: the clear folder alone was not clear: %r" % alone)
+        with self.darwin(), mock.patch.dict(os.environ, {"LSOF_UNREADABLE": unreadable}):
+            answers = sweep._busy_reasons([unreadable, clear])
+        self.assertIsNotNone(answers[unreadable], "an unreadable folder of the batch was read as clear: %r"
+                             % answers)
+        self.assertIsNone(answers[clear], "a clear folder was kept because another folder of its batch could "
+                          "not be read: %r" % answers)
+
+    def test_a_missing_folder_in_the_batch_leaves_a_clear_folder_a_candidate(self):
+        clear = os.path.join(self.root, "clear")
+        missing = os.path.join(self.root, "missing")  # never created: a folder gone before the batch read
+        os.makedirs(clear)
+        with self.darwin():
+            alone = sweep._busy_reasons([clear])  # control: the clear folder alone reads clear
+            self.assertIsNone(alone[clear], "control: the clear folder alone was not clear: %r" % alone)
+            self.assertFalse(os.path.exists(missing), "fixture: the missing folder exists")
+            answers = sweep._busy_reasons([clear, missing])
+        self.assertIsNone(answers[clear], "a clear folder was kept because a folder of its batch does not "
+                          "exist: %r" % answers)
+        self.assertIsNone(answers[missing], "a folder that does not exist was kept: %r" % answers)
 
 
 class AgentEndOwnWorktreeTests(_AgentEndFixture):
@@ -7888,6 +8739,27 @@ class BuildDirReapTests(unittest.TestCase):
             self.assertIsNone(self.reap.edit_idle(tree, spent))
 
     def test_a_build_started_during_the_hook_keeps_its_build_folders(self):
+        # Native platform: on Linux the first read is the only process read, so this case pins it there.
+        self.check_build_started_during_the_hook()
+
+    @unittest.skipIf(sys.platform.startswith("win"), "the stub lsof is a POSIX shell script")
+    def test_a_build_started_during_the_hook_keeps_its_build_folders_on_macos(self):
+        # The shared read and its re-read before a removal run only on macOS, so this case reads darwin.
+        # Its cwd table is the stub's, so no real lsof runs and the case reads the same with none on PATH.
+        install_lsof_stub(self, cwd_table=self.cwd_table_lines())
+        with mock.patch.object(sys, "platform", "darwin"):
+            self.check_build_started_during_the_hook(
+                on_build=lambda proc, cwd: set_lsof_table(self, self.cwd_table_lines((proc, cwd))))
+
+    def cwd_table_lines(self, *holders):
+        """`-Fpn` lines for the stub's table: this test process at the case root, outside every tree,
+        then each `(process, cwd)` a test holds. Paths are real paths, as lsof prints them."""
+        lines = ["p%d" % os.getpid(), "n" + os.path.realpath(self.root)]
+        for proc, cwd in holders:
+            lines += ["p%d" % proc.pid, "n" + os.path.realpath(cwd)]
+        return lines
+
+    def check_build_started_during_the_hook(self, on_build=None):
         # A build that starts after the hook's first process read must still keep its folders.
         primary = self.make_primary("late-build")
         late, quiet = self.add_agent(primary, "bdrLateBuild"), self.add_agent(primary, "bdrQuiet")
@@ -7900,7 +8772,9 @@ class BuildDirReapTests(unittest.TestCase):
 
         def then_start_build(target):
             answer = real(target)
-            self.hold_cwd(late)  # the build's cwd is the worktree root
+            proc = self.hold_cwd(late)  # the build's cwd is the worktree root
+            if on_build is not None:
+                on_build(proc, late)
             return answer
 
         with mock.patch.object(self.reap, "_decide", new=then_start_build):

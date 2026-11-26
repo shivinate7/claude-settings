@@ -1,0 +1,1 @@
+- stall-watch-summary-early-end: A task description that holds a summary closing tag followed by a note tag or a result tag ends the stall-watch summary early, so a waiting agent with such a description reads as finished (decision `stall-watch`, Limits; a debt only after a real case). Seen: 2026-11-25 x1

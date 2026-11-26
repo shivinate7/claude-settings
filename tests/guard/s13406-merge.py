@@ -485,16 +485,23 @@ STAMPLINK = os.path.join(ROOT, "stamp_link", "into")  # a symlink from outside i
 STAMPIGNORE = os.path.join(ROOT, "stamp_ignore")     # stamp.json whose merge block ignores the `sync` check
 STAMPNOCHECK = os.path.join(ROOT, "stamp_no_checks")  # stamp.json pins requiredChecks "none", and a workflows folder holds one workflow file
 FIRST_PROOF_REPO = os.path.join(ROOT, "first_proof_repo")  # its merge config pins requiredChecks "first-proof", and a workflows folder holds one workflow file
+STAMPUNKNOWN = os.path.join(ROOT, "pin_unknown_repo")  # its merge config pins requiredChecks "all-proof", a string the merge tool's PINNED_STRINGS lacks
+STAMPPROTECT = os.path.join(ROOT, "pin_protect_repo")  # its merge config pins requiredChecks "protection", the default's own string
 
 
-def _merge_config_path():
-    """The merge config path, merge.DEFAULT_CONFIG, read with the ast from merge/merge.py: the guard cases never import the merge tool."""
+def _merge_constant(name):
+    """The string constant `name` of merge/merge.py, read with the ast: the guard cases never import the merge tool."""
     with open(os.path.join(os.path.dirname(HERE), "merge", "merge.py"), encoding="utf-8") as f:
         tree = ast.parse(f.read())
     for node in tree.body:
-        if isinstance(node, ast.Assign) and any(getattr(t, "id", None) == "DEFAULT_CONFIG" for t in node.targets):
+        if isinstance(node, ast.Assign) and any(getattr(t, "id", None) == name for t in node.targets):
             return node.value.value
-    raise AssertionError("merge/merge.py has no DEFAULT_CONFIG")
+    raise AssertionError("merge/merge.py has no %s" % name)
+
+
+def _merge_config_path():
+    """The merge config path, merge.DEFAULT_CONFIG (see _merge_constant)."""
+    return _merge_constant("DEFAULT_CONFIG")
 
 
 def _build_stamp_repos():
@@ -512,6 +519,12 @@ def _build_stamp_repos():
     firstproof = {"defaultBranch": "main", "kinds": [], "merge": {
         "method": "merge", "requiredChecks": "first-proof", "deadlineMinutes": 30, "deleteBranch": True}}
     make_repo(FIRST_PROOF_REPO, {_merge_config_path(): json.dumps(firstproof) + "\n", ".github/workflows/ci.yml": "name: ci\non: push\n"})
+    unknown = {"defaultBranch": "main", "kinds": [], "merge": {
+        "method": "merge", "requiredChecks": "all-proof", "deadlineMinutes": 30, "deleteBranch": True}}
+    make_repo(STAMPUNKNOWN, {".github/stamp.json": json.dumps(unknown) + "\n", ".github/workflows/ci.yml": "name: ci\non: push\n"})  # glossary-ok: .github/stamp.json is the real config file name
+    protect = {"defaultBranch": "main", "kinds": [], "merge": {
+        "method": "merge", "requiredChecks": "protection", "deadlineMinutes": 30, "deleteBranch": True}}
+    make_repo(STAMPPROTECT, {".github/stamp.json": json.dumps(protect) + "\n", ".github/workflows/ci.yml": "name: ci\non: push\n"})  # glossary-ok: .github/stamp.json is the real config file name
     make_repo(STAMPNONE, {".github/dependabot.yml": "version: 2\n", "hooks/keep": "x\n"})
     make_repo(STAMPNOBLOCK, {".github/stamp.json": json.dumps({"defaultBranch": "main", "kinds": []}) + "\n"})
     make_repo(STAMPBAD, {".github/stamp.json": '{"defaultBranch": "main", "merge": {"method": \n'})
@@ -522,7 +535,8 @@ def _build_stamp_repos():
         os.symlink(os.path.join(STAMPREPO, "hooks"), STAMPLINK, target_is_directory=True)
 
 
-lazy_fixture([STAMPREPO, STAMPNONE, STAMPNOBLOCK, STAMPBAD, STAMPDIR, STAMPLIST, STAMPLINK, STAMPIGNORE, STAMPNOCHECK, FIRST_PROOF_REPO],
+lazy_fixture([STAMPREPO, STAMPNONE, STAMPNOBLOCK, STAMPBAD, STAMPDIR, STAMPLIST, STAMPLINK, STAMPIGNORE, STAMPNOCHECK, FIRST_PROOF_REPO,
+              STAMPUNKNOWN, STAMPPROTECT],
              _build_stamp_repos)
 add("merge-batch: the merge tool of the host is allowed past an ignored running workflow on another ready pr", "allow",
     tool="mcp__github__merge_pull_request", cwd=STAMPIGNORE, pullNumber=1, repo="x", owner="y",
@@ -1170,7 +1184,7 @@ STANDING_ROLE = "standing"
 
 def standing_refuse(name, command, transcript, env=ROLE_ENV, **kw):
     """A `merge --role standing` the guard refuses. The reason names its rule, never the role flag and never the tier word."""
-    sh("merge-role-proof: " + name, command, "deny", rule=ROLE_RULE, lacks=ROLE_FLAG + (STANDING_ROLE,),
+    sh("merge-role-proof: " + name + ", standing tier", command, "deny", rule=ROLE_RULE, lacks=ROLE_FLAG + (STANDING_ROLE,),
        transcript=transcript, env=env, cwd=NOGIT, **kw)
 
 
@@ -1493,7 +1507,7 @@ def record_push_cost_case():
     `git rev-parse --show-toplevel`. A refspec push adds one `git symbolic-ref`. A HEAD push adds two
     `git symbolic-ref`, and reads no push.default. A bare push adds two
     `git symbolic-ref` and two `git config` reads, and reads push.default. A literal main destination
-    (`origin main`, `HEAD:main`) adds one `git config` read, the remote's URL (rule push-main). A literal
+    (`origin main`, `HEAD:main`) adds one `git config` read, the remote's URL (rule force-push). A literal
     `HEAD:<branch>` adds no read. A `--all` push (rule push-all-main) reads that URL the same way, then the current
     branch (`symbolic-ref`, the agent test), one `git for-each-ref` of the tracking refs, and, when those refs show no
     update, one more `git for-each-ref` of the local branches (the all-agent test). A glob refspec reads the URL and

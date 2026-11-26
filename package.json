@@ -3,6 +3,6 @@
   "private": true,
   "description": "Packages that the skills of claude-settings load. install.sh and install.ps1 run npm ci here.",
   "dependencies": {
-    "typescript": "~5.8.2"
+    "typescript": "5.9.3"
   }
 }

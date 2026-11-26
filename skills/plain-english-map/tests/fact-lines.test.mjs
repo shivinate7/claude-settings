@@ -42,7 +42,7 @@ import { spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import { delimiter, dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { FIXTURE, POSIX_ONLY, SKILL, cleanEnv, expected, gitIn, gitShim, needFile, run, scratchRepo, tmpFolder, verdicts } from './helpers.mjs';
+import { FIXTURE, POSIX_ONLY, SKILL, TS_STANDARD, cleanEnv, expected, gitIn, gitShim, needFile, run, scratchRepo, tmpFolder, verdicts } from './helpers.mjs';
 
 const CHECK = join(SKILL, 'scripts', 'map-check.mjs');
 const PARITY = join(SKILL, 'tests', 'value-cite-parity.json');
@@ -163,14 +163,14 @@ test('F2a. factLines reads a value fact and a uses fact, with their line, parent
     '- `lint/find_copies.py` — Lists the copies of claude-settings things.',
     '  - A near-equal file needs 12 significant lines. — `MIN_LINES = 12`',
     '  - Starts git with no window, through the one home. — `uses hooks/_nowindow.py:run`',
-    '  - The skill pins typescript to one version. — `package.json: dependencies.typescript = "~5.8.2"`',
+    '  - The skill pins typescript to one version. — `package.json: dependencies.typescript = "' + TS_STANDARD + '"`',
     '  - Parent files under examples and templates are never copies. — `TEMPLATE_DIRS = {"examples", "templates"}`',
     '',
   ].join('\n');
   assert.deepEqual(factLines(text), [
     { kind: 'value', line: 6, parent: 'lint/find_copies.py', prose: 'A near-equal file needs 12 significant lines.', file: 'lint/find_copies.py', symbol: 'MIN_LINES', literal: '12' },
     { kind: 'uses', line: 7, parent: 'lint/find_copies.py', prose: 'Starts git with no window, through the one home.', file: 'hooks/_nowindow.py', symbol: 'run' },
-    { kind: 'value', line: 8, parent: 'lint/find_copies.py', prose: 'The skill pins typescript to one version.', file: 'package.json', symbol: 'dependencies.typescript', literal: '"~5.8.2"' },
+    { kind: 'value', line: 8, parent: 'lint/find_copies.py', prose: 'The skill pins typescript to one version.', file: 'package.json', symbol: 'dependencies.typescript', literal: '"' + TS_STANDARD + '"' },
     { kind: 'value', line: 9, parent: 'lint/find_copies.py', prose: 'Parent files under examples and templates are never copies.', file: 'lint/find_copies.py', symbol: 'TEMPLATE_DIRS', literal: '{"examples", "templates"}' },
   ]);
 });

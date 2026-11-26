@@ -194,9 +194,10 @@ def pid_is_owned(pid: int, root: int):
     return None
 
 
-def pid_is_session_job(pid: int, session_id: str) -> bool:
-    """True when `pid` is this session's to wait on (`bin/wait-pid`, the one caller). It never
-    signals: waiting is no kill, so the kill verdict (`foreign_pid_kill`) is unchanged.
+def pid_is_session_job(pid: int, session_id: str):
+    """True when `pid` is this session's to wait on (`bin/wait-pid`, the one caller), False when it is
+    not, None when that cannot be told because an environment read was unreadable. It never signals:
+    waiting is no kill, so the kill verdict (`foreign_pid_kill`) is unchanged.
 
     Owned: the pid is dead or descends from the session root (as `pid_is_owned`). A job stranded
     after a stall is not a descendant: its stub shell is under init. So a pid is also this
@@ -204,8 +205,11 @@ def pid_is_session_job(pid: int, session_id: str) -> bool:
     `CLAUDE_CODE_SESSION_ID=<session_id>` (`proc_env.holds_session_tag`). On Linux the forked stub
     holds no tag and the exec'd job under it does, so the walk reads each step. The stall report
     names that stub first, so a pid whose own parent is init is also this session's when a
-    descendant of it holds the tag (`_tagged_descendant`). Unknown (no root, `ps` fails) answers
-    True, as `foreign_pid_kill` does. Pid 0, 1 and -1 are never this session's.
+    descendant of it holds the tag (`_tagged_descendant`). The pid, its stub just under init, or a
+    descendant whose environment is unreadable (macOS hides a system program's) never proves the pid
+    foreign: when none holds the tag, the answer is None, not False. A hidden shell mid-chain is not
+    counted, so a foreign pid under a hidden login shell is still False (a limit). Unknown (no root, `ps` fails) answers True, as `foreign_pid_kill`
+    does. Pid 0, 1 and -1 are never this session's.
     """
     if pid <= 1:
         return False
@@ -216,14 +220,22 @@ def pid_is_session_job(pid: int, session_id: str) -> bool:
     if owned is not False:
         return True   # descends from the root, dead, or unknown
     current = pid
+    unreadable = False
     for _ in range(64):
-        if holds_session_tag(current, session_id):
+        held = holds_session_tag(current, session_id)
+        if held:
             return True
         parent = _ps_ppid(current)
         if parent is None or parent == 0:
             return True   # unknown, or it ended during the walk
+        # Only the pid and the step just under init (its stub) can be a stranded job's tag holder; a
+        # hidden shell mid-chain (zsh always is on macOS) would make every foreign pid unknown.
+        unreadable = unreadable or (held is None and (current == pid or parent <= 1))
         if parent <= 1:
-            return current == pid and _tagged_descendant(pid, session_id)
+            found = current == pid and _tagged_descendant(pid, session_id)
+            if found:
+                return True
+            return None if unreadable or found is None else False
         current = parent
     return True
 
@@ -257,8 +269,9 @@ def _process_parents():
         return None
 
 
-def _tagged_descendant(pid: int, session_id: str) -> bool:
-    """True when a descendant of `pid` holds the session tag. Unknown (no table) answers True.
+def _tagged_descendant(pid: int, session_id: str):
+    """True when a descendant of `pid` holds the session tag. Unknown (no table) answers True. None when
+    no descendant holds it and one descendant's environment was unreadable.
 
     This helper's own pid and its ancestors are skipped: it holds the tag, so a scan from the top
     of its own chain would find itself and own a pid it can never see end. The scan is bounded
@@ -278,16 +291,18 @@ def _tagged_descendant(pid: int, session_id: str) -> bool:
     children = {}
     for child, parent in parents.items():
         children.setdefault(parent, []).append(child)
-    level, seen = [pid], 0
+    level, seen, unreadable = [pid], 0, False
     for _ in range(DESCENDANT_DEPTH):
         level = [c for p in level for c in children.get(p, ()) if c not in mine]
         for child in level:
             seen += 1
             if seen > DESCENDANT_COUNT:
-                return False
-            if holds_session_tag(child, session_id):
+                return None if unreadable else False
+            held = holds_session_tag(child, session_id)
+            if held:
                 return True
-    return False
+            unreadable = unreadable or held is None
+    return None if unreadable else False
 
 
 AGENT_WORKTREE_RE = re.compile(r"/\.claude/worktrees/agent-([A-Za-z0-9_-]{1,64})(?:/|$)")
@@ -371,7 +386,8 @@ def foreign_pid_kill(tokens, transcript: str = "", session_id: str = "") -> str:
     and its parent is init, or its parent's parent is init (a stranded job under an orphan stub
     shell). The tag is read on the pid itself, only after the walk says foreign. That adds at most
     one `ps` read per level (the pid, then its parent) and one environment read; a pid the walk
-    owns pays nothing more. An agent call passes session_id "", so it owns no pid by tag.
+    owns pays nothing more. A tag read that is unreadable (None) owns nothing: the pid is still
+    named, and `pid_tag_unreadable` gives the refusal its own reason. An agent call passes session_id "", so it owns no pid by tag.
     ponytail: a pid reused since launch reads as foreign; an untagged PPID-1 stub reads foreign;
     stop it through the harness.
     """
@@ -391,6 +407,17 @@ def foreign_pid_kill(tokens, transcript: str = "", session_id: str = "") -> str:
                 continue
             return arg
     return ""
+
+
+def pid_tag_unreadable(arg: str, session_id: str) -> bool:
+    """True when `arg`, a pid `foreign_pid_kill` named, is refused because its session-tag read was
+    unreadable, not because the tag was absent. The kill stays refused either way; this only picks the
+    reason text. One more environment read, on the refusal path only."""
+    try:
+        number = abs(int(arg))
+    except ValueError:
+        return False
+    return number > 1 and _under_init(number) and holds_session_tag(number, session_id) is None
 
 
 def kill_fed_by_name(tokens) -> str:
@@ -442,6 +469,15 @@ def kill_fed_by_pipe(tokens, previous) -> str:
 KILL_PID_REASON = (
     "Rule (shared trees): this stops a process this session did not start. That process may be "
     "another agent's server or the owner's editor. "
+    "Remedy: stop only a pid this session started, taken from the $! its own launch printed, "
+    "or stop a run_in_background job through the harness's own stop tool. "
+    "Leave any other process alone."
+)
+
+KILL_PID_UNKNOWN_REASON = (
+    "Rule (shared trees): this session cannot tell whose process this is. The environment read that "
+    "would show whether this session started it was unreadable (macOS hides the environment of a "
+    "system program), so the owner is unknown, and an unknown owner is not taken as this session's. "
     "Remedy: stop only a pid this session started, taken from the $! its own launch printed, "
     "or stop a run_in_background job through the harness's own stop tool. "
     "Leave any other process alone."

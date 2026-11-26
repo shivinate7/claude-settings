@@ -171,10 +171,15 @@ LOG_CHECKS_EXTRA.append(("rm-var: 2000 unclosed $( spans are judged in under 2 s
 # subprocess is timed here. judge answers by printing one JSON block and exiting, so stdout is
 # captured and SystemExit is caught. The guard's log goes under CLAUDE_CONFIG_DIR, pointed at the
 # fixture config for the call and then restored.
-def judge_in_process(command, cwd):
-    """Return (decision, reason, CPU seconds) for one Bash call judged in this process."""
+def judge_in_process(command, cwd, prepare=None):
+    """Return (decision, reason, CPU seconds) for one Bash call judged in this process.
+
+    `prepare(guard)`, when given, runs on the freshly loaded module before the judge call.
+    """
     materialize(cwd)
     guard = _load_guard_module()
+    if prepare is not None:
+        prepare(guard)
     payload = {"tool_name": "Bash", "tool_input": {"command": command}, "cwd": cwd}
     printed = io.StringIO()
     saved = os.environ.get("CLAUDE_CONFIG_DIR")
@@ -286,6 +291,73 @@ def rm_var_linear_case():
 
 LOG_CHECKS_EXTRA.append(("rm-var: 4000 bindings and 4000 flagged deletes scale linearly in CPU",
                          rm_var_linear_case))
+
+
+# Work counts for the rm-var walk, read on one 50-binding and one 100-binding command. A count is
+# exact, so it cannot flake under load, and it needs no repeats. Two counters are wrapped for one judge
+# call, on the module that call loads:
+#   reads: the earlier segments `_segment_with_vars` reads for a segment that holds `$`. Only
+#     hand_made_worktree_hit calls it, and that exits early on a segment without the word `worktree`,
+#     so the clean guard reads none for this command.
+#   rewrites: calls to `_rm_var_rewrite`, one per flagged target. A linear walk makes one per delete.
+# Doubling n doubles a linear count (2) and multiplies a per-delete re-read count by 4. The bound is 3,
+# the midpoint of the two.
+RM_WORK_N = 50
+RM_WORK_BOUND = 3
+RM_WORK_NAME = "rm-var: counted segment reads and rewrites for 50 and 100 bindings grow at most 3x"
+# A worktree segment with a variable: the early exit in hand_made_worktree_hit does not skip it, so
+# the reads counter must move. A dead counter reads 0 here, and the case fails on that alone.
+RM_WORK_WORKTREE = "W=wt; git worktree add $W/x"
+
+
+def judge_work(command, cwd):
+    """Return (decision, reason, segments read, rewrites) for one Bash call judged in this process."""
+    counts = {"reads": 0, "rewrites": 0}
+
+    def prepare(guard):
+        read_real = guard._segment_with_vars
+        scope = guard.rm_var_hits.__globals__
+        rewrite_real = scope["_rm_var_rewrite"]
+
+        def read(segments, number, ends=()):
+            if "$" in segments[number]:
+                counts["reads"] += number
+            return read_real(segments, number, ends)
+
+        def rewrite(word, ctx):
+            counts["rewrites"] += 1
+            return rewrite_real(word, ctx)
+
+        guard._segment_with_vars = read
+        scope["_rm_var_rewrite"] = rewrite
+
+    got, reason, _ = judge_in_process(command, cwd, prepare)
+    return got, reason, counts["reads"], counts["rewrites"]
+
+
+def rm_var_work_case():
+    small, big = RM_WORK_N, 2 * RM_WORK_N
+    got_s, why_s, reads_s, rew_s = judge_work(rm_var_linear_cmd(small), NOGIT)
+    got_b, why_b, reads_b, rew_b = judge_work(rm_var_linear_cmd(big), NOGIT)
+    _, _, live_reads, _ = judge_work(RM_WORK_WORKTREE, NOGIT)
+    for got, why in ((got_s, why_s), (got_b, why_b)):
+        if got != "deny" or "rm-var-unguarded" not in why:
+            return False, "judged %s, not the expected deny by rm-var-unguarded" % got
+    if rew_s < 1:
+        return False, "no rewrite counted for %d bindings: the rewrites counter is not wired" % small
+    if live_reads < 1:
+        return False, "no read counted on a worktree segment: the reads counter is not wired"
+    if reads_b > RM_WORK_BOUND * reads_s:
+        return False, ("segments read grew from %d to %d for %d to %d bindings, over %dx"
+                       % (reads_s, reads_b, small, big, RM_WORK_BOUND))
+    if rew_b > RM_WORK_BOUND * rew_s:
+        return False, ("rewrites grew from %d to %d for %d to %d bindings, over %dx"
+                       % (rew_s, rew_b, small, big, RM_WORK_BOUND))
+    return True, ("segments read %d to %d, rewrites %d to %d, for %d to %d bindings"
+                  % (reads_s, reads_b, rew_s, rew_b, small, big))
+
+
+LOG_CHECKS_EXTRA.append((RM_WORK_NAME, rm_var_work_case))
 
 
 # The 64000-binding limit: one delete after 64000 bindings, judged in CPU time of judge, whose
