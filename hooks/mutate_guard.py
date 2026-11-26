@@ -4062,6 +4062,8 @@ GUARD_MODULE_FAMILIES = {
     "hooks/guard_browser.py": ["browser-keychain"],
     # hooks/guard_write.py holds the silent-write family moved out of guard.py. Its mutants meet the write section.
     "hooks/guard_write.py": ["write"],
+    # hooks/guard_impeccable.py holds the impeccable family moved out of guard.py. Its mutants meet the impeccable section.
+    "hooks/guard_impeccable.py": ["impeccable"],
     # hooks/guard.py holds the rules that no guard_<x>.py module owns. A mutant of it meets six families that read those rules.
     "hooks/guard.py": ["write", "paths", "diff", "model-cap", "cite", "hook-bypass"],
 }
@@ -4086,7 +4088,6 @@ GUARD_MODULE_EXEMPT = {
     "hooks/guard_paths.py": EMPTY_MOVE_REASON,
     "hooks/guard_scratchpad_owner.py": EMPTY_MOVE_REASON,
     "hooks/guard_pages.py": EMPTY_MOVE_REASON,
-    "hooks/guard_impeccable.py": EMPTY_MOVE_REASON,
     "hooks/guard_simulator.py": EMPTY_MOVE_REASON,
     "hooks/guard_workflow_args.py": EMPTY_MOVE_REASON,
     "hooks/guard_ci_wait.py": EMPTY_MOVE_REASON,

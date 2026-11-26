@@ -1993,6 +1993,12 @@ class GuardModuleFamilyTests(unittest.TestCase):
         self.assertIn("write", families, "hooks/guard_write.py needs a GUARD_MODULE_FAMILIES row that names the write "
                                          "family, the family of its silent-write mutants")
 
+    def test_guard_impeccable_has_a_row_that_names_the_impeccable_family(self):
+        """The impeccable family moved to hooks/guard_impeccable.py, so its mutants meet the impeccable section from its own row."""
+        families = guard_table().get("hooks/guard_impeccable.py") or []
+        self.assertIn("impeccable", families, "hooks/guard_impeccable.py needs a GUARD_MODULE_FAMILIES row that names the "
+                                              "impeccable family, the family of its review-only rule")
+
     def test_every_row_is_a_non_empty_list(self):
         table = guard_table()
         self.assertIn("hooks/guard_kill.py", table, "GUARD_MODULE_FAMILIES has no row for hooks/guard_kill.py")
