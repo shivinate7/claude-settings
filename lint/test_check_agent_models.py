@@ -553,9 +553,11 @@ class RoundRowDrift(unittest.TestCase):
                          "the guard's round table read for this fixture is not %s, so this case proves nothing" % rounds)
 
     def test_a_round_row_naming_a_model_the_guard_cannot_read_fails_the_check(self):
-        code, out = self.check_fixture("| reviewer | 2 | fable | high |")
+        # fable is a family now (hooks/shared_names.py MODEL_FAMILIES), so the guard reads it. gemini is no family: the scope.
+        self.assertIsNone(C._guard.role_model_rank("gemini"), "gemini is a model family the guard reads, so this case proves nothing")
+        code, out = self.check_fixture("| reviewer | 2 | gemini | high |")
         self.assertEqual(code, 1, "a round row naming a model the guard cannot read passes the check: %r" % out)
-        self.assertTrue(names(out, "agent-model-cap.md", "fable"), "the check does not name the round row it flags: %r" % out)
+        self.assertTrue(names(out, "agent-model-cap.md", "gemini"), "the check does not name the round row it flags: %r" % out)
 
     def test_a_round_row_the_guard_reads_passes_the_check(self):
         code, out = self.check_fixture("| reviewer | 2 | sonnet | high |")
