@@ -53,7 +53,7 @@ from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _test_temp  # noqa: E402  test-temp-standard: every temp path comes from this run's folder
-from test_windows_split import ALL_JOBS_PASSED_JOB, CHECKS, MACOS_JOBS, NIGHTLY_SKIP_JOB, PUSH_OFF_SHARDS, PUSH_SKIP_JOB, all_jobs, eval_if, eval_value, job_outputs_of  # noqa: E402  the one home of the checks.yml reader and the shard list
+from test_windows_split import ALL_JOBS_PASSED_JOB, CHECKS, MACOS_JOBS, NIGHTLY_SKIP_JOB, PUSH_OFF_SHARDS, PUSH_SKIP_JOB, all_jobs, draft_guard_only, eval_if, eval_value, job_outputs_of  # noqa: E402  the one home of the checks.yml reader, the shard list and the draft guard alone
 from all_jobs_passed_rules import FAN_IN, needs_of, split_jobs  # noqa: E402  the one home of the needs reader
 from workflow_steps import job_block, step_blocks, step_env, step_key, step_with  # noqa: E402  the one home of the job parser
 import test_all_jobs_passed as all_jobs_home  # noqa: E402  the one home of the child workflow fixtures (CHILD_GOOD)
@@ -1078,10 +1078,11 @@ class PushSkipWiring(unittest.TestCase):
             self.text = f.read()
         self.jobs = all_jobs(self.text)
 
-    def test_push_skip_starts_on_every_event_and_its_steps_run_on_a_push_only(self):
-        # A job-level if would leave the job skipped on a pull request, and all-jobs-passed reads a skipped needed job as red.
-        # Named failure: a job-level if returns, or a step runs off a push.
-        self.assertIsNone(self.jobs.get(JOB, {}).get("if"), f"{JOB} keeps a job-level if: it would read skipped on a pull request")
+    def test_push_skip_starts_on_every_event_but_a_draft_pull_request_and_its_steps_run_on_a_push_only(self):
+        # A job-level if other than the draft guard alone would leave the job skipped on a pull request or a push, and all-jobs-passed
+        # reads a skipped needed job as red. Named failure: a job-level if that is more than the draft guard, or a step that runs off a push.
+        expr = self.jobs.get(JOB, {}).get("if")
+        self.assertTrue(expr is None or draft_guard_only(expr), f"{JOB} keeps a job-level if that is more than the draft guard: {expr}")
         block = job_block(self.text, JOB) or ""
         steps = step_blocks(block)
         self.assertTrue(steps, f"{JOB} has no steps")
