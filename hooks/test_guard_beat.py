@@ -7,7 +7,8 @@ goes to stderr, flushed, and is appended to STALL_WATCH_BEAT when that is set. E
 on one family (GUARD_FAMILY=branch-worktree: 64 cases and one log check, 16-18 s per family run) and reads what it
 printed. The watch classes run that family under hooks/stall_watch.py with a short limit. The defs classes run
 the beat's own defs with a fake clock, so no suite runs. The run folder and its sweep are the shared helper's
-(lint/_test_temp.py); its sweep is proved in lint/test_find_copies.py.
+(lint/_test_temp.py); its sweep is proved in lint/test_find_copies.py. The class HoldersEndWithTheRun proves that
+a run which exits early stops the holders its kill cases started.
 
     python3 hooks/test_guard_beat.py
 """
@@ -97,6 +98,44 @@ def kill_job(job):
         os.killpg(job.pid, signal.SIGKILL)  # the job's own session (start_new_session)
     except (AttributeError, OSError):
         job.kill()
+
+
+EARLY_EXIT = "refused-by-the-test"  # a GUARD_TESTS value the runner refuses before any case runs
+EARLY_EXIT_RC = 2  # the runner's exit for a value it refuses
+NOTHING_RAN = "Nothing ran."
+
+
+def read_pids(path):
+    """The pids in a record file the runner wrote, or [] when it wrote none."""
+    try:
+        with open(path, encoding="utf-8") as record:
+            return [int(line) for line in record.read().split()]
+    except OSError:
+        return []
+
+
+def group_members(group):
+    """The pids of the live processes in process group `group`. The child leads its own group (start_new_session),
+    so a holder that did not call setsid is in it. A zombie is not listed: its exit is over."""
+    rows = subprocess.run(["ps", "-axo", "pid=,pgid=,stat="], capture_output=True, text=True,
+                          timeout=30).stdout.splitlines()
+    members = []
+    for row in rows:
+        fields = row.split()
+        if len(fields) == 3 and fields[1] == str(group) and not fields[2].startswith("Z"):
+            members.append(int(fields[0]))
+    return members
+
+
+def still_alive(pids):
+    """The pids that have not ended. A zombie has ended: its exit waits only to be collected."""
+    alive = []
+    for pid in pids:
+        stat = subprocess.run(["ps", "-o", "stat=", "-p", str(pid)], capture_output=True, text=True,
+                              timeout=30).stdout.strip()
+        if stat and not stat.startswith("Z"):
+            alive.append(pid)
+    return alive
 
 
 def watched_run(name, heartbeat):
@@ -316,6 +355,44 @@ class WatchedBeatOff(unittest.TestCase):
         self.assertEqual(self.watched.watch_rc, stall_watch.STALL_EXIT,
                          "the watcher exited %r with the beat off, not a stall" % self.watched.watch_rc)
         self.assertIn("STALL", self.watched.watch_out, "the watcher exited with no STALL report")
+
+
+class HoldersEndWithTheRun(unittest.TestCase):
+    """The kill cases start holders: sleeps, python jobs and shell stubs that outlive the run, one of them a python
+    holder that calls setsid. The run stops them at its end. A run that stops early must stop them too. The child is
+    refused before any case runs, after its holders exist. Its holders are found two ways: those in its process group
+    (a holder that did not call setsid shares it) and those the run recorded (GUARD_HOLDER_RECORD), since a holder that
+    called setsid leads a group of its own."""
+
+    @unittest.skipIf(os.name == "nt", "the holders are POSIX processes: a process group, and ps")
+    def test_no_holder_of_the_run_is_alive_after_an_early_exit(self):
+        record = os.path.join(RUN_FOLDER, "holders-early-exit.txt")
+        out_path = os.path.join(RUN_FOLDER, "holders-early-exit-out.txt")
+        env = suite_env()
+        env.update(GUARD_FAMILY="kill", GUARD_TESTS=EARLY_EXIT, GUARD_HOLDER_RECORD=record)
+        with open(out_path, "wb") as out:
+            child = subprocess.Popen(SUITE_CMD, stdout=out, stderr=subprocess.STDOUT, env=env,
+                                     start_new_session=True)
+        left, recorded = [], []
+        try:
+            rc = child.wait(timeout=TIMEOUT)
+            recorded = read_pids(record)
+            left = still_alive(sorted(set(recorded) | set(group_members(child.pid))))
+        finally:
+            if child.poll() is None:
+                kill_job(child)
+            for pid in left:  # the test started these: it ends what it finds running, so a red run leaks none
+                try:
+                    os.kill(pid, signal.SIGTERM)
+                except OSError:
+                    pass
+        with open(out_path, encoding="utf-8", errors="replace") as f:
+            output = f.read()
+        self.assertEqual(rc, EARLY_EXIT_RC, "the run exited %r, not the refusal's %r" % (rc, EARLY_EXIT_RC))
+        self.assertIn(NOTHING_RAN, output, "the run did not stop at the refusal: it printed no %r" % NOTHING_RAN)
+        self.assertEqual(left, [], "%d holder(s) of the run are alive after its early exit: pids %s"
+                         % (len(left), left))
+        self.assertTrue(recorded, "the run recorded no holder, so the check above proved nothing")
 
 
 if __name__ == "__main__":

@@ -166,9 +166,9 @@ def spawn_live_parent(cwd):
             ["sh", "-c", "sh -c 'sleep 300 </dev/null >/dev/null 2>&1 & echo $!; echo $$; wait' "
                          "</dev/null 2>/dev/null &"],
             cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
-        outer.wait(timeout=20)   # the outer shell exits; its background child is reparented
         child, parent = int(outer.stdout.readline()), int(outer.stdout.readline())
-        ORPHAN_PIDS.extend([child, parent])
+        ORPHAN_PIDS.extend([child, parent])   # recorded as soon as the inner shell names them, before the wait
+        outer.wait(timeout=20)   # the outer shell exits; its background child is reparented
         ps_parent = subprocess.run(["ps", "-o", "ppid=", "-p", str(parent)], capture_output=True,
                                    text=True, timeout=5).stdout.strip()
         ps_child = subprocess.run(["ps", "-o", "ppid=", "-p", str(child)], capture_output=True,

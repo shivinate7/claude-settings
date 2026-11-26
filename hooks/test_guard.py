@@ -13,6 +13,9 @@ GUARD_FAMILY=<name> runs only one family of cases (FAMILIES, at the top of this 
 name, or a filter that matches no case, fails the run. GUARD_TIMING=1 prints what each fixture
 block cost.
 
+GUARD_HOLDER_RECORD=<path> writes the pid of each holder the kill cases start to that path before the run
+stops them, however the run ends (test_guard_beat.py reads it after an early exit).
+
 Rule matching is exact. A deny or ask case passes only when the rule its reason prints (the text before the reason's
 first ": ") is the case's rule, and a deny or ask case that names no rule fails. GUARD_RULE_EXACT=report is the
 non-failing read: it fails no rule check, so a case whose rule does not match still passes or fails on its verdict
@@ -986,13 +989,6 @@ def run_cases():
         say("%s  %-6s(want %-6s)  [%-11s] %s  (%s)" % (
             "PASS" if ok else "FAIL", "logged" if ok else "wrong", "logged", "Bash", label, note))
     say("")
-    shutil.rmtree(ROOT, ignore_errors=True)
-    OWNED.kill()
-    for orphan in ORPHAN_PIDS:   # the sleeps this file started, by their own pids
-        try:
-            os.kill(orphan, signal.SIGTERM)
-        except OSError:
-            pass
     if (mode or fam or only or GUARD_SHARD != (1, 1)) and not ran:
         say("test_guard FAIL: ran 0 cases (GUARD_TESTS=%s, GUARD_FAMILY=%s, MUTATE_ONLY=%s, "
             "GUARD_SHARD=%d/%d matched none, or matched only skips: %d skipped)" % (
@@ -1006,9 +1002,63 @@ def run_cases():
     return 0
 
 
+HOLDER_RECORD = os.environ.get("GUARD_HOLDER_RECORD", "")  # the pids the run started, read by test_guard_beat.py
+HOLDER_WAIT = 10.0  # seconds, in all, for the holders to end once signalled: a hang cap, never a pause
+
+
+def holder_ended(pid):
+    """True once `pid` has ended: no process has it, or it is a zombie, whose exit waits only to be collected."""
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return True
+    except OSError:
+        return False  # alive, but not ours to signal
+    state = subprocess.run(["ps", "-o", "stat=", "-p", str(pid)], capture_output=True, text=True,
+                           timeout=10).stdout.strip()
+    return not state or state.startswith("Z")
+
+
+def stop_holders():
+    """Stop every holder the kill cases started, by its recorded pid, and wait until each has ended. A holder that
+    called setsid leads its own process group, so its group goes with it. Any other holder shares this run's group,
+    so only its pid is signalled. main runs this in a finally, so an early exit of the run stops them too."""
+    if HOLDER_RECORD:
+        with open(HOLDER_RECORD, "w", encoding="utf-8") as record:
+            record.write("".join("%d\n" % pid for pid in ORPHAN_PIDS))
+    try:
+        OWNED.kill()
+        OWNED.wait(timeout=HOLDER_WAIT)
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    if os.name == "nt":  # no process groups or ps here: each holder is ended by its own pid
+        for pid in ORPHAN_PIDS:
+            try:
+                os.kill(pid, signal.SIGTERM)
+            except OSError:
+                pass
+        return
+    for pid in ORPHAN_PIDS:
+        try:
+            if os.getpgid(pid) == pid and pid != os.getpgrp():
+                os.killpg(pid, signal.SIGTERM)
+            else:
+                os.kill(pid, signal.SIGTERM)
+        except OSError:
+            pass  # it has ended already
+    deadline = time.monotonic() + HOLDER_WAIT
+    for pid in ORPHAN_PIDS:
+        while not holder_ended(pid) and time.monotonic() < deadline:
+            time.sleep(0.02)
+
+
 def main():
     _mark("case registration (module code after the fixtures)")
-    rc = run_cases()
+    try:
+        rc = run_cases()
+    finally:
+        stop_holders()
+        shutil.rmtree(ROOT, ignore_errors=True)
     _timing_report()
     return rc
 
