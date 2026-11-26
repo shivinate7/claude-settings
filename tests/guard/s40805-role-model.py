@@ -140,10 +140,10 @@ def role_model_allow(name, role, model, prompt, tool="Agent", config=ROLE_REAL_C
     add(name, "allow", tool=tool, config=config, env=env, **role_input(role, model, prompt))
 
 
-def role_opus_refuse(name, role, model, prompt, tool="Agent", config=ROLE_REAL_CFG):
-    """An Opus spawn above its row is refused under agent-model-cap, not this rule. An owner override lifts it,
-    so the case is not never-lifted."""
-    add(name, "deny", "agent-model-cap", tool=tool, config=config, lacks=(ROLE_MODEL_RULE,),
+def role_opus_refuse(name, role, model, prompt, tool="Agent", config=ROLE_REAL_CFG, carries=(), lacks=()):
+    """A spawn above its row on Opus or Fable is refused under agent-model-cap, not this rule (one rule for both models).
+    A held model or an override lifts it, so the case is not never-lifted."""
+    add(name, "deny", "agent-model-cap", tool=tool, config=config, carries=carries, lacks=(ROLE_MODEL_RULE,) + tuple(lacks),
         **role_input(role, model, prompt))
 
 
@@ -169,12 +169,12 @@ role_model_refuse("role-model: claude-code-guide on sonnet is denied", "claude-c
 role_model_refuse("role-model: test-author on the full sonnet id is denied", "test-author", "claude-sonnet-5-5",
           "Write the failing cases.")
 # A model the table does not rank is above any row below opus: fail closed. Its rank is unruled, so none is guessed.
-role_model_refuse("role-model: fable on builder is denied, a model the table does not rank fails closed",
-          "builder", "fable", "Fix the failing case.")
-role_model_refuse("role-model: fable on test-author is denied, a model the table does not rank fails closed",
-          "test-author", "fable", "Write the failing cases.")
-role_model_refuse("role-model: claude-fable-5-1 on reviewer with no round line is denied, fails closed",
-          "reviewer", "claude-fable-5-1", "Check the diff for typos.")
+role_opus_refuse("role-model: fable on builder is denied under agent-model-cap, a model the table does not rank fails closed",
+                 "builder", "fable", "Fix the failing case.")
+role_opus_refuse("role-model: fable on test-author is denied under agent-model-cap, a model the table does not rank fails closed",
+                 "test-author", "fable", "Write the failing cases.")
+role_opus_refuse("role-model: claude-fable-5-1 on reviewer with no round line is denied under agent-model-cap, fails closed",
+                 "reviewer", "claude-fable-5-1", "Check the diff for typos.")
 # A role written with a capital letter or a trailing space is the same role, so it takes its row.
 role_model_refuse("role-model: role Test-author on sonnet is denied, matched to its row",
           "Test-author", "sonnet", "Write the failing cases.")
@@ -197,8 +197,8 @@ role_model_refuse("role-model: Explore on sonnet with lowercase audit: on line 1
           "Explore", "sonnet", "audit: check the glossary for meaning drift.", carries=(EXPLORE_MARKER,))
 # The marker lifts only a Sonnet Explore. A model the table does not rank is still refused, and its reason names no
 # marker.
-role_model_refuse("role-model: Explore on fable with Audit: on line 1 is denied, reason names no marker",
-          "Explore", "fable", "Audit: check the glossary for meaning drift.", lacks=ROLE_LACKS + (EXPLORE_MARKER,))
+role_opus_refuse("role-model: Explore on fable with Audit: on line 1 is denied under agent-model-cap, reason names no marker",
+                 "Explore", "fable", "Audit: check the glossary for meaning drift.", lacks=ROLE_LACKS + (EXPLORE_MARKER,))
 
 # ---- C: at or below the row passes. An Opus spawn above its row is refused under agent-model-cap (rule 9d).
 # An Explore on Sonnet passes when the first `Audit:` on the brief's first non-blank line counts, with any text ahead
@@ -1218,9 +1218,9 @@ role_model_refuse("role-model: fix check: a lowercase marker on line one does no
                   carries=(ROLE_REMEDY, FIX_MARKER))
 # The lift reaches only a model below the top rank. A model the table does not rank counts above it, so the marker does not
 # lift a reviewer on it. Its refusal still names the marker, as every reviewer refusal does.
-role_model_refuse("role-model: fix check: reviewer on claude-fable-5-1 with the marker on line one is denied, the lift "
-                  "does not reach an unranked model", "reviewer", "claude-fable-5-1", FIX_MARKER + ". Re-run the cases.",
-                  carries=(ROLE_REMEDY, FIX_MARKER))
+role_opus_refuse("role-model: fix check: reviewer on claude-fable-5-1 with the marker on line one is denied under "
+                 "agent-model-cap, the lift does not reach an unranked model", "reviewer", "claude-fable-5-1",
+                 FIX_MARKER + ". Re-run the cases.")
 role_opus_refuse("role-model: fix check: reviewer on opus with the marker is denied under agent-model-cap, the ceiling holds",
                  "reviewer", "opus", FIX_MARKER + ". Re-run the cases.")
 role_opus_refuse("role-model: fix check: builder on opus with the marker is denied under agent-model-cap, no lift",
@@ -1237,9 +1237,9 @@ role_model_refuse("role-model: fix check: Explore on sonnet with the marker is d
 role_model_refuse("role-model: reviewer on sonnet with no round line names each brief form and the round 1 sentence",
                   "reviewer", "sonnet", "Check the diff for typos.",
                   carries=(ROLE_REMEDY, ROUND_MARKER, ROUND_ONE_SENTENCE, FIX_MARKER, ROUND_FIX_FORM) + FREE_ROUND_MARKERS)
-role_model_refuse("role-model: builder on fable names no reviewer form and no round 1 sentence",
-                  "builder", "fable", "Fix the failing case.",
-                  lacks=ROLE_LACKS + (ROUND_MARKER, FIX_MARKER, ROUND_FIX_FORM, ROUND_ONE_SENTENCE) + FREE_ROUND_MARKERS)
+role_opus_refuse("role-model: builder on fable is denied under agent-model-cap and names no reviewer form or round 1 sentence",
+                 "builder", "fable", "Fix the failing case.",
+                 lacks=ROLE_LACKS + (ROUND_MARKER, FIX_MARKER, ROUND_FIX_FORM, ROUND_ONE_SENTENCE) + FREE_ROUND_MARKERS)
 # A fix check on a later round lifts a reviewer on Sonnet when its first line is the round marker and the fix check words.
 # The round row reads that line, so the lift comes from the row, not from the fix check marker.
 role_model_allow("role-model: round row: reviewer on sonnet with Round 2 of 3 (fix check) on line one is allowed, as a round 2 brief",
