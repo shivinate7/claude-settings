@@ -257,6 +257,7 @@ def _hooks_on_path():
 
 _hooks_on_path()
 from shared_names import CONSULTANT_TAG, LANE_TAG  # noqa: E402  the one home of the lane and consultant tags, shared with hooks/guard.py
+from shared_names import MODEL_FAMILIES  # noqa: E402  the one home of the model list, shared with hooks/guard.py and hooks/override.py
 
 # guard.py owns the one shell parser this repo trusts: quote-aware segment splitting,
 # heredoc-body stripping, and `git_calls`, which resolves each `git` invocation past `sudo`
@@ -1044,12 +1045,11 @@ def placeholder_problem(text):
 # search or a Plan spawn needs no name. A Workflow agent() is unseen: its model can sit in a variable.
 NAMED_ROLES = {"builder", "reviewer", "test-author", "record-writer"}
 SPAWN_TOOLS = {"Agent", "Task"}
-MODEL_FAMILIES = ("haiku", "sonnet", "opus", "fable")
 # A model names the roles just before it: "builder sonnet", "builder: sonnet", "builder (sonnet)",
 # and "builder and reviewer sonnet" all count.
 _ROLE = r"(?:builder|reviewer|test-author|record-writer)"
 ROLE_MODEL_RE = re.compile(
-    r"\b(" + _ROLE + r"(?:\s*(?:,|/|&|\band\b)\s*" + _ROLE + r")*)\s*[:(]?\s*(haiku|sonnet|opus|fable)\b",
+    r"\b(" + _ROLE + r"(?:\s*(?:,|/|&|\band\b)\s*" + _ROLE + r")*)\s*[:(]?\s*(" + "|".join(MODEL_FAMILIES) + r")\b",
     re.I)
 ROLE_RE = re.compile(_ROLE, re.I)
 # A test hook: REPORT_GUARD_AGENTS_DIR points agent_pin at a fixture folder. Read once at import; unset or empty keeps the
@@ -3883,6 +3883,36 @@ def triage_hold(hook, records, active):
         return ""
 
 
+MODEL_LINE_REASON = (
+    "The owner's model hold is on (model %s%s): open your reply with one line that says so, in this form: "
+    "`Model %s is on for %s; say \"no %s\" to end it.` Only the reply that is your report, which ends the hold, goes "
+    "without it. (rule agent-model-cap, the owner's model name)")
+MODEL_LINE_WHY_MAX = 80  # characters of the owner's words the reason offers as the line's <why>
+
+
+def model_line_problem(hook, records, reply):
+    """The reason the reply must carry the model line, or "". While the session's judged model hold is live
+    (override.model_override, the one reader the guard also uses: no write here, so the line and the guard cannot
+    disagree) the reply carries one line `Model <m> is on for <why>; say "no <m>" to end it.` A reply that is a report
+    ends the hold and needs none, and a hold a keyword grant wrote (it names no model) asks for none. A rewrite
+    (stop_hook_active) is never asked again: main checks this before that branch. Cost: one open of the pass file, none
+    when it is absent; a hold that ends at the report also reads the replies since it from `records`, in memory."""
+    if report_shape_ok(reply or ""):
+        return ""
+    import override  # the hooks folders are on sys.path (_hooks_on_path)
+    hold = override.model_override(hook.get("session_id"), hook.get("transcript_path"), records, report_shape_ok)
+    if not hold or not hold.get("judged"):
+        return ""
+    model = hold["model"]
+    if re.search(r'^Model %s is on for .+; say "no %s" to end it\.$' % (re.escape(model), re.escape(model)),
+                 reply or "", re.M):
+        return ""
+    why = " ".join((hold.get("said") or "").replace(";", ",").split()).rstrip(".!?")[:MODEL_LINE_WHY_MAX] or "<his words>"
+    import local_time  # the time line's own clock names the hour the hold ends at the latest
+    ends_at = local_time.central_hhmm(hold["until"])
+    return MODEL_LINE_REASON % (model, " until %s at the latest" % ends_at if ends_at else "", model, why, model)
+
+
 def main():
     try:
         hook = json.load(sys.stdin)
@@ -3936,6 +3966,12 @@ def main():
 
     # The hand-off cite reads the refusals file before pending_refusals settles it away.
     reply = last_reply(hook)  # one read of the reply for the hand-off cite, the refusals and the report checks
+    model_line = ""
+    try:  # the owner's model hold asks every reply for one line until the report ends it
+        model_line = model_line_problem(hook, records, reply)
+    except Exception as exc:  # a read that could not run is UNKNOWN, never a block
+        print("model-line guard: UNKNOWN, the check did not run (%s), so the hold went unchecked."
+              % type(exc).__name__, file=sys.stderr)
     hand_off, hand_note = "", ""
     try:
         _hooks_on_path()
@@ -4030,6 +4066,7 @@ def main():
         pick.append(hand_off)
         pick.append(cannot)
         pick.append(review)
+        pick.append(model_line)
         try:
             if report_shape_ok(text):
                 pick.append(recovered_problem(records, text))
@@ -4083,6 +4120,8 @@ def main():
         reasons.append(cannot)
     if review:
         reasons.append(review)
+    if model_line:
+        reasons.append(model_line)
     try:
         rewrite = rewrite_stamp_problem(text, records[last_human_idx].get("timestamp"), hook.get("cwd"))
         if rewrite:

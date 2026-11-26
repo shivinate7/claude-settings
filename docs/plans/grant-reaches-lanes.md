@@ -85,8 +85,7 @@ receiving session that approves the named act before the classifier runs. Questi
 ### The grant word
 
 A hook cannot bind free prose to one act (rule outcomes-grant-covers-named-act, a grant covers the
-act it names, never a variant). So the grant is a typed word with a fixed form, like `override 15m`
-and `opus builders 2h`:
+act it names, never a variant). So the grant is a typed word with a fixed form, like `override 15m`:
 
 `grant batch-runner merge <pr> <n>[m|h]`, `grant <lane slug> self-edit <n>[m|h]`, or
 `grant off <lane slug>` (`grant off batch-runner` for the runner)

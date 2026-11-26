@@ -1,0 +1,1 @@
+- glossary-held-model-names: GLOSSARY.md's held model row says "a pass file with model, not an override", but hooks/override.py:37 calls that same folder file an Opus override. The printed "Model override:" line (hooks/local_time.py:138-152) is a second name for a held model. The printed why repeats the owner's words. Pick one name for each. Seen: 2026-11-25 x1
