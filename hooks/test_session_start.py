@@ -16,6 +16,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from unittest import mock
 
@@ -3099,6 +3100,22 @@ PRE_COMMIT = os.path.join(HERE, "..", "githooks", "pre-commit", "pre-commit")
 HANG_GUARD = 20
 # A fixed old modification time for a fixture's files, so no tracked file shares a second with git's index.
 OLD_MTIME = 1000000000
+# The dash binary, where the runner has one. The dash cases run the hook and its installer under it, as the CI runner's sh is dash.
+# A case that finds none skips; it never installs one.
+DASH = shutil.which("dash")
+DASH_SKIP = "no dash binary on PATH; the case never installs one"
+
+
+def process_state(pid):
+    """The ps state of a pid: '' when no process has it, 'Z...' for a zombie no parent has reaped."""
+    answer = subprocess.run(["ps", "-o", "stat=", "-p", str(pid)], capture_output=True, text=True, timeout=60)
+    return answer.stdout.strip()
+
+
+def process_command(pid):
+    """The command line of a pid, so a failure message names what is still running."""
+    answer = subprocess.run(["ps", "-o", "command=", "-p", str(pid)], capture_output=True, text=True, timeout=60)
+    return answer.stdout.strip()
 
 
 def pre_commit_marker():
@@ -3186,22 +3203,75 @@ class SessionStartMainRefTests(SessionStartAgentWorktreeNoticeTests):
                 found.update(os.path.join(dirpath, name) for name in names)
         return found
 
-    def sh_shim(self, name):
-        """A folder whose `sh` logs each call that names main-ref/install.sh to a log outside the fixtures, then runs the real sh.
-        Returns the folder and the log path."""
+    def sh_shim(self, name, target=None):
+        """A folder whose `sh` logs each call that names main-ref/install.sh to a log outside the fixtures, then runs `target`
+        (the real sh when none is given). Returns the folder and the log path."""
         folder = os.path.join(self.root, "shim-" + name)
         log = os.path.join(self.root, "sh-starts-" + name + ".log")
         os.makedirs(folder)
         script = os.path.join(folder, "sh")
         with open(script, "w", encoding="utf-8") as handle:
             handle.write("#!/bin/sh\ncase \"$*\" in *main-ref/install.sh*) printf '%%s\\n' \"$*\" >> '%s' ;; esac\nexec '%s' \"$@\"\n"
-                         % (log, sh_exe()))
+                         % (log, target or sh_exe()))
         os.chmod(script, 0o755)
         return folder, log
 
     def installer_starts(self, log):
         """How many calls to the installer the shim logged; 0 when no log exists because nothing ran."""
         return len([line for line in log_lines(log) if "main-ref/install.sh" in line])
+
+    def mktemp_shim(self, name, tmpdir):
+        """A folder whose `mktemp` makes each temp file in `tmpdir` and logs the path it hands out. macOS mktemp ignores TMPDIR,
+        so the folder comes from the shim's template. Returns the folder and the log path."""
+        folder = os.path.join(self.root, "shim-mktemp-" + name)
+        log = os.path.join(self.root, "mktemp-" + name + ".log")
+        os.makedirs(folder)
+        script = os.path.join(folder, "mktemp")
+        with open(script, "w", encoding="utf-8") as handle:
+            handle.write("#!/bin/sh\nout=$('%s' '%s/tmp.XXXXXXXXXX') || exit 1\nprintf '%%s\\n' \"$out\" >> '%s'\nprintf '%%s\\n' \"$out\"\n"
+                         % (shutil.which("mktemp"), tmpdir, log))
+        os.chmod(script, 0o755)
+        return folder, log
+
+    def run_as(self, where, shell=None, path_dir=None, tmpdir=None):
+        """Session start in `where`, run by `shell` (the harness's sh when None), with `path_dir` first on PATH and `tmpdir` as
+        TMPDIR. Returns (exit code, stdout, stderr)."""
+        argv, env, payload, cwd = self.hook_launch(session_cwd=where, path_dir=path_dir)
+        if shell is not None:
+            argv[0] = shell
+        if tmpdir is not None:
+            env["TMPDIR"] = tmpdir
+        answer = subprocess.run(argv, input=payload, capture_output=True, text=True, env=env, cwd=cwd, timeout=120)
+        return answer.returncode, answer.stdout, answer.stderr
+
+    def recorded_pids(self, pidfile):
+        """The pids a case's installer wrote to its pid file, in the order written."""
+        with open(pidfile, encoding="utf-8") as handle:
+            return [int(text) for text in handle.read().split()]
+
+    def still_running(self, pids):
+        """The pids that stay a live process (not gone, not a zombie). Polls until none is left or HANG_GUARD runs out, so a
+        pid that dies at once costs no wait; the cap is the hang guard, well above one run."""
+        deadline = time.monotonic() + HANG_GUARD
+        while True:
+            alive = []
+            for pid in pids:
+                state = process_state(pid)
+                if state and not state.startswith("Z"):
+                    alive.append(pid)
+            if not alive or time.monotonic() >= deadline:
+                return alive
+            time.sleep(0.05)
+
+    def kill_recorded(self, pidfile):
+        """Kills the pids a case's own installer recorded, so no sleep the case started outlives it."""
+        if not os.path.isfile(pidfile):
+            return
+        for pid in self.recorded_pids(pidfile):
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
 
     def snapshot(self, *folders):
         """Every file path under the folders with its modification time, so a case proves a file was not added, removed or touched."""
@@ -3364,6 +3434,71 @@ class SessionStartMainRefTests(SessionStartAgentWorktreeNoticeTests):
         found = [line for line in self.normal(text, where).splitlines() if "main-ref" in line]
         self.assertEqual(len(found), 1, "expected one main-ref line for exit 3, got %r" % found)
         self.assertIn(err.splitlines()[0], found[0], "the line does not carry the installer's own text: %r" % found[0])
+
+    @unittest.skipIf(DASH is None, DASH_SKIP)
+    def test_the_hook_run_by_dash_prints_what_the_sh_run_prints_and_no_stderr(self):
+        """Under dash, bounded_run's `set -m` has no tty to act on and prints a line to stderr on each call. The hook and its
+        installer run under dash here, as on the CI runner, where sh is dash. The sh run is the control."""
+        where = self.make_repo("dash-run")
+        self.ship(where)
+        folder, log = self.sh_shim("dash-run", target=DASH)
+        sh_code, sh_text, sh_err = self.run_as(where)
+        self.assertEqual(sh_err, "", "control: the sh run wrote to stderr: %r" % sh_err)
+        code, text, err = self.run_as(where, shell=DASH, path_dir=folder)
+        self.assertEqual(self.installer_starts(log), 1,
+                         "scope: the dash run never started the installer's --check, so it proves nothing")
+        self.assertEqual(err, "", "the hook run by dash wrote to stderr: %r" % err)
+        self.assertEqual(code, sh_code, "the hook exited %d under dash and %d under sh" % (code, sh_code))
+        self.assertEqual(self.normal(text, where), self.normal(sh_text, where),
+                         "the stdout under dash differs from the sh run's stdout")
+
+    @unittest.skipIf(DASH is None, DASH_SKIP)
+    @unittest.skipIf(os.name == "nt", "the hung installer is a POSIX sh script in its own process group")
+    def test_a_hung_check_under_dash_is_stopped_within_the_bound_with_no_child_left(self):
+        """Under dash the hook's group kill does nothing, since dash's kill rejects `--`, so the bound must end the installer's
+        own children too. The installer writes its own pid and its sleep's pid; both must be gone once the hook has ended."""
+        pids = os.path.join(self.root, "dash-hung-pids")
+        installer = os.path.join(self.root, "dash-hung-install.sh")
+        self.put(installer, "#!/bin/sh\n# main-ref-check: 1\necho $$ > '%s'\nsleep 40 &\necho $! >> '%s'\nwait\n" % (pids, pids))
+        where = self.make_repo("dash-hung")
+        self.ship(where, installer=installer)
+        folder, log = self.sh_shim("dash-hung", target=DASH)
+        self.addCleanup(self.kill_recorded, pids)
+        argv, env, payload, cwd = self.hook_launch(session_cwd=where, path_dir=folder, fetch_timeout="2")
+        argv[0] = DASH
+        proc = subprocess.Popen(argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                env=env, cwd=cwd, start_new_session=True, text=True)
+        self.addCleanup(self.kill_group, proc)
+        try:
+            out, err = proc.communicate(payload, timeout=HANG_GUARD)
+        except subprocess.TimeoutExpired:
+            self.kill_group(proc)
+            proc.communicate()
+            self.fail("session start did not end within %d s of a hung --check under dash; the bound did not end it" % HANG_GUARD)
+        self.assertEqual(proc.returncode, 0, "the hook exited %d: %r" % (proc.returncode, err))
+        self.assertEqual(self.installer_starts(log), 1, "scope: the hung installer never started under dash, so the bound proves nothing")
+        self.assertTrue(os.path.isfile(pids), "scope: the hung installer wrote no pid file, so the check proves nothing")
+        found = self.recorded_pids(pids)
+        self.assertEqual(len(found), 2, "scope: the installer wrote %d pids, want its own and its sleep's" % len(found))
+        left = self.still_running(found)
+        self.assertEqual(left, [], "the hook ended, but these of its hung check are still running: %r"
+                         % [(pid, process_command(pid)) for pid in left])
+
+    def test_a_session_start_leaves_no_file_in_the_temp_dir(self):
+        """The temp folder stays empty after session start. The main-ref step makes a stderr file, removes it, and keeps its path
+        in a variable set by a prefix assignment. In sh's POSIX mode that assignment outlives the function call, so each later
+        git call in the hook recreates the file. macOS mktemp ignores TMPDIR, so the shim sets the folder in its template."""
+        where = self.make_repo("temp-leak")
+        self.ship(where)
+        tmpdir = tempfile.mkdtemp(prefix="tmpdir-", dir=self.root)
+        folder, log = self.mktemp_shim("temp-leak", tmpdir)
+        code, text, err = self.run_as(where, path_dir=folder, tmpdir=tmpdir)
+        self.assertEqual(code, 0, "the hook exited %d" % code)
+        self.assertTrue(any("main-ref" in line for line in self.normal(text, where).splitlines()),
+                        "scope: the main-ref check printed no line, so the check did not run: %r" % text)
+        self.assertTrue(log_lines(log), "scope: the hook made no temp file, so the folder check proves nothing")
+        left = sorted(os.listdir(tmpdir))
+        self.assertEqual(left, [], "session start left %d file(s) in the temp folder: %r" % (len(left), left))
 
     @unittest.skipIf(os.name == "nt", "the hung installer is a POSIX sh script in its own process group")
     def test_a_hung_check_does_not_hold_session_start(self):
