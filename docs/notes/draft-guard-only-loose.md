@@ -1,0 +1,1 @@
+- draft-guard-only-loose: lint/test_windows_split.py `draft_guard_only` accepts `!github.event.pull_request.draft && github.event_name != 'schedule'` as a job-level `if:`. Its truth-table rows have no schedule event. Unlikely in normal work: that form in a job-level `if:` is a deliberate choice. Decision: none. Fix: none — rare and harmless. Until: 2026-11-24 Seen: 2026-11-25 x1

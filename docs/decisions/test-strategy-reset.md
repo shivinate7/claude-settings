@@ -35,7 +35,7 @@ that do not touch the OS. A duplicate run costs minutes for no new verdict.
 Accepted risk: a defect in an OS-independent suite that shows only on macOS or Windows is not caught. Unmeasured.
 
 Accepted risk (R61): the full guard suite no longer runs on macOS at all. Every event that starts a `checks.yml` macOS job (a manual run, or a daily that runs) runs the mac-tagged slice, and a push to main runs no macOS job. A draft pull request that touches a macOS-tested file runs those tests in the lane workflow's macOS leg (`draft-until-reviewed`), which narrows this risk for those tests only. The daily runs the macOS slice on main once a day. A macOS-only guard defect outside the slice reaches main and shows at the next daily, up to a day later. Unmeasured. The slice's tag comes from the darwin arms in `hooks/` (`MACOS_REACH` in `hooks/test_guard.py`, held to the arms by an ast scan).
-Cost of `nightly-skip` (unmeasured): a runner on each push, pull request, manual run and the daily. It reads only on the daily. It makes a schedule runs read and push runs pages back to the green daily, and reads no jobs (see decision `push-skip-on-proven-tree`). It writes no file and sets no timer. The one timer is the daily cron.
+Cost of `nightly-skip` (unmeasured): a runner on each push, pull request (not a draft), manual run and the daily. A draft pull request starts none (decision `draft-until-reviewed`). It reads only on the daily. It makes a schedule runs read and push runs pages back to the green daily, and reads no jobs (see decision `push-skip-on-proven-tree`). It writes no file and sets no timer. The one timer is the daily cron.
 
 Kind: process
 Home: .github/workflows/checks.yml

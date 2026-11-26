@@ -21,7 +21,7 @@ Built-today lines in this record were not re-read by the edit of 2026-11-12 11:2
 - A job that a scope flag turns off skips its steps, not the job, so it ends green, not skipped. Cost: a
   pull request that turns every flag off still starts its 7 Windows base jobs, which skip every step. No
   macOS job starts on a pull request.
-- A draft PR runs no CI: `scope` skips on a draft, and every other job skips with it.
+- A draft PR runs no CI: `scope`, `nightly-skip` and `push-skip` skip on a draft, and every other job skips with them (decision `draft-until-reviewed`).
 - A merge needs a pull request and no approval.
 - Today's classic protection has `strict` false (`strict` requires the branch to be up to date with main).
   GitHub merges a PR that lacks main's newest commit. The `merge` tool refuses it (`merge-needs-current-base`: a merge needs a green run on the current base). The refusal lifts only for a small base move (`small_base_move` in `merge/merge.py`; decision `merge-needs-current-base`). A small base move holds when main has no change since the merge base. Otherwise all four conditions must hold. Main's paths since the merge base share no path with the batch's (the records page aside). The merge of the head and main is clean. The scope turns no job on for main's paths. The lints and affected suites pass on that merge. If any one fails, the refusal says to merge main into the branch, push, and run again.
