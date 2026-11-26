@@ -7111,6 +7111,18 @@ class CancelledProofReadsLiveHead(Env):
         self.assertNotIn(MERGE_CALL, self.calls(), "the merge call was sent:\n" + out)
         self.assertEqual(self.refs(), before, "pushed on a refused merge:\n" + out)
 
+    def refused_under_a_red_live_run(self, proven_rows, proven_runs):
+        """Control: a red own run of the live head is never covered by a failed proof under it, whichever row failed under the proof."""
+        proven, live = self.merged_over_lane_commit(
+            proven_rows=proven_rows, proven_runs=proven_runs,
+            live_rows=[("checks", "fail", job_link(NEW_RUN, 201))],
+            live_runs=[("checks", "completed", "failure", NEW_RUN)])
+        self.assertTrue(self.gh_host().head_state(7, live).startswith("red: "), "scope: the live head is not red")
+        before = self.refs()
+        rc, out = self.go()
+        self.assert_refused_unmerged(rc, out, before)
+        self.assertEqual(self.paused, [], "waited on the live head's red run instead of refusing:\n" + out)
+
     def head_state_in_checkout(self, host, n, sha):
         """head_state read in the checkout the run reads its caps from (run_once changes into it), so a scope read sees the same workflow files."""
         prior = os.getcwd()
@@ -7243,9 +7255,11 @@ class CancelledProofReadsLiveHead(Env):
         rc, out = self.go()
         self.assert_refused_unmerged(rc, out, before)
 
-    # ---- the refusals of a cancel-only proof: each case states "the merge is REFUSED" with the live head's own run green
+    # ---- a failed row under a cancel-only proof: the live head's own green run that ran its checks job is the proof (owner, 20:31 CST Nov 25, 2026)
 
-    def test_a_failed_row_named_like_a_cancel_entry_beside_cancelled_rows_refuses(self):
+    def test_a_failed_row_named_like_a_cancel_entry_beside_cancelled_rows_merges_on_a_live_run_that_ran_its_checks(self):
+        """Owner, typed 20:31 CST Nov 25, 2026: "Q-A (a) approved, knowing it reverses R1 (10:49 Nov 23) for the case of a red older lane commit under a green,
+        fully run live head." Decision merge-needs-current-base. Re-pointed from the refusal this test expected: the live head's checks job passed."""
         # The failed job is named "deploy: cancel", so its entry holds the cancel text but is a failure: the cancel shape must match the whole entry.
         proven, live = self.merged_over_lane_commit(
             proven_rows=[("deploy: cancel", "fail", job_link(OLD_RUN, 103)), ("checks", "cancel", job_link(OLD_RUN, 101))],
@@ -7256,10 +7270,17 @@ class CancelledProofReadsLiveHead(Env):
         state = host.head_state(7, proven)  # scope first: the proven head reads its failed job, and the live head reads green
         self.assertTrue(state.startswith("red: ") and "deploy: cancel: fail" in state, "scope: the proven head does not read its failed job: " + state)
         self.assertEqual(host.head_state(7, live), "green", "scope: the live head is not green")
-        before = self.refs()
         rc, out = self.go()
-        self.assert_refused_unmerged(rc, out, before)
-        self.assertIn("deploy: cancel: fail", out, "the refusal does not name the failed job of the proven head:\n" + out)
+        self.assertEqual(rc, 0, "a failed row named like a cancel entry under a green, fully run live head did not merge:\n" + out)
+        self.assertIn(MERGE_CALL, self.calls(), "the merge call was not sent:\n" + out)
+        self.assertEqual(self.paused, [], "waited instead of merging on the live head's own green run:\n" + out)
+        self.assertIn("deploy: cancel: fail", out, "the merge does not name the failed job of the proven head, so it was not read as a failure:\n" + out)
+
+    def test_a_failed_row_named_like_a_cancel_entry_under_a_red_live_run_refuses_control(self):
+        # Control, passes on today's code and after the fix: the live head's own run is red, so the failed proof under it is not covered.
+        self.refused_under_a_red_live_run(
+            proven_rows=[("deploy: cancel", "fail", job_link(OLD_RUN, 103)), ("checks", "cancel", job_link(OLD_RUN, 101))],
+            proven_runs=[("checks", "completed", "cancelled", OLD_RUN)])
 
     def test_an_earlier_failed_attempt_of_a_cancelled_proof_refuses(self):
         # The latest rows of the proven commit are cancel-only: the next push cancelled the re-run of `checks`. Its first attempt failed, and only the
@@ -7329,7 +7350,9 @@ class CancelledProofReadsLiveHead(Env):
         self.assertIn(MERGE_CALL, self.calls(), "the merge call was not sent:\n" + out)
         self.assertEqual(self.paused, [], "waited instead of merging on the live head's own green run:\n" + out)
 
-    def test_a_cancelled_row_and_a_failed_row_of_one_check_name_refuses(self):
+    def test_a_cancelled_row_and_a_failed_row_of_one_check_name_merges_on_a_live_run_that_ran_its_checks(self):
+        """Owner, typed 20:31 CST Nov 25, 2026: "Q-A (a) approved, knowing it reverses R1 (10:49 Nov 23) for the case of a red older lane commit under a green,
+        fully run live head." Decision merge-needs-current-base. Re-pointed from the refusal this test expected: the live head's checks job passed."""
         proven, live = self.merged_over_lane_commit(
             proven_rows=[("checks", "cancel", job_link(OLD_RUN, 101)), ("checks", "fail", job_link(OLD_RUN, 102))],
             proven_runs=[("checks", "completed", "cancelled", OLD_RUN)],
@@ -7339,12 +7362,21 @@ class CancelledProofReadsLiveHead(Env):
         state = host.head_state(7, proven)  # scope first: the proven head reads its failed row, and the live head reads green
         self.assertTrue(state.startswith("red: ") and "checks: fail" in state, "scope: the proven head does not read its failed row: " + state)
         self.assertEqual(host.head_state(7, live), "green", "scope: the live head is not green")
-        before = self.refs()
         rc, out = self.go()
-        self.assert_refused_unmerged(rc, out, before)
-        self.assertIn("checks: fail", out, "the refusal does not name the failed row of the proven head:\n" + out)
+        self.assertEqual(rc, 0, "a cancelled row and a failed row of one check name under a green, fully run live head did not merge:\n" + out)
+        self.assertIn(MERGE_CALL, self.calls(), "the merge call was not sent:\n" + out)
+        self.assertEqual(self.paused, [], "waited instead of merging on the live head's own green run:\n" + out)
+        self.assertIn("checks: fail", out, "the merge does not name the failed row of the proven head, so it was not read as a failure:\n" + out)
 
-    def test_a_failed_row_on_page_two_of_a_48_row_proof_refuses(self):
+    def test_a_cancelled_row_and_a_failed_row_of_one_check_name_under_a_red_live_run_refuses_control(self):
+        # Control, passes on today's code and after the fix: the live head's own run is red, so the failed proof under it is not covered.
+        self.refused_under_a_red_live_run(
+            proven_rows=[("checks", "cancel", job_link(OLD_RUN, 101)), ("checks", "fail", job_link(OLD_RUN, 102))],
+            proven_runs=[("checks", "completed", "cancelled", OLD_RUN)])
+
+    def test_a_failed_row_on_page_two_of_a_48_row_proof_merges_on_a_live_run_that_ran_its_checks(self):
+        """Owner, typed 20:31 CST Nov 25, 2026: "Q-A (a) approved, knowing it reverses R1 (10:49 Nov 23) for the case of a red older lane commit under a green,
+        fully run live head." Decision merge-needs-current-base. Re-pointed from the refusal this test expected: the live head's checks job passed."""
         # The fake's page_cap of 40 reads the 48 rows in two pages; the one failed row, job48, is the last row, on page 2.
         rows = [(f"job{k:02d}", "cancel", job_link(OLD_RUN, 100 + k)) for k in range(1, 48)] + [("job48", "fail", job_link(OLD_RUN, 148))]
         self.set(page_cap=40)
@@ -7359,10 +7391,18 @@ class CancelledProofReadsLiveHead(Env):
         state = host.head_state(7, proven)
         self.assertTrue(state.startswith("red: ") and "job48: fail" in state, "scope: the proven head does not read its failed row on page 2: " + state)
         self.assertEqual(host.head_state(7, live), "green", "scope: the live head is not green")
-        before = self.refs()
         rc, out = self.go()
-        self.assert_refused_unmerged(rc, out, before)
-        self.assertIn("job48: fail", out, "the refusal does not name the page-two failed row of the proven head:\n" + out)
+        self.assertEqual(rc, 0, "a failed row on page two of a 48-row proof under a green, fully run live head did not merge:\n" + out)
+        self.assertIn(MERGE_CALL, self.calls(), "the merge call was not sent:\n" + out)
+        self.assertEqual(self.paused, [], "waited instead of merging on the live head's own green run:\n" + out)
+        self.assertIn("job48: fail", out, "the merge does not name the page-two failed row of the proven head, so page two was not read:\n" + out)
+
+    def test_a_failed_row_on_page_two_of_a_48_row_proof_under_a_red_live_run_refuses_control(self):
+        # Control, passes on today's code and after the fix: the live head's own run is red, so the failed proof under it is not covered.
+        rows = [(f"job{k:02d}", "cancel", job_link(OLD_RUN, 100 + k)) for k in range(1, 48)] + [("job48", "fail", job_link(OLD_RUN, 148))]
+        self.set(page_cap=40)
+        self.refused_under_a_red_live_run(
+            proven_rows=rows, proven_runs=[("checks", "completed", "cancelled", OLD_RUN)])
 
     def test_a_job_cancelled_at_its_time_cap_merges_on_a_live_run_that_ran_its_checks(self):
         # Owner, typed in the consultant's chat, 20:31 CST Nov 25, 2026: "Q-A (a) approved, knowing it reverses R1 (10:49 Nov 23) for the case of a red older
