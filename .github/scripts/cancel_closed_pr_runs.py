@@ -1,12 +1,17 @@
 #!/usr/bin/env python3
-"""Cancels the CI runs of a pull request that was closed, for .github/workflows/cancel-on-close.yml.
+"""Cancels the CI runs of a pull request that was closed or went back to draft, for .github/workflows/cancel-on-close.yml.
 
 Usage: cancel_closed_pr_runs.py PR_NUMBER OWNER/REPO      (env: GH_TOKEN, read by the gh CLI)
 
 It re-reads the PR from the API instead of trusting the event, lists the repo's runs that have not finished, and cancels
-each one select_runs picks. It fails safe: a PR that is not closed, another open PR on the same head branch, a read it
-cannot parse or a gh call that fails cancels nothing, and an unreadable input exits non-zero so the run shows red. Stdlib only.
+each one select_runs picks. A closed PR loses every unfinished run of its head branch. An open draft PR loses only the
+`checks` runs created before its newest converted_to_draft event (select_draft_runs): the PR left review, so the full run
+that review started has no reader, while a lane-touched-tests run, which draft starts, keeps going. An open ready PR loses
+nothing. It fails safe: any other state, another open PR on the same head branch, a read it cannot parse or a gh call that
+fails cancels nothing, and an unreadable input exits non-zero so the run shows red; the draft path names such a read
+"unknown". Stdlib only.
 """
+import datetime
 import json
 import os
 import subprocess
@@ -14,10 +19,19 @@ import sys
 
 # The run statuses GitHub lists as not finished. A completed run has nothing left to cancel.
 ACTIVE_STATUSES = ("queued", "in_progress", "waiting", "pending", "requested")
+# The workflow whose full run a PR's return to draft cancels (the `name:` of .github/workflows/checks.yml).
+CHECKS_WORKFLOW = "checks"
+DRAFT_EVENT = "converted_to_draft"
+TIME_FORM = "%Y-%m-%dT%H:%M:%SZ"
 
 
 def pr_is_closed(state):
     return state == "closed"
+
+
+def pr_is_open_draft(pr):
+    """True for an open PR whose draft flag is true. A missing or non-boolean flag is not a draft."""
+    return isinstance(pr, dict) and pr.get("state") == "open" and pr.get("draft") is True
 
 
 def _head_of(pr):
@@ -86,6 +100,42 @@ def select_runs(runs, pr, repo, default_branch, own_run_id=None):
             and run["id"] != own_run_id]
 
 
+def _utc(stamp):
+    """A GitHub UTC timestamp as a datetime, or None when it is not in that form."""
+    if not isinstance(stamp, str):
+        return None
+    try:
+        return datetime.datetime.strptime(stamp, TIME_FORM)
+    except ValueError:
+        return None
+
+
+def newest_draft_time(events):
+    """The created_at of the newest converted_to_draft event, or None when there is none. An event whose time cannot be
+    read is a ReadError: the cut-off would be wrong."""
+    times = []
+    for event in events if isinstance(events, list) else []:
+        if isinstance(event, dict) and event.get("event") == DRAFT_EVENT:
+            when = _utc(event.get("created_at"))
+            if when is None:
+                raise ReadError(f"a {DRAFT_EVENT} event has no readable time")
+            times.append(when)
+    return max(times) if times else None
+
+
+def select_draft_runs(runs, pr, repo, default_branch, draft_at, own_run_id=None):
+    """The ids to cancel when an open PR went back to draft at draft_at: the runs select_runs picks that are `checks` runs
+    created before draft_at. A run with no readable creation time is kept."""
+    picked = set(select_runs(runs, pr, repo, default_branch, own_run_id))
+    out = []
+    for run in runs if isinstance(runs, list) else []:
+        if run.get("id") in picked and run.get("name") == CHECKS_WORKFLOW:
+            created = _utc(run.get("created_at"))
+            if created is not None and created < draft_at:
+                out.append(run["id"])
+    return out
+
+
 def count_other_pr_runs(runs, pr, repo, default_branch):
     """How many runs on the PR's head branch select_runs leaves because their list names only other PRs."""
     if not isinstance(runs, list) or not head_in_repo(pr, repo):
@@ -145,6 +195,11 @@ def list_active_runs(repo):
     return runs
 
 
+def list_pr_events(repo, pr_number):
+    return _json_lines(["-X", "GET", "--paginate", f"repos/{repo}/issues/{pr_number}/events", "-f", "per_page=100",
+                        "--jq", ".[]"])
+
+
 def list_open_prs_on_head(repo, pr):
     owner = pr["head"]["repo"]["full_name"].split("/")[0]
     return _json_lines(["-X", "GET", "--paginate", f"repos/{repo}/pulls", "-f", "state=open",
@@ -162,13 +217,15 @@ def main(argv):
         print(f"nothing cancelled: GITHUB_RUN_ID is not a number: {raw_run_id!r}", file=sys.stderr)
         return 1
     own_run_id = int(raw_run_id) if raw_run_id else None
+    draft_mode = False
     try:
         pr = read_pr(repo, pr_number)
         state = pr.get("state")
         if not isinstance(state, str) or not state:
             raise ReadError("the PR state came back empty")
-        if not pr_is_closed(state):
-            print(f"PR {pr_number} is {state}, not closed: nothing cancelled")
+        draft_mode = pr_is_open_draft(pr)
+        if not pr_is_closed(state) and not draft_mode:
+            print(f"PR {pr_number} is {state} and not a draft, not closed: nothing cancelled")
             return 0
         if _head_of(pr) is None:
             raise ReadError("the PR names no head branch or head repo")
@@ -181,18 +238,29 @@ def main(argv):
         default_branch = read_text([f"repos/{repo}", "--jq", ".default_branch"]).strip()
         if not default_branch:
             raise ReadError("the default branch came back empty")
+        draft_at = None
+        if draft_mode:
+            # One read, before the run list: a PR that went to draft has the event; a PR with none has no cut-off.
+            draft_at = newest_draft_time(list_pr_events(repo, pr_number))
+            if draft_at is None:
+                raise ReadError(f"the PR has no {DRAFT_EVENT} event, so there is no cut-off time")
         runs = list_active_runs(repo)
-        ids = select_runs(runs, pr, repo, default_branch, own_run_id)
+        if draft_mode:
+            ids = select_draft_runs(runs, pr, repo, default_branch, draft_at, own_run_id)
+        else:
+            ids = select_runs(runs, pr, repo, default_branch, own_run_id)
         skipped = count_other_pr_runs(runs, pr, repo, default_branch)
         if skipped:
             print(f"{skipped} run(s) skipped: they name only another PR", file=sys.stderr)
-        # A reopen during the list must stop the cancel, so the state is read again right before the loop.
-        state = read_pr(repo, pr_number).get("state")
-        if not isinstance(state, str) or not pr_is_closed(state):
-            print(f"PR {pr_number} is {state or 'unreadable'}, not closed: nothing cancelled")
+        # A reopen, or a return to ready, during the list must stop the cancel, so the PR is read again right before the loop.
+        again = read_pr(repo, pr_number)
+        state = again.get("state")
+        holds = pr_is_open_draft(again) if draft_mode else isinstance(state, str) and pr_is_closed(state)
+        if not holds:
+            print(f"PR {pr_number} is {state or 'unreadable'} and changed since the first read: nothing cancelled")
             return 0
     except ReadError as e:
-        print(f"nothing cancelled: {e}", file=sys.stderr)
+        print(f"nothing cancelled: {'unknown: ' if draft_mode else ''}{e}", file=sys.stderr)
         return 1
     failed = 0
     for run_id in ids:
