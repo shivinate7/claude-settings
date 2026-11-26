@@ -2991,12 +2991,18 @@ def head_config_refusal(root, head, base, path=DEFAULT_CONFIG):
         return UnknownStop(f"{where} could not be read ({' '.join(why.split())[:200]}), so what the merge tool at stable makes of it is unknown, not clear. "
                            f"Fetch origin/{base} and run again. Nothing was claimed or pushed. {UNKNOWN_CITE}")
 
-    c, changed = git(root, "diff", "--name-status", "--no-renames", f"origin/{base}...{head}", "--", path)
+    def read(*args):  # a read that timed out is as unknown as one that failed
+        try:
+            return git(root, *args)
+        except subprocess.TimeoutExpired as e:
+            raise unknown(f"timed out after {e.timeout} s")
+
+    c, changed = read("diff", "--name-status", "--no-renames", f"origin/{base}...{head}", "--", path)
     if c:
         raise unknown(changed)
     if not changed.strip() or changed.split()[0] == "D":
         return None
-    c, text = git(root, "show", f"{head}:{path}")
+    c, text = read("show", f"{head}:{path}")
     if c:
         raise unknown(text)
     try:
@@ -3009,7 +3015,7 @@ def head_config_refusal(root, head, base, path=DEFAULT_CONFIG):
         return f"{where} is not an object in its merge block: merge must be a JSON object. Every merge in the repo reads this file from the default branch, so fix it before the PR goes on."
     try:
         with contextlib.redirect_stdout(io.StringIO()):  # parse_config says its defaults and floors; only its refusal is read here
-            parse_config(root, cfg, head, f"the head {head[:9]}", path, "", fill=False)
+            parse_config(root, cfg, head, f"the head {head[:9]}", path, " " + HEAD_CONFIG_CITE, fill=False)
     except ConfigValueStop as e:
         land = f"land the tool change first, wait until stable holds it, then change {path} in a second PR"
         if e.cause == "newer":
@@ -3020,6 +3026,8 @@ def head_config_refusal(root, head, base, path=DEFAULT_CONFIG):
         return f"{e} No version of the merge tool takes this value, so fix it in {path} and push."
     except Stop as e:  # not a verdict on the value: parse_config could not read the workflows at the head
         raise unknown(str(e))
+    except subprocess.TimeoutExpired as e:  # the same workflow read, timed out
+        raise unknown(f"timed out after {e.timeout} s")
     return None
 
 def refuse_bad_pr(info):
