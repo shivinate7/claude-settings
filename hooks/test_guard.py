@@ -13,6 +13,11 @@ GUARD_FAMILY=<name> runs only one family of cases (FAMILIES, at the top of this 
 name, or a filter that matches no case, fails the run. GUARD_TIMING=1 prints what each fixture
 block cost.
 
+GUARD_HOLDER_RECORD=<path> names the file the run writes the pid of each holder the kill cases start to, as its
+reap starts and before it signals any holder (test_guard_beat.py reads it). The holders are stopped on a normal
+return, sys.exit, an uncaught exception, KeyboardInterrupt and SIGTERM (which exits 143). SIGKILL, os._exit and any other fatal signal
+run no code, so they leave the holders running. A holder that cannot be stopped is named on stderr.
+
 Rule matching is exact. A deny or ask case passes only when the rule its reason prints (the text before the reason's
 first ": ") is the case's rule, and a deny or ask case that names no rule fails. GUARD_RULE_EXACT=report is the
 non-failing read: it fails no rule check, so a case whose rule does not match still passes or fails on its verdict
@@ -50,6 +55,7 @@ Two literals are assembled from parts, so that this file cannot trip the guard i
 """
 
 import ast  # noqa: F401  the section files use it
+import atexit
 import contextlib  # noqa: F401  the section files use it
 import hashlib  # noqa: F401  the section files use it
 import io  # noqa: F401  the section files use it
@@ -688,6 +694,120 @@ def load_sections(section_dir):
         exec(compile(text, os.path.join(section_dir, name), "exec"), globals())
 
 
+# The holders the kill section starts outlive a run unless the run stops them. The sections load at import, so the
+# reap is set up before the first section runs: a sys.exit or an exception in a later section ends the run through the
+# interpreter's exit, which runs atexit. SIGTERM runs _on_term, which reaps and exits with 128 + the signal number.
+HOLDER_RECORD = os.environ.get("GUARD_HOLDER_RECORD", "")  # the pids the run started, read by test_guard_beat.py
+HOLDER_WAIT = 10.0  # seconds, in all, for the holders to end once signalled: a hang cap, never a pause
+ORPHAN_PIDS = []  # the holders' pids, in the order they started (note_holder)
+HOLDER_STARTS = {}  # pid -> its start time as ps reads it at its start: the reap signals only a pid that still has it
+HOLDERS_STOPPED = []  # one entry once the reap has run, so the atexit call after main's finally does nothing
+
+
+def note_holder(pid):
+    """Record a holder the kill cases start, with its start time now."""
+    HOLDER_STARTS[pid] = holder_start(pid)  # read first: a pid is recorded only once its start time is known
+    ORPHAN_PIDS.append(pid)
+
+
+def holder_start(pid):
+    """The start time of `pid` as ps prints it: "" when no process has the pid, None when ps cannot be run."""
+    try:
+        done = subprocess.run(["ps", "-o", "lstart=", "-p", str(pid)], capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return done.stdout.strip() if done.returncode == 0 else ""
+
+
+def holder_ended(pid):
+    """True once `pid` has ended: no process has it, or it is a zombie, whose exit waits only to be collected. It is
+    never called ended when ps cannot tell, so the wait on it runs to its cap."""
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return True
+    except OSError:
+        return False  # alive, but not ours to signal
+    try:
+        state = subprocess.run(["ps", "-o", "stat=", "-p", str(pid)], capture_output=True, text=True,
+                               timeout=10).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return not state or state.startswith("Z")
+
+
+def stop_holders():
+    """Stop every holder the kill cases started, and wait up to HOLDER_WAIT for each to end. A holder is signalled only
+    while ps still gives the start time it had when note_holder recorded it, so a pid that a later process took is left
+    alone. A holder that called setsid leads its own group, and its group goes with it. It runs once. It never raises:
+    a step that fails is reported on stderr and the rest still runs, so the run's exit code does not change."""
+    if HOLDERS_STOPPED:
+        return
+    HOLDERS_STOPPED.append(True)
+    try:
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)  # a second TERM or INT must not cut this reap short
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
+    except (OSError, ValueError):
+        pass
+    try:
+        reap_holders()
+    except Exception as err:  # last guard: the reap is never the reason a run fails
+        print("stop_holders: the reap failed: %s" % err, file=sys.stderr, flush=True)
+
+
+def reap_holders():
+    if HOLDER_RECORD:
+        try:
+            with open(HOLDER_RECORD, "w", encoding="utf-8") as record:
+                record.write("".join("%d\n" % pid for pid in ORPHAN_PIDS))
+        except OSError as err:
+            print("stop_holders: cannot write the holder record %s: %s" % (HOLDER_RECORD, err),
+                  file=sys.stderr, flush=True)
+    owned = globals().get("OWNED")  # the sleep the kill section holds, a child of this run
+    if owned is not None:
+        try:
+            owned.kill()
+            owned.wait(timeout=HOLDER_WAIT)
+        except (OSError, subprocess.SubprocessError):
+            pass
+    signalled = []
+    for pid in list(ORPHAN_PIDS):
+        if os.name != "nt":  # no ps on Windows: each holder is ended by its own pid there
+            now = holder_start(pid)
+            if now == "":
+                continue  # it has ended
+            if now is None or now != HOLDER_STARTS.get(pid):
+                print("stop_holders: holder pid %d not signalled: ps does not confirm the start time it had "
+                      "when it started" % pid, file=sys.stderr, flush=True)
+                continue
+        try:
+            if os.name != "nt" and os.getpgid(pid) == pid and pid != os.getpgrp():
+                os.killpg(pid, signal.SIGTERM)
+            else:
+                os.kill(pid, signal.SIGTERM)
+        except OSError:
+            pass  # it has ended already
+        signalled.append(pid)
+    if os.name == "nt":  # no waiting here: holder_ended would send Ctrl+C (os.kill with 0 is CTRL_C_EVENT on Windows)
+        return
+    deadline = time.monotonic() + HOLDER_WAIT
+    for pid in signalled:
+        while not holder_ended(pid) and time.monotonic() < deadline:
+            time.sleep(0.02)
+    for pid in signalled:
+        if not holder_ended(pid):
+            print("stop_holders: holder pid %d is still alive %.0f s after its signal" % (pid, HOLDER_WAIT),
+                  file=sys.stderr, flush=True)
+
+
+def _on_term(signum, frame):
+    """SIGTERM stops the holders, then the run exits with the conventional code for the signal (128 + its number)."""
+    stop_holders()
+    sys.exit(128 + signum)
+
+
+atexit.register(stop_holders)  # every exit that runs the interpreter's exit code
+signal.signal(signal.SIGTERM, _on_term)
 load_sections(os.environ.get("GUARD_SECTION_DIR") or SECTION_DIR)
 # A log check appended to LOG_CHECKS_EXTRA after its join is in no run. Refuse that, rather than drop it.
 UNJOINED = [label for label, check in LOG_CHECKS_EXTRA if (label, check) not in LOG_CHECKS]
@@ -1077,13 +1197,6 @@ def run_cases():
         say("%s  %-6s(want %-6s)  [%-11s] %s  (%s)" % (
             "PASS" if ok else "FAIL", "logged" if ok else "wrong", "logged", "Bash", label, note))
     say("")
-    shutil.rmtree(ROOT, ignore_errors=True)
-    OWNED.kill()
-    for orphan in ORPHAN_PIDS:   # the sleeps this file started, by their own pids
-        try:
-            os.kill(orphan, signal.SIGTERM)
-        except OSError:
-            pass
     if (mode or fam or only or GUARD_SHARD != (1, 1)) and not ran:
         say("test_guard FAIL: ran 0 cases (GUARD_TESTS=%s, GUARD_FAMILY=%s, MUTATE_ONLY=%s, "
             "GUARD_SHARD=%d/%d matched none, or matched only skips: %d skipped)" % (
@@ -1099,7 +1212,11 @@ def run_cases():
 
 def main():
     _mark("case registration (module code after the fixtures)")
-    rc = run_cases()
+    try:
+        rc = run_cases()
+    finally:
+        stop_holders()  # atexit runs it again, which does nothing
+        shutil.rmtree(ROOT, ignore_errors=True)
     _timing_report()
     return rc
 
