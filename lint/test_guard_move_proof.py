@@ -377,8 +377,8 @@ class ImportTime(Proof):
 
 
 class BadRef(unittest.TestCase):
-    def run_cli(self, *refs):
-        root = make_repo(tree(guard="X = 1\n"), tree(guard="X = 1\n"))
+    def run_cli(self, *refs, base=None, head=None):
+        root = make_repo(base or tree(guard="X = 1\n"), head or tree(guard="X = 1\n"))
         return subprocess.run([sys.executable, SCRIPT] + list(refs) + ["--root", root],
                               capture_output=True, text=True)
 
@@ -391,6 +391,16 @@ class BadRef(unittest.TestCase):
         done = self.run_cli("HEAD~1", "no-such-ref-for-guard-move")
         self.assertEqual(done.returncode, 2, done.stdout + done.stderr)
         self.assertTrue(done.stdout.startswith("unknown: "), done.stdout)
+
+    def test_a_head_file_symtable_refuses_exits_two_with_unknown_and_no_traceback(self):
+        """guard_x.py at head has `nonlocal q` at module level: ast.parse accepts it, symtable refuses it. The moved
+        unit `a` makes the proof read guard_x.py's names, so the refusal must end as `unknown:`, never a traceback.
+        The case runs the CLI in a subprocess: an in-process SyntaxError would error the case, not fail it."""
+        done = self.run_cli("HEAD~1", "HEAD", base=tree(guard="def a():\n    return 1\n"),
+                            head=tree(guard='"""Guard module."""\n', guard_x="nonlocal q\n\ndef a():\n    return 1\n"))
+        self.assertEqual(done.returncode, 2, done.stdout + done.stderr)
+        self.assertTrue(done.stdout.startswith("unknown: "), done.stdout)
+        self.assertNotIn("Traceback", done.stderr)
 
 
 class Scale(Proof):
@@ -422,6 +432,120 @@ class DroppedCopy(Proof):
         self.assertFail(tree(guard="def a():\n    return 1\n\ndef a():\n    return 1\n"),
                         tree(guard="def a():\n    return 1\n"), "--changed", "a",
                         lines=["lost: def a"])
+
+
+class ModuleOrder(Proof):
+    """A module-scope statement reads a name at import time, so the name's def or assignment must come first."""
+
+    def test_a_module_statement_reading_a_def_above_it_fails(self):
+        self.assertFail(tree(guard="def build():\n    return {}\n\nTABLE = build()\n"),
+                        tree(guard="TABLE = build()\n\ndef build():\n    return {}\n"),
+                        lines=["build", "guard.py"])
+
+    def test_a_module_statement_reading_an_assignment_above_it_fails(self):
+        self.assertFail(tree(guard="LIMIT = 5\nTABLE = LIMIT + 1\n"),
+                        tree(guard="TABLE = LIMIT + 1\nLIMIT = 5\n"),
+                        lines=["LIMIT", "guard.py"])
+
+    def test_the_same_read_below_the_def_passes(self):
+        text = tree(guard="def build():\n    return {}\n\nTABLE = build()\n")
+        self.assertPass(text, text, lines=["0 moved module"])
+
+    def test_a_def_body_reading_a_def_below_it_is_not_order_checked(self):
+        self.assertPass(tree(guard="def build():\n    return {}\n\ndef show():\n    return build()\n"),
+                        tree(guard="def show():\n    return build()\n\ndef build():\n    return {}\n"),
+                        lines=["0 moved module"])
+
+
+class GlobalDeclaration(Proof):
+    def test_a_moved_unit_that_declares_global_and_assigns_it_fails(self):
+        """bump moves to guard_x.py. Its `global STATE` makes the assignment rebind guard_x's STATE, not guard's."""
+        self.assertFail(tree(guard="STATE = 0\n\ndef bump():\n    global STATE\n    STATE = 1\n"),
+                        tree(guard="STATE = 0\n",
+                             guard_x="from guard import STATE\n\ndef bump():\n    global STATE\n    STATE = 1\n"),
+                        lines=["bump", "STATE"])
+
+    def test_a_moved_unit_without_global_passes(self):
+        self.assertPass(tree(guard="STATE = 0\n\ndef peek():\n    return STATE\n"),
+                        tree(guard="STATE = 0\n", guard_x="from guard import STATE\n\ndef peek():\n    return STATE\n"),
+                        lines=["1 moved module"])
+
+
+class ImportedName(Proof):
+    def test_an_import_of_a_name_the_source_module_lacks_fails(self):
+        self.assertFail(tree(guard="def gate():\n    return 1\n"),
+                        tree(guard="from guard_core import gate\n", guard_core='"""Guard module."""\n',
+                             guard_x="def gate():\n    return 1\n"),
+                        lines=["gate", "guard_core"])
+
+    def test_an_import_from_the_module_that_holds_the_name_passes(self):
+        self.assertPass(tree(guard="def gate():\n    return 1\n"),
+                        tree(guard="from guard_x import gate\n", guard_x="def gate():\n    return 1\n"),
+                        lines=["1 moved module"])
+
+
+class FamilyTuple(Proof):
+    """_FAMILY_MODULES is a tuple of guard module names. An edit under --changed may add a new guard module only."""
+    BASE = tree(guard='_FAMILY_MODULES = ("guard_core", "guard_x")\n\ndef a():\n    return 1\n',
+                guard_core="X = 1\n", guard_x="Y = 2\n")
+
+    def test_dropping_a_family_entry_fails_even_with_changed(self):
+        head = {**self.BASE, **tree(guard='_FAMILY_MODULES = ("guard_core",)\n\ndef a():\n    return 1\n')}
+        self.assertFail(self.BASE, head, "--changed", "_FAMILY_MODULES", lines=["_FAMILY_MODULES"])
+
+    def test_reordering_family_entries_fails_even_with_changed(self):
+        head = {**self.BASE, **tree(guard='_FAMILY_MODULES = ("guard_x", "guard_core")\n\ndef a():\n    return 1\n')}
+        self.assertFail(self.BASE, head, "--changed", "_FAMILY_MODULES", lines=["_FAMILY_MODULES"])
+
+    def test_adding_a_new_guard_module_to_the_family_tuple_passes(self):
+        head = {**self.BASE, **tree(guard='_FAMILY_MODULES = ("guard_core", "guard_x", "guard_y")\n\n'
+                                          'def a():\n    return 1\n',
+                                    guard_y='"""Guard module."""\n')}
+        self.assertPass(self.BASE, head, "--changed", "_FAMILY_MODULES")
+
+
+class NewGuardModule(Proof):
+    BASE = tree(guard='_FAMILY_MODULES = ("guard_core",)\n\ndef a():\n    return 1\n', guard_core="X = 1\n")
+
+    def test_a_new_guard_module_missing_from_the_family_tuple_fails(self):
+        self.assertFail(self.BASE, {**self.BASE, **tree(guard_y='"""Guard module."""\n')}, lines=["guard_y"])
+
+    def test_a_new_file_outside_the_guard_family_passes(self):
+        self.assertPass(self.BASE, {**self.BASE, "hooks/helper.py": "X = 2\n"})
+
+
+class MovedBlock(Proof):
+    """A try or if block binds a name at base. When the block moves out, a unit left in its module that reads the
+    name needs an import. The block has no name of its own, so its module is not otherwise checked."""
+    TRY = "try:\n    Z = 1\nexcept ImportError:\n    Z = 2\n"
+    IF = "if True:\n    Z = 1\n"
+
+    def test_a_try_block_moved_out_with_a_unit_left_reading_its_name_fails(self):
+        self.assertFail(tree(guard=self.TRY + "\ndef a():\n    return Z\n"),
+                        tree(guard="def a():\n    return Z\n", guard_core=self.TRY),
+                        lines=["unresolved name `Z` in def a", "guard.py"])
+
+    def test_an_if_block_moved_out_with_a_unit_left_reading_its_name_fails(self):
+        self.assertFail(tree(guard=self.IF + "\ndef a():\n    return Z\n"),
+                        tree(guard="def a():\n    return Z\n", guard_core=self.IF),
+                        lines=["unresolved name `Z` in def a", "guard.py"])
+
+    def test_the_unit_left_behind_importing_the_moved_name_passes(self):
+        self.assertPass(tree(guard=self.TRY + "\ndef a():\n    return Z\n"),
+                        tree(guard="from guard_core import Z\n\ndef a():\n    return Z\n", guard_core=self.TRY),
+                        lines=["1 moved module"])
+
+
+class NewUnitFreeNames(Proof):
+    def test_a_new_unit_reading_an_unresolved_global_fails(self):
+        self.assertFail(tree(guard="def b():\n    return 2\n"),
+                        tree(guard="def b():\n    return 2\n\ndef c():\n    return MISSING_TABLE\n"),
+                        "--new", "c", lines=["unresolved name `MISSING_TABLE` in def c"])
+
+    def test_a_new_unit_reading_a_name_defined_here_and_a_builtin_passes(self):
+        self.assertPass(tree(guard="TABLE = 1\n\ndef b():\n    return 2\n"),
+                        tree(guard="TABLE = 1\n\ndef b():\n    return 2\n\ndef c():\n    return len(TABLE)\n"),
+                        "--new", "c", lines=["new (allowed by --new): def c at guard.py"])
 
 
 if __name__ == "__main__":
