@@ -910,6 +910,14 @@ jobs:
         if: ${{ !cancelled() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_guard_merge_imports.py
 
+      - name: Case timing helper suite
+        if: ${{ !cancelled() && needs.scope.outputs.records_only_skip != 'true' }}
+        run: python3 lint/test_case_times.py
+
+      - name: Case timing report suite
+        if: ${{ !cancelled() && needs.scope.outputs.records_only_skip != 'true' }}
+        run: python3 lint/test_case_times_report.py
+
       # Last step, so a red test here skips none of the steps above, and a red step above does not hide
       # a mod test (!cancelled() runs it anyway). The script is the one home of the mod tests and the
       # plain-english-map skill tests. The same step ends checks-windows and checks-macos. The `mods` flag

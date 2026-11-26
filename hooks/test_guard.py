@@ -85,6 +85,8 @@ import precompact_handoff as ph  # noqa: E402,F401  the one home of the handoff 
 import local_time  # noqa: E402,F401  the one home of the inbox paths
 import mutate_shared  # noqa: E402,F401  module_files: every module a copied guard may import
 import _guard_sections  # noqa: E402  the one home of the section folder, header read and faults
+sys.path.insert(0, os.path.join(HERE, "..", "testing", "case_times"))
+import case_times  # noqa: E402  the one home of per-case times (testing/case_times/, decision per-case-times)
 
 # Assembled, so this file never holds the token whole.
 ENV = "." + "env"
@@ -362,6 +364,7 @@ def skip_case(label, reason):
 # import, and each lazy block the first time a case needs it. Unset, a run prints nothing extra.
 GUARD_TIMING = os.environ.get("GUARD_TIMING") == "1"
 TIMINGS = []
+_FIXTURE_S = [0.0]  # the net seconds of every _timed block, kept whether or not GUARD_TIMING is set: run_cases nets them out
 _TIMED_LAST = [time.perf_counter()]
 
 
@@ -386,6 +389,7 @@ def _timed(label, build):
     inner = _TIMED_INNER.pop()
     if _TIMED_INNER:
         _TIMED_INNER[-1] += took
+    _FIXTURE_S[0] += took - inner
     if GUARD_TIMING:
         TIMINGS.append((label, took - inner))
 
@@ -906,6 +910,16 @@ if _UNNAMED or _BAD_LOG:
 SKIP = "skip"
 
 
+GUARD_SUITE = "hooks/test_guard.py"  # the suite name every guard row carries; its group is the case's family
+
+
+def _record_case(name, family, took, fixture, ok):
+    """Hands one case or log check to the case-times home: its own seconds, its fixture seconds apart.
+    `ok` is True, False or SKIP (a skip is shown and counted, never a pass)."""
+    outcome = "skip" if ok == SKIP else "pass" if ok else "fail"
+    case_times.record(GUARD_SUITE, family, name, took - fixture, fixture, outcome)
+
+
 def printed_rule(reason):
     """The rule a printed reason leads with: the text before its first ": ", or "(none)" when it has no ": "."""
     head, sep, _ = reason.partition(": ")
@@ -1001,7 +1015,9 @@ def run_cases():
             continue
         ran += 1
         beat("case %d of %d, before it runs" % (ran, len(cases)))
+        fixture0, clock0 = _FIXTURE_S[0], time.perf_counter()
         got, reason = decide(case)
+        took = time.perf_counter() - clock0
         beat("case %d of %d, after it ran" % (ran, len(cases)))
         rule_exact_report(case, got, reason)
         ok = got == case["expected"]
@@ -1029,6 +1045,7 @@ def run_cases():
                 reason, case["rule"])
         elif not ok:
             note = "  (%s)" % reason[:110] if reason else ""
+        _record_case(case["name"], case["family"], took, _FIXTURE_S[0] - fixture0, ok)
         failed += 0 if ok else 1
         if not ok:
             note = fail_note(note, case)
@@ -1043,8 +1060,11 @@ def run_cases():
         if only and only not in label:
             continue
         beat("log check, before it runs")
+        fixture0, clock0 = _FIXTURE_S[0], time.perf_counter()
         ok, note = checker()
+        took = time.perf_counter() - clock0
         beat("log check, after it ran")
+        _record_case("log: " + label, _family(label), took, _FIXTURE_S[0] - fixture0, ok)
         if ok == SKIP:  # cannot run on this platform: shown and counted, never a PASS, never a failure
             skipped += 1
             say("SKIP  %s  (%s)" % (label, note))
