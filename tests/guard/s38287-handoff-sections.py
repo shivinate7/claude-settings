@@ -795,6 +795,119 @@ sh("handoff-sections: the audit brief run of the session handoff, python3 on the
    cwd=NOGIT, session=HS_SID, config=HS_CFG, silent=True)
 
 
+# ----------------------------------------------------------------- Bash sources a call writes, and the default-value path
+# A source that any segment of the same call writes is unknown: the guard reads it from disk before the call runs, so the
+# disk text is not the text that lands on the handoff. Such a call is refused under handoff-shell-write, with the Write tool
+# as the remedy. The controls are the same writes without the copy onto the handoff.
+HBW_PRINTED = os.path.join(HBW_DIR, "printed.md")     # a complete handoff on disk, which the call's printf overwrites
+HBW_STALE = os.path.join(HBW_DIR, "stale.md")         # a handoff that drops the tail on disk, which the call copies over
+HBW_MOVED = os.path.join(HBW_DIR, "moved-out.md")     # where a moved handoff goes; no case writes it
+
+
+def _build_hbw_sources():
+    write(HBW_PRINTED, hs_text())
+    write(HBW_STALE, hs_text(omit=HS_TAIL))
+
+
+lazy_fixture([HBW_PRINTED, HBW_STALE], _build_hbw_sources)
+
+
+def hbw_sources_scope():
+    """The source cases name their scratch files by what is on disk: a complete handoff under the printf case's name, and a
+    handoff that drops the tail under the stale copy's. Other text would move a verdict with no other check failing."""
+    for path, want in ((HBW_PRINTED, hs_text()), (HBW_STALE, hs_text(omit=HS_TAIL))):
+        materialize(path)
+        try:
+            with open(path, "r", encoding="utf-8") as handle:
+                text = handle.read()
+        except OSError as e:
+            return False, "%s is unreadable: %s" % (os.path.basename(path), e)
+        if text != want:
+            return False, "%s on disk is not the text the case names" % os.path.basename(path)
+    return True, "the printf case's scratch file is a complete handoff, and the stale copy's drops the tail"
+
+
+LOG_CHECKS_EXTRA.append(("handoff-sections: scope: the source cases' scratch files hold the text each case names",
+                         hbw_sources_scope))
+
+hbw_refuse("handoff-shell-write: a Bash printf that overwrites a scratch file, then a cp of that file onto the session handoff, "
+           "is refused, with the Write tool as the remedy",
+           "printf 'x' > %s && cp %s %s" % (HBW_PRINTED, HBW_PRINTED, HS_HANDOFF),
+           rule=HSW_RULE, carries=(HSW_REMEDY,), lacks=HSW_LACKS)
+hbw_refuse("handoff-shell-write: a Bash cp of a good file over a scratch file that holds a handoff dropping the tail, then a cp "
+           "of that scratch file onto the session handoff, is refused under handoff-shell-write, with the Write tool as the remedy",
+           "cp %s %s && cp %s %s" % (HBW_GOOD, HBW_STALE, HBW_STALE, HS_HANDOFF),
+           rule=HSW_RULE, carries=(HSW_REMEDY,), lacks=HSW_LACKS)
+hbw_allow("handoff-sections: a Bash printf over a scratch file that no handoff names passes, silently",
+          "printf 'x' > %s" % HBW_PRINTED)
+hbw_allow("handoff-sections: a Bash cp of a good file over a scratch file that holds a stale handoff, with no copy onto the "
+          "session handoff, passes, silently",
+          "cp %s %s" % (HBW_GOOD, HBW_STALE))
+
+# False alarms. Each call touches the session handoff without writing its text. The guard on main allows every one of them;
+# the head refuses the first five under handoff-shell-write, which the pins below hold to allow.
+hbw_allow("handoff-sections: a Bash rm of the session handoff passes, silently", "rm %s" % HS_HANDOFF)
+hbw_allow("handoff-sections: a Bash rm -f of the handoffs folder's .md files passes, silently", "rm -f %s/*.md" % HS_FOLDER)
+hbw_allow("handoff-sections: a Bash mv of the session handoff to another folder passes, silently",
+          "mv %s %s" % (HS_HANDOFF, HBW_MOVED))
+hbw_allow("handoff-sections: a Bash mv of the session handoff to a .bak name passes, silently",
+          "mv %s %s.bak" % (HS_HANDOFF, HS_HANDOFF))
+hbw_allow("handoff-sections: a Bash chmod 600 of the session handoff passes, silently", "chmod 600 %s" % HS_HANDOFF)
+hbw_allow("handoff-sections: an echo of a string that holds rm and the session handoff's path passes, silently",
+          "echo \"rm %s\"" % HS_HANDOFF)
+
+# The default-value path. ${CLAUDE_CONFIG_DIR:-$HOME/.claude} names the session handoff with the variable set (the config
+# folder is HS_CFG) and with it unset (HOME is the fixture home, whose .claude is HBD_CFG). Each call is judged like the
+# plain path. HBD_CFG holds an installed prompt, so a refusal there is the rule's, not a missing prompt's.
+HBD_HOME = os.path.join(ROOT, "hbd-home")             # the fixture home; its .claude is the config folder below
+HBD_CFG = os.path.join(HBD_HOME, ".claude")           # the installed prompt and a session handoff, as HS_CFG holds
+HBD_HANDOFF = hs_handoff(HBD_CFG)                     # the plain path to the session handoff under HBD_CFG
+HBD_ENV = {"CLAUDE_CONFIG_DIR": None, "HOME": HBD_HOME}   # the variable unset, and HOME at the fixture home
+HBD_DEFAULT = "\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/handoffs/%s.md\"" % HS_SID
+
+
+def _build_hbd():
+    hs_install(HBD_CFG, hs_prompt_text())
+    write(HBD_HANDOFF, HS_FULL)
+
+
+lazy_fixture([HBD_CFG], _build_hbd)
+
+hbw_refuse("handoff-sections: a Bash cp of a scratch file that drops the tail to the default-value path, with the variable "
+           "set, is refused, naming the three",
+           "cp %s %s" % (HBW_NOSEC, HBD_DEFAULT))
+hbw_refuse("handoff-sections: a Bash > redirect of a scratch file that drops the tail to the default-value path, with the "
+           "variable set, is refused, naming the three",
+           "cat %s > %s" % (HBW_NOSEC, HBD_DEFAULT))
+hbw_allow("handoff-sections: a Bash cp of a complete scratch file to the default-value path, with the variable set, passes, "
+          "silently",
+          "cp %s %s" % (HBW_GOOD, HBD_DEFAULT))
+hbw_allow("handoff-sections: a Bash > redirect of a complete scratch file to the default-value path, with the variable set, "
+          "passes, silently",
+          "cat %s > %s" % (HBW_GOOD, HBD_DEFAULT))
+sh("handoff-sections: a Bash cp of a scratch file that drops the tail to the default-value path, with the variable unset, "
+   "is refused, naming the three",
+   "cp %s %s" % (HBW_NOSEC, HBD_DEFAULT), "deny", HS_RULE, cwd=NOGIT, session=HS_SID, config=HBD_CFG, env=HBD_ENV,
+   carries=HS_TAIL, lacks=HBW_KEEP)
+sh("handoff-sections: a Bash > redirect of a scratch file that drops the tail to the default-value path, with the variable "
+   "unset, is refused, naming the three",
+   "cat %s > %s" % (HBW_NOSEC, HBD_DEFAULT), "deny", HS_RULE, cwd=NOGIT, session=HS_SID, config=HBD_CFG, env=HBD_ENV,
+   carries=HS_TAIL, lacks=HBW_KEEP)
+sh("handoff-sections: a Bash cp of a complete scratch file to the default-value path, with the variable unset, passes, "
+   "silently",
+   "cp %s %s" % (HBW_GOOD, HBD_DEFAULT), "allow", cwd=NOGIT, session=HS_SID, config=HBD_CFG, env=HBD_ENV, silent=True)
+sh("handoff-sections: a Bash > redirect of a complete scratch file to the default-value path, with the variable unset, "
+   "passes, silently",
+   "cat %s > %s" % (HBW_GOOD, HBD_DEFAULT), "allow", cwd=NOGIT, session=HS_SID, config=HBD_CFG, env=HBD_ENV, silent=True)
+sh("handoff-sections: a Bash cp of a scratch file that drops the tail to the plain path under the fixture home's config is "
+   "refused, naming the three",
+   "cp %s %s" % (HBW_NOSEC, HBD_HANDOFF), "deny", HS_RULE, cwd=NOGIT, session=HS_SID, config=HBD_CFG,
+   carries=HS_TAIL, lacks=HBW_KEEP)
+hbw_refuse("handoff-sections: a Bash cp of a scratch file that drops the tail to the braces form, ${CLAUDE_CONFIG_DIR}, is "
+           "refused, naming the three",
+           "cp %s \"${CLAUDE_CONFIG_DIR}/handoffs/%s.md\"" % (HBW_NOSEC, HS_SID))
+
+
 # =========================================================================== handoff-checked-stamp
 # A write to a session handoff that restamps a premise's `Checked` value needs evidence in the session's own transcript: a
 # tool_use, after the last compact_boundary record, whose input holds a token of that premise's Source. A restamp with no
