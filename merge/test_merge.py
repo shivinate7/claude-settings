@@ -2530,6 +2530,7 @@ class Guards(Env):
 
 SCOPE_SCRIPT = os.path.join(HERE, "..", ".github", "scripts", "ci-scope.sh")  # the real script: the one home of which jobs read which paths
 GUARD_INPUTS = os.path.join(HERE, "..", ".github", "guard-inputs.txt")  # the real list ci-scope.sh reads for windows_guard; an empty or missing list turns it on
+GUARD_SET = os.path.join(HERE, "..", "hooks", "guard-set.txt")  # the real list ci-scope.sh's guard arm reads; an empty or missing list turns every flag on
 def scope_line(name):
     """The words of ci-scope.sh's `NAME="..."` line (JOBS, LINTS, ALL). A fixture that fakes the script's flags takes its names here, so it cannot drift from the script."""
     with open(SCOPE_SCRIPT, encoding="utf-8") as f:
@@ -2578,6 +2579,9 @@ class ScopedRepo:
                 put_lf(os.path.join(o, ".github/guard-inputs.txt"), f.read())
         put(os.path.join(o, ".github/workflows", name), workflow)
         put(os.path.join(o, "landed-dirs.txt"), "hooks\n")
+        if os.path.isfile(GUARD_SET):  # the list ci-scope.sh's guard arm reads; without it every flag is on
+            with open(GUARD_SET, encoding="utf-8") as f:
+                put_lf(os.path.join(o, "hooks/guard-set.txt"), f.read())
         put(os.path.join(o, "lint/check_slugs.py"), SLUG_LINT)
         put(os.path.join(o, "hooks/test_reads_guide.py"), DOC_SUITE)
         put(os.path.join(o, "hooks/x.py"), "X = 1\n")
@@ -29935,12 +29939,32 @@ class StaleMergeTrees(unittest.TestCase):
         processes = unittest.mock.patch.object(sweep, "processes_in", return_value=([], []))
         self.fake_processes_in = processes.start()
         self.addCleanup(processes.stop)
+        self.dropped_by_case = set()  # the folders a case dropped or removed itself: make_tree's cleanup drops those a second time
 
     def read_real_processes(self):
         """Put the real process reader back for this case."""
         restore = unittest.mock.patch.object(sweep, "processes_in", self.real_processes_in)
         restore.start()
         self.addCleanup(restore.stop)
+
+    def read_own_processes(self, own):
+        """Put the real process reader back, reporting only the pids in OWN. The runner's other pids are no part of the case: an
+        unreadable one under an ended ancestor would keep a tree for a reason the case does not test. -> the list of what the real
+        reader answered, one entry per read, so a case can see that it read a process table."""
+        reads = []
+        real = self.real_processes_in
+
+        def scoped(path):
+            inside, unreadable = real(path)
+            reads.append(inside)
+            if inside is None:  # the enumeration failed: pass that through, so the case sees it
+                return inside, unreadable
+            return [p for p in inside if p in own], [p for p in unreadable if p in own]
+
+        patch = unittest.mock.patch.object(sweep, "processes_in", side_effect=scoped)
+        patch.start()
+        self.addCleanup(patch.stop)
+        return reads
 
     def make_tree(self, name, reason, root=None, prefix="merge-wt-"):
         """A <prefix><name> folder with a locked worktree in it, as the merge tool makes one (prefix merge-wt- or merge-fresh-),
@@ -29949,7 +29973,7 @@ class StaleMergeTrees(unittest.TestCase):
         wt = os.path.join(tmp, "tree")
         os.makedirs(tmp)
         sh(self.repo, "git", "worktree", "add", "-q", "--detach", "--lock", "--reason", reason, wt, self.head)
-        self.addCleanup(merge.drop_worktree, self.repo, tmp, wt)
+        self.addCleanup(self.drop_at_exit, tmp, wt)
         return tmp, wt
 
     def locked_trees(self):
@@ -29985,6 +30009,20 @@ class StaleMergeTrees(unittest.TestCase):
         self.assertTrue(os.path.isdir(live_tmp), "a merge-wt tree whose merge pid is alive must stay")
         self.assertIn(os.path.realpath(live_wt), self.locked_trees(), "the live tree must stay registered")
         self.assertTrue(os.path.isdir(tmp), "add_worktree must return the tree it made")
+
+    @unittest.skipUnless(os.name == "nt", "the real process reader and pid_alive's kernel32 branch are Windows's: this case runs in the Windows CI job")
+    def test_a_real_exited_merge_pid_on_windows_has_its_tree_removed(self):
+        """No fake reader: a real child that ran and exited, named by a tree's lock reason, must not keep the tree on Windows. The hold
+        check reads the runner's live processes here, scoped to this case's own pid, so an unrelated unreadable pid on the runner
+        cannot keep the tree."""
+        dead = reaped_child_pid()
+        reads = self.read_own_processes({dead})
+        stale_tmp, stale_wt = self.make_tree("stale", "merge tool, pid %d" % dead)
+        tmp, wt = merge.add_worktree(self.repo, self.head)
+        self.addCleanup(merge.drop_worktree, self.repo, tmp, wt)
+        self.assertTrue(reads and reads[0] is not None, "scope: the hold check must read the real process table, or the case proves nothing about the reader")
+        self.assertFalse(os.path.exists(stale_tmp),
+                         "a merge-wt tree whose merge pid %d is a real exited process must be removed on Windows" % dead)
 
     def test_a_locked_tree_whose_reason_names_no_merge_pid_stays(self):
         dead = reaped_child_pid()
@@ -30136,6 +30174,131 @@ class StaleMergeTrees(unittest.TestCase):
                 self.assertFalse(os.path.exists(control[kind]), "control: a dead %s folder with no process in it must be removed" % kind)
             with self.subTest(kind=kind, part="held"):
                 self.assertTrue(os.path.isdir(held[kind]), "a %s folder whose pid %d is dead must stay while a live child runs in it" % (kind, dead))
+
+    # A read-only folder stops a removal on POSIX only, and root removes it anyway: the cases that need one run as a POSIX user.
+    BLOCKABLE = os.name != "nt" and not (hasattr(os, "geteuid") and os.geteuid() == 0)
+    BLOCKABLE_WHY = "a read-only folder stops a removal on POSIX only, and root removes it anyway"
+
+    def blocked_tree(self, name, where="tree"):
+        """A locked merge-wt tree from make_tree, with a read-only folder that git cannot empty: `stuck` in the worktree (where "tree") or in
+        the merge-wt folder beside it (where "folder"). -> (tmp, wt, stuck)."""
+        tmp, wt = self.make_tree(name, "merge tool, pid %d" % os.getpid())
+        stuck = os.path.join(wt if where == "tree" else tmp, "stuck")
+        os.makedirs(stuck)
+        with open(os.path.join(stuck, "held.txt"), "w", encoding="utf-8") as handle:
+            handle.write("held\n")
+        os.chmod(stuck, 0o500)
+        self.addCleanup(os.chmod, stuck, 0o700)  # registered after make_tree's cleanup, so it runs first: the drop can empty the folder
+        return tmp, wt, stuck
+
+    def drop_printed(self, tmp, wt):
+        """drop_worktree of one tree, with what it prints on either stream. -> (its return value, the non-blank lines it printed)."""
+        self.dropped_by_case.add(tmp)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(out):
+            ret = merge.drop_worktree(self.repo, tmp, wt)
+        return ret, [line for line in out.getvalue().splitlines() if line.strip()]
+
+    def drop_at_exit(self, tmp, wt):
+        """make_tree's cleanup. A folder the case already dropped or removed gets a second drop here, and that drop's output is no claim
+        of the case, so it stays off the run's output. Any other folder's drop prints as usual."""
+        if tmp not in self.dropped_by_case:
+            merge.drop_worktree(self.repo, tmp, wt)
+            return
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            merge.drop_worktree(self.repo, tmp, wt)
+
+    def refused_removal(self, name):
+        """A blocked tree, and a twin in the same state. The twin's removal runs through git alone, so the expected exit code and first
+        stderr line come from git, with the twin's tree path swapped for the blocked tree's. -> (tmp, wt, the twin's exit code, that line)."""
+        tmp, wt, _ = self.blocked_tree(name)
+        twin_tmp, twin_wt, _ = self.blocked_tree(name + "-twin")
+        merge.git(self.repo, "worktree", "unlock", twin_wt)
+        code, out = merge.git(self.repo, "worktree", "remove", "--force", twin_wt)
+        self.dropped_by_case.add(twin_tmp)  # the case ran the twin's removal itself, so the twin's cleanup is a second drop
+        first = out.splitlines()[0] if out.strip() else ""
+        return tmp, wt, code, first.replace(twin_wt, wt)
+
+    @unittest.skipUnless(BLOCKABLE, BLOCKABLE_WHY)
+    def test_a_refused_worktree_removal_prints_one_line(self):
+        """`git worktree remove` exits non-zero on a tree it cannot empty: drop_worktree prints one line for that tree, and no more."""
+        tmp, wt, stuck = self.blocked_tree("refused")
+        self.assertFalse(os.access(stuck, os.W_OK), "scope: the blocked folder must be read-only, or the removal is not refused")
+        _, printed = self.drop_printed(tmp, wt)
+        self.assertEqual(len(printed), 1, "a removal git refuses prints one line for the tree; printed %r" % (printed,))
+
+    @unittest.skipUnless(BLOCKABLE, BLOCKABLE_WHY)
+    def test_the_line_for_a_refused_removal_names_the_tree(self):
+        tmp, wt, stuck = self.blocked_tree("refused")
+        self.assertFalse(os.access(stuck, os.W_OK), "scope: the blocked folder must be read-only, or the removal is not refused")
+        _, printed = self.drop_printed(tmp, wt)
+        self.assertTrue(any(os.path.basename(tmp) in line for line in printed),
+                        "the line for a refused removal names the merge-wt folder %s; printed %r" % (os.path.basename(tmp), printed))
+
+    @unittest.skipUnless(BLOCKABLE, BLOCKABLE_WHY)
+    def test_the_line_for_a_refused_removal_carries_the_exit_code(self):
+        tmp, wt, code, first = self.refused_removal("refused")
+        self.assertNotEqual(code, 0, "scope: the twin's removal must be refused by git, or the case proves nothing")
+        _, printed = self.drop_printed(tmp, wt)
+        # the path and git's own text hold digits: strip them, so only the tool's exit code can match
+        rest = [line.replace(first, "").replace(wt, "").replace(tmp, "") for line in printed]
+        self.assertTrue(any(re.search(r"\b%d\b" % code, line) for line in rest),
+                        "the line for a refused removal carries git's exit code %d; printed %r" % (code, printed))
+
+    @unittest.skipUnless(BLOCKABLE, BLOCKABLE_WHY)
+    def test_the_line_for_a_refused_removal_carries_the_first_stderr_line(self):
+        tmp, wt, code, first = self.refused_removal("refused")
+        self.assertNotEqual(code, 0, "scope: the twin's removal must be refused by git, or the case proves nothing")
+        self.assertTrue(first, "scope: git must print a stderr line for the refused twin, or the case proves nothing")
+        _, printed = self.drop_printed(tmp, wt)
+        self.assertTrue(any(first in line for line in printed),
+                        "the line for a refused removal carries git's first stderr line %r; printed %r" % (first, printed))
+
+    @unittest.skipUnless(BLOCKABLE, BLOCKABLE_WHY)
+    def test_a_refused_worktree_removal_returns_false(self):
+        tmp, wt, stuck = self.blocked_tree("refused")
+        self.assertFalse(os.access(stuck, os.W_OK), "scope: the blocked folder must be read-only, or the removal is not refused")
+        ret, _ = self.drop_printed(tmp, wt)
+        self.assertIs(ret, False, "drop_worktree returns False for a tree it did not remove, so the caller reads it as kept; returned %r" % (ret,))
+
+    @unittest.skipUnless(BLOCKABLE, BLOCKABLE_WHY)
+    def test_a_folder_left_after_a_removal_prints_one_line(self):
+        """The tree is removed, but the merge-wt folder beside it cannot be emptied: the folder stays, and drop_worktree says so once."""
+        tmp, wt, stuck = self.blocked_tree("left", where="folder")
+        self.assertFalse(os.access(stuck, os.W_OK), "scope: the folder beside the tree must be read-only, or the folder does not stay")
+        _, printed = self.drop_printed(tmp, wt)
+        self.assertEqual(len(printed), 1, "a merge-wt folder that stays after the removal prints one line for the tree; printed %r" % (printed,))
+
+    @unittest.skipUnless(BLOCKABLE, BLOCKABLE_WHY)
+    def test_a_folder_left_after_a_removal_returns_false(self):
+        tmp, wt, stuck = self.blocked_tree("left", where="folder")
+        self.assertFalse(os.access(stuck, os.W_OK), "scope: the folder beside the tree must be read-only, or the folder does not stay")
+        ret, _ = self.drop_printed(tmp, wt)
+        self.assertIs(ret, False, "drop_worktree returns False when the merge-wt folder stays, so the caller reads the tree as kept; returned %r" % (ret,))
+
+    def test_a_removal_that_succeeds_prints_no_line(self):
+        """Control: a tree git removes and the folder empties, so there is nothing to report."""
+        tmp, wt = self.make_tree("clean", "merge tool, pid %d" % os.getpid())
+        self.assertTrue(os.path.isdir(tmp), "scope: the tree must exist before the drop, or the case proves nothing")
+        _, printed = self.drop_printed(tmp, wt)
+        self.assertEqual(printed, [], "a removal that succeeds prints no line; printed %r" % (printed,))
+
+    def test_a_removal_that_succeeds_returns_true(self):
+        tmp, wt = self.make_tree("clean", "merge tool, pid %d" % os.getpid())
+        self.assertTrue(os.path.isdir(tmp), "scope: the tree must exist before the drop, or the case proves nothing")
+        ret, _ = self.drop_printed(tmp, wt)
+        self.assertIs(ret, True, "drop_worktree returns True for a tree it removed; returned %r" % (ret,))
+
+    def test_dropping_a_tree_that_is_already_gone_prints_no_line_and_returns_true(self):
+        """A tree the first drop removed is gone. git refuses a removal of a gone tree, and that is no failure: the second drop prints
+        nothing and returns True."""
+        tmp, wt = self.make_tree("twice", "merge tool, pid %d" % os.getpid())
+        first_ret, _ = self.drop_printed(tmp, wt)
+        self.assertIs(first_ret, True, "scope: the first drop of a clean tree must return True, or the second drop proves nothing; returned %r" % (first_ret,))
+        self.assertFalse(os.path.exists(tmp), "scope: the first drop must remove the folder, or the second drop is not a drop of a gone tree")
+        ret, printed = self.drop_printed(tmp, wt)
+        self.assertEqual(printed, [], "a drop of a tree that is already gone prints no line; printed %r" % (printed,))
+        self.assertIs(ret, True, "a drop of a tree that is already gone returns True; returned %r" % (ret,))
 
 
 class ProducerFolderNames(unittest.TestCase):
