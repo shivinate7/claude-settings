@@ -1548,9 +1548,10 @@ def record_push_cost_case():
         ("a push with no remote-tracking ref and no upstream", "push origin HEAD:lane/bar",
          {"rev-parse": 2, "symbolic-ref": 1, "diff": 3, "rev-list": 1, "log": 1}),
         # A stray push: HEAD on a branch tracking another name. It is allowed, so push_ask_hit reads no upstream. The
-        # conflict check finds no tracking ref for the destination and reads the upstream: two diff reads.
+        # conflict check finds no tracking ref for the destination and reads the upstream: two diff reads. The red-run
+        # base is that upstream, so one rev-parse reads its full name to see whether it sits on another remote.
         ("a stray push, HEAD on a branch tracking another name", "push origin HEAD",
-         {"rev-parse": 1, "symbolic-ref": 2, "diff": 2, "rev-list": 1, "log": 1}, PUSHSTRAY),
+         {"rev-parse": 2, "symbolic-ref": 2, "diff": 2, "rev-list": 1, "log": 1}, PUSHSTRAY),
         # rule push-all-main. push_ask_hit alone reads, for a --all push to a network remote, the remote's config, the
         # current branch (the agent test), one for-each-ref of the tracking refs, and one for-each-ref of the local
         # branches when the tracking refs show no update. A glob reads the config and the same two for-each-ref reads.

@@ -38,16 +38,18 @@ _FETCH_QUIET_FLAGS = ("--no-tags", "--no-write-fetch-head", "--no-auto-maintenan
 _GIT_USAGE_EXIT = 129
 
 
-def fetch_remote(where: str, remote: str, timeout: int = 10) -> bool:
+def fetch_remote(where: str, remote: str, timeout: int = 10, prune: bool = False) -> bool:
     """True when `git fetch --quiet <remote>` ran in `where` and succeeded: the remote's tracking refs now match the
     remote. The fetch writes tracking refs only (no tags, no FETCH_HEAD, no gc). A git older than 2.29 refuses those
     flags with a usage error, and the fetch then runs once more without them. A prompt is switched off, so a remote that
-    wants a login fails at once, not at the timeout. A refused, failed or timed-out fetch is False."""
+    wants a login fails at once, not at the timeout. `prune` also deletes the tracking refs of branches the remote no
+    longer has (`--prune`), for a caller that must not trust a ref the remote dropped. A refused, failed or timed-out
+    fetch is False."""
     env = dict(os.environ, GIT_TERMINAL_PROMPT="0")
     for flags in (_FETCH_QUIET_FLAGS, ()):
         try:
             done = _nowindow.run(
-                ["git", "-C", where, "fetch", "--quiet", *flags, remote], capture_output=True, encoding="utf-8",
+                ["git", "-C", where, "fetch", "--quiet", *(("--prune",) if prune else ()), *flags, remote], capture_output=True, encoding="utf-8",
                 errors="replace", timeout=timeout, env=env,
             )
         except Exception:
