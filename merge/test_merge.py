@@ -231,6 +231,9 @@ class FakeHost:
         rows = [state for row_name, state, head in self.named_checks if row_name == name and head == sha]
         return rows[-1] if rows else None
 
+    def batch_member_runs(self, members, heads):  # the fake of Host.batch_member_runs -> (kept, left): no head reads a failed run here, so every member stays; the real split is pinned by BatchMemberOwnRunGreen
+        return list(members), []
+
     def holds_head(self, head, other):  # no base holds a head this fake reads: a record's head is a past head only where a case says so
         return False
 
