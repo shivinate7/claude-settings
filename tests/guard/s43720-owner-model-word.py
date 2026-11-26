@@ -266,7 +266,7 @@ add("owner-model-word: control, an Agent spawn on opus is refused when the owner
 
 # ---- THE HOLD FILE (the lane decision). A judged yes for a named model writes the hold to the Opus pass file,
 # state/override/opus/<session>.json: `model`, and `end` "report" for a plain ask with no length. It ends at the session's next
-# report (an assistant record after `at` that passes report_shape_ok) or at `until`, whichever comes first. A keyword hold
+# report (an assistant record after `at` that passes report_shape_ok) or at `until`, whichever comes first. A model-less file
 # keeps its `until` and has no `end`. These helpers write the file as the judge's yes does. Times are seconds after OV_T0.
 OMW_NOW_ENV = {"LOCAL_TIME_NOW": ov_clock(60)}  # the guard's clock, a minute after the hold was set
 OMW_REPORT = "> **Done** BUILT abc123\n> **Next** ship it"
@@ -280,8 +280,8 @@ def omw_at(record, when):
 
 def omw_hold(name, session, model, end="report", at=0, until=2 * 3600, role=None):
     """A config folder with the role table pointer (role_config) and the session's hold file for `model`. Returns the
-    folder, for a case's `config`. The file is built when a case names the folder. A `model` of None writes the keyword
-    form (`opus 2h`, `opus builders 2h`): the keys a keyword grant writes, with no `model`, `at` or `end`."""
+    folder, for a case's `config`. The file is built when a case names the folder. A `model` of None writes a model-less file
+    shape (`opus 2h`, `opus builders 2h`) a keyword-era grant wrote, with no `model`, `at` or `end`."""
     config = role_config("omw-" + name, REPO)
     body = {"kind": "opus", "until": ov_clock(until), "role": role}
     if model is not None:
@@ -322,17 +322,15 @@ omw_lets_through("a record-writer spawn on sonnet is allowed while the owner's s
 add("owner-model-word: control, a record-writer spawn on sonnet is refused under agent-role-model when no hold is on", "deny",
     ROLE_MODEL_RULE, tool="Agent", config=ROLE_REAL_CFG, transcript=OMW_PLAIN, carries=(ROLE_REMEDY,),
     lacks=ROLE_LACKS, **role_input("record-writer", "sonnet", "Write the record."))
+# One rule for Opus and Fable: a Fable spawn lifted by its hold goes through take(), under the Opus ceiling's rule.
 omw_lets_through("a builder spawn on fable is allowed while the owner's fable hold is on",
                  role_input("builder", "fable", "Fix the failing case."), omw_hold("fable-held", "omw-fable-held", "fable"),
-                 "omw-fable-held", 60, ROLE_MODEL_RULE)
-add("owner-model-word: control, a builder spawn on fable is refused under agent-role-model when no hold is on", "deny",
-    ROLE_MODEL_RULE, tool="Agent", config=ROLE_REAL_CFG, transcript=OMW_PLAIN, carries=(ROLE_REMEDY,),
-    lacks=ROLE_LACKS, **role_input("builder", "fable", "Fix the failing case."))
+                 "omw-fable-held", 60, CEILING)
 # One rule for Opus and Fable: a Fable spawn with no hold is refused by the Opus ceiling, not by the role row (rule 9d).
 add("one rule: a builder spawn on fable with no hold is refused under agent-model-cap, not agent-role-model", "deny",
     CEILING, tool="Agent", config=ROLE_REAL_CFG, transcript=OMW_PLAIN, **role_input("builder", "fable", "Fix the failing case."))
 
-# ---- A keyword Opus override (`opus 2h`, or `opus builders 2h` for one role) writes no model, and the guard reads its file as an
+# ---- A model-less Opus file (a keyword-era file, `opus 2h` or `opus builders 2h`) writes no model, and the guard reads its file as an
 # Opus hold. It lifts the Opus ceiling only, as on main, so it must not lift the role row of a spawn on sonnet. `opus 2h` names
 # no role: each spawn below is refused as on main. `opus builders 2h` names one role, so the same spawns stay refused under it
 # on the old code too; those are controls. The Haiku Explore and the Opus builder are controls under `opus 2h`.
@@ -343,20 +341,20 @@ OMW_KW_SPAWNS = (
     ("a round-1 reviewer on sonnet", "reviewer", "sonnet", "Review the diff."),
 )
 for _label, _role, _model, _prompt in OMW_KW_SPAWNS:
-    add("owner-model-word: a keyword Opus override (opus 2h) refuses %s under agent-role-model, as on main" % _label, "deny",
+    add("owner-model-word: a model-less Opus file (a keyword-era file) refuses %s under agent-role-model, as on main" % _label, "deny",
         ROLE_MODEL_RULE, tool="Agent", config=omw_hold("kw-any-" + _role, "omw-kw-any-" + _role, None, end=None),
         session="omw-kw-any-" + _role, transcript=OMW_PLAIN, env=OMW_NOW_ENV, carries=(ROLE_REMEDY,), lacks=ROLE_LACKS,
         **role_input(_role, _model, _prompt))
 for _label, _role, _model, _prompt in OMW_KW_SPAWNS:
-    add("owner-model-word: control, a keyword Opus override for builders (opus builders 2h) still refuses %s under agent-role-model"
+    add("owner-model-word: control, a model-less Opus file for builders (a keyword-era file) still refuses %s under agent-role-model"
         % _label, "deny", ROLE_MODEL_RULE, tool="Agent",
         config=omw_hold("kw-builders-" + _role, "omw-kw-builders-" + _role, None, end=None, role="builder"),
         session="omw-kw-builders-" + _role, transcript=OMW_PLAIN, env=OMW_NOW_ENV, carries=(ROLE_REMEDY,), lacks=ROLE_LACKS,
         **role_input(_role, _model, _prompt))
-add("owner-model-word: control, a keyword Opus override (opus 2h) lets a Haiku Explore through, as its row does", "allow",
+add("owner-model-word: control, a model-less Opus file (a keyword-era file) lets a Haiku Explore through, as its row does", "allow",
     tool="Agent", config=omw_hold("kw-haiku-explore", "omw-kw-haiku-explore", None, end=None), session="omw-kw-haiku-explore",
     transcript=OMW_PLAIN, env=OMW_NOW_ENV, **role_input("Explore", "haiku", "Find where the model list lives."))
-omw_lets_through("control, an Opus builder spawn is allowed under a keyword Opus override (opus 2h), through the Opus ceiling",
+omw_lets_through("control, an Opus builder spawn is allowed under a model-less Opus file (a keyword-era file), through the Opus ceiling",
                  role_input("builder", "opus", "Fix the failing case."),
                  omw_hold("kw-opus-builder", "omw-kw-opus-builder", None, end=None), "omw-kw-opus-builder", 60, CEILING)
 
