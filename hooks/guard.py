@@ -5406,7 +5406,7 @@ def role_model_one(tool_input, hold=None):
     rounds = role_round_table(pointer)
     role = role_name(table, tool_input.get("subagent_type"))
     model = str(tool_input.get("model") or "").strip()
-    if hold:
+    if isinstance(hold, dict) and hold:  # a hold is the dict override.model_override reads; anything else is no hold
         held = role_hold_verdict(hold, tool_input, role, model, rounds)
         if held is not None:
             return held
@@ -5798,13 +5798,13 @@ def audit_disk_cleanup_hit(tool: str, tool_input) -> bool:
 
 OPUS_STANDING_ROLES = ("Plan", "designer", "design-reviewer", REFUTER_ROLE)
 MODEL_SPAWN_REASON = (
-    "Rule (configuration): this spawn sets a model above its role's model. That model runs only on the owner's own "
+    "Rule (configuration): this spawn sets model %s, above its role's model. That model runs only on the owner's own "
     "typed words that name it for this spawn, or his `override`, except Plan, the designer, the design reviewer, the "
     "refuter and an Explore whose brief's first line carries the `%s` marker (decision agent-model-cap). A step grant "
     "lifts the model its words name. Remedy: run this spawn on the role's model now, and do not ask the owner for the "
     "model. If he named a model for this work, say in your report that his word did not hold. A reviewer's Round 2 or "
     "Round 3 brief names sonnet. A builder's third try runs Sonnet."
-) % EXPLORE_AUDIT_MARKER
+)
 
 
 def opus_spawn_hit(tool: str, tool_input) -> tuple:
@@ -8714,7 +8714,7 @@ def judge(payload) -> None:
     opus_model, opus_role, opus_unread = opus_spawn_hit(tool, tool_input)
     if opus_model:
         refuse(tool, "deny", "agent-model-cap",
-               MODEL_SPAWN_REASON
+               MODEL_SPAWN_REASON % (opus_model, EXPLORE_AUDIT_MARKER)
                + (" The scan could not read this brief, so it read no marker: " + BRIEF_LITERAL_REMEDY + "."
                   if opus_unread and role_key(opus_role) != "builder" and "fable" not in opus_model.lower() else ""),
                opus_model,
