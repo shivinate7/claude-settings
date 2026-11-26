@@ -474,16 +474,17 @@ class T(unittest.TestCase):
         self.assertRefusedAtOnce(self.own_child(), root=other.pid, entries=PRESENT_NO_TAG)
 
     def test_system_sleep_job_is_owned_where_the_os_shows_its_env_and_unknown_where_it_does_not(self):
-        """The one case with a system `sleep` as the job, which macOS may hide (an Apple-signed program). A probe
-        first, apart from the reader under test: the OS shows the environment (owned: the helper waits until the
-        job is killed) or hides it (unknown: exit 3, one line). The leg that ran is written to stderr."""
+        """The one case with a system `sleep` as the job, which macOS may hide (an Apple-signed program). On macOS a
+        probe apart from the reader under test decides: the OS shows the environment (owned: the helper waits until
+        the job is killed) or hides it (unknown: exit 3, one line). The leg that ran is written to stderr."""
         other = subprocess.Popen(SLEEPER)
         self.addCleanup(lambda: (stop(other.pid), other.wait()))
         env = {k: v for k, v in os.environ.items() if k != TAG}
         env[TAG] = SESSION
-        job = subprocess.Popen(["sleep", LIFE], env=env)   # Popen returns once sleep has exec'd, so no wait is needed
+        job = subprocess.Popen(["sleep", LIFE], env=env)
         self.addCleanup(lambda: (stop(job.pid), job.wait()))
-        if os_shows_tag(job.pid):
+        # Linux skips the probe: proc_env reads the tag itself and answers False there, never unknown (None is macOS only).
+        if sys.platform.startswith("linux") or os_shows_tag(job.pid):
             sys.stderr.write("\n  system sleep leg: owned, the OS shows its environment\n")
             self.assertWaitsUntilKilled(job.pid, root=other.pid)
         else:
