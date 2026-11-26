@@ -2229,16 +2229,18 @@ CHAT_REASONS = {"uniform-pick": CHAT_WIDENS_REASON, "press-link": CHAT_PRESS_LIN
 # question judge (hooks/call_judge.py, and lint/report_guard.py for a relayed question) can refuse a question a
 # standing record settles. Sources: docs/decisions and docs/debts (every record, one index line each), and the
 # ruling sentences of the `roadmap` ref's step notes (the 30 with the most word overlap). Of the records, only
-# the RECORD_TOP that share the most words with the question go in, and a record the question names always does.
-# The whole block holds at most CANDIDATES_CAP characters (see candidates_block). Closed page items are
+# those that share a word with the question go in (a record the question names always does), a rare word counting
+# more than a common one and the newer ruling first among equal scores. The whole block holds at most
+# CANDIDATES_CAP characters, the lowest-ranked lines going first; the text the judge reads says how many were
+# cut (see candidates_block). Closed page items are
 # always unknown: a hook cannot call the Artifact tool, and the decision records carry their rulings.
 # Cost: one git process, only when the caller already makes a model call; no file written.
 PAST_RULING_RULE = "past-ruling"
+CUT_NOTE = "%d more rulings that share words with the question, left out because the list is over its size limit"
 UNVETTED_LINE = re.compile(r"^[ \t>*+-]*Unvetted:[ \t]*\S", re.I | re.M)
 UNREADABLE = "unreadable"
 CLOSED_ITEMS = "closed page items"
 INDEX_CAP, STEP_TOP, STEP_GIT_TIMEOUT, RULED_TOP = 800, 30, 10, 8
-RECORD_TOP = 40  # the most decision and debt records sent that share words with the question (a record it names is extra)
 # The most characters of the candidate block (candidates_block): the judge call has a 60 s limit (call_judge.py), and
 # the unfiltered block of about 475,000 characters timed out. Three 500-600 character questions against the live docs
 # tree gave filtered blocks of 63,862, 65,754 and 64,895 characters; 80,000 leaves about 22% headroom over the largest.
@@ -2249,11 +2251,13 @@ RULING_WORDS = re.compile(r"ruling|owner|shiv", re.I)
 SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+")
 UNCHECKED_MARK = " (unchecked, not law)"  # the ruled store's mark on an entry no reader has checked: the one text of it
 DATE_IN_TEXT = re.compile(r"\b20\d\d-\d\d-\d\d(?: \d\d:\d\d)?")
-WORD = re.compile(r"[a-z]{4,}")
+WORD = re.compile(r"[a-z]{3,}")
 STOPWORDS = frozenset(("that", "this", "with", "from", "have", "will", "should", "would", "could", "there", "their",
                        "about", "which", "when", "what", "were", "been", "into", "than", "then", "them", "they",
                        "your", "also", "only", "does", "each", "more", "most", "must", "never", "other", "some",
-                       "such", "same", "after", "before", "because", "owner", "ruling", "rulings"))
+                       "such", "same", "after", "before", "because", "owner", "ruling", "rulings",
+                       "the", "and", "for", "may", "its", "are", "not", "can", "was", "has", "had", "but", "you",
+                       "any", "all", "out", "who", "how", "why", "our", "did", "yet", "nor", "per", "via"))
 # An id a refusal may cite: `decisions/<stem>` or `debts/<stem>`.
 RECORD_REF = re.compile(r"(?<![\w/-])(?:decisions|debts)/[\w.-]*\w")
 
@@ -2263,8 +2267,28 @@ def has_unvetted(text) -> bool:
     return bool(UNVETTED_LINE.search(text or ""))
 
 
-def _words(text) -> set:
-    return set(WORD.findall(str(text).lower())) - STOPWORDS
+def _stem(word) -> str:
+    """`word` with a plural ending dropped, so a singular and its plural count as one word: merges and merge, caps
+    and cap, branches and branch, policies and policy."""
+    if len(word) > 4 and word.endswith("ies"):
+        return word[:-3] + "y"
+    if len(word) > 4 and word.endswith(("ches", "shes", "sses", "xes", "zes")):
+        return word[:-2]
+    if len(word) > 3 and word.endswith("s") and not word.endswith(("ss", "us", "is")):
+        return word[:-1]
+    return word
+
+
+def _words(text, plurals=False) -> set:
+    """The words of `text` that can be shared: three letters or more, no stop word. With `plurals`, a plural is reduced
+    to its singular (see _stem), so the two forms are one word; the step and ruled-store reads, and
+    sendmessage_state's key words, keep each form as written."""
+    found = set()
+    for word in WORD.findall(str(text).lower()):
+        stem = _stem(word) if plurals else word
+        if word not in STOPWORDS and stem not in STOPWORDS:
+            found.add(stem)
+    return found
 
 
 def _ruling_text(body) -> str:
@@ -2494,36 +2518,70 @@ def _ruled_candidates(roots, unknown, words):
     return []
 
 
-def _line_score(line, words) -> int:
-    """The words of `words` that the text of a candidate line (`<id>: <text>`) shares. A ruled-store line's own
-    `(owner <at>; ...)` tail is not its ruling and is left out."""
-    text = line.split(": ", 1)[-1]
-    if line.startswith("ruled:"):
+RECORD_FOLDERS = ("decisions/", "debts/")
+
+
+def _line_words(line) -> set:
+    """The words a candidate line (`<id>: <text>`) can share with a question. A record's slug words count, as its id is
+    its name. A ruled-store line's own `(owner <at>; ...)` tail is not its ruling and is left out."""
+    ident, sep, text = line.partition(": ")
+    if not sep:
+        return _words(line, plurals=True)
+    if ident.startswith("ruled:"):
         text = text.rsplit(" (owner ", 1)[0]
-    return len(_words(text) & words)
+    elif ident.startswith(RECORD_FOLDERS):
+        text += " " + ident.rsplit("/", 1)[-1].replace("-", " ")
+    return _words(text, plurals=True)
 
 
-def _records_to_send(lines, words, named) -> list:
-    """The record lines to send, in their own order: every record in `named`, and the RECORD_TOP others that share
-    the most words with the question (`words`; the first in the folder's order among equal counts). A record that
-    shares no word is never one of the top."""
-    scored = sorted((-_line_score(line, words), i) for i, line in enumerate(lines) if line.split(": ", 1)[0] not in named)
-    top = {i for count, i in scored[:RECORD_TOP] if count}
-    return [line for i, line in enumerate(lines) if line.split(": ", 1)[0] in named or i in top]
+def _word_weights(words, records) -> dict:
+    """A weight for each word of `words`: 1 plus the log of how many times fewer records hold it than there are
+    records. A word every record holds weighs 1; a word one record holds weighs most. A word no record holds weighs as
+    one record's. Only a record's own words count (see _line_words)."""
+    total = max(len(records), 1)
+    held = dict.fromkeys(words, 0)
+    for line in records:
+        for word in _line_words(line) & words:
+            held[word] += 1
+    return {word: 1 + math.log(total / max(count, 1)) for word, count in held.items()}
 
 
-def _best_first(lines, words, named) -> list:
-    """`lines` with the records in `named` first, then the most shared words first; a stable sort, so equal counts keep
-    the order the sources gave. candidates_block drops lines from the end, so the lowest-scored go first."""
-    return [line for _key, line in sorted(
-        ((line.split(": ", 1)[0] not in named, -_line_score(line, words), i), line) for i, line in enumerate(lines))]
+def _line_score(line, weights) -> float:
+    """The summed weight of the words of `weights` that a candidate line shares. Rounded, so equal sets score equal in
+    any order of summing."""
+    return round(sum(weights[word] for word in _line_words(line) & weights.keys()), 6)
+
+
+def _line_date(line) -> str:
+    """The newest `YYYY-MM-DD[ HH:MM]` stamp in a candidate line, else "" (an undated line is the oldest)."""
+    dates = DATE_IN_TEXT.findall(line)
+    return max(dates) if dates else ""
+
+
+def _records_to_send(lines, weights, named) -> list:
+    """The record lines to send, in their own order: every record in `named`, and each other record that shares a word
+    with the question (a key of `weights`). How many go in is decided by the size limit of the block alone (see
+    candidates_block)."""
+    return [line for line in lines if line.split(": ", 1)[0] in named or _line_score(line, weights) > 0]
+
+
+def _best_first(lines, weights, named) -> list:
+    """`lines` with the records in `named` first, then the open ruled-store entries (not yet on main, at most
+    RULED_TOP), then the highest score first, then the newest ruling first; the sort is stable, so lines equal
+    in all keys keep the order the sources gave. candidates_block drops lines from the end, so the lowest-ranked go
+    first."""
+    out = sorted(lines, key=_line_date, reverse=True)
+    out.sort(key=lambda line: -_line_score(line, weights))
+    out.sort(key=lambda line: (line.split(": ", 1)[0] not in named, not line.startswith("ruled:")))
+    return out
 
 
 def past_rulings(question_text, repo_root):
     """(candidates, unknown). `candidates` are lines `<id>: <text>`, best first (see _best_first): the (up to eight)
     open ruled-store entries that share words with the question, as `ruled:<id>`; the decision and debt records the
-    question names, then the RECORD_TOP records that share the most words (a record with no shared word is left
-    out unless named); the step rulings that share words with the question. `unknown` lists each source not
+    question names, then each record that shares a word with it (a record with no shared word is left out unless
+    named), a rarer shared word scoring more and a newer ruling coming first among equal scores; the step rulings
+    that share words with the question. `unknown` lists each source not
     searched: "<source> (absent)"
     for a source the repo does not have, "<source> (unreadable: ...)" for one that exists and failed, and always
     "closed page items". Absent sources never refuse; unreadable ones do (see unreadable_sources)."""
@@ -2549,7 +2607,8 @@ def past_rulings(question_text, repo_root):
         if not found:
             unknown.append("%s (absent)" % label)
     named = set(cited_rulings(question_text, [line.split(": ", 1)[0] for line in records]))
-    candidates += _records_to_send(records, words, named)
+    weights = _word_weights(_words(question_text, plurals=True), records)
+    candidates += _records_to_send(records, weights, named)
     steps, state = _read_steps(repo_root)
     if state == "ok":
         candidates += _step_rulings(steps, words)
@@ -2558,7 +2617,7 @@ def past_rulings(question_text, repo_root):
     else:
         unknown.append("roadmap step notes (%s)" % state)
     unknown.append(CLOSED_ITEMS)
-    return _best_first(candidates, words, named), unknown
+    return _best_first(candidates, weights, named), unknown
 
 
 def unreadable_sources(unknown) -> list:
@@ -2585,14 +2644,31 @@ def _past_text(candidates, unknown) -> str:
     return text
 
 
-def candidates_block(candidates, unknown, questions=None) -> str:
-    """The text added after the judge prompt's reply line: the candidate rulings, then the sources not searched, then
-    (with `questions`) the labelled questions of labels_block. `candidates` come best first (past_rulings): while the
-    text before the labelled questions is over CANDIDATES_CAP characters, the last line goes, so no line is cut."""
+def _fit(candidates, unknown):
+    """(kept, unknown) for one model call. `candidates` come best first (past_rulings): while the text before the
+    labelled questions is over CANDIDATES_CAP characters, the last line goes, so no line is cut. When lines went, the
+    returned `unknown` also says how many, so the judge never reads a partial list as a whole one."""
     kept = list(candidates)
-    while kept and len(_past_text(kept, unknown)) > CANDIDATES_CAP:
+    said = list(unknown)
+    while kept:
+        said = list(unknown) + ([CUT_NOTE % (len(candidates) - len(kept))] if len(kept) < len(candidates) else [])
+        if len(_past_text(kept, said)) <= CANDIDATES_CAP:
+            return kept, said
         kept.pop()
-    return _past_text(kept, unknown) + (labels_block(questions) if questions else "")
+    return kept, list(unknown) + ([CUT_NOTE % len(candidates)] if candidates else [])
+
+
+def shown_candidates(candidates, unknown) -> list:
+    """The candidate lines that candidates_block puts in the text the judge reads: the only ones it may cite."""
+    return _fit(candidates, unknown)[0]
+
+
+def candidates_block(candidates, unknown, questions=None) -> str:
+    """The text added after the judge prompt's reply line: the candidate rulings that fit under CANDIDATES_CAP
+    characters (see _fit), then the sources not searched and the count of rulings left out for size, then (with
+    `questions`) the labelled questions of labels_block."""
+    kept, said = _fit(candidates, unknown)
+    return _past_text(kept, said) + (labels_block(questions) if questions else "")
 
 
 def _plain_records(text) -> str:

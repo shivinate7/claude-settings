@@ -3477,7 +3477,7 @@ def past_ruling_problem(asked, cwd, whole=None, session=None):
         return ""
     reason = verdict.get("reason")
     reason = reason.strip() if isinstance(reason, str) and reason.strip() else ""
-    ids = question_form.candidate_ids(candidates)
+    ids = question_form.candidate_ids(question_form.shown_candidates(candidates, unknown))
     if question_form.ruling_cite(reason, ids, strict=True) != "cited":
         return cannot_run(asked, "the review cited a record that was not in the list")
     # A listed ruling named in a unit's own Based on (ruling) line passes that unit by code, whatever the judge answered;
