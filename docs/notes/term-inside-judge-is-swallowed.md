@@ -1,0 +1,1 @@
+- term-inside-judge-is-swallowed: `_judge_bash_here` in tests/guard/s21304-diff.py wraps `guard.judge` in `except SystemExit: pass`. If SIGTERM lands inside that call, `_on_term` stops the holders and raises SystemExit, and the except swallows it. The holders are already stopped, but the run goes on and exits with another code. Seen: 2026-11-25 x1

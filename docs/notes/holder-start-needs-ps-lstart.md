@@ -1,0 +1,1 @@
+- holder-start-needs-ps-lstart: `holder_start` in hooks/test_guard.py returns "" when its `ps -o lstart=` run exits non-zero, and `reap_holders` reads "" as an ended holder. A ps that rejects the lstart field makes the reap signal nothing and print nothing. A ps that cannot be run returns None and prints a line. Seen: 2026-11-25 x1
