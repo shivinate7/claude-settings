@@ -3272,9 +3272,8 @@ def combine_hint(root, host, trigger=None, exclude=None):
     """Print one line when a batch could skip a wait: the ready PRs whose records pass, and the command that builds a train from them, so a lane
     does not wait on a queue the batch could skip (decision session-tiers, merge alone or combine). The set is the one `combine_train.py --build` takes
     (batch_rows there): the rows whose act is `batch` on a main base (ready_batch_numbers), the lowest number, the front PR, which merges alone, left out. That
-    slice is mirrored in batch_rows, which cannot call a new merge.py name (test_combine_train GIT_WRAPPERS). At a backlog the members whose queued head has a failed job
-    or unreadable runs are then left out (Host.batch_member_runs, the build's call), each named on a line of its own before the names line. The count of what stays is
-    compared with BUILD_THRESHOLD, and only a set at the threshold gets the build command. Never stops a lint: a read that fails prints one line saying so.
+    slice is mirrored in batch_rows, which cannot call a new merge.py name (test_combine_train GIT_WRAPPERS). The count of that set is compared with
+    BUILD_THRESHOLD after the members whose queued head has a failed job or unreadable runs are left out of it at a backlog (Host.batch_member_runs, the build's call), each named on a line of its own before the names line. Only a set at the threshold gets the build command. Never stops a lint: a read that fails prints one line saying so.
     `trigger` None: the trigger is another lane lint of this clone, running or queued. Or `trigger` is the caller's own words for why it asks (queue_hint's CI
     queue depth) and `exclude` is the info row of the pull request under merge: its head is read against every other ready PR, a clash is named, and a clash
     read git could not make adds one sentence saying the clash read is unknown. At the backlog only a batch runner gets the build command; any other
