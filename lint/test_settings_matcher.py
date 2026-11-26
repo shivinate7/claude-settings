@@ -894,5 +894,47 @@ class McpToolMatcher(unittest.TestCase):
                                  "the guard matcher %r covers %s" % (matcher, START_SESSION))
 
 
+# One guard process per MCP call (decision agent-no-remote-tools, Cost). No entry names these tools, so only the generic
+# guard matcher can cover them. The iOS simulator tool is named by its own hook entry, which runs no guard.py.
+GENERIC_MCP_TOOLS = (
+    "mcp__an-unlisted-server__any_tool",
+    "mcp__Claude_Browser_evil__navigate",
+    "mcp__computer-use__app_click",
+    "mcp__rea__list_names",
+)
+IOS_CONTROL_TOOL = "mcp__Claude_Code_iOS_Simulator__control"
+
+
+def guard_entry_indexes():
+    """The indexes of the PreToolUse entries whose command runs guard.py, read from SETTINGS."""
+    return [index for index, entry in enumerate(pre_tool_entries())
+            if any("guard.py" in hook.get("command", "") for hook in entry.get("hooks", []))]
+
+
+class McpGuardStarts(unittest.TestCase):
+    def test_one_pretooluse_entry_runs_the_guard(self):
+        indexes = guard_entry_indexes()
+        self.assertEqual(len(indexes), 1, "PreToolUse entries %s run guard.py; one start per MCP call needs exactly one"
+                         % indexes)
+
+    def test_only_the_guard_entry_covers_a_generic_mcp_tool(self):
+        # The scan reads the matcher of every PreToolUse entry, so the guard entry is found in the same list it is counted in.
+        guard = guard_entry_indexes()
+        self.assertTrue(guard, "no PreToolUse entry runs guard.py: the scan reads nothing")
+        entries = pre_tool_entries()
+        for tool in GENERIC_MCP_TOOLS:
+            with self.subTest(tool=tool):
+                covering = [index for index, entry in enumerate(entries) if pre_tool_covers(entry.get("matcher"), tool)]
+                self.assertEqual(len(covering), 1, "PreToolUse entries %s cover %s; one entry, the guard, may" % (covering, tool))
+                self.assertEqual(covering, guard,
+                                 "PreToolUse entries %s cover %s; only the guard entry %s may" % (covering, tool, guard))
+
+    def test_the_ios_control_tool_starts_the_guard_once(self):
+        # A control for the iOS exception: its own entry covers the tool too, and the guard still starts once for it.
+        entries = pre_tool_entries()
+        guard_hits = [index for index in guard_entry_indexes() if pre_tool_covers(entries[index].get("matcher"), IOS_CONTROL_TOOL)]
+        self.assertEqual(len(guard_hits), 1, "the guard entry covers %s %d times, not once" % (IOS_CONTROL_TOOL, len(guard_hits)))
+
+
 if __name__ == "__main__":
     unittest.main()
