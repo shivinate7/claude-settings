@@ -54,6 +54,7 @@ import importlib
 import json
 import os
 import re
+import shlex
 import sys
 
 try:
@@ -297,14 +298,37 @@ def _esc(text):
 # The one remedy text for an owed audit. The Stop block uses it, and so does the guard's compaction-audit refusal
 # (guard.COMPACTION_AUDIT_REASON), so the two cannot drift. It holds one `%s`: the handoff path.
 AUDIT_OWED = "context was compacted and the handoff audit is still owed. "
-# The audit helper's command, in the one form the remedy prints and the guard's compaction-audit rule lets through.
-AUDIT_HELPER_HEAD = ('python3 "' + os.path.join(os.path.dirname(os.path.realpath(__file__)), "precompact_handoff.py")
-                     + '" --audit-brief --handoff "')
+# The audit helper's command, in the form the remedy prints. The guard's compaction-audit rule lets that exact text
+# through, and the spellings audit_helper_allows reads as the same call.
+AUDIT_HELPER_SCRIPT = os.path.join(os.path.dirname(os.path.realpath(__file__)), "precompact_handoff.py")
+AUDIT_HELPER_HEAD = 'python3 "' + AUDIT_HELPER_SCRIPT + '" --audit-brief --handoff "'
+# Any character a shell would act on outside plain words: chaining, pipes, redirects, substitution, subshells, a new line.
+_AUDIT_SHELL_ACTIVE = re.compile(r"[;&|<>$`()\r\n]")
 
 
 def audit_helper_command(handoff):
-    """The helper command with the handoff path filled in: the exact text the guard allows while the audit is owed."""
+    """The helper command with the handoff path filled in: the exact text the remedy prints."""
     return AUDIT_HELPER_HEAD + handoff + '"'
+
+
+def audit_helper_allows(command, handoff):
+    """True when `command` is the remedy's helper call: the printed text, or the same four words spelled with other
+    quotes or through a symlink to the helper. Argv is exactly `python3 <script> --audit-brief --handoff <handoff>`, the
+    script's real path is this folder's precompact_handoff.py, and the handoff is this session's. No shell operator or
+    substitution may appear anywhere in the text, so nothing else runs."""
+    if not isinstance(command, str) or not isinstance(handoff, str) or not handoff:
+        return False
+    if command == audit_helper_command(handoff):
+        return True
+    if _AUDIT_SHELL_ACTIVE.search(command):
+        return False
+    try:
+        words = shlex.split(command)
+    except ValueError:
+        return False
+    if len(words) != 5 or words[0] != "python3" or words[2:4] != ["--audit-brief", "--handoff"] or words[4] != handoff:
+        return False
+    return os.path.isabs(words[1]) and os.path.realpath(words[1]) == os.path.realpath(AUDIT_HELPER_SCRIPT)
 
 
 AUDIT_REMEDY = (

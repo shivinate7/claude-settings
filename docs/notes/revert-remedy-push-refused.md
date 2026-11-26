@@ -1,0 +1,1 @@
+- revert-remedy-push-refused: the revert remedy that `merge/merge.py` `revert_claim` prints (`git push origin <branch>`) is refused by the ready-pr-push guard under the first-proof pin (any pin but `none`) while the branch's ready pull request shows a run pending or green. The remedy defeats itself. It should name the return-to-draft step first. Seen: 2026-11-25 x1
