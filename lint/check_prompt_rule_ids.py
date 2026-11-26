@@ -5,14 +5,15 @@
 
 A model judge's prompt names the rule ids it may file a finding under. An id that no home declares
 files its findings under a dead id. A home, each read at run time: a `<!-- rule:<id> -->` anchor in a
-RULE_FILES file; a guard rule name (rule_audit.emitted_rule_ids, over hooks/guard*.py); a decision record
-slug (a file in the decisions folder of lint/layout.py). The case that started this: JUDGED_RULES held `measure-before-priority`, and the anchor
-was `style-measure-before-priority`.
+RULE_FILES file; a guard rule name (rule_audit.emitted_rule_ids, the one reader of the files that
+write guard.log); a decision record slug (compliance_probes.decision_records, over the decisions
+folder of lint/layout.py).
 
-WHAT IT READS. hooks/*.py, with `ast` and `tokenize`, in two places. A test file (`test_*.py`,
-`*_test.py`) holds fixtures and is not read.
+WHAT IT READS. Each non-test hooks/*.py, with `ast` and `tokenize`, in two places. A test file
+(`test_*.py`, `*_test.py`) holds fixtures and is not read.
   - a prompt constant in PROMPT_CONSTANTS. A name it is built from (INSTRUCTIONS = "..." + GH_PART)
-    is read through, in the same module.
+    is read through, in the same module. A row whose file is missing, or whose file does not define
+    the constant, is a problem: a reader that sees less must not print ok.
   - the string a function returns, when its name has `prompt` in it: a plain, f-string, implicitly
     joined or plus-joined string, or a local name that the function assigns and returns.
 A comment, a docstring and any other string are not read.
@@ -45,7 +46,7 @@ import tokenize
 
 HERE = os.path.dirname(os.path.realpath(__file__))
 sys.path.insert(0, HERE)
-import layout  # noqa: E402  the one home of where decision records live
+import compliance_probes  # noqa: E402  the one home of the decision record slugs and the decisions folders
 import rule_audit  # noqa: E402  the one home of the anchor pattern, the anchor files and the guard rule names
 
 # hooks/ file -> {prompt constant: how its strings read}. `ids`: each string is an id. `prose`: ids
@@ -249,27 +250,34 @@ def prompt_ids(root):
     return sorted(found)
 
 
-def decision_dir(root):
-    """The folder of decision records under `root`: the first of the layout's candidates that exists."""
-    homes = layout.candidates(root, "decisions")
-    return next((h for h in homes if os.path.isdir(os.path.join(root, *h.split("/")))), homes[0])
-
-
-def decision_slugs(root):
-    """The slug of each decision record under `root`: its file name without `.md`."""
-    folder = os.path.join(root, *decision_dir(root).split("/"))
-    return {os.path.basename(p)[:-3] for p in glob.glob(os.path.join(folder, "*.md"))}
+def table_problems(root):
+    """One message per PROMPT_CONSTANTS row whose file is missing, or whose file defines none of a row's constants
+    at module level: a prompt that the table names but the reader cannot find is a prompt it does not check."""
+    out = []
+    for base, constants in sorted(PROMPT_CONSTANTS.items()):
+        path = os.path.join(root, "hooks", base)
+        if not os.path.isfile(path):
+            out.append("hooks/%s: PROMPT_CONSTANTS names this file, which does not exist" % base)
+            continue
+        with open(path, encoding="utf-8") as f:
+            defined = module_assignments(ast.parse(f.read()))
+        out.extend("hooks/%s: PROMPT_CONSTANTS names %s, which the file does not define" % (base, const)
+                   for const in constants if const not in defined)
+    return out
 
 
 def problems(root):
-    """One message per id that no home declares, naming its file, line and id. The homes: a rule anchor,
-    a guard rule name (rule_audit.emitted_rule_ids), a decision record slug."""
+    """One message per id that no home declares, naming its file, line and id, and one per table row that
+    the tree does not hold. The homes: a rule anchor, a guard rule name (rule_audit.emitted_rule_ids), a
+    decision record slug (compliance_probes.decision_records)."""
+    folders, records = compliance_probes.decision_records(root)
     homes = (set(rule_audit.claude_md_anchors(rule_audit.rule_text(root)))
-             | rule_audit.emitted_rule_ids(root) | decision_slugs(root))
-    where = "%s (rule anchors), hooks/guard*.py (guard rule names), %s/ (decision record slugs)" % (
-        " or ".join(p.replace(os.sep, "/") for p in rule_audit.RULE_FILES), decision_dir(root))
-    return ["%s:%d: the prompt names id %s, which no home declares; looked in %s" % (path, line, rid, where)
-            for path, line, rid in prompt_ids(root) if rid not in homes]
+             | rule_audit.emitted_rule_ids(root) | set(records))
+    where = "%s (rule anchors), the files that write guard.log (guard rule names), %s (decision record slugs)" % (
+        " or ".join(p.replace(os.sep, "/") for p in rule_audit.RULE_FILES), " or ".join(f + "/" for f in folders))
+    return table_problems(root) + [
+        "%s:%d: the prompt names id %s, which no home declares; looked in %s" % (path, line, rid, where)
+        for path, line, rid in prompt_ids(root) if rid not in homes]
 
 
 def main(argv):
@@ -282,7 +290,7 @@ def main(argv):
     try:
         read = prompt_ids(root)
         bad = problems(root)
-    except (OSError, SyntaxError, ValueError, tokenize.TokenError) as e:
+    except (OSError, SyntaxError, ValueError, tokenize.TokenError, compliance_probes.CannotRun) as e:
         print("check_prompt_rule_ids: FAIL, could not read: %s" % e)
         return 1
     if not read:

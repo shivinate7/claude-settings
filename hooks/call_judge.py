@@ -119,7 +119,7 @@ SPAWN_PROMPT = (
     "(not only to find files, names or text) and the call's model field is neither sonnet nor opus "
     "(haiku, or no model field, blocks; text in the brief does not count); the fix is model sonnet or "
     "opus with effort high, and the `" + EXPLORE_AUDIT_MARKER + "` marker on the brief's first non-blank line "
-    "so the guard rule agent-role-model passes too (agent-model-cap, audit Explore row). The marker is part of "
+    "so the guard rule agent-role-model passes too (rule agent-model-cap, audit Explore row). The marker is part of "
     "the fix only, never a reason to block or to allow. Otherwise answer {\"ok\": true} for "
     "Explore. Only for builder, reviewer, and test-author briefs, apply rule roles-brief-contents (the brief "
     "carries the task, the files, governing rulings, and the check that proves done) and "
