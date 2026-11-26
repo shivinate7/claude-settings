@@ -16,5 +16,11 @@ Why: the owner wants `stable` to match main after each merge, which is the simpl
 
 Alternative not taken: a last job in the checks workflow, on push to main, in place of a separate workflow file. Refuter, 2026-11-11 22:58 CST, simpler route (b). The design names the `workflow_run` trigger. The owner approved the design in the ruling above.
 
+## The guard
+
+The merge guard (`hooks/guard_merge.py`) checks the stamp's `merge.requiredChecks` string against the pinned strings of the installed merge tool. A string that tool does not pin is an unknown pin. The merge check refuses the head as unknown and names the string. Its remedy offers waiting for a tool that pins the string, or landing that string's reader. A push to a ready pull request under an unknown pin is judged as under the protection pin, and the guard prints one warn line on stderr that names the string. On a ready mark whose page read is unknown, the refusal names the followed ref (`stale_install.followed_ref`, `origin/stable` by default) when the installed copy is behind it.
+
+Single reader: met only in part. The guard loads the pinned copy's reader, `merge/merge.py` beside the hook's real path. The tool runs the followed ref's tree: `merge/launch.py` checks out `origin/stable` in a temporary worktree. So the guard's pin list can differ from the tool's when the installed copy and the followed ref differ.
+
 Kind: process
 Home: docs/plans/restart-plan.md

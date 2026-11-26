@@ -236,7 +236,10 @@ def merge_check(selector, repo: str, where: str):
     if module is None:
         return "unknown", "the merge tool's check reader could not be loaded"
     where = os.path.normpath(where) if where else ""   # a `cd` target may carry either separator
-    host = module.Host(required=pinned_required(where) or "protection", repo=repo or None, cwd=where or None)
+    pinned = pinned_required(where)
+    if isinstance(pinned, UnknownPin):
+        return "unknown", pinned.reason()
+    host = module.Host(required=pinned or "protection", repo=repo or None, cwd=where or None)
     # No ignore list: this head counts every check, so an ignored red check on it still refuses.
     # The other ready pull requests on the base may not have CI running (decision no-merge-during-batch-ci), but an ignored check or run never counts.
     try:
@@ -254,9 +257,18 @@ MERGE_CHECK_REASON = (
     "Remedy: run the merge tool, `merge <pr> --confirm`, which waits on the required checks, then "
     "merges the head it waited on."
 )
+UNKNOWN_PIN_CAUSE = " is not a string the loaded merge tool pins"  # UnknownPin.reason's tail, the one home merge_check_reason reads it from
+MERGE_CHECK_UNKNOWN_PIN_REASON = (
+    "Rule (Git): this head is not settled: %s. A merge waits for every check and workflow run on "
+    "the head, required or not, and a read that could not run counts as not settled. "
+    "Remedy: the merge tool the guard loaded does not know this string yet, so the merge tool refuses it too. "
+    "Wait for the installed merge tool to move to a version that pins it, or land the reader for the string first, then retry."
+)
 
 
 def merge_check_reason(verdict: str, detail: str) -> str:
+    if verdict == "unknown" and UNKNOWN_PIN_CAUSE in detail:  # `merge <pr> --confirm` fails on the same string, so it is no remedy
+        return MERGE_CHECK_UNKNOWN_PIN_REASON % ("unknown (" + cap_safe(detail, 160) + ")")
     return MERGE_CHECK_REASON % (verdict + (" (" + cap_safe(detail, 160) + ")" if detail else ""))
 
 
@@ -289,9 +301,20 @@ def uses_merge_tool(where: str) -> bool:
     return bool(_merge_configs(where))
 
 
+class UnknownPin:
+    """A stamp `merge.requiredChecks` string the loaded merge tool does not pin. The merge tool the guard loaded may be older
+    than the stamp, so the string's meaning is unread: a read that cannot run is unknown, never "no pin"."""
+
+    def __init__(self, name: str):
+        self.name = name
+
+    def reason(self) -> str:
+        return "merge.requiredChecks %r" % self.name + UNKNOWN_PIN_CAUSE
+
+
 def pinned_required(where: str):
     """The repo's pinned `merge.requiredChecks`: the string "none", another of the merge tool's PINNED_STRINGS ("first-proof"), or a non-empty list of names; else None,
-    and the batch read takes the names from the branch protection. "none" is the merge tool's value for a repo
+    and the batch read takes the names from the branch protection. Any other string is an UnknownPin, which merge_check refuses as unknown. "none" is the merge tool's value for a repo
     that requires no check (decision private-repos-no-ci), so a head with no check and no run reads green here too: it is read with no load of the tool.
     "first-proof" is its value for a repo whose CI is live: the merge tool's own head_read then needs the rollup (decision merge-needs-current-base).
     That string is the merge tool's constant, never a copy: with the tool unloadable it is not pinned, and merge_check reads that as unknown."""
@@ -302,20 +325,16 @@ def pinned_required(where: str):
             return names
         if isinstance(names, str) and names != "protection":  # the default pins nothing and loads nothing
             module = merge_module()
-            if module is not None and names in module.PINNED_STRINGS:
-                return names
+            if module is not None:  # an unloadable tool stays None: merge_check reads that as unknown
+                return names if names in getattr(module, "PINNED_STRINGS", ()) else UnknownPin(names)
         if isinstance(names, list) and names and all(isinstance(k, str) and k for k in names):
             return names
     return None
 
 
-def waits_on_no_ci(where: str) -> bool:
-    """True when the repo pins a merge.requiredChecks string that waits on no check: "none", or what the merge tool's waits_on_no_check says of the other pinned string. A repo with "none" loads no tool here."""
-    pinned = pinned_required(where)
-    if pinned == "none":
-        return True
-    module = merge_module()
-    return isinstance(pinned, str) and module is not None and module.waits_on_no_check(pinned)
+def runs_no_ci(where: str) -> bool:
+    """True when the repo pins merge.requiredChecks "none": no CI run exists, so a push has no run to cancel. "first-proof" is no such pin: CI is live, and a ready branch still merges on the first proof of its head, so a push moves the head under that proof. Reads no merge tool: "none" is the one string pinned_required returns before a load."""
+    return pinned_required(where) == "none"
 
 
 def ignored_checks(module, where: str):
@@ -480,29 +499,30 @@ READY_PAGE_UNKNOWN_REASON = (
 
 READY_PAGE_BEHIND_REASON = (
     "Rule (Git, guard-hooks-fail-closed): the records page on the head of this pull request could not be read, so it is "
-    "unknown whether it is stale: %s. The merge tool the guard loaded is behind origin/main, and a tool that old can "
+    "unknown whether it is stale: %s. The merge tool the guard loaded is behind %s, and a tool that old can "
     "fail this read. A read that cannot run refuses the ready mark. "
-    "Remedy: from the claude-settings clone, run merge/install_from_main.sh (the reinstall from main), then retry. "
+    "Remedy: from the claude-settings clone, run merge/install_from_main.sh, which moves the install to that ref, then retry. "
     "(decision guard-hooks-fail-closed, a guard that cannot run its read refuses)"
 )
 
 
-def merge_tool_behind_main() -> bool:
-    """True when the checkout that holds the loaded merge tool is behind origin/main (its HEAD is an ancestor of
-    origin/main and not equal to it). Any read that fails is False: the plain unknown reason then stands."""
+def merge_tool_behind_followed_ref() -> str:
+    """The name of the ref (stale_install.followed_ref's) when the checkout that holds the loaded merge tool is behind it
+    (its HEAD is an ancestor of that ref's local tip and not equal to it), else "". The ref is the install record's ref,
+    else the pin's own. Any read that fails is "": the plain unknown reason then stands."""
     module = merge_module()
     path = getattr(module, "__file__", None)
     if not path:
-        return False
+        return ""
     root = os.path.dirname(os.path.dirname(os.path.realpath(path)))
-    ref = resolve_default_base(root) or "origin/main"  # the short ref name already holds the remote
-    if not ref.startswith("origin/"):
-        return False
-    head, tip = _git(root, "rev-parse", "HEAD"), _git(root, "rev-parse", ref)
-    if not head or not tip or head.returncode or tip.returncode or head.stdout.strip() == tip.stdout.strip():
-        return False
-    ancestor = _git(root, "merge-base", "--is-ancestor", "HEAD", ref)
-    return ancestor is not None and ancestor.returncode == 0
+    try:
+        import stale_install  # the one home of "the ref the installed copy follows"; imported here, so a call with no unknown read loads nothing
+        record, _ = stale_install.load_record()
+        _, name, tip = stale_install.followed_ref({"source": root, "ref": record["ref"] if record else stale_install.PIN_REF})
+        head = stale_install.local_sha(root, "HEAD")
+        return name if tip and head and head != tip and stale_install.covered(root, head, tip) else ""
+    except Exception:  # an unreadable ref is the plain unknown reason
+        return ""
 
 
 def ready_page_calls(tool: str, tool_input: dict, command: str):
@@ -554,8 +574,10 @@ def ready_page_hit(tool: str, tool_input: dict, command: str, where: str):
             remedy = merge_module().stale_page_remedy(int(detail))
             return READY_PAGE_STALE_REASON % (detail, remedy), "ready on a stale page #" + detail
         if state == "unknown":
-            reason = READY_PAGE_BEHIND_REASON if merge_tool_behind_main() else READY_PAGE_UNKNOWN_REASON
-            return reason % cap_safe(detail, 200), "ready, page read unknown"
+            behind = merge_tool_behind_followed_ref()
+            cause = cap_safe(detail, 200)
+            reason = READY_PAGE_BEHIND_REASON % (cause, behind) if behind else READY_PAGE_UNKNOWN_REASON % cause
+            return reason, "ready, page read unknown"
     return None
 
 
@@ -581,6 +603,7 @@ READY_PUSH_REASON = (
     + COMPLY_TAIL
 )
 READY_PUSH_WARNING = "ready-pr-push: the pull request list read failed (%s), so the push is allowed unchecked (decision standing-merge-grant)"
+READY_PUSH_PIN_WARNING = "ready-pr-push: %s, so the push was judged as under the protection pin (decision standing-merge-grant)"
 
 
 def _ready_push_branches(args, where: str, overrides):
@@ -597,6 +620,7 @@ def ready_push_hit(stripped: str, cwd: str, read_verb):
     guard.py's test for a dry run, which writes nothing. One list read serves every push of the call."""
     pulls = {}  # where -> (host, open pull requests) or the failure text: one read per folder
     warning = None
+    pin_warning = None  # an unknown pin string is reported, and never loosens the judgment
     for segment in split_segments(stripped):
         if merge_tool_args(segment) is not None:
             continue
@@ -604,10 +628,13 @@ def ready_push_hit(stripped: str, cwd: str, read_verb):
             if not where or read_verb("push", args) or not uses_merge_tool(where):
                 continue
             branches, archive_only = _ready_push_branches(args, where, overrides)
-            if archive_only or waits_on_no_ci(where):  # a repo that runs no CI has no run to cancel
+            if archive_only or runs_no_ci(where):  # a repo that runs no CI has no run to cancel
                 continue
             if where not in pulls:
                 pulls[where] = _ready_push_pulls(where)
+                pin = pinned_required(where)
+                if isinstance(pin, UnknownPin) and pin_warning is None:
+                    pin_warning = READY_PUSH_PIN_WARNING % pin.reason()
             host, rows = pulls[where]
             if host is None:
                 if warning is None:
@@ -623,6 +650,8 @@ def ready_push_hit(stripped: str, cwd: str, read_verb):
                     elif verdict != "red":
                         state = "running or queued" if verdict == "pending" else "finished green"
                         return "deny", READY_PUSH_REASON % (number, state, number), "push to ready #%d" % number
+    if pin_warning:
+        return ("warn", warning[1] + "; " + pin_warning, "") if warning else ("warn", pin_warning, "")
     return warning
 
 
@@ -631,9 +660,11 @@ def _ready_push_pulls(where: str):
     module = merge_module()
     if module is None:
         return None, "the merge tool could not be loaded"
+    pinned = pinned_required(where)
+    required = "protection" if isinstance(pinned, UnknownPin) else pinned or "protection"  # an unread pin judges the push as on main: the list read needs no pin, and ready_push_hit reports the string
     try:
         with module.shared_deadline(READY_PUSH_LIST_SECONDS):
-            host = module.Host(required=pinned_required(where) or "protection", cwd=os.path.normpath(where))
+            host = module.Host(required=required, cwd=os.path.normpath(where))
             return host, host.open_prs()
     except subprocess.TimeoutExpired:  # its text names the resolved program path
         return None, "a read timed out after %d s" % READY_PUSH_LIST_SECONDS

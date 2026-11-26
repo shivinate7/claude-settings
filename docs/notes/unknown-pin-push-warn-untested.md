@@ -1,0 +1,1 @@
+- unknown-pin-push-warn-untested: no test reads the stderr line a push prints under an unknown pin (READY_PUSH_PIN_WARNING, hooks/guard_merge.py). When the pull request list read failed, the line still says the push was judged as under the protection pin, though the push was allowed unchecked. Review finding F9. Seen: 2026-11-25 x1
