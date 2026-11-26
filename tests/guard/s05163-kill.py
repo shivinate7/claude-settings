@@ -429,12 +429,10 @@ if os.name != "nt":   # Windows has no `ps`: ownership reads unknown, so these a
 else:
     skip_case("kill: a job this session started, still parented to its own shell, passes", NO_PS)
     skip_case("kill: a child of a job this session started, alive, passes", NO_PS)
-# TWELVE `&` JOBS WITH ONE `$!`. The bare-& test is skipped when `$!`
-# appears anywhere in the command (decision detached-launch-refused: "unless the command captures the pid
-# with `$!`"). `$!` names only the last job, so eleven of the twelve pids cannot be named. A pin of that
-# exemption as written; the fix waits for the owner's grant.
-sh("detached: twelve background jobs in a loop, one echo $! after them, pass (the $! exemption)",
-   "for i in $(seq 12); do yes >/dev/null 2>&1 & done; echo $!", "allow", cwd=NOGIT)
+# TWELVE `&` JOBS WITH ONE `$!`. A `$!` after `done` names only the last job, so eleven of the twelve
+# pids cannot be named. Refused: one `$!` per `&` job (decision detached-launch-refused).
+sh("detached: twelve background jobs in a loop, one echo $! after them, is refused under one $! per & job",
+   "for i in $(seq 12); do yes >/dev/null 2>&1 & done; echo $!", "deny", "detached-launch", cwd=NOGIT)
 
 sh("kill: a pid list made by pgrep", "kill $(pgrep -f node)", "deny", "machine-wide-kill",
    cwd=NOGIT)
@@ -1434,6 +1432,75 @@ sh("detached: nohup wrapping a real kill still hits rule 2, not this rule",
    "nohup pkill foo", "deny", "machine-wide-kill", cwd=NOGIT)
 sh("detached: the shape inside a heredoc body is data, not a command",
    "cat <<'EOF' > notes.txt\nnohup python3 server.py &\nEOF", "allow", cwd=NOGIT)
+
+# PID CAPTURE, PER JOB. A background job is exempt only with its own `$!`: one `$!` in the call covers
+# one job, not every job in it. A `$!` inside quotes is text, not a capture.
+sh("detached: twelve background jobs under one pid capture are refused",
+   " ".join(["yes > /dev/null &"] * 12) + " echo $!", "deny", "detached-launch", cwd=NOGIT)
+sh("detached: two different background jobs under one pid capture are refused",
+   "make test & make lint & echo $!", "deny", "detached-launch", cwd=NOGIT)
+sh("detached: a quoted $! is text, so the background job it follows is refused",
+   "make test & echo 'pid $!'", "deny", "detached-launch", cwd=NOGIT)
+# LOAD GENERATORS. A CPU load generator (`yes`, `stress`, a busy `while` loop with no sleep) starts in
+# the background only under a time limit and in its own session. The form read is `timeout N setsid
+# cmd &`: the time limit is the `timeout` word before the command, the session is the `setsid` word after it.
+sh("detached: yes in the background with no time limit is refused", "yes > /dev/null & echo $!",
+   "deny", "detached-launch", cwd=NOGIT)
+sh("detached: stress with a pid capture and no time limit is refused", "stress --cpu 4 & pid=$!",
+   "deny", "detached-launch", cwd=NOGIT)
+sh("detached: a busy while true loop with no sleep, in the background, is refused",
+   "while true; do :; done & pid=$!", "deny", "detached-launch", cwd=NOGIT)
+sh("detached: a busy while colon loop with no sleep, in the background, is refused",
+   "while :; do :; done & pid=$!", "deny", "detached-launch", cwd=NOGIT)
+sh("detached: yes under a time limit but not its own session is refused",
+   "timeout 600 yes > /dev/null & pid=$!", "deny", "detached-launch", cwd=NOGIT)
+# A brace group is a job too: its `&` starts the load generator inside it, and the group's `$!` is the one pid
+# the call holds. No `timeout N setsid` form wraps the yes, so the rule refuses it.
+sh("detached: yes inside a brace group run in the background, with its $! captured, is refused",
+   "{ yes > /dev/null; } & echo $!", "deny", "detached-launch", cwd=NOGIT)
+# CONTROLS. A test job or server with its own capture is no load generator; a time-limited yes in its
+# own session, a foreground pipe and a short sleep start nothing the rule refuses.
+sh("detached: one background test job with its own pid capture is allowed",
+   "python3 lint/test_guard_inputs.py & pid=$!", "allow", cwd=NOGIT)
+sh("detached: two background jobs, each with its own pid capture, are allowed",
+   "make test & p1=$!; make lint & p2=$!", "allow", cwd=NOGIT)
+sh("detached: yes under a time limit in its own session, pid printed, is allowed",
+   "timeout 600 setsid yes > /dev/null & echo $!", "allow", cwd=NOGIT)
+sh("detached: a foreground yes piped into head starts no job", "yes | head -n 5", "allow",
+   cwd=NOGIT)
+sh("detached: a short background sleep with its pid captured is allowed", "sleep 5 & pid=$!",
+   "allow", cwd=NOGIT)
+
+# EACH JOB'S OWN CAPTURE. A job is exempt only when a `$!` follows it, in its own segment or in the loop body
+# that holds it. One `$!` after a loop, or one written before a job, captures no job of the call.
+sh("detached: a job in a for loop body, one pid capture after the loop, is refused",
+   "for i in 1 2 3; do npm run worker & done; echo $!", "deny", "detached-launch", cwd=NOGIT)
+sh("detached: a pid captured before its job is refused", "echo $!; npm run worker &", "deny",
+   "detached-launch", cwd=NOGIT)
+# A load generator inside sh -c or bash -c is read from the body, as a bare yes is.
+sh("detached: yes inside sh -c started in the background, pid printed, is refused",
+   "sh -c 'yes > /dev/null' & echo $!", "deny", "detached-launch", cwd=NOGIT)
+sh("detached: yes inside nohup sh -c started in the background, pid printed, is refused",
+   "nohup sh -c 'yes' & echo $!", "deny", "detached-launch", cwd=NOGIT)
+sh("detached: yes inside bash -c started in the background, pid captured, is refused",
+   "bash -c 'yes' & pid=$!", "deny", "detached-launch", cwd=NOGIT)
+# `timeout 0` sets no time limit, so a yes under it runs until it is killed.
+sh("detached: yes under timeout 0, which sets no limit, is refused",
+   "timeout 0 setsid yes > /dev/null & echo $!", "deny", "detached-launch", cwd=NOGIT)
+# CONTROLS for the per-job capture and the scanner: a loop body that captures its own job, a hash inside
+# double quotes, and a lone quote in an echo, each beside a capture that follows a job.
+sh("detached: a job in a for loop body with its own pid capture in the body is allowed",
+   "for i in 1 2 3; do npm run worker & pids+=($!); done", "allow", cwd=NOGIT)
+sh("detached: a background job with the pid printed after it is allowed", "npm run worker & echo $!",
+   "allow", cwd=NOGIT)
+sh("detached: a time-limited yes in its own session under sh -c, pid printed, is allowed",
+   "timeout 600 setsid sh -c 'yes > /dev/null' & echo $!", "allow", cwd=NOGIT)
+sh("detached: sh -c of a test with the pid printed is allowed", "sh -c 'npm test' & echo $!",
+   "allow", cwd=NOGIT)
+sh("detached: a hash inside double quotes after a job with its capture is text, allowed",
+   'make test & pid=$!; echo "# $!"', "allow", cwd=NOGIT)
+sh("detached: a lone quote in an echo after a job, then its capture, is allowed",
+   'make test & echo "it\'s"; p=$!', "allow", cwd=NOGIT)
 
 # THE WINDOWS FORMS, the owner's scope change: the same protection PowerShell needs, since
 # guard.py judges Bash and PowerShell alike (SHELL_TOOLS). MEASURED 2026-09-24 against local
