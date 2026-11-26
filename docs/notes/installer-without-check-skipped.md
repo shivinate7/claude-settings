@@ -1,0 +1,1 @@
+- installer-without-check-skipped: An installer with no `--check` mode is skipped, not run: the marker test at hooks/session_start.sh:227 fails, so session start prints nothing for that installer. Seen: 2026-11-25 x1

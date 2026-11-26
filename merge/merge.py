@@ -42,6 +42,11 @@
   merge <pr> --confirm --express   go on to the merge only for a prose-only diff (main's ci-scope.sh turns on nothing) whose body has a `Ruling: <id>`
                           line naming an entry in origin/roadmap's rulings; any other case refuses before a push.
   merge <pr> --confirm, after a merge that changes skills/waiting-page/page.html: one report-only line says to republish each live page (UNKNOWN when the changed paths could not be read). The exit code is unchanged.
+  merge <pr> --confirm, and merge <pr> --ready, on a ready pull request (a draft's confirm and a batch integration PR print none): before the lock, one hint line from one read of the
+                          CI queue (`GET actions/runs`, status queued, per_page 1, total_count). An empty queue says the PR goes alone and reads no ready list. A queue that is not empty
+                          reads the ready, reviewed PRs (reviewed_read) and names the set `combine_train.py --build` takes (the ready rows but the front PR, the lowest number), with the queue depth. At 10 or more of them (BUILD_THRESHOLD) a batch
+                          runner gets the `combine_train.py --build` command and any other session is told to hand them to the batch runner; fewer merge alone. A member whose head
+                          clashes with this one (`git merge-tree`) is named. A failed read, a failed fetch of heads for the clash read, or a merge-tree answer of unknown prints one line saying so. A hint only: no verdict and no exit code changes. Cost: one GET, and on a non-empty queue one ready-list read.
   merge --unlock [branch] remove the merge lock on the branch (default: the default branch). Never checks the holder. A cloud run reads the lock first and skips one already released.
   merge <pr> --review-record --head SHA --kind K --guard yes|no [--round N:ROLE:MODEL:VERDICT ...]
                           [--fix-check HEAD:reviewer:MODEL:PASS|FAIL] [--net-value V] [--grant "#PR, item N x, owner, YYYY-MM-DD HH:MM CST|CDT"]
@@ -1284,6 +1289,7 @@ class Host:
         self.budget = {}  # remaining, limit, reset (epoch seconds) from the newest reply that had a header block; None for each one the reply lacks or garbles, so an unknown budget never refuses
         self.memo = {}  # (route, query, flags) -> the reply of this run's GET, kept until any write (api)
         self.route_counts = {}  # (method, route template) -> gh calls made, retries included (route_template)
+        self.head_rows = {}  # head sha -> the check rows of head_state's newest read of it, so confirm reads whether a job ran without a second read (ran_job)
 
     batch_brake = None  # the guard sets it to merge.ignoreChecks ({} for none): head_read then also reads the other ready pull requests on the base (batch_running). The merge tool never sets it
     commit_message = None  # set by confirm just before the merge: one line per reason flag that lifted a check. None leaves GitHub's default message
@@ -1484,6 +1490,13 @@ class Host:
     def open_pulls(self):
         """-> the open pull requests (drafts too), every page, as `GET pulls` lists them. A failed read is a Stop, never an empty list."""
         return self.pages("pulls", fields={"state": "open"})
+
+    def queued_runs(self):
+        """-> the count of the repo's queued CI runs (`GET actions/runs`, status queued, one run a page, reading total_count): one call, the queue depth queue_hint prints. A failed read is a Stop."""
+        c, out = self.api("actions/runs", fields={"status": "queued", "per_page": 1}, memo=False)
+        if c:
+            raise Stop("reading the queued CI runs failed " + READ_CITE + ": " + out)
+        return int(json.loads(out)["total_count"])
 
     def read_pr(self, n):
         """-> the pr() fields of pull request n, one read, with no change to this Host. A failed read is a Stop."""
@@ -2074,6 +2087,7 @@ class Host:
             sha = sha or self.pr(n)["head"]
             got = self.checks(n, warn=False, sha=sha)
             names = [ROLLUP_JOB] if needs_proof else self.required_names()
+            self.head_rows[sha] = got
             red, pending, ignored = self.classify(got, names, self.ignore, self.branch)
             r_red, r_pending = self.run_state(sha)
         except Stop as e:
@@ -3232,35 +3246,93 @@ def ready_batch_numbers(rows, pulls):
 
 
 
-def combine_hint(root, host):
-    """Print one line when another lane lint is running or queued: the ready PRs whose records pass, and the command that builds a train from them, so a lane
+def clashing_members(root, pulls, others, mine):
+    """-> (clashes, unknown, why): the (number, files) of each PR in `others` whose head conflicts, by `git merge-tree`, with the head `mine`; the numbers whose clash
+    read git could not make (a merge-tree answer of unknown, which a head the clone still lacks after a failed fetch gives); and one line of why, the fetch's when it failed,
+    else the first merge-tree's. A PR whose head the clone lacks is fetched once (fetch_branch_heads). An unreadable pair is never a clash and never clean: the caller says
+    the clash read is unknown. Cost: at most one fetch and one merge_tree per member."""
+    heads = {d["number"]: d["head"]["sha"] for d in pulls}
+    why = ""
+    if missing_commits(root, *[heads[m] for m in others if m in heads], mine):
+        code, out = fetch_branch_heads(root)
+        if code:
+            why = f"git fetch exited {code}: {(out.strip().splitlines() or ['no output'])[0][:120]}"
+    clashes, unknown = [], []
+    for m in others:
+        if m in heads:
+            state, files = conflicting_files(root, mine, heads[m])
+            if state == "conflict":
+                clashes.append((m, files))
+            elif state != "clean":
+                unknown.append(m)
+                why = why or f"{(files[:1] or ['no reason'])[0][:120]}"
+    return clashes, unknown, why
+
+def combine_hint(root, host, trigger=None, exclude=None):
+    """Print one line when a batch could skip a wait: the ready PRs whose records pass, and the command that builds a train from them, so a lane
     does not wait on a queue the batch could skip (decision session-tiers, merge alone or combine). The set is the one `combine_train.py --build` takes
-    (batch_rows there): rows whose act is `batch` on a main base, the lowest-numbered one (the front PR, which merges alone) left out, then at a backlog the members whose queued head has a failed job or
-    unreadable runs (Host.batch_member_runs, the build's call), each named on a line of its own before the names line. Never stops a lint: a read that fails prints one line saying so. Cost, when another lane lint runs and the backlog is at the threshold: Host.batch_member_runs per ready member."""
-    pids = other_lane_lint_pids(root)
-    if not pids:
-        return
-    who = f"another lane lint is running or queued (pid {', '.join(map(str, sorted(pids)))})"
+    (batch_rows there): the rows whose act is `batch` on a main base (ready_batch_numbers), the lowest number, the front PR, which merges alone, left out. That
+    slice is mirrored in batch_rows, which cannot call a new merge.py name (test_combine_train GIT_WRAPPERS). At a backlog the members whose queued head has a failed job
+    or unreadable runs are then left out (Host.batch_member_runs, the build's call), each named on a line of its own before the names line. The count of what stays is
+    compared with BUILD_THRESHOLD, and only a set at the threshold gets the build command. Never stops a lint: a read that fails prints one line saying so.
+    `trigger` None: the trigger is another lane lint of this clone, running or queued. Or `trigger` is the caller's own words for why it asks (queue_hint's CI
+    queue depth) and `exclude` is the info row of the pull request under merge: its head is read against every other ready PR, a clash is named, and a clash
+    read git could not make adds one sentence saying the clash read is unknown. At the backlog only a batch runner gets the build command; any other
+    session is handed to the batch runner (decision session-tiers: only the batch runner owns a batch). Cost, at the threshold: Host.batch_member_runs per ready member."""
+    if trigger is None:
+        pids = other_lane_lint_pids(root)
+        if not pids:
+            return
+        who = f"another lane lint is running or queued (pid {', '.join(map(str, sorted(pids)))})"
+    else:
+        who = trigger
     try:
         rows, left_out = [], []
         _lines, pulls, _totals = reviewed_read(host, None, ledger=rows)
-        ready = ready_batch_numbers(rows, pulls)[1:]
+        every = ready_batch_numbers(rows, pulls)
+        ready = every[1:]
         if len(ready) >= BUILD_THRESHOLD:  # under the backlog no train is built, so no run is read; the build drops a member by the same call
             ready, left_out = host.batch_member_runs(ready, {d["number"]: d["head"]["sha"] for d in pulls})
+        clashes, unknown, why = clashing_members(root, pulls, [m for m in every if m != exclude["number"]], exclude["head"]) if exclude else ([], [], "")
     except Exception as e:  # a hint is never a verdict: an unreadable list is reported as unknown
         say(f"merge: {who}. The ready PRs with passing records are unknown: the read failed ({type(e).__name__}), so no combine hint. Run `merge --reviewed`.")
         return
     for n, detail, _unknown in left_out:  # the build names each of these too; a reader who sees #N missing from the names line learns why
         say(f"merge: {who}. #{n} is left out of the combine: {detail}")
     names = ", ".join(f"#{n}" for n in ready) or "none"
+    clash = "".join(f" #{m} clashes with this pull request ({', '.join(files[:3]) or 'no path named'}), so it cannot join a train with it." for m, files in clashes)
+    if unknown:
+        clash += f" The clash read is unknown for {', '.join(f'#{m}' for m in unknown)} ({why}), so a clash with this pull request is not ruled out."
     tool = os.path.join(os.path.dirname(os.path.abspath(__file__)), "combine_train.py")
+    alone = f" PR {exclude['number']} itself goes alone." if exclude else ""
     if not os.path.isfile(tool):
-        say(f"merge: {who}. Ready PRs with passing records: {names}. This checkout has no combine command.")
+        say(f"merge: {who}. Ready PRs with passing records: {names}. This checkout has no combine command.{clash}")
     elif len(ready) < BUILD_THRESHOLD:
-        say(f"merge: {who}. Ready PRs with passing records: {names}, under the backlog of {BUILD_THRESHOLD}, so they merge alone and no train is built.")
+        say(f"merge: {who}. Ready PRs with passing records ({len(ready)}): {names}, under the backlog of {BUILD_THRESHOLD}, so they merge alone and no train is built.{alone}{clash}")
+    elif exclude and read_merge_role() != "batch-runner":
+        say(f"merge: {who}. {len(ready)} ready PRs with passing records ({names}) could merge as one train. Hand them to the batch runner, which builds it.{clash}")
     else:
         say(f"merge: {who}. Combine the {len(ready)} ready PRs with passing records ({names}) instead of linting one by one: "
-            f"python3 {tool} --root {root} --build --name <name>")
+            f"python3 {tool} --root {root} --build --name <name>{clash}")
+
+def queue_hint(root, host, n, info):
+    """Print one line, before the lock, on `merge N --confirm` and `merge N --ready` for a ready pull request: how deep the CI queue is and whether N goes alone or a train
+    is worth building. One read of the queued run count (Host.queued_runs). An empty queue says N goes alone and reads no ready list; any other depth goes through
+    combine_hint with N as `exclude`: N stays in the ready set when it is a batch row (only the front PR is left out), and N is read against the others for a clash. A failed read prints one unknown line. A hint only: no verdict, no exit code. A batch integration PR gets none, and a host that
+    reads no queue (a scripted one) gets none. Under the stamp value "none" no CI is read, so none (decision private-repos-no-ci). Cost: one `actions/runs` GET, then on a queue that is not empty one ready-list read (reviewed_read)."""
+    if is_integration_pr(info) or not hasattr(host, "queued_runs"):
+        return
+    if getattr(host, "required", None) == "none":
+        return  # no CI run is read under the stamp value none (decision private-repos-no-ci)
+    try:
+        depth = host.queued_runs()
+    except Exception as e:
+        say(f"merge: the CI queue depth is unknown: the read failed ({type(e).__name__}), so no batch hint for #{n}.")
+        return
+    if depth <= 0:
+        say(f"merge: the CI queue is empty (0 queued runs), so #{n} goes alone.")
+        return
+    combine_hint(root, host, trigger=f"the CI queue holds {depth} queued run{'s' if depth != 1 else ''}", exclude={"number": n, "head": info["head"]})
 
 
 def drop_worktree(root, tmp, wt):
@@ -5211,6 +5283,11 @@ def head_check_red(state):
     others = [e for e in rest.split("; ") if e and not (e.startswith("workflow ") and e.endswith(NO_JOB_RAN))]
     return "a check is " + state if others else None
 
+def ran_job(host, sha, job):
+    """True when the check rows `host` read for `sha` (Host.head_state, no new read) hold a passing row of `job`. A skipped row is no run: checks.yml skips its `checks` job on a
+    records-only delta, so a green rollup over that skip proves no suite. A host that kept no rows for `sha` (a fake, or a read that failed) is False, so the head stays unproven."""
+    return any(b == "pass" for b, _ in (getattr(host, "head_rows", None) or {}).get(sha, {}).get(job, []))
+
 CANCELLED = "cancelled"  # GitHub's conclusion of a cancelled run or job: judge_runs words a cancelled run with it, and it is the key of clear_rule.CONCLUSION_BUCKET
 
 @functools.lru_cache(maxsize=None)
@@ -5799,6 +5876,8 @@ def draft_step(root, cfg, n, host, info, merge_main=False):
     ok, why = host.ready(n)
     if ok:
         say(f"merge: #{n} is ready now. No pull request was merged. When its run is green, run --confirm again to merge.")
+        if merge_main:  # only `--ready`: a draft --confirm is the records step, and prints no queue hint
+            queue_hint(root, host, n, info)
     else:
         say(f"merge: #{n} stays a draft ({' '.join(why.split()) or 'no reason given'}). Mark it ready after its draft run shows, then run --confirm again to merge. No pull request was merged.")
     return 0
@@ -6038,11 +6117,12 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
             own = None  # the live head's own state, read once when this tool's commits sit on the proof
             if proof != info["head"]:
                 own = host.head_state(n, info["head"], **proof_kw(needs_proof))
-                if head_not_green(own) is None and not state.startswith("unknown (") and not head_check_failed(state):  # a green run of the live head itself proves it over a pending or skipped read of the head under it (a draft's skipped rollup is no failure of this head). A proof that failed (ruling R1: a red parent refuses a clean main merge) or could not be read still refuses, as before; one red only from cancelled checks and runs is no failure and reads like a pending one
-                    earlier = host.failed_attempts(proof) if head_check_red(state) else []  # a cancel-only proof: its latest rows hold no failure, but an earlier attempt whose re-run the next push cancelled may have failed
+                failed_proof = head_check_failed(state)
+                if head_not_green(own) is None and not state.startswith("unknown (") and (not failed_proof or ran_job(host, info["head"], LINT_JOB)):  # a green run of the live head itself proves it over a pending or skipped read of the head under it (a draft's skipped rollup is no failure of this head). A proof that could not be read still refuses; one red only from cancelled checks and runs is no failure and reads like a pending one. A proof that failed a job is covered only by a live run that ran its checks job (owner, 20:31 CST Nov 25 2026, reversing ruling R1 for that case)
+                    earlier = host.failed_attempts(proof) if head_check_red(state) and not failed_proof else []  # a cancel-only proof: its latest rows hold no failure, but an earlier attempt whose re-run the next push cancelled may have failed. A proof whose latest rows failed is already read, and needs no second read
                     if earlier:
                         raise Stop(f"the checks of the proven head {proof[:9]} hold a failed attempt that a later one cancelled, so the own run of {info['head'][:9]} does not cover it, and nothing was claimed or pushed {GREEN_CITE}: {'; '.join(earlier)}.")
-                    say(f"merge: the own run of {info['head'][:9]} is green, so it is the proof, not the checks of {proof[:9]} under it.")
+                    say(f"merge: the own run of {info['head'][:9]} is green, so it is the proof, not the checks of {proof[:9]} under it" + (f", which failed ({failed_proof}); the own run ran its {LINT_JOB} job." if failed_proof else "."))
                     proof, state, not_green = info["head"], own, None
                 else:
                     say(f"merge: {info['head'][:9]} is only this tool's own page and base-merge commits on {proof[:9]}, so the checks of {proof[:9]} are the proof.")
@@ -8748,12 +8828,15 @@ def main(argv, host=None, lock=None, hosts=None):
                     say(note)
             if not info["draft"]:
                 say(f"merge: #{a.pr} is ready already. Nothing was changed.")
+                queue_hint(root, h, a.pr, info)
                 return 0
             return draft_step(root, cfg, a.pr, h, info, merge_main=True)
         checked = None  # the head the lane-lint PASS names; confirm refuses any other
         if a.confirm and os.environ.get("CLAUDE_CODE_REMOTE") == "true" and isinstance(h, Host) and not info["draft"]:  # a scripted host that is no Host brings its own reads; a draft is the records step, never a join
             lint_check(h, a.pr, info, root, a.config)
             checked = info["head"]
+        if a.confirm and not info["draft"]:  # a hint on the ready pull request, before the lock; a draft's confirm is the records step
+            queue_hint(root, h, a.pr, info)
         if a.confirm:
             with release_on_signals():
                 proof = (lambda live: lint_proves_head(h, a.pr, live, root, a.config)) if hasattr(h, "issue_comments") else None  # read in the cloud and on a computer; a scripted host with no comment read reads no comments

@@ -1,0 +1,1 @@
+- batch-hint-on-ready-draft: `merge N --ready` on a draft prints the batch hint (`queue_hint`) once its ready checks pass (`draft_step` in merge/merge.py), and `merge N --confirm` on a ready PR prints it too; the design record (decision session-tiers, item 3) names only `merge N --confirm`. Seen: 2026-11-25 x1
