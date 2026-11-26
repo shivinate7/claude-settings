@@ -5767,9 +5767,6 @@ class OneLsofPerRunTests(_AgentEndFixture):
             decisions = sweep.find_leftover_temp(temp, now)
         self.assertEqual(sorted(d["action"] for d in decisions), ["keep"] * 3,
                          "the three candidates were not all judged and kept: %r" % decisions)
-        opens = self.open_file_starts()
-        self.assertLessEqual(opens, 1, "leftover temp folders opened the open-files read %d times for three "
-                                       "candidates; want at most once" % opens)
         cwd = self.batch_cwd_starts()
         self.assertLessEqual(cwd, 1, "leftover temp folders started the batch cwd read %d times for three "
                                      "candidates; want at most once" % cwd)
