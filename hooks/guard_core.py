@@ -28,9 +28,11 @@ from git_reads import (  # noqa: F401
     worktree_locked,
 )
 
-# The folder the guard files sit in: the one home a family module reads to find a file beside the hooks (the same
-# folder guard.py's own `_HERE` names, since the installer copies every guard file together).
-HOOKS_HOME = os.path.dirname(os.path.realpath(__file__))
+# The hooks folder: the one home a family module reads to find a file beside the hooks. It is guard.py's own `_HERE`.
+# An installed guard.py loads this file from <hooks>/guard.d/<id>, one level down, so that folder reads as its parent's
+# parent; the repo copy and a flat install sit in the hooks folder itself.
+HOOKS_HOME = (lambda own: os.path.dirname(os.path.dirname(own)) if os.path.basename(os.path.dirname(own)) == "guard.d"
+              else own)(os.path.dirname(os.path.realpath(__file__)))
 
 
 def is_cloud() -> bool:
