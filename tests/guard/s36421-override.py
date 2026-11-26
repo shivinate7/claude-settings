@@ -727,8 +727,8 @@ def ov_negated_role_check():
 
 def ov_two_models_check():
     """`just use sonnet agents throughout or even opus ...` (the judge says sonnet, the first model he names) names two models
-    and negates neither, so it writes no hold at all (owner ruling, 2026-11-26 00:18 CST; settled 00:18, relayed 00:20 CST):
-    the agents run their role's model. An Opus builder spawn is refused under agent-model-cap."""
+    and negates neither, so it writes no hold at all: the agents run their role's model. An Opus builder spawn is refused
+    under agent-model-cap."""
     config, session, rule = ov_config("two-models"), "ov-two-models", "agent-model-cap"
 
     def check():
