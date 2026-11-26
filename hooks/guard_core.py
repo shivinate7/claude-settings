@@ -28,6 +28,12 @@ from git_reads import (  # noqa: F401
     worktree_locked,
 )
 
+# The hooks folder: the one home a family module reads to find a file beside the hooks. It is guard.py's own `_HERE`.
+# An installed guard.py loads this file from <hooks>/guard.d/<id>, one level down, so that folder reads as its parent's
+# parent; the repo copy and a flat install sit in the hooks folder itself.
+HOOKS_HOME = (lambda own: os.path.dirname(os.path.dirname(own)) if os.path.basename(os.path.dirname(own)) == "guard.d"
+              else own)(os.path.dirname(os.path.realpath(__file__)))
+
 
 def is_cloud() -> bool:
     """True in a Claude Code cloud session: CLAUDE_CODE_REMOTE is exactly "true". Read at each call. The one home of the
@@ -1347,12 +1353,12 @@ PATH_EXTENSION = re.compile(r"\.[A-Za-z0-9]{1,6}$")
 REDIRECTION = re.compile(
     r"&>>?\s*\S+"       # &>file, &>>file
     r"|<\s*\S+"         # <file
-    r"|\d?>>?\s*\S+"    # >file, >>file, 2>file, 2>>file, 2>&1, >&2, 1>&2
+    r"|\d?(?:>\||>>?)\s*\S+"    # >file, >>file, >|file (override noclobber), 2>file, 2>>file, 2>&1, >&2, 1>&2
 )
 
 
-# The operator of a redirection, read at a word's start or after one: `&>`, `<`, `>`, `>>`, `2>`, with the space before its target.
-_REDIRECT_OPERATOR = re.compile(r"&>>?\s*|<\s*|\d?>>?\s*")
+# The operator of a redirection, read at a word's start or after one: `&>`, `<`, `>`, `>>`, `>|`, `2>`, with the space before its target.
+_REDIRECT_OPERATOR = re.compile(r"&>>?\s*|<\s*|\d?(?:>\||>>?)\s*")
 
 
 def strip_redirections(segment: str) -> str:
@@ -2343,14 +2349,16 @@ def _log_unlock(handle) -> None:
 
 _override_who = ("", None)  # (session id, agent id) of the call this process judges
 _override_cwd = ""  # the call's directory, where the step grant is read
+_override_transcript = None  # the session's transcript path, where a model hold that ends at the report is read
 
 
-def set_override_context(session_id, agent_id, cwd=None) -> None:
-    """Name the session and agent whose call this process judges, and its directory, for the owner
+def set_override_context(session_id, agent_id, cwd=None, transcript=None) -> None:
+    """Name the session and agent whose call this process judges, its directory and its transcript, for the owner
     override."""
-    global _override_who, _override_cwd
+    global _override_who, _override_cwd, _override_transcript
     _override_who = (session_id, agent_id or None)
     _override_cwd = cwd if isinstance(cwd, str) else ""
+    _override_transcript = transcript if isinstance(transcript, str) else None
 
 
 def set_override_veto(veto) -> None:
@@ -2384,11 +2392,13 @@ COMPLY_TAIL = "If this refusal looks wrong for your task, comply anyway and say 
 
 
 def refuse(tool: str, decision: str, rule: str, reason: str, matched: str, spawn_role=None, on_lift=None,
-           continue_on_lift: bool = False):
+           continue_on_lift: bool = False, spawn_model=None):
     """Print a deny (an ask only for the agent-model cap write) and exit, unless an owner override lifts it (decision
     owner-override). A lifted act prints one context line and no decision, so the normal permission flow runs. The
     veto runs before the override is taken, so a call that also holds a never-lifted act spends no override.
     spawn_role is set only on the Opus spawn refusal, the one refusal an Opus override may lift.
+    spawn_model is the model of the spawn the refusal is about. Only the Opus spawn refusal passes it (rule 9d); the model
+    floor and the role row pass none, so a held model lifts neither (the guard judges the hold itself).
     on_lift, when set, runs once when an override lifts the act, so a rule may keep state only for an act that lands.
     continue_on_lift makes a lifted act return True instead of exiting, so the caller can judge the next rule of a
     group (the lane start's rules); any other outcome exits as before.
@@ -2398,7 +2408,7 @@ def refuse(tool: str, decision: str, rule: str, reason: str, matched: str, spawn
         try:  # an import or read failure is no override: the refusal stands
             import override
             lifted = override.take(_override_who[0], _override_who[1], override.now(), rule, spawn_role,
-                                   _override_cwd)
+                                   _override_cwd, _override_transcript, spawn_model)
             step = override.step_read() if lifted in (override.STEP_LIFTED, override.STEP_UNREAD) else None
         except Exception:
             lifted = step = None
@@ -2744,12 +2754,17 @@ FIND_EXEC_ACTIONS = ("-exec", "-execdir", "-ok", "-okdir")
 def wrapped_commands(tokens, at: int, strict: bool = False):
     """The command texts the runner at `tokens[at]` starts, else []. Read: `docker|podman exec`,
     `kubectl exec ... --`, `find -exec ... ;`, `su -c`, `flock FILE`, `stdbuf`, `ionice`, `unbuffer`,
-    `caffeinate`, `watch`. A text keeps its quoting, so `docker exec c sh -c 'x y'` still reads as
+    `caffeinate`, `watch`, `red-run`. A text keeps its quoting, so `docker exec c sh -c 'x y'` still reads as
     `sh -c`. `watch` joins its words with spaces and hands the line to `sh -c`, so its text is that
     line.
     With `strict`, a `docker|podman exec` that has a flag before the container the tables do not list reads
     as no child: the flag may take a value, and the container is then misplaced."""
     word, rest = basename(tokens[at]), tokens[at + 1:]
+    if word == "red-run":
+        # `red-run COMMIT [--add P]... [--replace P OLD NEW]... -- CMD` (bin/red-run `parse`): the first `--` ends the
+        # head, so a --replace value is never read as the command. A call with no commit before it runs nothing.
+        cut = rest.index("--") if "--" in rest else 0
+        return [shlex.join(rest[cut + 1:])] if cut and not rest[0].startswith("-") and rest[cut + 1:] else []
     if word == "watch":
         index, _ = _wrapper_flags(word, rest, 0)
         return [" ".join(rest[index:])] if rest[index:] else []
@@ -2815,13 +2830,24 @@ def bare_words(segment: str):
     return words, {i for i, (_, b) in enumerate(spans) if b}
 
 
-def inner_commands(tokens):
+# The runners that start their command on another machine or in a container: not this machine's processes.
+REMOTE_RUNNERS = {"docker", "podman", "kubectl"}
+
+
+def inner_commands(tokens, local: bool = False):
     """Every command text one segment hands on, for a rule that judges the command word: what a
     shell, `eval` or `ssh` gets (nested_script, ssh_remote_script) and what a runner starts
-    (wrapped_commands), at each command in the segment. The one reader of these wrappers."""
+    (wrapped_commands), at each command in the segment. The one reader of these wrappers.
+    With `local`, a text that runs on another machine or in a container (`ssh`, `docker exec`,
+    `kubectl exec`) is left out: a rule about this machine's processes reads the rest."""
     found = [nested_script(tokens), ssh_remote_script(tokens)]
     for at in command_indexes(tokens):
         found.extend(wrapped_commands(tokens, at))
+    if local:
+        far = [ssh_remote_script(tokens)] + [text for at in command_indexes(tokens)
+                                             if basename(tokens[at]) in REMOTE_RUNNERS
+                                             for text in wrapped_commands(tokens, at)]
+        found = [text for text in found if text not in far]
     return [text for text in found if text]
 
 

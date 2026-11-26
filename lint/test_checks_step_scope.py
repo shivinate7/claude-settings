@@ -108,6 +108,7 @@ NO_MD = [
     'Stop-hook stamped copy suite',
     'Stop-hook route row falsifier suite',
     'Stop-hook hand-off cite suite',
+    'Stop-hook model line suite',
     'Clause parser suite',
     'Stop-hook landing fixture suite',
     'Ruling home fixture suite',
@@ -398,6 +399,7 @@ MAIN_STEPS = [
     'Stop-hook stamped copy suite',
     'Stop-hook route row falsifier suite',
     'Stop-hook hand-off cite suite',
+    'Stop-hook model line suite',
     'Clause parser suite',
     'Stop-hook cannot-claim suite',
     'Stop-hook landing fixture suite',
@@ -586,7 +588,7 @@ TRANSITIVE_MD_READERS = ["skills/impeccable/SKILL.md", "test_guard.py", "drive_t
 # A reader named in a file that does not read it at run time, with one reason. The ALLOWED rule, for these names.
 TRANSITIVE_ALLOWED = {
     "lint/test_ci_scope.py": (["test_guard.py"], "a changed path the scope detector is given; no file is run"),
-    "hooks/guard.py": (["skills/impeccable/SKILL.md"], "impeccable_command_verbs opens it only when a command verb check runs; an in-process audit hook over the 83 scoped python suites saw no open (read 13:32 CST Nov 14; a suite's own child processes were not watched)"),
+    "hooks/guard_impeccable.py": (["skills/impeccable/SKILL.md"], "impeccable_command_verbs opens it only when a command verb check runs; an in-process audit hook over the 83 scoped python suites saw no open (read 13:32 CST Nov 14; a suite's own child processes were not watched)"),
     "lint/rule_audit.py": (["test_guard.py"], "section_dir and _with_sections only parse hooks/test_guard.py and tests/guard/*.py as Python; nothing runs them or opens skills/impeccable"),
     "lint/test_rule_audit.py": (["test_guard.py", "tests/guard"], "builds its own hooks/test_guard.py and tests/guard fixture in a temp tree"),
     "lint/test_check_hook_dup_names.py": (["tests/guard"], "writes its own tests/guard fixture sections in a temp tree; the check parses them as Python and opens no .md"),

@@ -258,7 +258,7 @@ Each page has one writer: triage (owner, 2026-11-10 14:30-14:32 CST). In a run w
 wears triage's hat and writes it (owner, 2026-11-10 14:33 CST). The page's name for it is `writer` in `meta/page`. Find
 it with `ArtifactData get meta/page`. With no `writer`, the session that makes the page writes it
 into `meta/page`. The writer watches the page ("Read the answers"). A repo may name the writer's session id in its
-extras key `page-writer`; the pick guard uses it when the transcript has no `meta/page` read. The key send counts only on a delivered result, or on a failure of `session_inactive` (the writer is gone; the report names the failed send). A rotation updates it.
+extras key `page-writer`; the pick guard uses it when the transcript has no `meta/page` read. A repo with no page writer sets the key to `none`. The pick guard then asks a session that faces the owner for no send and no page item, and prints a note that the question was not sent. A lane still sends its question to its parent (see below). The key send counts only on a delivered result, or on a failure of `session_inactive` (the writer is gone; the report names the failed send). A rotation updates it.
 
 - Every other session sends its question to the writer, which writes the item. A lane sends its question
   to its parent in the same turn, and triage writes the item ("Add an item", step 0). Not built: the route from a lane to triage.

@@ -676,6 +676,28 @@ LOG_CHECKS_EXTRA.append(("handoff-checked-stamp: a premise that was [ruling] bef
                                   allowed=hcs_write(HCS_T_DEMOTE, transcript=hcs_tx("none")))))
 
 
+# ------------------------------------------------------------------------- a Bash call that restamps a premise
+# A Bash call that puts a restamped handoff on the session handoff is judged as the Write of its content. The scratch file
+# is the handoff with P1 restamped and nothing else changed. The refused call comes first: with no evidence it is refused,
+# and the same call with the P1 evidence in the transcript passes.
+HCS_REWRITE_FILE = os.path.join(ROOT, "hcs-scratch", "rewrite.md")   # the handoff with P1 restamped, nothing else changed
+
+
+def _build_hcs_rewrite():
+    write(HCS_REWRITE_FILE, hcs_text(new=("P1",)))
+
+
+lazy_fixture([HCS_REWRITE_FILE], _build_hcs_rewrite)
+sh("handoff-checked-stamp: a Bash cp of a scratch file that restamps P1 with no evidence onto the session handoff is "
+   "refused, naming P1",
+   "cp %s %s" % (HCS_REWRITE_FILE, HCS_HANDOFF), "deny", HCS_RULE, cwd=NOGIT, session=HCS_SID, config=HCS_CFG,
+   transcript=hcs_tx("none"), carries=("P1", "hooks/precompact_handoff.py"),
+   lacks=("P2", "P3", "P4", "P5", "P7", "P9"))
+sh("handoff-checked-stamp: the same Bash cp with the P1 evidence in the transcript passes, silently",
+   "cp %s %s" % (HCS_REWRITE_FILE, HCS_HANDOFF), "allow", cwd=NOGIT, session=HCS_SID, config=HCS_CFG,
+   transcript=hcs_tx("ev_p1"), silent=True)
+
+
 # =========================================================================== the machine-load brake
 # The brake's local cases are local runs. A cloud container sets CLAUDE_CODE_REMOTE=true, which turns the brake off, so the
 # suite drops it here, and a cloud case passes its own value to lb_decision_check (`remote`). No other case reads it.

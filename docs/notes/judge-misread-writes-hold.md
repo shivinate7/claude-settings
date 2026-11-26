@@ -1,0 +1,1 @@
+- judge-misread-writes-hold: The model judge (`model_ask`, hooks/call_judge.py, MODEL_ASK_PROMPT) answers yes "haiku" on "Do not use haiku". `grant_model_ask` (hooks/override.py) then writes a new haiku hold, live from the next turn. Decision agent-model-cap. Seen: 2026-11-25 x1

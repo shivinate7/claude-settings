@@ -2154,7 +2154,7 @@ def case_mid_reason_unlisted_id_is_a_plain_refusal():
 
 # The cost of one fire of the judged tools: a question, a page write, an Agent spawn, and the two Opus reads.
 # A judged question or page write makes one model call, and its one child is the roadmap read, `git`. A tool
-# this hook does not judge, or a read of the page, starts nothing. The opus pair (opus_ask, then opus_scope, which
+# this hook does not judge, or a read of the page, starts nothing. The model ask (model_ask, then opus_scope, which
 # the local_time row's grant calls) makes one call each, and the two timeouts fit that row.
 
 class CostTests(unittest.TestCase):
@@ -2214,14 +2214,14 @@ class CostTests(unittest.TestCase):
                          % run["children"])
         self.assertEqual(run["files"], ["guard.log"], "a refusal writes the guard log only; got %r" % run["files"])
 
-    def test_the_opus_ask_and_scope_cost_one_call_each_and_fit_the_local_time_row(self):
+    def test_the_model_ask_and_scope_cost_one_call_each_and_fit_the_local_time_row(self):
         import call_judge
         import decision_watch
-        ask = cost_probe.CountingModel(({"ok": True}, None))
+        ask = cost_probe.CountingModel(({"ok": True, "model": "opus"}, None))
         with cost_probe.children() as started, mock.patch.object(decision_watch, "invoke_model", ask):
-            granted = call_judge.opus_ask("send opus judges")
-        self.assertTrue(granted)
-        self.assertEqual(len(ask.kwargs), 1, "the owner's ask makes one call")
+            granted = call_judge.model_ask("send opus judges")
+        self.assertEqual(granted, "opus", "a yes that names opus answers the family")
+        self.assertEqual(len(ask.kwargs), 1, "the owner's model ask makes one call")
         self.assertEqual(ask.kwargs[0]["timeout"], call_judge.OPUS_ASK_TIMEOUT)
         scope = cost_probe.CountingModel(({"ok": True, "roles": ["Explore"]}, None))
         with cost_probe.children() as more, mock.patch.object(decision_watch, "invoke_model", scope):
