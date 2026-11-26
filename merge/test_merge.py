@@ -23,6 +23,7 @@ import merge_options  # noqa: E402  the one home of the long option names the gu
 sys.path.append(os.path.join(os.path.dirname(HERE), "lint"))  # append: no lint module shadows one this suite imports
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 import _test_temp  # noqa: E402  test-temp-standard: the run folder's one home (lint/_test_temp.py)
+import test_check_tool_pins as pins_fixture  # noqa: E402  the tool-pins fake tool and its fix markers, one home (lint/test_check_tool_pins.py)
 sys.path.append(os.path.join(os.path.dirname(HERE), "testing"))  # append: no testing module shadows one this suite imports
 import shallow_clone  # noqa: E402  the one shallow-clone fixture (testing/shallow_clone.py)
 from proc_fixture import stop_group, wait_for  # noqa: E402  the one home of the process helpers (testing/proc_fixture.py)
@@ -28121,16 +28122,19 @@ class DraftReady(CloudSession):
         self.heads = {}  # lane PR number -> its head sha on origin, as lane() leaves it
         self.check_reads = []  # one (tree, lane pushes so far) per ready check the run made: ready_check_answers appends it
 
-    def lane(self, n, page=False, claim=False, debt=False):
+    def lane(self, n, page=False, claim=False, debt=False, pins=None):
         """Lane PR #n: a branch on origin with one commit of its own, off origin/main, and an open pull request in the host. -> its head sha.
         debt: the commit adds a debt record, which gives the records page a row. The generator reads the layout's folders, so only a debt
         makes a page here: without one the generator writes nothing, and the page is current whatever the head holds.
         page: the commit also carries the records page the merge tool would write for its tree, so the page is current.
-        claim: the commit is a Record-claim for D-002, as a lane that claims a number is."""
+        claim: the commit is a Record-claim for D-002, as a lane that claims a number is.
+        pins: the commit carries this .tool-versions text, which the ready read takes from the head; None leaves no pin file."""
         o = self.other
         sh(o, "git", "fetch", "-q", "origin")
         sh(o, "git", "checkout", "-q", "-B", f"lane-{n}", "origin/main")
         put(os.path.join(o, "lanes", f"{n}.txt"), f"lane {n}\n")
+        if pins is not None:
+            put(os.path.join(o, ".tool-versions"), pins)
         msg = f"lane {n}"
         if debt:
             put(os.path.join(o, "debts", "gap-one.md"), DEBT_TEXT)
@@ -28286,11 +28290,134 @@ class DraftReady(CloudSession):
         self.run_args("101", "--ready")  # the second run finds #101 ready already
         self.assertEqual(self.host.readies, [101], "a second --ready on a ready lane asked the host to mark it ready again")
 
+    # The ready read of the tool pins (decision tool-pins): the head's .tool-versions is read before any fetch or worktree. A tool behind
+    # its pin refuses the ready mark and the draft stays a draft; a cloud session warns and goes on; a tool ahead of its pin goes ready.
+    def probe_on_path(self, output):
+        """A fake `pinprobe` that prints `output`, first on PATH for this case: its runs append to probe-runs.log in the case's folder."""
+        folder = os.path.join(self.t, "probe-bin")
+        pins_fixture.fake_tool(folder, os.path.join(self.t, "probe-runs.log"), "pinprobe", output)
+        return unittest.mock.patch.dict(os.environ, {"PATH": folder + os.pathsep + os.environ.get("PATH", "")})
+
+    def test_a_lane_whose_tool_is_behind_its_pin_is_refused_and_stays_a_draft(self):
+        self.lane(101, pins=pins_fixture.pin_file("pinprobe", "9.0"))
+        self.host.batch_pulls[101]["draft"] = True
+        refs, trees = self.refs(), self.worktrees()
+        with self.probe_on_path("pinprobe 8.1.0"):
+            rc, out, err = self.run_args("101", "--ready")
+        text = out + err
+        self.assertNotEqual(rc, 0, "a lane whose tool is behind its pin went ready: %s" % text)
+        self.assertTrue(self.host.batch_pulls[101]["draft"], "#101 left draft though its tool is behind its pin: %s" % text)
+        self.assertEqual(self.host.readies, [], "the host was asked to mark #101 ready: %s" % text)
+        self.assertIn("pinprobe", text, "the refusal does not name the tool behind its pin: %s" % text)
+        self.assertIn(pins_fixture.fix_mark("pinprobe"), text, "the refusal does not carry this machine's fix: %s" % text)
+        self.assertEqual(self.refs(), refs, "the refused ready pushed to origin")
+        self.assertEqual(self.worktrees(), trees, "the refused ready made a worktree")
+
+    def test_a_lane_whose_tool_cannot_be_read_is_refused_and_stays_a_draft(self):
+        self.lane(101, pins=pins_fixture.pin_file("pinprobe", "9.0"))
+        self.host.batch_pulls[101]["draft"] = True
+        rc, out, err = self.run_args("101", "--ready")  # no fake on PATH: the version read has nothing to run
+        text = out + err
+        self.assertNotEqual(rc, 0, "a lane whose tool cannot be read went ready: %s" % text)
+        self.assertTrue(self.host.batch_pulls[101]["draft"], "#101 left draft though its tool cannot be read: %s" % text)
+        self.assertEqual(self.host.readies, [], "the host was asked to mark #101 ready: %s" % text)
+        self.assertIn("unknown", text, "the unreadable tool is not named unknown: %s" % text)
+
+    def test_a_lane_whose_tool_is_ahead_of_its_pin_goes_ready(self):  # control: green on the old code
+        self.lane(101, pins=pins_fixture.pin_file("pinprobe", "9.0"))
+        self.host.batch_pulls[101]["draft"] = True
+        with self.probe_on_path("pinprobe 9.2.0"):
+            rc, out, err = self.run_args("101", "--ready")
+        self.assertEqual(rc, 0, "a tool newer than its pin refused --ready: %s" % (out + err))
+        self.assertEqual(self.host.readies, [101], "a tool newer than its pin did not mark #101 ready: %s" % (out + err))
+
+    def test_a_lane_with_no_pin_file_runs_no_tool(self):  # control: green on the old code
+        self.lane(101)
+        self.host.batch_pulls[101]["draft"] = True
+        with self.probe_on_path("pinprobe 8.1.0"):
+            rc, out, err = self.run_args("101", "--ready")
+        self.assertEqual(rc, 0, "a lane with no pin file refused --ready: %s" % (out + err))
+        self.assertEqual(self.host.readies, [101], "a lane with no pin file did not mark #101 ready: %s" % (out + err))
+        self.assertFalse(os.path.exists(os.path.join(self.t, "probe-runs.log")),
+                         "a lane with no pin file ran a version command: %s" % (out + err))
+
+    def test_a_lane_whose_head_the_ready_fetch_cannot_reach_is_refused_and_stays_a_draft(self):  # F1: an unreadable head is not "no pin file"
+        self.lane(101, pins=pins_fixture.pin_file("pinprobe", "9.0"))
+        self.host.batch_pulls[101]["draft"] = True
+        head = self.heads[101]
+        sh(self.bare, "git", "update-ref", "-d", "refs/heads/lane-101")  # origin no longer holds the branch, so the ready fetch of the head fails
+        held = subprocess.run(["git", "-C", self.co, "cat-file", "-e", f"{head}^{{commit}}"], capture_output=True).returncode == 0
+        self.assertFalse(held, "scope: the checkout already holds the head, so the ready run fetches nothing and reads nothing it cannot")
+        refs, trees = self.refs(), self.worktrees()
+        rc, out, err = self.run_args("101", "--ready")
+        text = out + err
+        self.assertNotEqual(rc, 0, "a head whose pin file the fetch could not reach went ready: %s" % text)
+        self.assertTrue(self.host.batch_pulls[101]["draft"], "#101 left draft though its pin file could not be read: %s" % text)
+        self.assertEqual(self.host.readies, [], "the host was asked to mark #101 ready: %s" % text)
+        named = [line for line in text.splitlines() if ".tool-versions" in line and "fetch" in line and "unknown" in line]
+        self.assertTrue(named, "the refusal does not name the failed fetch of .tool-versions as unknown: %s" % text)
+        self.assertEqual(self.refs(), refs, "the refused ready pushed to origin")
+        self.assertEqual(self.worktrees(), trees, "the refused ready made a worktree")
+
+    def test_a_lane_whose_pin_file_git_cannot_read_is_refused_and_stays_a_draft(self):  # F1: a read that fails is not "path not in tree"
+        self.lane(101, pins=pins_fixture.pin_file("pinprobe", "9.0"))
+        self.host.batch_pulls[101]["draft"] = True
+        head = self.heads[101]
+        sh(self.co, "git", "fetch", "-q", "origin")  # the head is local now, so the ready run fetches nothing
+        blob = sh(self.co, "git", "rev-parse", f"{head}:.tool-versions")
+        loose = os.path.join(self.co, ".git", "objects", blob[:2], blob[2:])
+        self.assertTrue(os.path.exists(loose), "scope: the pin file's blob is not a loose object here, so removing it proves nothing")
+        os.remove(loose)  # the path stays in the head's tree; git cannot read its blob
+        refs, trees = self.refs(), self.worktrees()
+        rc, out, err = self.run_args("101", "--ready")
+        text = out + err
+        self.assertNotEqual(rc, 0, "a head whose pin file git cannot read went ready: %s" % text)
+        self.assertTrue(self.host.batch_pulls[101]["draft"], "#101 left draft though git cannot read its pin file: %s" % text)
+        self.assertEqual(self.host.readies, [], "the host was asked to mark #101 ready: %s" % text)
+        named = [line for line in text.splitlines() if ".tool-versions" in line and "unknown" in line and ("show" in line or "read" in line)]
+        self.assertTrue(named, "the refusal does not name the failed read of .tool-versions as unknown: %s" % text)
+        self.assertEqual(self.refs(), refs, "the refused ready pushed to origin")
+        self.assertEqual(self.worktrees(), trees, "the refused ready made a worktree")
+
+    def test_a_lane_whose_pin_file_starts_with_a_byte_order_mark_is_read_as_at_session_start(self):  # F2: the ready read takes the file's text as the session start does
+        self.lane(101, pins="﻿" + pins_fixture.pin_file("pinprobe", "9.0"))
+        self.host.batch_pulls[101]["draft"] = True
+        blob = subprocess.run(["git", "-C", self.other, "show", f"{self.heads[101]}:.tool-versions"], capture_output=True).stdout
+        self.assertTrue(blob.startswith(b"\xef\xbb\xbf"), "scope: the committed pin file does not start with a byte order mark: %r" % blob[:8])
+        with self.probe_on_path("pinprobe 9.2.0"):
+            rc, out, err = self.run_args("101", "--ready")
+        text = out + err
+        self.assertEqual(rc, 0, "a pin file with a byte order mark refused --ready: %s" % text)
+        self.assertEqual(self.host.readies, [101], "a pin file with a byte order mark did not mark #101 ready: %s" % text)
+
+    def test_a_lane_whose_pin_file_the_checker_refuses_names_the_line_and_tells_no_one_to_upgrade(self):  # F3: the refusal names the file's fault, not a tool
+        self.lane(101, pins="pinprobe 9.0\nsecondprobe 1.0  # the comment is refused\n")
+        self.host.batch_pulls[101]["draft"] = True
+        with self.probe_on_path("pinprobe 9.2.0"):
+            rc, out, err = self.run_args("101", "--ready")
+        text = out + err
+        self.assertNotEqual(rc, 0, "a refused pin file went ready: %s" % text)
+        self.assertTrue(self.host.batch_pulls[101]["draft"], "#101 left draft though its pin file is refused: %s" % text)
+        self.assertEqual(self.host.readies, [], "the host was asked to mark #101 ready: %s" % text)
+        self.assertIn(".tool-versions", text, "the refusal does not name the pin file: %s" % text)
+        self.assertIn("line 2", text, "the refusal does not name the refused line: %s" % text)
+        self.assertNotIn("up to its pin", text, "the refusal tells the user to bring a tool up to its pin, though the fault is the file: %s" % text)
+
+    def test_a_standing_cloud_ready_with_a_behind_tool_warns_and_goes_on_to_the_ready_mark(self):
+        with self.probe_on_path("pinprobe 8.1.0"):
+            rc, out, err = self.ready_as("standing", "Small edit.\n", pins=pins_fixture.pin_file("pinprobe", "9.0"))
+        text = out + err
+        self.assertIn("pinprobe", text, "the cloud ready did not warn about the tool behind its pin: %s" % text)
+        self.assertIn(pins_fixture.fix_mark("pinprobe"), text, "the cloud warning does not carry this machine's fix: %s" % text)
+        self.assertEqual(rc, 0, "the cloud warning refused --ready: %s" % text)
+        self.assertEqual(self.host.readies, [101], "--ready did not go on to mark #101 ready after the warning: %s" % text)
+
     # --ready by a standing cloud session. --confirm refuses a standing pull request whose body lacks the session's own link, so --ready
     # names the line to add, one line, and goes on. A warning only: a body edit after the ready mark still mends the gap.
-    def ready_as(self, role, body, n=101):
-        """`merge <n> --ready` as a cloud session that records `role` (None: no role file), on lane draft n whose body is `body`. -> (rc, stdout, stderr)."""
-        self.lane(n)
+    def ready_as(self, role, body, n=101, pins=None):
+        """`merge <n> --ready` as a cloud session that records `role` (None: no role file), on lane draft n whose body is `body`. -> (rc, stdout, stderr).
+        pins: the lane's .tool-versions text, or None for no pin file."""
+        self.lane(n, pins=pins)
         self.host.batch_pulls[n]["draft"] = True
         self.host.batch_pulls[n]["body"] = body
         if role is None:  # a subtest's earlier role file would otherwise still name a role here

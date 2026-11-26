@@ -40,6 +40,7 @@ import uuid
 from unittest import mock
 
 import _test_temp  # noqa: E402  test-temp-standard: every temp path comes from this run's folder
+from test_windows_split import CHECKS, all_jobs, eval_if, eval_value  # noqa: E402  the one home of the checks.yml reader and the if: evaluator
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SKIP = os.path.join(ROOT, ".github", "scripts", "nightly-skip.py")
@@ -514,6 +515,35 @@ class NightlySkipJobWiring(unittest.TestCase):
         header = job_text.split("    steps:", 1)[0]
         self.assertNotIn("\n    if:", header,
                          "nightly-skip must run on every event: a skipped job it leaves behind skips scope's descendants")
+
+
+class DailySkipKeepsToolPins(unittest.TestCase):
+    """Decision tool-pins (owner, 11:05 CST Nov 25): the daily run judges the pins every day, also on a day the nightly skip says
+    skip. The skip output the gate writes for a green daily with no push run since is fed to checks.yml's own `if:` expressions:
+    scope must still run, and each job that holds the tool-pins step must still run that step."""
+
+    TOOL_PINS_STEP = "Tool pins (this runner)"
+    TOOL_PINS_JOBS = ("checks", "checks-windows", "checks-macos")
+    # The scope outputs a skipped daily sets to true (ci-scope.sh, as test_ci_scope.py's SkippedDaily reads them). Every other
+    # scope flag reads false, as on a real skipped daily.
+    SKIPPED_DAILY = {"records_only_skip": "true", "skip_comment_delta": "true", "tool_pins": "true"}
+
+    def test_a_skipped_daily_still_runs_the_tool_pins_steps(self):
+        got = run_skip(runs=[run("schedule", created=OLDER)])
+        self.assertEqual((got["rc"], got["value"]), (0, "true"),
+                         "the precondition: a green daily at this head with no push run after it must skip (item 893): %s" % got["text"][-300:])
+        jobs = all_jobs(open(CHECKS, encoding="utf-8").read())
+        self.assertTrue(eval_if(jobs["scope"]["if"], "schedule", "true", nightly_skip=got["value"]),
+                        "on a skipped daily scope is skipped, and every job behind it with it, so no tool-pins step runs")
+        for name in self.TOOL_PINS_JOBS:
+            with self.subTest(job=name):
+                job = jobs[name]
+                self.assertTrue(eval_value(job["if"], "schedule", "false", results={"scope": "success"}, needs=("scope",),
+                                           values=self.SKIPPED_DAILY),
+                                "the %s job's if: must hold when scope succeeded on a skipped daily" % name)
+                step = next(s for s in job["steps"] if s.get("name") == self.TOOL_PINS_STEP)
+                self.assertTrue(eval_value(step["if"], "schedule", "false", values=self.SKIPPED_DAILY),
+                                "the %s job's %s step must run on a skipped daily" % (name, self.TOOL_PINS_STEP))
 
 
 class NightlySkipReadErrors(unittest.TestCase):

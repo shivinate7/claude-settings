@@ -13,6 +13,7 @@ done
 if [ "$ss_self" != "$0" ] && ss_real=$(cd "$(dirname "$ss_self")" 2>/dev/null && pwd -P) && [ -f "$ss_real/$(basename "$ss_self")" ] && command -v sh >/dev/null 2>&1; then
   exec sh "$ss_real/$(basename "$ss_self")" "$@"
 fi
+ss_started=$(date +%s 2>/dev/null)  # the clock the pin read measures its time left against (hook kill: settings.json)
 input=$(cat 2>/dev/null)
 cwd=$(printf '%s' "$input" | sed -n 's/.*"cwd"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)
 [ -n "$cwd" ] || cwd=$(pwd)
@@ -517,6 +518,39 @@ if [ -n "$d" ] && [ -f "$d/lint/layout.py" ]; then
     printf '%s\n' "$caution_text" | sed 's/^/repo /'
   else
     printf 'repo caution: unknown, the level could not be read\n'
+  fi
+fi
+
+# The repo's tool pins (decision tool-pins): on a fresh start a tool behind its pin prints one line with this machine's fix, so a new
+# device learns it before a run fails on it. lint/check_tool_pins.py --behind is the one home; the line says the owner runs the fix.
+# A tool at or ahead of its pin prints nothing; one that cannot be read prints an unknown line. Startup only, never a cloud session, and
+# a checkout with no .tool-versions starts nothing. The checker's reads share CS_TOOL_PINS_BUDGET seconds (default 5, cut to the time left under the hook's
+# 10 s kill). Cost: at startup in a repo with a pin file, one python start plus one version command per pin; no network, no file written,
+# no timer, no process kept. A failure is silent.
+if [ "$source" = "startup" ] && [ "${CLAUDE_CODE_REMOTE:-}" != "true" ] && [ -f "$toplevel/.tool-versions" ] \
+   && command -v python3 >/dev/null 2>&1; then
+  tp_script="$d/lint/check_tool_pins.py"
+  [ -n "$d" ] && [ -f "$tp_script" ] || tp_script="$(cd "$(dirname "$0")" 2>/dev/null && pwd)/../lint/check_tool_pins.py"
+  if [ -f "$tp_script" ]; then
+    # The reads get the time left under the hook's 10 s kill, less 2 s for the python start and the whole-second clock, never more than
+    # the budget set (default 5). Never 0: the checker reads 0 as its default. Under 1 s left the read is skipped and says so.
+    tp_budget=${CS_TOOL_PINS_BUDGET:-5}
+    case "$tp_budget" in ''|*[!0-9]*) tp_budget=5 ;; esac
+    [ "$tp_budget" -gt 0 ] 2>/dev/null || tp_budget=5
+    tp_now=$(date +%s 2>/dev/null)
+    case "$ss_started$tp_now" in
+      ''|*[!0-9]*) ;;  # no clock: the budget stands as set
+      *)
+        tp_left=$((10 - 2 - (tp_now - ss_started)))
+        [ "$tp_left" -lt "$tp_budget" ] && tp_budget=$tp_left
+        ;;
+    esac
+    if [ "$tp_budget" -ge 1 ]; then
+      tp_lines=$(CS_TOOL_PINS_BUDGET=$tp_budget python3 "$tp_script" --behind "$toplevel" 2>/dev/null | grep -v '^ok ')
+      [ -n "$tp_lines" ] && printf '%s\n' "$tp_lines"
+    else
+      printf 'tool-pins: unknown: the earlier start steps left too little time before the hook ends to read the tools against %s\n' ".tool-versions"
+    fi
   fi
 fi
 

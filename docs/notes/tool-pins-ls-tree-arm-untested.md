@@ -1,0 +1,1 @@
+- tool-pins-ls-tree-arm-untested: The failure arm of the ls-tree call in `head_tool_pins` (merge/merge.py:5686) has no case, so no test shows a failed ls-tree returning its unknown line. Seen: 2026-11-25 x1

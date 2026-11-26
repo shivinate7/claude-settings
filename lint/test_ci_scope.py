@@ -33,7 +33,7 @@ import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
 sys.path.insert(0, os.path.join(HERE, "..", "testing"))
 import tracked_tree  # noqa: E402  copies the script under test into a scratch tree; rm_tree removes the run folder
-from workflow_steps import job_block, job_workflow, run_body, step_blocks, step_key  # noqa: E402  the one home of the step parser
+from workflow_steps import job_block, job_workflow, run_body, step_blocks, step_env, step_key  # noqa: E402  the one home of the step parser
 import test_windows_split as split  # noqa: E402  the one home of the checks.yml reader and the `if:` evaluator (eval_with)
 SCRIPT = os.environ.get("CI_SCOPE") or os.path.join(HERE, "..", ".github", "scripts", "ci-scope.sh")
 JOB_FLAGS = ["checks_windows", "checks_windows_merge", "checks_windows_rest", "checks_macos", "shell_macos", "pointer_windows"]
@@ -142,8 +142,9 @@ def guard_read_files():
 
 def run(paths, event="pull_request", base="auto", existing=(), landed=None, head_ref="", green=None,
         green_sibling=False, green_head=None, contents=None, green_contents=None, facts=None, merged=None, moves=None,
-        guard_inputs=REAL_GUARD_INPUTS, scope_files=None, proven=False, modes=()):
-    """-> {name: 'true'|'false'} the script wrote. `paths` are committed on top of one base commit. `scope_files` (a list of paths), when
+        guard_inputs=REAL_GUARD_INPUTS, scope_files=None, proven=False, modes=(), nightly_skip=None):
+    """-> {name: 'true'|'false'} the script wrote. `nightly_skip` is NIGHTLY_SKIP, the nightly-skip job's answer (`"true"` on a skipped
+    daily); None leaves it unset, so no NIGHTLY_SKIP of the caller's environment reaches the script. `paths` are committed on top of one base commit. `scope_files` (a list of paths), when
     given, is SCOPE_FILES: the script reads those paths in place of the diff, with the same BASE_SHA range as the other cases. `head_ref` is HEAD_REF,
     empty when not given, so no HEAD_REF of the caller's environment reaches the script. `base` is BASE_SHA: "auto" is the base
     commit (the pull request's base), and "head" (HEAD itself), "green" (the `green` commit) and "sibling" (a commit off the base
@@ -253,6 +254,9 @@ def run(paths, event="pull_request", base="auto", existing=(), landed=None, head
         env.pop("PR_HEAD", None)  # a caller's value never reaches the script; only `merged` sets it
         if merged is not None:
             env["PR_HEAD"] = head_sha
+        env.pop("NIGHTLY_SKIP", None)  # a caller's value never reaches the script; only `nightly_skip` sets it
+        if nightly_skip is not None:
+            env["NIGHTLY_SKIP"] = nightly_skip
         env.pop("SCOPE_FILES", None)  # a caller's value never reaches the script; only `scope_files` sets it
         if scope_files is not None:
             env["SCOPE_FILES"] = "\n".join(scope_files)
@@ -1577,13 +1581,37 @@ class _IfParser:
         return self.env.get(tok, "")
 
 
-def if_env(outs, event, results=None):
-    """The names an if: reads: the event, the pull request's draft flag, each scope output of the run, and each job's result.
-    The scope job succeeded unless `results` says otherwise. A name the env does not hold reads as empty."""
+def if_env(outs, event, results=None, nightly_skip=""):
+    """The names an if: reads: the event, the pull request's draft flag, each scope output of the run, each job's result, and the
+    skip output of nightly-skip as the reading job sees it (`nightly_skip`). The scope job succeeded unless `results` says otherwise.
+    A name the env does not hold reads as empty."""
     env = {"github.event_name": event, "github.event.pull_request.draft": False if event == "pull_request" else None}
     env.update({f"needs.scope.outputs.{name}": value for name, value in outs.items()})
     env.update({f"needs.{job}.result": result for job, result in {"scope": "success", **(results or {})}.items()})
+    env[f"needs.{split.NIGHTLY_SKIP_JOB}.outputs.skip"] = nightly_skip
     return env
+
+
+def job_needs(text, job):
+    """The jobs `job` lists under needs:, inline (`needs: scope`, `needs: [a, b]`) or as a block list, in file order."""
+    block = job_block(text, job) or ""
+    m = re.search(r"^    needs:[ \t]*(.*)$", block, re.M)
+    if m is None:
+        return []
+    if m.group(1).strip():
+        return re.findall(r"[\w-]+", m.group(1))
+    names = []
+    for line in block[m.end():].split("\n")[1:]:
+        if not line.startswith("      - "):
+            break
+        names.append(line[len("      - "):].strip())
+    return names
+
+
+def visible_skip(text, job, nightly_skip):
+    """The nightly-skip output `job` reads: `nightly_skip` where the job lists nightly-skip under needs, else empty. GitHub's needs
+    context holds the outputs of the jobs a job lists and no others, so an unlisted reader sees no skip."""
+    return nightly_skip if split.NIGHTLY_SKIP_JOB in job_needs(text, job) else ""
 
 
 def job_names(text):
@@ -1601,22 +1629,28 @@ def job_if(text, job):
     return (wrapped.group(1) if wrapped else raw).strip()
 
 
-def job_runs(expr, outs, event, results=None):
+def job_runs(expr, outs, event, results=None, nightly_skip=""):
     """True when the job starts on this run: it has no job-level if, or its if: is true on the run's outputs and job results."""
-    return True if expr is None else _IfParser(expr, if_env(outs, event, results)).parse()
+    return True if expr is None else _IfParser(expr, if_env(outs, event, results, nightly_skip)).parse()
 
 
-def step_runs(raw, outs, event):
+def step_runs(raw, outs, event, nightly_skip=""):
     """True when a step whose if: is `raw` (with its ${{ }}) runs on this run. A step with no if: runs, as success() is its default."""
     if raw is None:
         return True
     wrapped = re.fullmatch(r"\$\{\{(.*)\}\}", raw.strip())
-    return _IfParser((wrapped.group(1) if wrapped else raw).strip(), if_env(outs, event)).parse()
+    return _IfParser((wrapped.group(1) if wrapped else raw).strip(), if_env(outs, event, nightly_skip=nightly_skip)).parse()
 
 
-def running_jobs(text, outs, event):
+def job_starts(text, job, outs, event, nightly_skip=""):
+    """True when `job` starts on this run. `nightly_skip` is the skip output a skipped daily sets; the job reads it only if it lists
+    nightly-skip under needs (visible_skip)."""
+    return job_runs(job_if(text, job), outs, event, nightly_skip=visible_skip(text, job, nightly_skip))
+
+
+def running_jobs(text, outs, event, nightly_skip=""):
     """The jobs of checks.yml that start on this run, sorted."""
-    return sorted(job for job in job_names(text) if job_runs(job_if(text, job), outs, event))
+    return sorted(job for job in job_names(text) if job_starts(text, job, outs, event, nightly_skip))
 
 
 def rollup_needs(text):
@@ -1905,6 +1939,116 @@ class RecordsOnlyEveryJob(unittest.TestCase):
                                         f"{job} does not start on a docs/decisions-only {event} run, so its decision steps do not run; its job-level if is {expr}")
 
 
+
+
+@unittest.skipUnless(BASH, "bash not on PATH")
+class SkippedDaily(unittest.TestCase):
+    """A skipped daily (EVENT=schedule, NIGHTLY_SKIP=true). ci-scope.sh turns every flag off, sets records_only_skip and
+    skip_comment_delta, and keeps tool_pins on (decision tool-pins). On that run
+    each pin job starts for its Tool pins step, and no job runs a test step. Each job's and step's if: is read on the script's own
+    outputs by RecordsOnlyEveryJob's reader. The plain daily is the control: its test steps and Tool pins steps run."""
+
+    DECISION_JOBS = ("scope", "nightly-skip", "push-skip")  # they decide the skip and read it, so they run on every event
+    PIN_JOBS = ("checks", "checks-windows", "checks-macos")  # the jobs with a Tool pins step (decision tool-pins)
+    # Open: whether a skipped daily starts these two macOS jobs is not decided, so the beyond-the-set check does not judge them.
+    MACOS_OPEN = ("shell-macos", "checks-macos-b")
+    TOOL_PINS = "Tool pins (this runner)"
+    # A command line that runs a test file, a mod runner or a mutation test. runs_suite reads the suite files only, so these are named here.
+    TEST_RUN = re.compile(r"\btest_|\.test\.|mod-tests\.sh|mutate_|--test\b")
+    KEPT_ON = ("records_only_skip", "skip_comment_delta", "tool_pins")  # the outputs a skipped daily sets to true
+
+    def workflow(self):
+        return RecordsOnlyEveryJob.workflow(self)  # the one reader of checks.yml in this file
+
+    def skipped_daily(self):
+        """The outputs of a skipped daily. The scope outputs are asserted first, so each if: is read on a run that set them."""
+        outs = run([], event="schedule", nightly_skip="true")
+        for name in self.KEPT_ON:
+            self.assertEqual(outs.get(name), "true", f"a skipped daily does not set {name} to true: {outs}")
+        on = sorted(n for n, v in outs.items() if n not in self.KEPT_ON and v != "false")
+        self.assertEqual(on, [], f"a skipped daily leaves these scope flags on: {on}")
+        return outs
+
+    def running(self, text, job, outs, nightly_skip):
+        """The steps of `job` that run on this run, or [] when the job does not start. `nightly_skip` is the skip output the run set."""
+        if not job_starts(text, job, outs, "schedule", nightly_skip):
+            return []
+        seen = visible_skip(text, job, nightly_skip)
+        return [st for st in step_blocks(job_block(text, job)) if step_runs(step_key(st, "if"), outs, "schedule", seen)]
+
+    def runs_test(self, st):
+        """True when a step runs a test: a suite file (runs_suite), or a command line that TEST_RUN matches. A comment is no command."""
+        lines = [line for line in (run_body(st) or "").split("\n") if line.strip() and not line.lstrip().startswith("#")]
+        return runs_suite(st) or any(self.TEST_RUN.search(line) for line in lines)
+
+    # Named failure: a decision or pin job does not start on a skipped daily. Named failure: a job starts on a skipped daily that the
+    # decision and tool-pins set does not need. The two halves are separate asserts, so each names its own cause. Every job's
+    # job-level if is read on the run's outputs and the skip output the run set.
+    def test_a_skipped_daily_starts_only_the_decision_jobs_and_the_tool_pins_jobs(self):
+        text = self.workflow()
+        outs = self.skipped_daily()
+        started = running_jobs(text, outs, "schedule", nightly_skip="true")
+        want = set(self.DECISION_JOBS + self.PIN_JOBS)
+        missing = sorted(want - set(started))
+        self.assertFalse(missing, f"a skipped daily misses decision or tool-pins jobs {missing}; it starts {sorted(started)}")
+        extra = sorted(set(started) - want - set(self.MACOS_OPEN))
+        self.assertFalse(extra, f"a skipped daily starts jobs beyond the decision and tool-pins set: {extra}")
+
+    # Control: a plain daily starts the two macOS jobs, so the case above reads them as jobs the skip turns off,
+    # not as jobs that never start.
+    def test_control_a_plain_daily_starts_the_two_macos_jobs_the_skip_turns_off(self):
+        text = self.workflow()
+        outs = run([], event="schedule", nightly_skip="false")
+        started = running_jobs(text, outs, "schedule", nightly_skip="false")
+        for job in ("shell-macos", "checks-macos-b"):
+            with self.subTest(job=job):
+                self.assertIn(job, started, f"{job} does not start on a plain daily, so the skipped-daily case proves nothing about it")
+
+    # Named failure: the scope step is not handed the nightly-skip output, so ci-scope.sh never learns of a skipped daily and turns
+    # the suites on. One assert on the step's env.
+    def test_the_scope_step_is_handed_the_nightly_skip_output(self):
+        text = self.workflow()
+        got = [step_env(st).get("NIGHTLY_SKIP") for st in step_blocks(job_block(text, "scope")) if step_key(st, "id") == "scope"]
+        self.assertEqual(got, ["${{ needs.nightly-skip.outputs.skip }}"],
+                         f"the scope step's env does not carry NIGHTLY_SKIP from the nightly-skip output, "
+                         f"so ci-scope.sh reads no skip: {got}")
+
+    # Named failure: a job runs a test step on a skipped daily, so the suites the green daily proved run again. One subtest per job.
+    def test_no_job_runs_a_test_step_on_a_skipped_daily(self):
+        text = self.workflow()
+        outs = self.skipped_daily()
+        for job in job_names(text):
+            if job in self.DECISION_JOBS:
+                continue
+            with self.subTest(job=job):
+                tests = [step_key(st, "name") or " ".join((run_body(st) or "").split())[:50]
+                         for st in self.running(text, job, outs, "true") if self.runs_test(st)]
+                self.assertFalse(tests, f"{job} runs {len(tests)} test steps on a skipped daily, the first {tests[:3]}")
+
+    # Named failure: a pin job does not start on a skipped daily, or starts without its Tool pins step. One subtest per pin job.
+    def test_each_pin_job_starts_and_runs_its_tool_pins_step_on_a_skipped_daily(self):
+        text = self.workflow()
+        outs = self.skipped_daily()
+        for job in self.PIN_JOBS:
+            with self.subTest(job=job):
+                expr = job_if(text, job)
+                self.assertTrue(job_starts(text, job, outs, "schedule", "true"),
+                                f"{job} does not start on a skipped daily, so its Tool pins step does not run; its job-level if is {expr}")
+                names = [step_key(st, "name") for st in self.running(text, job, outs, "true")]
+                self.assertIn(self.TOOL_PINS, names, f"{job} starts on a skipped daily but its Tool pins step does not run: {names}")
+
+    # Control: the plain daily starts each pin job with its Tool pins step, and checks-macos runs test steps, so the two cases above
+    # read steps that do run.
+    def test_a_plain_daily_runs_the_tool_pins_step_and_the_test_steps_in_checks_macos(self):
+        text = self.workflow()
+        outs = run([], event="schedule")
+        for job in self.PIN_JOBS:
+            with self.subTest(job=job):
+                names = [step_key(st, "name") for st in self.running(text, job, outs, "false")]
+                self.assertIn(self.TOOL_PINS, names, f"{job} does not run its Tool pins step on a plain daily: {names}")
+        with self.subTest(job="checks-macos"):
+            tests = [st for st in self.running(text, "checks-macos", outs, "false") if self.runs_test(st)]
+            self.assertTrue(tests, "checks-macos runs no test step on a plain daily, so the no-test case has no step to see")
 
 
 # The mod phase must run each mods check script (mods/**/check.mjs), not only *.test.mjs. The script cds to its own
@@ -2634,6 +2778,55 @@ class PushDiffFromProvenBase(FlagAsserts, unittest.TestCase):
     def test_a_pull_request_diff_is_unchanged_by_a_proven_base(self):
         self.assertFlags(run(self.DOCS, event="pull_request", proven=True), want_false=ALL)
         self.assertFlags(run(self.CODE, event="pull_request", proven=True), want_true=["checks_windows_merge", "code"])
+
+
+@unittest.skipUnless(BASH, "bash not on PATH")
+class ToolPinsScope(unittest.TestCase):
+    """The tool_pins output. A pull request's run judges the pins only when that pull request moves a pin or the checker
+    (decision tool-pins, the 11:05 CST Nov 25 ruling). The checker is .tool-versions and lint/check_tool_pins.py: a change to the
+    checker's own suite is not a move of the checker. A schedule and a dispatch judge them on every run. An unreadable diff turns
+    every flag on, tool_pins too (ci-scope.sh header)."""
+
+    PIN_PATHS = [".tool-versions", "lint/check_tool_pins.py"]
+
+    def tool_pins(self, paths, **keys):
+        got = run(paths, **keys)
+        self.assertIn("tool_pins", got, "the scope script writes no tool_pins output: %s" % got)
+        return got["tool_pins"]
+
+    def test_a_pull_request_that_moves_a_pin_or_the_checker_turns_it_on(self):
+        for p in self.PIN_PATHS:
+            with self.subTest(path=p):
+                self.assertEqual(self.tool_pins([p], event="pull_request"), "true",
+                                 "a pull request that touches %s must turn tool_pins on" % p)
+
+    def test_a_pull_request_that_moves_only_the_checker_suite_keeps_it_off(self):
+        self.assertEqual(self.tool_pins(["lint/test_check_tool_pins.py"], event="pull_request"), "false",
+                         "a pull request that touches only lint/test_check_tool_pins.py moves neither a pin nor the checker, so tool_pins stays off")
+
+    def test_a_schedule_and_a_dispatch_turn_it_on_for_a_docs_only_diff(self):
+        for ev in ("schedule", "workflow_dispatch"):
+            with self.subTest(event=ev):
+                self.assertEqual(self.tool_pins(["README.md"], event=ev), "true",
+                                 "a %s run must judge the pins even when the diff touches no pin" % ev)
+
+    def test_the_all_on_paths_keep_it_off(self):
+        for p in (".github/workflows/checks.yml", ".github/scripts/ci-scope.sh"):
+            with self.subTest(path=p):
+                self.assertEqual(self.tool_pins([p]), "false", "a diff touching %s moves neither a pin nor the checker, so tool_pins stays off" % p)
+
+    def test_a_pull_request_with_an_unreadable_base_turns_it_on_like_every_other_flag(self):
+        self.assertEqual(self.tool_pins(["README.md"], base="f" * 40), "true",
+                         "an unreadable pull request diff must turn tool_pins on, as it turns every other flag on (ci-scope.sh header)")
+
+    def test_a_push_with_no_proven_base_turns_it_on_like_every_other_flag(self):
+        self.assertEqual(self.tool_pins(["README.md"], event="push", base=""), "true",
+                         "a push with no proven base must turn tool_pins on, as it turns every other flag on (ci-scope.sh header)")
+
+    def test_an_unrelated_diff_keeps_it_off(self):
+        for p in ("merge/merge.py", "README.md"):
+            with self.subTest(path=p):
+                self.assertEqual(self.tool_pins([p]), "false", "a diff that touches no pin or the checker must keep tool_pins off")
 
 
 if __name__ == "__main__":

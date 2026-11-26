@@ -1,0 +1,11 @@
+# The tools this repo's checks run on, one `<tool> <version>` per line. lint/check_tool_pins.py compares them to the machine.
+# The python line is read by actions/setup-python, so a comment never sits after it.
+# read: python = python3 --version
+# read: python = python --version
+python 3.15
+git 2.56
+# A fix line gives the command that brings a tool up to its pin on one platform; the owner runs it. No Linux line until the owner names a Linux machine.
+# fix: python macos = brew upgrade python@3.15
+# fix: python windows = winget upgrade --id Python.Python.3.15 -e
+# fix: git macos = brew upgrade git
+# fix: git windows = winget upgrade --id Git.Git -e

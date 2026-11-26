@@ -28,6 +28,8 @@ RUN_FOLDER = _test_temp.run_folder()
 sys.path.insert(0, os.path.join(HERE, "..", "testing"))
 import tracked_tree  # noqa: E402  copies the repo's lint folder into the pointer clone (testing/tracked_tree.py)
 import test_ruled_store as fixture  # noqa: E402  the one home of a ruled-store fixture (lint/test_ruled_store.py)
+import test_check_tool_pins as pins_fixture  # noqa: E402  the tool-pins fake tool and python3 shim, one home (lint/test_check_tool_pins.py)
+import check_tool_pins  # noqa: E402  the checker's time budget for its reads (BEHIND_BUDGET), one home (lint/check_tool_pins.py)
 SESSION = "session-start-cases"  # the session id every run_hook payload names
 VCS = "g" + "it"  # assembled so this file cannot itself look like the command it tests
 IDENT = ["-c", "user.email=session-start-cases@example.invalid", "-c", "user.name=session-start-cases"]
@@ -3085,6 +3087,154 @@ class SessionStartRolePickTests(unittest.TestCase):
         lane = "Pick lane for one line of work, or coordinator for a standing build."
         self.assertFalse(self.names(lane, r"\bone[ -]lane\b"))
         self.assertFalse(self.names(lane, r"\bsolo\b"))
+
+
+@unittest.skipIf(os.name == "nt", "the fake tools and the python3 shim are sh scripts; a Windows run has no shim to count starts with")
+class SessionStartToolPinsTests(GitFixtureMixin, SessionStartAgentWorktreeNoticeTests):
+    """The start read of the repo's tool pins (decision tool-pins): a tool behind its pin prints one line with this machine's
+    fix. The hook runs the checker with `--behind` on the checkout. Fake tools and a python3 shim lead PATH, so each case reads
+    what the hook ran, never the runner's own tools."""
+
+    # The 51-worktree case is the base class's; it builds 51 worktrees and this class does not repeat it (as SessionStartTierLineTests).
+    test_no_notice_at_fifty_and_one_notice_at_fifty_one = None
+
+    def setUp(self):
+        super().setUp()
+        self.point_at()
+        shutil.copy(os.path.join(HERE, "..", "lint", "check_tool_pins.py"),
+                    os.path.join(self.root, "pointer", "lint", "check_tool_pins.py"))
+        self.bin = os.path.join(self.root, "bin")
+        self.probe_runs = os.path.join(self.root, "probe-runs.log")
+        self.python_runs = os.path.join(self.root, "python-runs.log")
+        pins_fixture.python_shim(self.bin, self.python_runs)
+
+    def pin_file(self, text):
+        self.put(os.path.join(self.primary, ".tool-versions"), text)
+
+    def probe(self, name, output, hang=False):
+        pins_fixture.fake_tool(self.bin, self.probe_runs, name, output, hang=hang)
+
+    def runs_of(self, log):
+        try:
+            with open(log, encoding="utf-8") as handle:
+                return [line.strip() for line in handle if line.strip()]
+        except OSError:
+            return []
+
+    def checker_starts(self):
+        return [line for line in self.runs_of(self.python_runs) if "check_tool_pins.py" in line]
+
+    def pin_lines(self, lines):
+        return [line for line in lines if "pinprobe" in line]
+
+    def test_a_tool_behind_its_pin_prints_one_line_with_this_machines_fix_at_startup(self):
+        self.pin_file(pins_fixture.pin_file("pinprobe", "9.0"))
+        self.probe("pinprobe", "pinprobe 8.1.0")
+        hits = self.pin_lines(self.run_hook(path_dir=self.bin, source="startup"))
+        self.assertEqual(len(hits), 1, "the start read did not print one line for a tool behind its pin: %r" % hits)
+        self.assertIn("8.1.0", hits[0], "the start line does not name the version found: %s" % hits[0])
+        self.assertIn(pins_fixture.fix_mark("pinprobe"), hits[0],
+                      "the start line does not carry this machine's fix: %s" % hits[0])
+
+    def test_a_tool_newer_than_its_pin_prints_no_pin_line_at_startup(self):
+        self.pin_file(pins_fixture.pin_file("pinprobe", "9.0"))
+        self.probe("pinprobe", "pinprobe 9.2.0")
+        hits = self.pin_lines(self.run_hook(path_dir=self.bin, source="startup"))
+        self.assertEqual(hits, [], "a tool newer than its pin printed a start line: %r" % hits)
+
+    def test_a_repo_with_no_pin_file_starts_no_checker_process(self):
+        self.run_hook(path_dir=self.bin, source="startup")
+        # Control: the shim logs the hook's own interpreter starts, so an empty count below means no checker start.
+        self.assertTrue(self.runs_of(self.python_runs), "control: the hook made no python start the shim could log")
+        self.assertEqual(self.checker_starts(), [], "a repo with no pin file started the checker: %r" % self.checker_starts())
+
+    def test_a_repo_with_a_pin_file_starts_one_checker_and_one_version_command_per_pin(self):
+        self.pin_file(pins_fixture.pin_file("pinprobe", "9.0") + "secondprobe 1.0\n")
+        self.probe("pinprobe", "pinprobe 9.0.0")
+        self.probe("secondprobe", "secondprobe 1.0.0")
+        self.run_hook(path_dir=self.bin, source="startup")
+        self.assertEqual(len(self.checker_starts()), 1,
+                         "a repo with a pin file did not start the checker exactly once: %r" % self.checker_starts())
+        self.assertEqual(sorted(self.runs_of(self.probe_runs)), ["pinprobe", "secondprobe"],
+                         "the start read ran a version command other than one per pin: %r" % self.runs_of(self.probe_runs))
+
+    def test_a_resume_start_reads_no_pin(self):
+        self.pin_file(pins_fixture.pin_file("pinprobe", "9.0"))
+        self.probe("pinprobe", "pinprobe 8.1.0")
+        lines = self.run_hook(path_dir=self.bin, source="resume")
+        self.assertEqual(self.pin_lines(lines), [], "a resume start printed a pin line: %r" % lines)
+        self.assertEqual(self.checker_starts(), [], "a resume start started the checker")
+
+    def test_a_compact_start_reads_no_pin(self):
+        self.pin_file(pins_fixture.pin_file("pinprobe", "9.0"))
+        self.probe("pinprobe", "pinprobe 8.1.0")
+        lines = self.run_hook(path_dir=self.bin, source="compact")
+        self.assertEqual(self.pin_lines(lines), [], "a compact start printed a pin line: %r" % lines)
+        self.assertEqual(self.checker_starts(), [], "a compact start started the checker")
+
+    def test_a_cloud_start_prints_no_pin_line(self):
+        self.pin_file(pins_fixture.pin_file("pinprobe", "9.0"))
+        self.probe("pinprobe", "pinprobe 8.1.0")
+        lines = self.run_hook(remote="true", path_dir=self.bin, source="startup")
+        self.assertEqual(self.pin_lines(lines), [], "a cloud start printed a pin line: %r" % lines)
+
+    def test_a_hung_version_read_ends_and_reads_unknown_at_startup(self):
+        self.pin_file(pins_fixture.pin_file("pinprobe", "9.0"))
+        self.probe("pinprobe", "", hang=True)
+        try:
+            lines = self.run_hook(path_dir=self.bin, source="startup")
+        except subprocess.TimeoutExpired:
+            self.fail("the start read hung on a version command: the hook did not end")
+        hits = self.pin_lines(lines)
+        self.assertEqual(len(hits), 1, "the hung read printed no one start line: %r" % lines)
+        self.assertIn("unknown", hits[0], "the hung read is not named unknown: %s" % hits[0])
+
+    # The hook's first git call is its first step, and it runs before the pin read. A stub sleeps this many seconds on that one call, so
+    # the steps before the pin read have spent at least this long of the hook's 10 s kill (settings.json). The verdict reads that lower
+    # bound, never a clock the case sets: a longer real run only shrinks the time left.
+    SLOW_EARLIER_STEP = "7"
+
+    def budgets_given(self):
+        """The CS_TOOL_PINS_BUDGET each checker start got, in log order: the value, or `unset` when the hook passed none."""
+        return [line.rsplit(" ", 1)[1] for line in self.checker_starts()]
+
+    def test_a_pin_read_after_slow_earlier_steps_gets_the_time_left_or_is_skipped_with_one_line(self):
+        """With the earlier steps slow, the checker may not start with its full budget: it gets the time left under the kill, or the
+        read is skipped with one line that names tool-pins. The slow step is the hook's first git call, a stub that sleeps once."""
+        self.pin_file(pins_fixture.pin_file("pinprobe", "9.0"))
+        folder = self.make_git_stub("slow-first-git", 'if [ ! -e "$0.slowed" ]; then : > "$0.slowed"; sleep %s; fi' % self.SLOW_EARLIER_STEP)
+        pins_fixture.python_shim(folder, self.python_runs, env="CS_TOOL_PINS_BUDGET")
+        pins_fixture.fake_tool(folder, self.probe_runs, "pinprobe", "pinprobe 8.1.0")
+        with mock.patch.dict(os.environ):
+            os.environ.pop("CS_TOOL_PINS_BUDGET", None)  # the runner's own budget must not reach the hook
+            lines = self.run_hook(path_dir=folder, source="startup")
+        self.assertTrue(os.path.exists(os.path.join(folder, "git.slowed")), "scope: the slow first git call never ran, so the case proves nothing")
+        budgets = self.budgets_given()
+        if not budgets:
+            tool_lines = [line for line in lines if "tool-pins" in line]
+            self.assertEqual(len(tool_lines), 1, "the pin read after %s s of earlier steps was neither given the time left nor skipped with one "
+                             "line that names tool-pins: %r" % (self.SLOW_EARLIER_STEP, lines))
+            return
+        self.assertEqual(len(budgets), 1, "the checker started %d times after slow earlier steps, not once: %r" % (len(budgets), budgets))
+        self.assertNotEqual(budgets[0], "unset", "the pin read got the full %s s budget after %s s of earlier steps, so it can run past the "
+                            "10 s kill: %r" % (check_tool_pins.BEHIND_BUDGET, self.SLOW_EARLIER_STEP, lines))
+        self.assertTrue(0 < float(budgets[0]) < check_tool_pins.BEHIND_BUDGET,
+                        "the pin read got %s s after %s s of earlier steps: want the time left, above 0 and under the full budget" %
+                        (budgets[0], self.SLOW_EARLIER_STEP))
+
+    def test_control_a_pin_read_with_no_slow_step_before_it_is_not_cut(self):
+        """Green on the old code: with nothing slow before the pin read, the checker starts once and no budget is cut below the full one."""
+        self.pin_file(pins_fixture.pin_file("pinprobe", "9.0"))
+        folder = os.path.join(self.root, "plain-bin")
+        pins_fixture.python_shim(folder, self.python_runs, env="CS_TOOL_PINS_BUDGET")
+        pins_fixture.fake_tool(folder, self.probe_runs, "pinprobe", "pinprobe 8.1.0")
+        with mock.patch.dict(os.environ):
+            os.environ.pop("CS_TOOL_PINS_BUDGET", None)
+            self.run_hook(path_dir=folder, source="startup")
+        budgets = self.budgets_given()
+        self.assertEqual(len(budgets), 1, "control: the checker did not start once with no slow step before it: %r" % budgets)
+        self.assertTrue(budgets[0] == "unset" or float(budgets[0]) >= check_tool_pins.BEHIND_BUDGET,
+                        "control: the pin read was cut below the full budget with no slow step before it: %r" % budgets)
 
 
 if __name__ == "__main__":
