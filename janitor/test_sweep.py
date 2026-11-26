@@ -5826,12 +5826,95 @@ _SPONSOR = ("import os, subprocess, sys, time\n"
             "time.sleep(120)\n")
 
 
+# The stub `lsof` the agent-end fixture puts first on PATH. It logs every start, so a case counts the
+# reads a run makes. The cwd table lists this user's processes only, read through the real lsof with
+# `-p`, so no case scans every process on the machine. `$LSOF_LATE` adds table lines from start number
+# `$LSOF_FROM` on: a process that enters a tree after the first read. `$LSOF_FAIL` fails every cwd read.
+# An open-files read (`+D`) lists nothing, as a clear read does, unless `$LSOF_OPEN` names a file of lines
+# to print: a holder inside a folder of the batch. A `+D` folder that does not exist makes the read warn
+# on stderr, list nothing and exit 1. `$LSOF_UNREADABLE` names one existing folder whose read fails the
+# same way, with `Permission denied`.
+# `$LSOF_REAL_OPEN` sends the open-files read to the real lsof. A per-pid read goes to the real lsof unchanged.
+# `$LSOF_TABLE` names a file of `-Fpn` lines that stands for the whole cwd table: the stub prints it and runs
+# no real lsof, so a case needs none on PATH. The file holds at least one line: an empty table reads as failed.
+LSOF_STUB = r"""#!/bin/sh
+printf '%s\n' "$*" >> "${LSOF_COUNT:-/dev/null}"
+case "$*" in
+  *"+D"*)
+    if [ -n "$LSOF_REAL_OPEN" ]; then exec "@REAL@" "$@"; fi
+    prev=""
+    for arg in "$@"; do
+      if [ "$prev" = "+D" ] && [ ! -e "$arg" ]; then echo "lsof: WARNING: can't stat($arg)" >&2; exit 1; fi
+      if [ "$prev" = "+D" ] && [ -n "$LSOF_UNREADABLE" ] && [ "$arg" = "$LSOF_UNREADABLE" ]; then echo "lsof: WARNING: can't opendir($arg): Permission denied" >&2; exit 1; fi
+      prev="$arg"
+    done
+    if [ -n "$LSOF_OPEN" ]; then cat "$LSOF_OPEN"; fi
+    exit 1 ;;
+  *"-d cwd"*) ;;
+  *) exit 1 ;;
+esac
+case "$*" in
+  *"-p "*) exec "@REAL@" "$@" ;;
+esac
+if [ -n "$LSOF_FAIL" ]; then exit 2; fi
+if [ -n "$LSOF_TABLE" ]; then
+  cat "$LSOF_TABLE"
+  status=0
+else
+  pids=$(ps -axo pid=,uid= | awk -v me="$(id -u)" '$2 == me { printf "%s%s", sep, $1; sep = "," }')
+  if [ -z "$pids" ]; then exit 1; fi
+  "@REAL@" -a -d cwd -Fpn -p "$pids" 2>/dev/null
+  status=$?
+fi
+if [ -n "$LSOF_LATE" ]; then
+  count=$(wc -l < "${LSOF_COUNT:-/dev/null}" | tr -d ' ')
+  if [ "$count" -ge "${LSOF_FROM:-1}" ]; then cat "$LSOF_LATE"; fi
+fi
+exit $status
+"""
+
+def install_lsof_stub(test, cwd_table=None):
+    """Put the stub `lsof` first on PATH for TEST, so every read a hook or an in-process run makes goes
+    through it. Its starts are logged to `test.lsof_count`. `cwd_table`, a list of `-Fpn` lines, sets the
+    whole cwd table through `set_lsof_table`, so the read runs no real lsof. Windows reads no lsof here: no stub."""
+    test.lsof_count = os.path.join(test.root, "lsof-starts.txt")
+    test.real_lsof = shutil.which("lsof")  # None when the machine has no lsof: a real-read case skips
+    if sys.platform.startswith("win"):
+        return
+    folder = os.path.join(test.root, "lsof-bin")
+    os.makedirs(folder)
+    stub = os.path.join(folder, "lsof")
+    write(stub, LSOF_STUB.replace("@REAL@", test.real_lsof or ""))
+    os.chmod(stub, 0o755)
+    env = {"PATH": folder + os.pathsep + os.environ.get("PATH", ""), "LSOF_COUNT": test.lsof_count}
+    if cwd_table is not None:
+        test.lsof_table = os.path.join(test.root, "lsof-table.txt")
+        env["LSOF_TABLE"] = test.lsof_table
+        set_lsof_table(test, cwd_table)
+    patch = mock.patch.dict(os.environ, env)
+    patch.start()
+    test.addCleanup(patch.stop)
+
+
+def set_lsof_table(test, lines):
+    """Rewrite the cwd table the stub prints: `lines` are `-Fpn` lines, one entry each."""
+    write(test.lsof_table, "".join(line + "\n" for line in lines))
+
+
+# A process that opens one file for writing and keeps it open while it sleeps: the open file a `+D` read lists.
+_HOLD = ("import sys, time\n"
+         "handle = open(sys.argv[1], 'w', encoding='utf-8')\n"
+         "handle.write('held')\n"
+         "handle.flush()\n"
+         "time.sleep(120)\n")
+
+
 class _AgentEndFixture(unittest.TestCase):
     """Shared fixture for the agent-end worktree cases below. Real repo with a bare remote, real
     worktrees under `.claude/worktrees/`, and the SubagentStop hook run as the harness runs it."""
 
     def setUp(self):
-        self.root = tempfile.mkdtemp(prefix="agent_end_wt_")
+        self.root = tempfile.mkdtemp(prefix="agent_end_wt_", dir=_test_temp.run_folder())
         self.addCleanup(shutil.rmtree, self.root, True)
         self.cfg = os.path.join(self.root, "cfg")  # the config dir the hook process reads and writes
         self.primary = os.path.join(self.root, "repo")
@@ -5839,6 +5922,7 @@ class _AgentEndFixture(unittest.TestCase):
         give_remote(self.primary)
         import agent_end_reap
         self.reap = agent_end_reap
+        install_lsof_stub(self)
 
     def add(self, name):
         """A worktree at `.claude/worktrees/agent-NAME` on a new lane branch cut from main. HEAD sits
@@ -6035,12 +6119,18 @@ class _AgentEndFixture(unittest.TestCase):
         commit = run_vcs(path, *IDENT, "commit", "-q", "-m", "unpushed lane work")
         require(commit.returncode == 0, "commit in %s failed: %s" % (path, commit.stderr.strip()))
 
-    def sleeper(self, cwd):
-        """A plain sleeping process with its cwd in CWD, started by this test process (the host)."""
-        proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)"], cwd=cwd,
-                                stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+    def sleeper(self, cwd, holds=None):
+        """A plain sleeping process with its cwd in CWD, started by this test process (the host). With HOLDS,
+        it first opens that file for writing and keeps it open, so the file is an open file whatever the cwd;
+        this returns once the file is written, so the open is visible to lsof."""
+        argv = [sys.executable, "-c", _HOLD if holds else "import time; time.sleep(120)"]
+        if holds:
+            argv.append(holds)
+        proc = subprocess.Popen(argv, cwd=cwd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                                 stderr=subprocess.DEVNULL)
         self.addCleanup(self.stop, proc)
+        if holds:
+            _read_when_ready(holds)
         return proc
 
     @staticmethod
@@ -6082,6 +6172,249 @@ class _AgentEndFixture(unittest.TestCase):
         for pid in children:
             self.addCleanup(sweep.send_signal, pid)
         return shell, children
+
+
+@unittest.skipIf(sys.platform.startswith("win"), "the stub lsof is a POSIX shell script")
+class OneLsofPerRunTests(_AgentEndFixture):
+    """A run reads the process table once, not once per tree it judges. A whole-machine `lsof -d cwd`
+    takes seconds on a real Mac, so one agent-end reap or one sweep that judges several trees must not
+    start one per tree, and one leftover-temp pass must not open one `lsof +D` per folder.
+
+    The read-count cases pin that shared read. The safety cases pin what the shared read must keep: a
+    tree the run removes gets a fresh read just before its removal, and a failed or timed-out read
+    removes nothing. The open-files cases pin how one batch open-files read is judged: a holder keeps
+    its folder, a folder that does not exist never makes a held folder clear, a folder whose read fails
+    is kept and never a candidate, and a clear folder in the same batch still gets its own answer.
+
+    Each case reads sys.platform as darwin, where the cwd table and the open-files read are taken."""
+
+    def darwin(self):
+        return mock.patch.object(sys, "platform", "darwin")
+
+    def keep_tree(self, name):
+        """An agent's tree the run may only keep: idle past the rule, clean and pushed, so a process
+        inside it is the only reason it stays."""
+        tree = self.add(name)
+        _age_admin_files(tree, 31 * 60)
+        return tree
+
+    def rows_by_path(self, record):
+        return {_norm_path(str(row["path"])): row for row in record.get("worktrees") or [] if "path" in row}
+
+    def count_starts(self, wanted):
+        if not os.path.exists(self.lsof_count):
+            return 0
+        with open(self.lsof_count, encoding="utf-8") as handle:
+            return sum(1 for line in handle if wanted(line))
+
+    def batch_cwd_starts(self):
+        """Batch `lsof -d cwd` starts: a per-pid read (`-p PID`) is not counted."""
+        return self.count_starts(lambda argv: "-d cwd" in argv and "-p " not in argv)
+
+    def open_file_starts(self):
+        return self.count_starts(lambda argv: "+D" in argv)
+
+    def open_file_argv_lines(self):
+        """The logged argv of every open-files (`+D`) start, in order."""
+        if not os.path.exists(self.lsof_count):
+            return []
+        with open(self.lsof_count, encoding="utf-8") as handle:
+            return [line for line in handle if "+D" in line]
+
+    def test_one_agent_end_reap_reads_the_process_table_once_for_three_kept_trees(self):
+        own = self.add("ending")
+        trees = [self.keep_tree(name) for name in ("one", "two", "three")]
+        for tree in trees:
+            self.sleeper(tree)  # a live process inside each tree: the reap keeps all three
+        with self.darwin():
+            record = self.run_in_process("ending", own)
+        self.assertIsNone(record.get("reason"), "the reap did not run: %s" % record.get("reason"))
+        rows = self.rows_by_path(record)
+        for tree in trees:
+            self.assertIn(_norm_path(tree), rows, "the reap wrote no row for %s" % tree)
+            self.assertEqual(rows[_norm_path(tree)]["action"], "keep",
+                             "a tree with a process inside was not kept: %s" % rows[_norm_path(tree)].get("reason"))
+        starts = self.batch_cwd_starts()
+        self.assertLessEqual(starts, 1, "one agent-end reap of three kept trees started the batch cwd read %d "
+                                        "times; want at most once" % starts)
+
+    def test_one_acting_sweep_reads_the_process_table_once_for_three_kept_trees(self):
+        trees = [self.keep_tree(name) for name in ("one", "two", "three")]
+        for tree in trees:
+            self.sleeper(tree)  # a live process inside each tree: the sweep keeps all three
+        with self.darwin(), mock.patch.object(sweep, "reap_listener"):  # no real listener is reaped
+            sweep.sweep_repo(self.primary, True, os.path.join(self.root, "restore.log"), attended=True)
+        for tree in trees:
+            self.assertKept(tree)
+        starts = self.batch_cwd_starts()
+        self.assertLessEqual(starts, 1, "one acting sweep over three kept trees started the batch cwd read %d "
+                                        "times; want at most once" % starts)
+
+    def test_a_tree_the_run_removes_gets_a_fresh_read_before_its_removal(self):
+        own = self.add("ending")
+        late = self.keep_tree("late")  # a process enters this tree after the run's first read
+        control = self.keep_tree("ctl")  # no process: the run must remove it
+        table = os.path.join(self.root, "late-table.txt")
+        write(table, "p2147483\nn%s\n" % os.path.realpath(late))
+        with self.darwin(), mock.patch.dict(os.environ, {"LSOF_LATE": table, "LSOF_FROM": "2"}):
+            record = self.run_in_process("ending", own)
+        self.assertIsNone(record.get("reason"), "the reap did not run: %s" % record.get("reason"))
+        self.assertRemoved(control, " (the clean control tree: the run must remove a tree with no process inside)")
+        self.assertKept(late)
+
+    def test_a_failed_read_keeps_every_tree_and_removes_none(self):
+        own = self.add("ending")
+        tree = self.add("gone")  # clean, pushed and removable, so only the failed read can keep it
+        with self.darwin(), mock.patch.dict(os.environ, {"LSOF_FAIL": "1"}):
+            _age_admin_files(tree, 31 * 60)
+            record = self.run_in_process("ending", own)
+        self.assertIsNotNone(record.get("reason"), "a failed process-table read did not stop the reap")
+        self.assertKept(tree)
+        with self.darwin():
+            _age_admin_files(tree, 31 * 60)
+            self.run_in_process("ending", own)
+        self.assertRemoved(tree, " (the same tree goes once the read works, so the keep came from the failed read)")
+
+    def test_a_timed_out_read_keeps_every_tree_and_removes_none(self):
+        own = self.add("ending")
+        tree = self.add("gone")
+        real_run = subprocess.run
+
+        def timing_out(argv, *args, **kwargs):
+            if argv and argv[0] == "lsof":
+                raise subprocess.TimeoutExpired(argv, kwargs.get("timeout"))
+            return real_run(argv, *args, **kwargs)
+        with self.darwin(), mock.patch.object(subprocess, "run", timing_out):
+            _age_admin_files(tree, 31 * 60)
+            record = self.run_in_process("ending", own)
+        self.assertIsNotNone(record.get("reason"), "a timed-out process-table read did not stop the reap")
+        self.assertKept(tree)
+        with self.darwin():
+            _age_admin_files(tree, 31 * 60)
+            self.run_in_process("ending", own)
+        self.assertRemoved(tree, " (the same tree goes once the read works, so the keep came from the timeout)")
+
+    def test_leftover_temp_reads_the_process_table_and_open_files_once_for_three_candidates(self):
+        temp = os.path.join(self.root, "tmp")
+        run_folders = os.path.join(temp, "claude-settings-test-temp")
+        os.makedirs(run_folders)
+        dead = temp_dead_pid()
+        now = time.time()
+        for _ in range(3):
+            folder = os.path.join(run_folders, "%d-%s" % (dead, uuid.uuid4().hex))
+            os.makedirs(folder)
+            os.utime(folder, (now - 2 * 60 * 60, now - 2 * 60 * 60))  # over the one-hour limit
+            self.sleeper(folder)  # a live process inside each folder: every candidate is kept
+        with self.darwin():
+            decisions = sweep.find_leftover_temp(temp, now)
+        self.assertEqual(sorted(d["action"] for d in decisions), ["keep"] * 3,
+                         "the three candidates were not all judged and kept: %r" % decisions)
+        cwd = self.batch_cwd_starts()
+        self.assertLessEqual(cwd, 1, "leftover temp folders started the batch cwd read %d times for three "
+                                     "candidates; want at most once" % cwd)
+        # Only a folder with no process inside reaches the open-files read, and the three above all have
+        # one, so the read never ran for them. Two such folders, in a second pass, must share ONE read.
+        for _ in range(2):
+            folder = os.path.join(run_folders, "%d-%s" % (dead, uuid.uuid4().hex))
+            os.makedirs(folder)
+            os.utime(folder, (now - 2 * 60 * 60, now - 2 * 60 * 60))  # over the one-hour limit, no process
+        before = self.open_file_starts()
+        with self.darwin():
+            decisions = sweep.find_leftover_temp(temp, now)
+        clear = [d["path"] for d in decisions if d["action"] == "reap"]
+        self.assertEqual(len(clear), 2, "the two folders with no process inside were not both judged clear: "
+                                        "%r" % decisions)
+        shared = self.open_file_starts() - before
+        self.assertEqual(shared, 1, "two folders with no process inside started the open-files read %d times; "
+                                    "want exactly once" % shared)
+
+    def test_a_holder_in_the_batch_read_keeps_its_folder_and_leaves_the_other_a_candidate(self):
+        held = os.path.join(self.root, "held")
+        clear = os.path.join(self.root, "clear")
+        os.makedirs(held)
+        os.makedirs(clear)
+        open_file = os.path.join(self.root, "open-files.txt")
+        write(open_file, "p2147483\nn%s\n" % os.path.join(os.path.realpath(held), "held.txt"))  # one holder, in HELD
+        with self.darwin(), mock.patch.dict(os.environ, {"LSOF_OPEN": open_file}):
+            answers = sweep._busy_reasons([held, clear])
+        reads = self.open_file_argv_lines()
+        self.assertEqual(len(reads), 1, "the two folders made %d open-files reads; want one batch read: %r"
+                         % (len(reads), reads))
+        self.assertTrue(all(folder in reads[0] for folder in (held, clear)),
+                        "the one open-files read does not name both folders: %r" % reads[0])
+        self.assertIsNotNone(answers[held], "a folder with a live holder in the batch read was not kept: %r"
+                             % answers)
+        self.assertIsNone(answers[clear], "a folder with no holder in the batch read was kept: %r" % answers)
+
+    def test_a_missing_folder_in_the_batch_never_reads_a_held_folder_as_clear(self):
+        held = os.path.join(self.root, "held")
+        missing = os.path.join(self.root, "missing")  # never created: a folder gone before the batch read
+        os.makedirs(held)
+        open_file = os.path.join(self.root, "open-files.txt")
+        write(open_file, "p2147483\nn%s\n" % os.path.join(os.path.realpath(held), "held.txt"))  # one holder, in HELD
+        with self.darwin(), mock.patch.dict(os.environ, {"LSOF_OPEN": open_file}):
+            control = sweep._busy_reasons([held])  # the same holder read alone, so the batch below is the only change
+            self.assertIsNotNone(control[held], "control: a holder alone in its folder was not read as busy: %r"
+                                 % control)
+            self.assertFalse(os.path.exists(missing), "fixture: the missing folder exists")
+            answers = sweep._busy_reasons([held, missing])
+        self.assertIsNotNone(answers[held], "a folder with a live holder was read as clear because another folder "
+                             "of the batch does not exist: %r" % answers)
+
+    def test_a_real_open_file_stays_busy_when_a_missing_folder_is_in_the_batch(self):
+        if self.real_lsof is None:
+            self.skipTest("no lsof on PATH: the real open-files read cannot run here")
+        held = os.path.join(self.root, "held")
+        missing = os.path.join(self.root, "missing")  # never created
+        os.makedirs(held)
+        self.sleeper(self.root, holds=os.path.join(held, "held.txt"))  # cwd outside HELD: the open file is the only holder
+        with self.darwin(), mock.patch.dict(os.environ, {"LSOF_REAL_OPEN": "1"}):
+            control = sweep._busy_reasons([held])
+            self.assertIsNotNone(control[held], "control: a real open file in its folder was not read as busy: %r"
+                                 % control)
+            self.assertFalse(os.path.exists(missing), "fixture: the missing folder exists")
+            answers = sweep._busy_reasons([held, missing])
+        self.assertIsNotNone(answers[held], "a folder with a real open file was read as clear because another "
+                             "folder of the batch does not exist: %r" % answers)
+
+    def test_an_unreadable_folder_is_kept_and_never_a_candidate(self):
+        unreadable = os.path.join(self.root, "unreadable")
+        os.makedirs(unreadable)
+        with self.darwin():
+            control = sweep._busy_reasons([unreadable])  # no fault injected: the folder is clear
+            self.assertIsNone(control[unreadable], "control: the folder with no fault was not clear: %r" % control)
+        with self.darwin(), mock.patch.dict(os.environ, {"LSOF_UNREADABLE": unreadable}):
+            answers = sweep._busy_reasons([unreadable])
+        self.assertIsNotNone(answers[unreadable], "an existing folder whose open-files read exited 1 with a "
+                             "message and listed nothing was read as clear: %r" % answers)
+
+    def test_an_unreadable_folder_in_the_batch_leaves_a_clear_folder_a_candidate(self):
+        unreadable = os.path.join(self.root, "unreadable")
+        clear = os.path.join(self.root, "clear")
+        os.makedirs(unreadable)
+        os.makedirs(clear)
+        with self.darwin():
+            alone = sweep._busy_reasons([clear])  # the clear folder's own read, with no fault injected
+            self.assertIsNone(alone[clear], "control: the clear folder alone was not clear: %r" % alone)
+        with self.darwin(), mock.patch.dict(os.environ, {"LSOF_UNREADABLE": unreadable}):
+            answers = sweep._busy_reasons([unreadable, clear])
+        self.assertIsNotNone(answers[unreadable], "an unreadable folder of the batch was read as clear: %r"
+                             % answers)
+        self.assertIsNone(answers[clear], "a clear folder was kept because another folder of its batch could "
+                          "not be read: %r" % answers)
+
+    def test_a_missing_folder_in_the_batch_leaves_a_clear_folder_a_candidate(self):
+        clear = os.path.join(self.root, "clear")
+        missing = os.path.join(self.root, "missing")  # never created: a folder gone before the batch read
+        os.makedirs(clear)
+        with self.darwin():
+            alone = sweep._busy_reasons([clear])  # control: the clear folder alone reads clear
+            self.assertIsNone(alone[clear], "control: the clear folder alone was not clear: %r" % alone)
+            self.assertFalse(os.path.exists(missing), "fixture: the missing folder exists")
+            answers = sweep._busy_reasons([clear, missing])
+        self.assertIsNone(answers[clear], "a clear folder was kept because a folder of its batch does not "
+                          "exist: %r" % answers)
+        self.assertIsNone(answers[missing], "a folder that does not exist was kept: %r" % answers)
 
 
 class AgentEndOwnWorktreeTests(_AgentEndFixture):
@@ -8406,6 +8739,27 @@ class BuildDirReapTests(unittest.TestCase):
             self.assertIsNone(self.reap.edit_idle(tree, spent))
 
     def test_a_build_started_during_the_hook_keeps_its_build_folders(self):
+        # Native platform: on Linux the first read is the only process read, so this case pins it there.
+        self.check_build_started_during_the_hook()
+
+    @unittest.skipIf(sys.platform.startswith("win"), "the stub lsof is a POSIX shell script")
+    def test_a_build_started_during_the_hook_keeps_its_build_folders_on_macos(self):
+        # The shared read and its re-read before a removal run only on macOS, so this case reads darwin.
+        # Its cwd table is the stub's, so no real lsof runs and the case reads the same with none on PATH.
+        install_lsof_stub(self, cwd_table=self.cwd_table_lines())
+        with mock.patch.object(sys, "platform", "darwin"):
+            self.check_build_started_during_the_hook(
+                on_build=lambda proc, cwd: set_lsof_table(self, self.cwd_table_lines((proc, cwd))))
+
+    def cwd_table_lines(self, *holders):
+        """`-Fpn` lines for the stub's table: this test process at the case root, outside every tree,
+        then each `(process, cwd)` a test holds. Paths are real paths, as lsof prints them."""
+        lines = ["p%d" % os.getpid(), "n" + os.path.realpath(self.root)]
+        for proc, cwd in holders:
+            lines += ["p%d" % proc.pid, "n" + os.path.realpath(cwd)]
+        return lines
+
+    def check_build_started_during_the_hook(self, on_build=None):
         # A build that starts after the hook's first process read must still keep its folders.
         primary = self.make_primary("late-build")
         late, quiet = self.add_agent(primary, "bdrLateBuild"), self.add_agent(primary, "bdrQuiet")
@@ -8418,7 +8772,9 @@ class BuildDirReapTests(unittest.TestCase):
 
         def then_start_build(target):
             answer = real(target)
-            self.hold_cwd(late)  # the build's cwd is the worktree root
+            proc = self.hold_cwd(late)  # the build's cwd is the worktree root
+            if on_build is not None:
+                on_build(proc, late)
             return answer
 
         with mock.patch.object(self.reap, "_decide", new=then_start_build):

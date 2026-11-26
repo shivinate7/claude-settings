@@ -1,0 +1,1 @@
+- build-keep-scan-before-rename: In `build_keep` in `janitor/agent_end_reap.py`, the process read is followed by a scan of the cwds before the caller renames the folder, as on main. This head adds a fresh second read and scan when the process table is shared. Seen: 2026-11-25 x1
