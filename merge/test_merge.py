@@ -8284,6 +8284,53 @@ class HeadConfigOnConfirm(Env):
         self.assertEqual(rc, 0, "a ready PR that leaves the stamp alone was refused: " + out + err)
         self.assertTrue(getattr(self.host, "merged", False), "a ready PR that leaves the stamp alone did not merge: " + out + err)
 
+    def head_config_read_fails(self, fail):
+        """Patch merge.sh so the head-config read fails: the `--name-status` diff whose path is the stamp (merge.head_config_refusal).
+        `fail(args)` returns (rc, text) or raises. -> the list of args it saw. Every other git call runs for real."""
+        real_sh, seen = merge.sh, []
+        def stub(args, cwd=None, input=None, env=None, stdout_only=False, **kw):  # kw: as in ClaudeMdFlag.unreadable
+            if "diff" in args and "--name-status" in args and merge.DEFAULT_CONFIG in args:
+                seen.append(args)
+                return fail(args)
+            return real_sh(args, cwd=cwd, input=input, env=env, stdout_only=stdout_only, **kw)
+        patch = unittest.mock.patch.object(merge, "sh", stub)
+        patch.start(); self.addCleanup(patch.stop)
+        return seen
+
+    def assert_unknown_and_nothing_claimed(self, rc, out, err, claims_before):
+        """The confirm refused the head as unknown: a non-zero exit, nothing merged, no claim pushed, the merge lock free."""
+        self.assertNotEqual(rc, 0, "a head stamp that could not be read was let through: " + out + err)
+        self.assertFalse(getattr(self.host, "merged", False), "the confirm merged a head stamp that could not be read: " + out + err)
+        self.assertEqual(self.claims(), claims_before, "the confirm claimed record numbers for a head stamp that could not be read: " + out + err)
+        self.assertFalse(self.lock_ref(), "the confirm left the merge lock held after refusing an unread head stamp: " + out + err)
+        self.assertIn("could not be read", out + err, "the refusal does not say the head stamp could not be read: " + out + err)
+        self.assertIn("unknown, not clear", out + err, "the refusal does not call the head stamp unknown: " + out + err)
+
+    def test_a_failed_head_config_read_refuses_as_unknown_and_claims_nothing(self):
+        self.lane_writes_config(json.dumps(CONFIG) + "\n")  # a stamp the running tool takes: only the read is broken
+        self.assertFalse(self.host.draft, "precondition: the PR is a draft, so the confirm takes the draft step, not the ready path under test")
+        self.assertEqual(self.host.state, "green", "precondition: the PR's rollup is not green, so the refusal would not be the only thing that stops the merge")
+        seen = self.head_config_read_fails(lambda args: (128, "fatal: bad revision"))
+        claims_before = self.claims()
+        rc, out, err = self.run_args("7", "--confirm")
+        self.assertTrue(seen, "the head-config read never ran, so the stub probed nothing: " + out + err)
+        self.assert_unknown_and_nothing_claimed(rc, out, err, claims_before)
+
+    def test_a_timed_out_head_config_read_refuses_as_unknown_and_no_timeout_escapes(self):
+        self.lane_writes_config(json.dumps(CONFIG) + "\n")  # a stamp the running tool takes: only the read is broken
+        self.assertFalse(self.host.draft, "precondition: the PR is a draft, so the confirm takes the draft step, not the ready path under test")
+        self.assertEqual(self.host.state, "green", "precondition: the PR's rollup is not green, so the refusal would not be the only thing that stops the merge")
+        def slow(args):
+            raise subprocess.TimeoutExpired(args, 1)
+        seen = self.head_config_read_fails(slow)
+        claims_before = self.claims()
+        try:
+            rc, out, err = self.run_args("7", "--confirm")
+        except subprocess.TimeoutExpired as e:  # a read that times out is an unknown refusal, never an exception out of the merge tool
+            self.fail("the head-config read's TimeoutExpired escaped the confirm instead of refusing as unknown: %s" % e)
+        self.assertTrue(seen, "the head-config read never ran, so the stub probed nothing: " + out + err)
+        self.assert_unknown_and_nothing_claimed(rc, out, err, claims_before)
+
 class ReadyChecksRun(unittest.TestCase):
     """The draft step's ready checks run through ci-job with --pinned: a child's pin names a claude-settings commit, so the
     check runs that commit's harness, never the local copy's. The argv keeps its step names and base as before."""
