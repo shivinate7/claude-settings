@@ -365,6 +365,10 @@ jobs:
         if: ${{ !cancelled() && (needs.scope.outputs.code == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_wait_until.py
 
+      - name: Outline helper fixture suite
+        if: ${{ !cancelled() && (needs.scope.outputs.code == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
+        run: python3 lint/test_outline.py
+
       - name: Now-central helper fixture suite
         if: ${{ !cancelled() && (needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_any == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_now_central.py
@@ -485,6 +489,22 @@ jobs:
         if: ${{ !cancelled() && (needs.scope.outputs.code == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_standin_signatures.py
 
+      - name: Test temp helper fixture suite
+        if: ${{ !cancelled() && (needs.scope.outputs.code == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
+        run: python3 lint/test_test_temp.py
+
+      - name: Tests set config fixture suite
+        if: ${{ !cancelled() && (needs.scope.outputs.code == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
+        run: python3 lint/test_tests_set_config.py
+
+      - name: Tests set config check
+        if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}
+        run: python3 lint/check_tests_set_config.py
+
+      - name: Merge config layout fixture suite
+        if: ${{ !cancelled() && (needs.scope.outputs.code == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
+        run: python3 lint/test_merge_config_layout.py
+
       - name: Record slug fixture suite
         if: ${{ !cancelled() && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 lint/test_check_record_slugs.py
@@ -551,8 +571,9 @@ jobs:
         if: ${{ !cancelled() && (needs.scope.outputs.code == 'true' || needs.scope.outputs.doc_any == 'true') }}
         run: python3 lint/check_cost_pins.py
 
-      # A static read of the mutant table: each anchor of hooks/mutate_guard.py sits once where its entry says. It reads every anchor in one
-      # pass, in about a second, and names each bad one. The mutation run's own pre-check covers ambiguity only for guard and audit targets.
+      # A static read of the mutant tables of hooks/mutate_guard.py and janitor/mutate_sweep.py: each anchor sits once where its entry says.
+      # It reads every anchor in one pass, in about a second, and names each bad one. The mutation run's own pre-check covers ambiguity only
+      # for guard and audit targets.
       - name: Mutant anchor census
         if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}
         run: python3 lint/check_mutant_anchors.py
@@ -1067,6 +1088,10 @@ jobs:
       - name: Start check suite
         if: ${{ (needs.scope.outputs.code == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
         run: python3 hooks/test_start_check.py
+
+      - name: Lease file suite
+        if: ${{ (needs.scope.outputs.code == 'true') && needs.scope.outputs.records_only_skip != 'true' }}
+        run: python3 hooks/test_lease.py
 
       - name: Session role file suite
         if: ${{ success() && needs.scope.outputs.records_only_skip != 'true' }}
@@ -1714,6 +1739,52 @@ jobs:
         uses: $/actions/ci-done-comment
         with:
           job: checks-guard-4
+
+  # The fixtureless family of the guard suite: each member runs fresh, in its own process, with only its
+  # named fixtures built. It is opt-in, so no shard runs it.
+  checks-fixtureless:
+    runs-on: ubuntu-latest
+    needs: scope
+    if: ${{ needs.scope.outputs.records_only_skip != 'true' }}
+    # provisional 60 (decision ci-job-caps, rule 6) until 5 green runs, then re-cap from the measured slowest run / 0.7.
+    # It measured 1036.1 s on the Mac, not on a runner, so the Mac time is no cap.
+    timeout-minutes: 60 # provisional
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        if: ${{ needs.scope.outputs.checks_guard == 'true' }}
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
+        if: ${{ needs.scope.outputs.checks_guard == 'true' }}
+        with:
+          python-version: "3.15"
+
+      # A member that renders a page (rule page-item-design) needs Playwright and Chromium, the same pinned copy as the shards.
+      - name: Install the pinned Playwright and Chromium, no apt step
+        if: ${{ needs.scope.outputs.checks_guard == 'true' }}
+        uses: $/actions/playwright-setup
+        with:
+          package-dir: .github/shoot
+
+      - name: Guard fixtureless family
+        if: ${{ needs.scope.outputs.checks_guard == 'true' }}
+        env:
+          NODE_PATH: ${{ github.workspace }}/.github/shoot/node_modules
+          GUARD_CHROMIUM: "1"
+          GUARD_FAMILY: fixtureless
+        run: python3 hooks/test_guard.py
+
+      # A red job wakes the watching session at once; ci-done names any the step could not.
+      - name: Wake the batch runner (red job)
+        if: ${{ failure() && github.event_name == 'pull_request' }}
+        uses: $/actions/ci-done-comment
+        with:
+          job: checks-fixtureless
 
   # The bin/shoot suite, in its own job so that a slow browser install never uses up the cap of the
   # `checks` lint job. bin/shoot needs Playwright and Chromium, and this runner has neither. The job
@@ -3568,6 +3639,7 @@ jobs:
       - checks-guard-2
       - checks-guard-3
       - checks-guard-4
+      - checks-fixtureless
       - checks-shoot
       - checks-waiting-page
       - pointer-windows
@@ -3616,6 +3688,7 @@ jobs:
       - checks-guard-2
       - checks-guard-3
       - checks-guard-4
+      - checks-fixtureless
       - checks-shoot
       - checks-waiting-page
       - pointer-windows

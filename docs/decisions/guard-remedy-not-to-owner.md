@@ -69,12 +69,41 @@ Text: `UNSTARTED_REASON`. It applies when the turn ran a builder.
 - Next holds an "Unstarted:" line. Name each queued item with every question answered that you left unstarted, with its reason.
 - If none, write "Unstarted: none".
 
-Text: `UNSTARTED_FILE_REASON`. It applies when an Unstarted item waits on another lane's merge, PR or landing and names no shared file.
+Text: `UNSTARTED_FILE_REASON`. It applies when an Unstarted item waits on another lane's merge, PR or landing and names neither a code need nor a measured conflict. A shared file alone is no reason to wait.
 
-- Name the file the two lanes share, like `lint/report_guard.py`, `bin/merge`, `.gitignore`, `docs/decisions` or `Makefile`, in the same item. A path with a slash, or a leading dot, counts.
-- Or say what the item waits on in other words, with no merge, PR, "#<n>", land, lands, landed or landing in it. A wait on the owner or the load brake also needs the file when it names a PR or merge.
-- "Unstarted: none" needs no file, even when it adds "all merged". "none" in bold or in parentheses, and "nothing", read the same way.
-- "e.g.", "i.e.", "and/or" and a number pair like "3679/3680" are not files. The item runs to the end of its wrapped lines and its sub-bullets. Bullets under a bare "Unstarted:" line are its items.
+- Start the lane now. It settles a conflict at its merge of main. This is the consultant's reading, not the owner's words (see Source below).
+- A bare "Unstarted:" line owns the bullets under it, and each top-level bullet is one item.
+- Otherwise the item is the rest of its "Unstarted:" line, its wrapped lines and its indented sub-bullets, up to a blank line, a bold report label or a sibling bullet.
+- Within an item, a comma, a semicolon or a sentence end starts a new item only when the clause has a waiting word, and one to three words before it, the first of which is not a pronoun (it, its, they, their, them, which, both, he, she, these, those).
+- A leading also, and, plus, then, that or this is skipped before that test.
+- Any other clause joins the item before it.
+- An item that begins with "none" or "nothing" takes no clause, so each later clause starts its own item.
+- The waiting words are wait and await (any ending), need or needs, blocked, block or blocks, until, till, after, once, when, behind, before, first, follow or follows, pending, depend, depends or dependent, hold, holds, holding or held, gated, stuck, "stacked on", "based on", and "start" or "starts" before at, on or with.
+- A PR is named by its number ("PR #<n>", "PR <n>", "pull request <n>" or "#<n>"), or by a definite noun: "the PR", "that PR", "the stamp lane's PR". "a PR" and "its own PR" name no PR.
+- The merge words are merge, merges, merged, merging, land, lands, landed and landing, each as a whole word that is no part of a name, and not followed by a noun such as tool, rules, queue, policy or page (the list is in `_MERGE_WORD_RE`).
+- A hyphen joins a word here, so "pr-reader" and "checkin-cancel-on-merge" hold no PR word.
+- A PR word is judged only beside a waiting word in the same clause. A clause ends at a comma, a semicolon or a line end.
+- An item with no PR word passes, whatever it waits on: the owner's grant or ruling, a test only the owner can run, the load brake, or a lane not briefed yet.
+- A PR word with no waiting word passes, unless the clause orders the item: "PR #<n> must merge", "PR #<n> blocks", or "first", "before", "ahead" or "prior" after the PR with no review word between, or "merges first" or "lands before". "PR #<n> awaits review" passes.
+- An item with a PR word and a waiting word passes only when the item holds one of the two accepted wordings. A code need covers only a wait on the PR it names. A wait that names no PR is covered by any code need. A code need that names no PR covers any wait.
+- An owner word (owner, grant, ruling, pick and the like) also passes when it is about a PR, as in "waits on the owner's grant on PR #<n>", or when it names a merge with no PR number, as in "waits on the owner's pick for the merge". No "and", "or", "then" or "plus" may stand between them. A PR already merged, with its time after it, passes too. The load brake does not exempt a wait on a PR. A test only the owner can run does, when a preposition such as "for" or "on" stands between "owner" and the PR: "waits on a test only the owner can run for PR #<n>" passes; "before PR #<n>" does not.
+- Accepted wording one: "needs PR #<n>'s code: `symbol`"; "needs PR #<n>'s" followed by a noun from the code's list (`_CODE_NEED_RE`) and then `symbol`; or "needs `symbol` from PR #<n>", where "in", "of" or "out of" may stand for "from". The symbol is in backticks.
+- No backtick or semicolon may stand between "needs" and the symbol.
+- The name is no symbol when it is a common word, a build file name such as Makefile, or a name with a source suffix from the code's short list (such as .py or .md).
+- Accepted wording two: "measured conflict in", "measured conflicts in", "measured a conflict in", "conflict measured in", "conflicts measured in" or "merge-tree shows a conflict in", then a file name in the same item.
+- No other phrasing of a measured conflict counts.
+- A code need with no symbol, a measured conflict with no file, and a wait that names only a shared file are refused.
+- "Unstarted: none" passes, even when it adds "all merged". "none" in bold or in parentheses, and "nothing", read the same way.
+- Open false alarms and holes in this check are the notes `unstarted-code-need-split`, `unstarted-code-need-bare-symbol`, `unstarted-review-wait-refused`, `unstarted-pr-wait-no-word-passes`, `unstarted-joined-wait-passes`, `unstarted-phrase-and-suffix-gaps` and `unstarted-file-alarms-misses`.
+- Source: owner, 2026-11-25 10:47 CST, "fix this", on the guard accepting a wait on PR N whenever an item named a shared file.
+- On 2026-11-23 11:40 CST the owner asked whether such waits went against the parallelism mandate. That was a question, not a ruling.
+- On 2026-11-24 10:30 CST the owner asked why only two check-in waits ran. (Reported, not quoted.)
+- Reading, not the owner's words (consultant, 2026-11-25): a lane starts at once and settles a conflict at its merge of main, and it waits on a PR only when it needs that PR's code or a measured conflict.
+- "A shared file blocks two writers" was the consultant's own summary.
+- Lanes bring main in only on conflict (decision `merge-needs-current-base`, rule d; owner, 2026-11-17 14:20 CST).
+- Mistake it stops: the consultant held about fifteen items behind open PRs for a day on a file-only wait that no owner ruling states.
+- Harm: lanes that could start did not.
+- Risk kind: named incident. A plan agent measured 18 to 22 percent of merges of main since 2026-11-18 as conflicted, on 2026-11-25 (reported, unchecked here).
 
 ### Answered guard (any reply)
 
@@ -166,9 +195,9 @@ Text: `past_ruling_text` in `hooks/question_form.py`, wrapped by `RELAY_RULE_REA
 - The remedy line reads `Based on (ruling): <id> (<time>), may be stale: <why>`.
 - The Stop-path refusal appends one `guard.log` line, rule `past-ruling`, with the session id. Cost: at most one line per refusal, no new file, no process. Reader: the guard cull (the `guard_log_report` script in `lint/`).
 - Control: a question with no `Based on (ruling)` line that names the cited ruling is refused when the judge cites the ruling and its list is missing, empty, bad or names the question; a rewrite that keeps it is refused again.
-- Owner, 10:36 and 10:42 CST 2026-11-24: a hook that cites a past ruling must not stop a question that updates that ruling; it carries a "may be stale" note; "forbids is too strong a word".
+- Owner, 10:36 and 10:42 CST 2026-11-24, on the refusal's wording: "forbids is too strong a word". The refusal says the ruling may be stale, and gives the way to ask anyway: a `Based on (ruling)` line that names the ruling.
 - Incident, 22:31 CST 2026-11-24: a session dropped five owner questions after a refusal that gave only a ruling id.
-- Open: the guard still refuses, and refuses again on a rewrite that keeps the question. Whether that refusal should be a note only is asked of the owner (00:43 CST 2026-11-25). Not ruled.
+- Owner, 2026-11-25 10:02 CST, on the merged change that makes it refuse with "may be stale" and a remedy line: "perfect yes the goal was to get the model to just ponder for a moment longer this is great". The guard stays a refusal, and refuses again on a rewrite that keeps the question. The option "note only" is closed.
 
 ### Unvetted guard (any reply with a question)
 

@@ -12,6 +12,8 @@ A capability has one home. Read this page before you build a helper, and extend 
 - running a test command in a copy of an old commit, for a red run or a mutant, removed when the run ends — `bin/red-run`
 - exporting a commit's tree into a folder — `hooks/tree_export.py:export_tree`
 - reading source text with comments and strings blanked — `skills/plain-english-map/scripts/lib/source-text.mjs:blankCommentsAndStrings`
+- taking, giving back and lifting a lease in git — `hooks/lease.py`
+- the list of files that make up the guard set, read by install.sh, install.ps1 and the CI scope script — `hooks/guard-set.txt`
 
 ## Code files
 

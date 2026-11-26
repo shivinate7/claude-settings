@@ -1,0 +1,1 @@
+- family-hit-lift-skips-rest: (#3983) an owner override that lifts a family hit ends the check at once, so later families and the tool tail rules of `judge` do not run for that call; never-lifted acts stay refused. Seen: 2026-11-25 x1

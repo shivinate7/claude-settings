@@ -216,13 +216,10 @@ If the harness rewords the waiting text, the agent closes as before: a missed al
 Cost (rule `outcomes-mechanize-rules`, each check states its cost): no process, file or timer. At each Stop: one `stat` per
 running agent, and one read of the transcript's end for each quiet agent not yet listed and not waiting, pinned by
 `A8_cost_one_stat_per_running_agent_and_a_read_only_when_quiet` in `hooks/test_stall_watch_stop.py`. The age rule and the
-waiting rule add no stat and no read. They use the record pass that `scan_jobs` already makes. Their extra work is a byte
-test per line, `ci_events` on each check-in or error line, and one JSON parse per check-in each time an agent is checked for it (unmeasured). Each healthy agent past `AGENT_LONG` costs one
-blocked Stop and one check-in (its false alarms).
+waiting rule add no stat and no read. They use the record pass that `scan_jobs` already makes. Their extra work: `keep_waiting` adds about 1.4 ms per MB of transcript at a Stop (median 0.4 ms, p95 19 ms, max 232 ms on a 110 MB transcript; 73 transcripts of this repo's sessions, top level only, 350 MB; measured 2026-11-25, best of 3). `ci_events` costs 0.10 ms per line holding a check-in or error key, JSON parse included (2187 such lines, measured 2026-11-25); no test pins these figures. The `checked_in` parse, one JSON parse per check-in each time an agent is checked for it, is unmeasured.
+Each healthy agent past `AGENT_LONG` costs one blocked Stop and one check-in (its false alarms). Unmeasured: the count of such agents, and so the false-alarm cost, rested on the P1 counts of runs past 30 min, which do not split healthy runs from stalled ones.
 
-- P1 [notes] Launch to final finish of a background agent: 95th percentile 32.5 min over 9196 launches in 8 days. Over 30 min:
-  520 in 8 days (about 65 a day), and 21 on Nov 24 in 7 sessions. Over 45 min: 180 in 8 days, and 10 on Nov 24. Source: the lane
-  plan (agent report, Nov 24, 2026); the command behind it is not on record. Checked never.
+- P1 [measured] Launch to final finish of a background agent. Measured 2026-11-25 on this machine over every project transcript, launches Nov 18-24: 4346 launches, 4337 finished; 394 (9.1% of finished) ran over 30 min, 191 over 45 min; median 5.0 min, p95 42.2 min. Method: each agent's `async_launched` record is paired with its last terminal notice, and a waiting notice does not close an agent. Source: the 2026-11-25 audit; its scripts are not in the repo. Checked 2026-11-25.
 
 Limits: a session that is idle with no Stop sees nothing until its next Stop. The age rule runs only at a Stop, and a
 foreground agent is never checked. A TaskStop, or a terminal notice without the waiting text, closes an agent id. A resume newer than that close reopens the agent: it is listed when quiet and blocked at the age, with the 1800 s counted from the latest resume. A resume newer than a waiting notice clears the waiting flag. `hooks/test_guard.py` has no case for a resumed agent under `fg-bash-while-bg`: its only mention of that rule is the catalog line (:206). An agent stuck inside one tool call is not quiet-listed. The age rule catches it only at
