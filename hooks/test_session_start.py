@@ -3224,13 +3224,15 @@ class SessionStartMainRefTests(SessionStartAgentWorktreeNoticeTests):
         except ProcessLookupError:
             pass
 
-    def heredoc_installer(self, name, marker_line):
-        """The old installer with a no-op heredoc at its end whose body is `marker_line`. The file has no marker line of its own."""
-        with open(OLD_INSTALLER, encoding="utf-8") as handle:
-            base = handle.read()
-        self.assertNotIn("main-ref-check:", base, "scope: the old installer already carries a marker line")
+    def heredoc_installer(self, name, body_line):
+        """The real installer with its marker line taken out, then a no-op heredoc at its end whose body is `body_line`.
+        The marker text is in that heredoc and nowhere else, so the heredoc is the only text that can arm the check."""
+        with open(os.path.join(MAIN_REF_SRC, "install.sh"), encoding="utf-8") as handle:
+            base, count = re.subn(r"^# main-ref-check: 1[^\n]*\n", "", handle.read(), flags=re.MULTILINE)
+        self.assertEqual(count, 1, "scope: the installer has %d marker lines, want 1" % count)
+        self.assertNotIn(pre_commit_marker(), base, "scope: the marker text is already in the installer outside the heredoc")
         path = os.path.join(self.root, name)
-        self.put(path, base + "\n: <<'NOTE'\n%s\nNOTE\n" % marker_line)
+        self.put(path, base + "\n: <<'NOTE'\n%s\nNOTE\n" % body_line)
         return path
 
     def assert_one_missing_copy_line(self, where, control):
@@ -3402,15 +3404,30 @@ class SessionStartMainRefTests(SessionStartAgentWorktreeNoticeTests):
         self.ship(where, installer=installer)
         self.assert_one_missing_copy_line(where, control)
 
-    def test_a_marker_in_a_heredoc_of_an_unmarked_installer_does_not_arm_the_check(self):
-        """The marker text at a line start inside a heredoc body does not make the installer marked, so it is never run."""
-        installer = self.heredoc_installer("heredoc-column-zero-install.sh", "# main-ref-check: 1")
-        self.assert_installer_is_not_run("heredoc-column-zero", installer)
+    def test_a_marker_line_in_a_heredoc_arms_the_check_as_the_pre_commit_hook_does(self):
+        """One marker rule: the pre-commit hook arms on the marker text anywhere in the installer, a heredoc body included.
+        Session start reads the same text, so a column-zero marker line inside a heredoc arms the check."""
+        installer = self.heredoc_installer("heredoc-column-zero-install.sh", "# " + pre_commit_marker())
+        control = self.control()
+        where = self.make_repo("heredoc-column-zero")
+        self.ship(where, installer=installer)
+        self.assert_one_missing_copy_line(where, control)
 
-    def test_an_indented_marker_in_a_heredoc_of_an_unmarked_installer_does_not_arm_the_check(self):
-        """Control, green on the old commit: the same text indented is not run. A matcher that accepts indented text breaks it."""
-        installer = self.heredoc_installer("heredoc-indented-install.sh", "  # main-ref-check: 1")
-        self.assert_installer_is_not_run("heredoc-indented", installer)
+    def test_an_indented_marker_line_in_a_heredoc_arms_the_check_as_the_pre_commit_hook_does(self):
+        """One marker rule, as above: an indented marker line inside a heredoc also arms the check, since the match is a substring."""
+        installer = self.heredoc_installer("heredoc-indented-install.sh", "  # " + pre_commit_marker())
+        control = self.control()
+        where = self.make_repo("heredoc-indented")
+        self.ship(where, installer=installer)
+        self.assert_one_missing_copy_line(where, control)
+
+    def test_marker_text_mid_line_in_a_heredoc_arms_the_check_as_the_pre_commit_hook_does(self):
+        """One marker rule, as above: the marker text anywhere on a heredoc line arms the check, not only at a line start."""
+        installer = self.heredoc_installer("heredoc-mid-line-install.sh", "set the marker as # " + pre_commit_marker())
+        control = self.control()
+        where = self.make_repo("heredoc-mid-line")
+        self.ship(where, installer=installer)
+        self.assert_one_missing_copy_line(where, control)
 
 
 if __name__ == "__main__":
