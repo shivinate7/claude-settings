@@ -1,0 +1,1 @@
+- walker-wrapped-runs-missed: a script run with no interpreter word is missed by `COMMAND_PATH` in `lint/test_checks_step_scope.py` (:583) after `env VAR=1`, `FOO=1`, `sudo`, `time`, `xargs`, `timeout`, `nohup`, `nice`, `command`, `if` or `while`, and when the script name is quoted. No such line exists in the repo today. Seen: 2026-11-25 x1

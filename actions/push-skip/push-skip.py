@@ -9,8 +9,8 @@ base is the proven base of a scoped push (proven_base): the head of the newest c
 on main whose suites ran, among the runs with an id below this run's GITHUB_RUN_ID (a newer run is never a base and never a stop, and
 this run's own record never counts). Empty means every flag stays on. A run not yet completed (queued, in progress, waiting, requested,
 pending) on its first attempt is passed over with no read. A run not completed on attempt 2 or later (a re-run in flight, whose first
-attempt completed) gives none, and the printed line names that run. A run that push-skip skipped whole is passed over. A completed run that is not a success (red,
-cancelled, timed out) gives none, and the printed line names that run and its conclusion. Any read error, malformed reply, or full page
+attempt completed) gives none, and the printed line names that run. A run that push-skip skipped whole is passed over. A cancelled run that no job started in and a newer push run replaced
+(clear_rule.superseded_run) is passed over, at the cost of one jobs read. A completed run that is not a success (red, cancelled after a job started, timed out) gives none, and the printed line names that run and its conclusion. Any read error, malformed reply, or full page
 with no usable run gives none and says "unknown". A skip=true push, and any event but a push, writes an empty base: scope does not run
 on a skip, and a schedule or dispatch run never scopes.
 
@@ -63,6 +63,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))  # the checkout this action came from: a pinned child repo gets claude-settings' copy
 LINT = os.path.join(ROOT, "lint")
 NIGHTLY_SKIP = os.path.join(ROOT, ".github", "scripts", "nightly-skip.py")
+CLEAR_RULE = os.path.join(ROOT, "actions", "ci-alarm", "clear_rule.py")
 
 
 class Unknown(Exception):
@@ -73,6 +74,15 @@ class Unknown(Exception):
 def _nightly_skip():
     """nightly-skip.py is the one home of the API reader. Its name has a hyphen, so it loads by path."""
     spec = importlib.util.spec_from_file_location("nightly_skip", NIGHTLY_SKIP)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+@functools.lru_cache(maxsize=None)
+def _clear_rule():
+    """actions/ci-alarm/clear_rule.py is the one home of "a superseded run" (superseded_run), loaded by path as this action's other readers are."""
+    spec = importlib.util.spec_from_file_location("clear_rule", CLEAR_RULE)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -318,7 +328,8 @@ def proven_base(env):
     GITHUB_RUN_ID (with it unset, every run): a newer run is never a base and never a stop, and this run's own record never counts.
     Walking newest to oldest, a run that is not completed (queued, in_progress, waiting, requested, pending) on its first attempt is
     passed over with no read. A run not completed on attempt 2 or later is a re-run in flight: its first attempt completed, and the
-    walk cannot read that as green, so it gives no base. A missing run_attempt reads as attempt 1. A completed run that is not a success (red, cancelled, timed out) gives no base, because main is then
+    walk cannot read that as green, so it gives no base. A missing run_attempt reads as attempt 1. A cancelled run that no job started in, with a newer push run on the page or this run (clear_rule.superseded_run),
+    is passed over: a newer run replaced it. A completed run that is not a success (red, cancelled after a job started, timed out) gives no base, because main is then
     not known green. A completed success with no suite job succeeded was skipped whole by push-skip, so it is passed over. Raises
     Unknown on a read that cannot be judged, a malformed reply, a head that is no full sha, a GITHUB_RUN_ID or run id that cannot be
     compared, and a full page that held no usable run (an older one may exist); the caller then writes an empty base."""
@@ -332,10 +343,21 @@ def proven_base(env):
         raise Unknown("GITHUB_RUN_ID %r is no run id, so the runs newer than this one cannot be set aside" % own)
     mine = [r for r in page if r.get("event") == "push" and r.get("head_branch") == MAIN
             and str(r.get("path") or "").split("@")[0] == workflow]
+    seen = list(mine)  # every push run of the workflow on the page: a run newer than a candidate may replace it (superseded_run)
     if own:
         if not all(isinstance(r.get("id"), int) for r in mine):
             raise Unknown("a push run has no integer id, so the runs newer than this one cannot be set aside")
         mine = [r for r in mine if r["id"] < int(own)]
+        seen.append({"id": int(own)})  # this run is newer than every candidate, on the page or not
+
+    def jobs_of(run):
+        jobs_body = get("actions/runs/%s/jobs" % run.get("id"), {"per_page": str(PAGE)}, env)
+        jobs = jobs_body.get("jobs") if isinstance(jobs_body, dict) else None
+        if not isinstance(jobs, list) or not all(isinstance(j, dict) for j in jobs):
+            raise Unknown("the jobs read of push run %s has no jobs list" % run.get("id"))
+        if len(jobs) >= PAGE:
+            raise Unknown("the jobs read of push run %s is a full page, so a job may be missing" % run.get("id"))
+        return jobs
     newest_first = sorted(mine, key=lambda r: (str(r.get("created_at") or ""), r.get("id") if isinstance(r.get("id"), int) else 0), reverse=True)
     for run in newest_first:
         if run.get("status") != "completed":
@@ -344,15 +366,13 @@ def proven_base(env):
                       % (run.get("id"), run.get("run_attempt")))
                 return ""
             continue
+        if run.get("conclusion") == "cancelled" and _clear_rule().superseded_run(run, seen, jobs_of, lambda r: "push"):
+            print("push-skip: push run %s was cancelled before any job started and a newer push run replaced it, so it is passed over" % run.get("id"))
+            continue
         if run.get("conclusion") != "success":
             print("push-skip: push run %s concluded %s, so main is not known green and the push has no base" % (run.get("id"), run.get("conclusion")))
             return ""
-        jobs_body = get("actions/runs/%s/jobs" % run.get("id"), {"per_page": str(PAGE)}, env)
-        jobs = jobs_body.get("jobs") if isinstance(jobs_body, dict) else None
-        if not isinstance(jobs, list) or not all(isinstance(j, dict) for j in jobs):
-            raise Unknown("the jobs read of push run %s has no jobs list" % run.get("id"))
-        if len(jobs) >= PAGE:
-            raise Unknown("the jobs read of push run %s is a full page, so a job may be missing" % run.get("id"))
+        jobs = jobs_of(run)
         suites = set(suite_jobs(env))
         if not any(j.get("name") in suites and (j.get("status"), j.get("conclusion")) == ("completed", "success") for j in jobs):
             continue

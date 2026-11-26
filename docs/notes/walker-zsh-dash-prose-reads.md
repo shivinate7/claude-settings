@@ -1,0 +1,1 @@
+- walker-zsh-dash-prose-reads: `zsh` and `dash` are command words in `INVOKE` (:580) of `lint/test_checks_step_scope.py`, so prose that names them on a line with a code name counts as a read. About 25 lines in `hooks/test_install_src.sh` trip it. Seen: 2026-11-25 x1
