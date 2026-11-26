@@ -8,7 +8,7 @@ Owner, 2026-11-26 13:57 CST, the newest words. Quoted exactly:
 
 On close items the owner said: "This should be resumed to land". On the new-work line he said: "this should be 90%".
 
-Far work: owner, 2026-11-26 13:47 CST. Its work is saved, committed, and marked in the handoff as part of its agenda.
+Far work: owner, 2026-11-26 13:47 CST: "those that are far get their stuff saved/committed and marked as a handoff part of their agenda". Its 94% start is replaced by the 13:57 words.
 
 It replaces R43 (restart-plan item R43, owner 2026-11-11 13:48 CST) and the earlier numbers.
 
@@ -59,7 +59,7 @@ The code home is open with question 14.Q2. The first lane names it after the mea
 
 Rulings go to a tracked home at once (decision `precompact-handoff`, item 5). This record is the tracked home for the usage brake ruling.
 
-No guard on main refuses a ruling kept only in a handoff. The nearest guards, `handoff-sections` and `handoff-checked-stamp` in `hooks/guard.py`, check section names and premise stamps. <!-- glossary-ok: the guard's fixed rule id, as hooks/guard.py names it -->
+At Stop, `hooks/feedback_guard.py` refuses a ruling homed only in the handoff (test `case_guard_ruling_homed_to_handoff_blocks`, `hooks/test_feedback_inbox.py`). The guards `handoff-sections` and `handoff-checked-stamp` in `hooks/guard.py` check handoff section names and premise stamps, not a ruling's home. <!-- glossary-ok: the guard's fixed rule id, as hooks/guard.py names it -->
 
 ## When this record changes
 
