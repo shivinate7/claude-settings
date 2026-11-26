@@ -1,0 +1,1 @@
+- pr3686-full-stop-line-14: on the PR 3686 head, a full stop sits at line 14. The review names no file. Found in PR 3686 review. Seen: 2026-11-20 x1

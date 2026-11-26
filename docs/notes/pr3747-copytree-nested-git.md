@@ -1,0 +1,1 @@
+- pr3747-copytree-nested-git: on the PR 3747 head, `--add` copies a nested .git, because copytree copies it. Found in PR 3747 review; not on main. Seen: 2026-11-20 x1

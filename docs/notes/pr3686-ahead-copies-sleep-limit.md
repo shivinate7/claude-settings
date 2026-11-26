@@ -1,0 +1,1 @@
+- pr3686-ahead-copies-sleep-limit: on the PR 3686 head, WAIT_UNTIL_AHEAD copies SLEEP_LIMIT. Found in PR 3686 review; not on main. Seen: 2026-11-20 x1

@@ -1,0 +1,1 @@
+- pr3686-substring-assert: on the PR 3686 head, one test asserts a substring. The review names no file. Found in PR 3686 review. Seen: 2026-11-20 x1

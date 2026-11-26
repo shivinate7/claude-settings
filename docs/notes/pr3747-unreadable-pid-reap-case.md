@@ -1,0 +1,1 @@
+- pr3747-unreadable-pid-reap-case: on the PR 3747 head, no case covers an unrelated pid that cannot be read and must still reap. Found in PR 3747 review; not on main. Seen: 2026-11-20 x1

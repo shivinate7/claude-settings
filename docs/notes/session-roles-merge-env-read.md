@@ -1,0 +1,1 @@
+- session-roles-merge-env-read: docs/decisions/session-tiers.md:186 names the unmeasured id equality on Windows only. merge/merge.py reads CLAUDE_CODE_SESSION_ID at lines 7202 and 7254 to find the role file, so that read is unmeasured too. Found in review of PR 3682. Decision: session-tiers. Seen: 2026-11-20 x1

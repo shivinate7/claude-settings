@@ -1,0 +1,1 @@
+- pr3691-barred-term-tests: on the PR 3691 head, hooks/test_feedback_inbox.py lines 1849, 1862 and 1895 use "waiting page", a term GLOSSARY.md:61 bars. Found in PR 3691 review; main's lines differ. Seen: 2026-11-20 x1

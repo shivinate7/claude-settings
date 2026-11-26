@@ -1,0 +1,1 @@
+- pr3741-no-cancelled-read-case: on the PR 3741 head, no test covers a failed tree read or a failed PR read beside a cancelled run. Found in PR 3741 review; not on main. Seen: 2026-11-20 x1
