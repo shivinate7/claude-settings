@@ -14,7 +14,6 @@ folder, the send and transcript helpers come from lint/test_report_guard.py, the
 """
 import json
 import os
-import re
 import shutil
 import sys
 import tempfile
@@ -27,7 +26,6 @@ import test_report_guard as trg  # noqa: E402  the run folder, the send and tran
 import test_report_guard_stalled as trs  # noqa: E402  the triage session's own record and remote id (one home)
 
 layout = trg.RG.layout  # the module the guard reads the writer key from, so this file reads the same key
-SESSION_ID = re.compile(r"session_[A-Za-z0-9]+")
 FIXTURE_WRITER = "session_pagewriter1"  # the fixture repo's page writer: no live session holds this id
 OTHER_ID = "session_notthewriter"  # a delivered send's target that is not the page writer
 PARENT_ID = "session_parent1"  # the parent id a triage session's own record names
@@ -99,13 +97,12 @@ class PageWriterTests(trg.SameTurnWriter, unittest.TestCase):
         refusal, _note = trg.RG.question_problem(records, records[1:], self.reply(self.PICK), hook)
         return refusal
 
-    def test_rw_key_names_a_session_id_for_this_repo(self):
-        # Catches: this repo's layout-extras.json with no page-writer key, or with a blank, parent-alias or non-session
-        # value, so the pick check has no writer to match a same-turn send against.
+    def test_rw_key_is_none_for_this_repo(self):
+        # Catches: this repo's layout-extras.json naming a page-writer session, which has gone stale. A question sent
+        # to it comes back undelivered, and the Stop check blocks on that. The owner ruled the page writer N/A
+        # (2026-11-25 20:32 CST, "page writer should be N/A atm"), so the key names no writer.
         writer = layout.page_writer_key(self.real_root())
-        self.assertIsNotNone(writer, "this repo's layout-extras.json names no usable page-writer key")
-        self.assertNotIn(writer, layout.PARENT_TARGETS, "the page-writer key names a parent alias, which reaches no one")
-        self.assertIsNotNone(SESSION_ID.fullmatch(writer), "the page-writer key is not a session id: %r" % writer)
+        self.assertIsNone(writer, "this repo's layout-extras.json names a page writer, but the page writer is N/A: %r" % writer)
 
     def test_rw_green_send_to_the_key_writer_is_not_refused(self):
         # Catches: a delivered send to the page writer refused as "the page writer is not known to this session" when
