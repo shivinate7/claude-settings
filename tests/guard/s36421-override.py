@@ -726,27 +726,26 @@ def ov_negated_role_check():
 
 
 def ov_two_models_check():
-    """`just use sonnet agents throughout or even opus ...` (the judge says sonnet, the first model he names): main writes
-    an Opus override for every role, 2 h, so an Opus spawn goes through. This branch must grant the same."""
+    """`just use sonnet agents throughout or even opus ...` (the judge says sonnet, the first model he names) names two models
+    and negates neither, so it writes no hold at all (owner ruling, 2026-11-26 00:18 CST; settled 00:18, relayed 00:20 CST):
+    the agents run their role's model. An Opus builder spawn is refused under agent-model-cap."""
     config, session, rule = ov_config("two-models"), "ov-two-models", "agent-model-cap"
 
     def check():
-        ok, why = ov_story([("with nothing typed", lambda: op_spawn(config, session, 0), "deny", rule)])
+        ok, why = ov_story([("with nothing typed", lambda: op_spawn(config, session, 0, OP_BUILDER), "deny", rule)])
         if not ok:
             return False, why
         note = ov_type(config, session, OV_TWO_MODELS, 60, judge="sonnet")
-        ok, why = ov_story([("an Opus spawn after the sentence", lambda: op_spawn(config, session, 120), "allow", rule)],
-                           note)
+        if os.path.exists(op_pass_path(config, session)):
+            with open(op_pass_path(config, session), encoding="utf-8") as handle:
+                data = json.load(handle)
+            return False, "a hold file was written (model %r, role %r); want no hold" % (
+                data.get("model"), data.get("role")) + ("; " + note if note else "")
+        ok, why = ov_story([("an Opus builder spawn after the sentence",
+                             lambda: op_spawn(config, session, 120, OP_BUILDER), "deny", rule)], note)
         if not ok:
             return False, why
-        if not os.path.exists(op_pass_path(config, session)):
-            return False, "no Opus hold file was written; want one for every role"
-        with open(op_pass_path(config, session), encoding="utf-8") as handle:
-            data = json.load(handle)
-        if data.get("model", "opus") != "opus" or data.get("role") is not None:
-            return False, "the hold is model %r, role %r; want an Opus hold for every role" % (
-                data.get("model"), data.get("role"))
-        return True, "the sentence granted an Opus spawn for every role, as main does"
+        return True, "the two-model sentence wrote no hold, and the Opus builder spawn was refused under %s" % rule
     return check
 
 
@@ -796,12 +795,208 @@ def ov_negated_role_model_check():
 for _label, _check in (
     ("override: `Use opus for the audit, don't use it for reviewers.` grants no reviewer, and the audit Explore is allowed",
      ov_negated_role_check()),
-    ("override: `just use sonnet agents ... or even opus` grants an Opus spawn for every role, as main does",
+    ("override: `just use sonnet agents ... or even opus` writes no hold, and an Opus builder spawn is refused",
      ov_two_models_check()),
     ("override: `use sonnet, not opus` grants sonnet only, and an Opus spawn is refused", ov_negated_model_check()),
     ("override: `use sonnet for the reviewers, not opus` grants nothing, as main does", ov_negated_role_model_check()),
 ):
     LOG_CHECKS_EXTRA.append((_label, _check))
+
+
+# ---- THE LOWER MODEL, THE EXCLUDED ROLES, AND A NEGATION THAT GOVERNS ANOTHER VERB (decision agent-model-cap). The judge's
+# answer is the stub's, set per story. A sentence that asks for a lower model and names Opus only to refuse it holds the
+# lower model, never Opus. A negation that reaches a role excludes it, and stops at the end of its clause. A `don't` that
+# governs another verb ("Don't forget to use opus for the reviewers") negates no role and no model. Each story first wants
+# the Opus spawn refused with nothing typed.
+OV_LOWER_ASKS = (
+    ("use sonnet, opus is too expensive", None),
+    ("use sonnet and avoid opus", None),
+    ("use sonnet over opus", None),
+    ("use sonnet, keep opus off", None),
+    ("use sonnet, the opus run last week was fine", None),
+    ("use sonnet for the reviewers, opus is overkill", "reviewer"),
+)
+OV_EXCLUDED_ROLES = (
+    "Use opus for the audit, don't use it for reviewers, nor builders.",
+    "Use opus for the audit, don't use it for reviewers or for builders",
+)
+OV_BUILDERS_NOT_REVIEWERS = "use opus for the builders and the explorers, don't use it for reviewers"
+OV_EXPLORE_OPUS = {"prompt": "List the hooks that read the config folder.", "model": "opus", "subagent_type": "Explore"}
+OV_NEGATED_VERBS = (
+    ("Please don't hesitate to use opus for the reviewers", "reviewer"),
+    ("Don't forget to use opus for the reviewers", "reviewer"),
+    ("don't be afraid to use opus for the builders", "builder"),
+)
+
+
+def ov_covers(hold, role):
+    """True when the hold file `hold` covers spawns of `role` (case-insensitive): every role when its `role` is None, else
+    the one role, or the list of roles, it names."""
+    named = hold.get("role")
+    if named is None:
+        return True
+    named = [named] if isinstance(named, str) else list(named)
+    return role.lower() in [str(r).lower() for r in named]
+
+
+def ov_hold(config, session):
+    """The Opus-route hold file as the grant wrote it, read as a dict; None when no file exists."""
+    path = op_pass_path(config, session)
+    if not os.path.exists(path):
+        return None
+    with open(path, encoding="utf-8") as handle:
+        return json.load(handle)
+
+
+def ov_lower_check(n, prompt, role):
+    """`prompt` names Opus only to refuse it (the judge says sonnet). A Sonnet hold or no hold are both acceptable, so the
+    one hold assertion is the absence of an Opus hold; an Opus spawn of `role` is refused under agent-model-cap."""
+    config, session, rule = ov_config("lower-%d" % n), "ov-lower-%d" % n, "agent-model-cap"
+    spawn = OP_REVIEWER if role == "reviewer" else OP_BUILDER
+
+    def check():
+        ok, why = ov_story([("with nothing typed", lambda: op_spawn(config, session, 0, spawn), "deny", rule)])
+        if not ok:
+            return False, why
+        note = ov_type(config, session, prompt, 60, judge="sonnet")
+        hold = ov_hold(config, session)
+        if hold is not None and hold.get("model") == "opus":
+            return False, "the hold is model 'opus'; want no Opus hold" + ("; " + note if note else "")
+        ok, why = ov_story([("an Opus spawn after the sentence", lambda: op_spawn(config, session, 120, spawn),
+                             "deny", rule)], note)
+        if not ok:
+            return False, why
+        return True, "no Opus hold was written, and the Opus spawn was refused under %s" % rule
+    return check
+
+
+def ov_excluded_check(n, prompt):
+    """`prompt` names the reviewers and the builders only to exclude them (the judge says opus). No hold covers a builder or a
+    reviewer, and an Opus spawn of either is refused under agent-model-cap."""
+    config, session, rule = ov_config("excluded-%d" % n), "ov-excluded-%d" % n, "agent-model-cap"
+
+    def check():
+        ok, why = ov_story([
+            ("a builder on Opus with nothing typed", lambda: op_spawn(config, session, 0, OP_BUILDER), "deny", rule),
+            ("a reviewer on Opus with nothing typed", lambda: op_spawn(config, session, 30, OP_REVIEWER), "deny", rule),
+        ])
+        if not ok:
+            return False, why
+        note = ov_type(config, session, prompt, 60, judge="opus")
+        hold = ov_hold(config, session)
+        if hold is not None:
+            covered = [r for r in ("builder", "reviewer") if ov_covers(hold, r)]
+            if covered:
+                return False, "the Opus hold covers %s; want neither builder nor reviewer" % " and ".join(covered)
+        ok, why = ov_story([
+            ("a builder on Opus after the sentence", lambda: op_spawn(config, session, 120, OP_BUILDER), "deny", rule),
+            ("a reviewer on Opus after the sentence", lambda: op_spawn(config, session, 150, OP_REVIEWER), "deny", rule),
+        ], note)
+        if not ok:
+            return False, why
+        return True, "the sentence held no builder and no reviewer, and both Opus spawns were refused under %s" % rule
+    return check
+
+
+def ov_builders_control_check():
+    """`use opus for the builders and the explorers, don't use it for reviewers` (the judge says opus): the hold covers the
+    builders and not the reviewers. The explorers have their own case (ov_explorers_check)."""
+    config, session, rule = ov_config("builders-control"), "ov-builders-control", "agent-model-cap"
+
+    def check():
+        ok, why = ov_story([("a builder on Opus with nothing typed", lambda: op_spawn(config, session, 0, OP_BUILDER),
+                             "deny", rule)])
+        if not ok:
+            return False, why
+        note = ov_type(config, session, OV_BUILDERS_NOT_REVIEWERS, 60, judge="opus")
+        hold = ov_hold(config, session)
+        if hold is None:
+            return False, "no Opus hold was written; want one that covers the builders" + ("; " + note if note else "")
+        if not ov_covers(hold, "builder"):
+            return False, "the Opus hold covers role %r; want the builders" % (hold.get("role"),)
+        if ov_covers(hold, "reviewer"):
+            return False, "the Opus hold covers the reviewers; want none"
+        ok, why = ov_story([
+            ("a builder on Opus after the sentence", lambda: op_spawn(config, session, 120, OP_BUILDER), "allow", rule),
+            ("a reviewer on Opus after the sentence", lambda: op_spawn(config, session, 150, OP_REVIEWER), "deny", rule),
+        ], note)
+        if not ok:
+            return False, why
+        return True, "the hold covers the builders and not the reviewers, under %s" % rule
+    return check
+
+
+def ov_explorers_check():
+    """`use opus for the builders and the explorers, don't use it for reviewers` (the judge says opus): the hold covers the
+    explorers too. A non-audit Explore on Opus is then allowed."""
+    config, session, rule = ov_config("explorers"), "ov-explorers", "agent-model-cap"
+
+    def check():
+        ok, why = ov_story([("an Explore on Opus with nothing typed", lambda: op_spawn(config, session, 0, OV_EXPLORE_OPUS),
+                             "deny", rule)])
+        if not ok:
+            return False, why
+        note = ov_type(config, session, OV_BUILDERS_NOT_REVIEWERS, 60, judge="opus")
+        hold = ov_hold(config, session)
+        if hold is None:
+            return False, "no Opus hold was written; want one that covers the explorers" + ("; " + note if note else "")
+        if not ov_covers(hold, "explore"):
+            return False, "the Opus hold covers role %r; want the explorers too" % (hold.get("role"),)
+        ok, why = ov_story([("an Explore on Opus after the sentence",
+                             lambda: op_spawn(config, session, 120, OV_EXPLORE_OPUS), "allow", rule)], note)
+        if not ok:
+            return False, why
+        return True, "the hold covers the explorers, and a non-audit Explore on Opus was allowed under %s" % rule
+    return check
+
+
+def ov_negated_verb_check(n, prompt, role):
+    """`prompt` names `role` under a negation that governs another verb (the judge says opus): the hold is Opus and covers
+    `role`, its spawn is allowed under agent-model-cap, and the other role's Opus spawn is refused."""
+    config, session, rule = ov_config("negated-verb-%d" % n), "ov-negated-verb-%d" % n, "agent-model-cap"
+    named, other = (OP_REVIEWER, OP_BUILDER) if role == "reviewer" else (OP_BUILDER, OP_REVIEWER)
+
+    def check():
+        ok, why = ov_story([("with nothing typed", lambda: op_spawn(config, session, 0, named), "deny", rule)])
+        if not ok:
+            return False, why
+        note = ov_type(config, session, prompt, 60, judge="opus")
+        hold = ov_hold(config, session)
+        if hold is None:
+            return False, "no Opus hold was written; want one for the %ss" % role + ("; " + note if note else "")
+        if hold.get("model") != "opus":
+            return False, "the hold is model %r; want opus" % hold.get("model")
+        if not ov_covers(hold, role):
+            return False, "the Opus hold covers role %r; want the %ss" % (hold.get("role"), role)
+        ok, why = ov_story([
+            ("the named %s on Opus after the sentence" % role, lambda: op_spawn(config, session, 120, named), "allow", rule),
+            ("the other role on Opus", lambda: op_spawn(config, session, 150, other), "deny", rule),
+        ], note)
+        if not ok:
+            return False, why
+        return True, "the sentence held the %s on Opus, and the other role was refused under %s" % (role, rule)
+    return check
+
+
+for _n, (_prompt, _role) in enumerate(OV_LOWER_ASKS):
+    LOG_CHECKS_EXTRA.append((
+        "override: `%s` (judge: sonnet) holds sonnet, never Opus, and an Opus spawn is refused" % _prompt,
+        ov_lower_check(_n, _prompt, _role)))
+for _n, _prompt in enumerate(OV_EXCLUDED_ROLES):
+    LOG_CHECKS_EXTRA.append((
+        "override: `%s` (judge: opus) holds no builder and no reviewer" % _prompt,
+        ov_excluded_check(_n, _prompt)))
+for _label, _check in (
+    ("override: `use opus for the builders and the explorers, don't use it for reviewers` holds the builders, not the "
+     "reviewers", ov_builders_control_check()),
+    ("override: `use opus for the builders and the explorers, don't use it for reviewers` holds the explorers too",
+     ov_explorers_check()),
+):
+    LOG_CHECKS_EXTRA.append((_label, _check))
+for _n, (_prompt, _role) in enumerate(OV_NEGATED_VERBS):
+    LOG_CHECKS_EXTRA.append((
+        "override: `%s` (judge: opus) holds the %s on Opus, and the other role is refused" % (_prompt, _role),
+        ov_negated_verb_check(_n, _prompt, _role)))
 
 
 # THE STEP GRANT (lane opus-grant-on-step: the lift of rule agent-model-cap that reads the lane's roadmap
