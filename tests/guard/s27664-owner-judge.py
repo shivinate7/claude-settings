@@ -128,7 +128,7 @@ def decide(case):
     if case["env_path"]:
         env["PATH"] = case["env_path"]
     guard_file = case.get("guard") or GUARD
-    command = [sys.executable, guard_file]
+    command = guard_start(guard_file)
     if case.get("tool") in dict(LB_TOOLS).values():
         # A start call makes the guard read the machine's load. A case about another rule must
         # not meet this host's load, or a busy host turns it red (the load brake refuses a
@@ -184,7 +184,7 @@ def log_case():
     env["CLAUDE_CONFIG_DIR"] = LOGDIR
     for command in ("pkill -f node", VCS + " status"):
         subprocess.run(
-            [sys.executable, GUARD],
+            guard_start(GUARD),
             input=json.dumps({"tool_name": "Bash", "tool_input": {"command": command},
                               "cwd": NOGIT}),
             capture_output=True, text=True, env=env, timeout=60,
@@ -226,7 +226,7 @@ def config_edit_log_case():
     ]
     for payload in calls:
         result = subprocess.run(
-            [sys.executable, GUARD], input=json.dumps(payload), capture_output=True, text=True,
+            guard_start(GUARD), input=json.dumps(payload), capture_output=True, text=True,
             env=env, timeout=60,
         )
         if result.returncode != 0:
@@ -271,7 +271,7 @@ def cap_log_case():
     ]
     for payload in calls:
         result = subprocess.run(
-            [sys.executable, GUARD], input=json.dumps(payload), capture_output=True, text=True,
+            guard_start(GUARD), input=json.dumps(payload), capture_output=True, text=True,
             env=env, timeout=60,
         )
         if result.returncode != 0:
@@ -321,7 +321,7 @@ def cap_deep_path_log_case():
                "tool_input": {"file_path": deep, "content": cap_settings()},
                "cwd": NOGIT}
     result = subprocess.run(
-        [sys.executable, GUARD], input=json.dumps(payload), capture_output=True, text=True,
+        guard_start(GUARD), input=json.dumps(payload), capture_output=True, text=True,
         env=env, timeout=60,
     )
     if result.returncode != 0:
@@ -368,7 +368,7 @@ def cap_reason_bound_case():
     env.pop("CLAUDE_CODE_REMOTE", None)
     env["CLAUDE_CONFIG_DIR"] = os.path.join(ROOT, "capbound")
     result = subprocess.run(
-        [sys.executable, GUARD], input=json.dumps(payload), capture_output=True, text=True,
+        guard_start(GUARD), input=json.dumps(payload), capture_output=True, text=True,
         env=env, timeout=60,
     )
     if result.returncode != 0:
@@ -448,7 +448,7 @@ def subject_unread_log_case(command=None, expect_note=True, cwd=SUBJDIRTY, searc
     env["PATH"] = search_path
     env.pop("CLAUDE_CODE_SESSION_ID", None)
     result = subprocess.run(
-        [sys.executable, GUARD],
+        guard_start(GUARD),
         input=json.dumps({"tool_name": "Bash",
                           "tool_input": {"command": command or VCS + " reset --hard HEAD"},
                           "cwd": cwd}),
@@ -504,7 +504,7 @@ def agent_worktree_noted_case(command):
     env["CLAUDE_CONFIG_DIR"] = folder
     env.pop("CLAUDE_CODE_SESSION_ID", None)
     result = subprocess.run(
-        [sys.executable, GUARD],
+        guard_start(GUARD),
         input=json.dumps({"tool_name": "Bash", "tool_input": {"command": command}, "cwd": AGENTWT}),
         capture_output=True, text=True, env=env, timeout=60,
     )
@@ -568,7 +568,7 @@ def branch_base_unread_log_case():
     env["CLAUDE_CONFIG_DIR"] = folder
     env.pop("CLAUDE_CODE_SESSION_ID", None)
     result = subprocess.run(
-        [sys.executable, GUARD],
+        guard_start(GUARD),
         input=json.dumps({"tool_name": "Bash",
                           "tool_input": {"command": VCS + " branch -D orphan-work"},
                           "cwd": BRANCHNOBASE}),

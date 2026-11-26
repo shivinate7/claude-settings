@@ -110,7 +110,7 @@ def _reload_run(folder, name, fix=None, command=None, delay=RELOAD_DELAY_S, sess
         timer.daemon = True
         timer.start()
     try:
-        run = subprocess.run([sys.executable, os.path.join(folder, "guard.py")], input=payload,
+        run = subprocess.run(guard_start(os.path.join(folder, "guard.py")), input=payload,
                              capture_output=True, text=True, env=env, timeout=120)
     finally:
         if timer:

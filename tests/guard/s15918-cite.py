@@ -316,7 +316,7 @@ def cite_unread_folders_case():
 
     def ask(command):
         return subprocess.run(
-            [sys.executable, copy],
+            guard_start(copy),
             input=json.dumps({"tool_name": "Bash", "tool_input": {"command": command},
                               "cwd": NOGIT}),
             capture_output=True, text=True, env=env, timeout=60)

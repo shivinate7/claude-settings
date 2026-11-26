@@ -248,7 +248,7 @@ def _hu_copy_run(folder, config, tool="Bash", tool_input=None):
     env["CLAUDE_GUARD_ROOT_PID"] = str(os.getpid())
     payload = json.dumps({"tool_name": tool, "tool_input": tool_input, "cwd": NOGIT,
                           "session_id": HU_SID})
-    return subprocess.run([sys.executable, os.path.join(folder, "guard.py")], input=payload,
+    return subprocess.run(guard_start(os.path.join(folder, "guard.py")), input=payload,
                           capture_output=True, text=True, env=env, timeout=120)
 
 

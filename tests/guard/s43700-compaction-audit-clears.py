@@ -65,7 +65,7 @@ def ca_call(folder, cfg, tool, tool_input):
     """One call through the copy's guard.py, from a folder that is not a git tree, in session CA_SID."""
     payload = {"tool_name": tool, "tool_input": tool_input, "cwd": NOGIT, "session_id": CA_SID,
                "transcript_path": CA_TRANSCRIPT}
-    return subprocess.run([sys.executable, os.path.join(folder, "hooks", "guard.py")], input=json.dumps(payload),
+    return subprocess.run(guard_start(os.path.join(folder, "hooks", "guard.py")), input=json.dumps(payload),
                           capture_output=True, text=True, env=ca_env(cfg), timeout=120)
 
 
