@@ -429,12 +429,10 @@ if os.name != "nt":   # Windows has no `ps`: ownership reads unknown, so these a
 else:
     skip_case("kill: a job this session started, still parented to its own shell, passes", NO_PS)
     skip_case("kill: a child of a job this session started, alive, passes", NO_PS)
-# TWELVE `&` JOBS WITH ONE `$!`. The bare-& test is skipped when `$!`
-# appears anywhere in the command (decision detached-launch-refused: "unless the command captures the pid
-# with `$!`"). `$!` names only the last job, so eleven of the twelve pids cannot be named. A pin of that
-# exemption as written; the fix waits for the owner's grant.
-sh("detached: twelve background jobs in a loop, one echo $! after them, pass (the $! exemption)",
-   "for i in $(seq 12); do yes >/dev/null 2>&1 & done; echo $!", "allow", cwd=NOGIT)
+# TWELVE `&` JOBS WITH ONE `$!`. A `$!` after `done` names only the last job, so eleven of the twelve
+# pids cannot be named. Refused: one `$!` per `&` job (decision detached-launch-refused).
+sh("detached: twelve background jobs in a loop, one echo $! after them, is refused under one $! per & job",
+   "for i in $(seq 12); do yes >/dev/null 2>&1 & done; echo $!", "deny", "detached-launch", cwd=NOGIT)
 
 sh("kill: a pid list made by pgrep", "kill $(pgrep -f node)", "deny", "machine-wide-kill",
    cwd=NOGIT)
