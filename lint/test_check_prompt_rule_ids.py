@@ -79,11 +79,31 @@ OUTPUT_STYLE = (
 )
 
 
-def make_tree(hooks=None, claude_md=CLAUDE_MD, extra=None):
-    """A fixture repo in a fresh folder under the run folder. `hooks` maps a hooks/ file name to its source."""
+def table_complete(hooks):
+    """`hooks` with each PROMPT_CONSTANTS row it leaves out laid down: a file that is absent is written, and a constant
+    its file does not define is appended as a neutral stub. A stub names no rule id, so no case's id count moves.
+    The case's own text comes first, so its line numbers stay as written."""
+    out = {}
+    for name, consts in lint().PROMPT_CONSTANTS.items():
+        src = hooks.get(name, "")
+        if src and not src.endswith("\n"):
+            src += "\n"
+        defined = defined_names(src)
+        out[name] = src + "".join(
+            "%s = ()\n" % const if kind == "ids" else '%s = "Judge the reply."\n' % const
+            for const, kind in consts.items() if const not in defined)
+    out.update((name, src) for name, src in hooks.items() if name not in out)
+    return out
+
+
+def make_tree(hooks=None, claude_md=CLAUDE_MD, extra=None, complete_table=True):
+    """A fixture repo in a fresh folder under the run folder. `hooks` maps a hooks/ file name to its source.
+    complete_table lays down the PROMPT_CONSTANTS rows that `hooks` leaves out (table_complete), so a case's tree
+    holds no table problem. A case that builds a row's absence passes False."""
     files = {"CLAUDE.md": claude_md, STYLE_PATH: OUTPUT_STYLE}
     assert set(files) == set(rule_audit.RULE_FILES), "scope: the fixture's anchor files are not rule_audit.RULE_FILES"
-    for name, src in (hooks or {}).items():
+    hooks = table_complete(hooks or {}) if complete_table else (hooks or {})
+    for name, src in hooks.items():
         files[os.path.join("hooks", name)] = src
     files.update(extra or {})
     root = tempfile.mkdtemp(dir=RUN_FOLDER)
@@ -143,12 +163,10 @@ def table_hooks(ids=(), omit_const=None, omit_file=None):
     return hooks
 
 
-def module_level_names(path):
-    """The names a module binds at top level, read with ast: this file's own reading of a real source file."""
-    with open(path, encoding="utf-8") as f:
-        tree = ast.parse(f.read())
+def defined_names(src):
+    """The names a module binds at top level, read with ast from its source text."""
     names = set()
-    for node in tree.body:
+    for node in ast.parse(src).body:
         if isinstance(node, ast.Assign):
             targets = node.targets
         elif isinstance(node, ast.AnnAssign):
@@ -157,6 +175,12 @@ def module_level_names(path):
             continue
         names |= {t.id for t in targets if isinstance(t, ast.Name)}
     return names
+
+
+def module_level_names(path):
+    """The names a real source file binds at top level: this file's own reading of it."""
+    with open(path, encoding="utf-8") as f:
+        return defined_names(f.read())
 
 
 class AnchoredIdTests(unittest.TestCase):
@@ -404,6 +428,7 @@ class SizeTests(unittest.TestCase):
     """The empty state and the full-size state."""
 
     def test_a_tree_with_no_prompt_constant_names_no_id(self):
+        # The table's rows resolve through neutral stubs (table_complete), which name no id: the empty state is no id.
         root = make_tree(hooks={"guard.py": "LIMIT = 3\n"})
         self.assertEqual(lint().prompt_ids(root), [])
         self.assertEqual(lint().problems(root), [])
@@ -421,14 +446,15 @@ class TableRowTests(unittest.TestCase):
     reported: a reader that sees less must not print ok."""
 
     def test_row_whose_constant_is_gone_from_its_file_is_reported(self):
-        root = make_tree(hooks=table_hooks(omit_const=("call_judge.py", "SPAWN_PROMPT")))
+        # complete_table=False: the row's absence is the subject, so the completion must not lay it down.
+        root = make_tree(hooks=table_hooks(omit_const=("call_judge.py", "SPAWN_PROMPT")), complete_table=False)
         problems = lint().problems(root)
         self.assertEqual(len(problems), 1, "the lint does not report SPAWN_PROMPT gone from call_judge.py: %r" % problems)
         self.assertIn("call_judge.py", problems[0])
         self.assertIn("SPAWN_PROMPT", problems[0])
 
     def test_row_whose_file_is_missing_is_reported(self):
-        root = make_tree(hooks=table_hooks(omit_file="sendmessage_state.py"))
+        root = make_tree(hooks=table_hooks(omit_file="sendmessage_state.py"), complete_table=False)
         problems = lint().problems(root)
         self.assertEqual(len(problems), 1, "the lint does not report the missing sendmessage_state.py: %r" % problems)
         self.assertIn("sendmessage_state.py", problems[0])
