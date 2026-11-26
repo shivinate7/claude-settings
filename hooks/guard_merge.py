@@ -332,13 +332,9 @@ def pinned_required(where: str):
     return None
 
 
-def waits_on_no_ci(where: str) -> bool:
-    """True when the repo pins a merge.requiredChecks string that waits on no check: "none", or what the merge tool's waits_on_no_check says of the other pinned string. A repo with "none" loads no tool here."""
-    pinned = pinned_required(where)
-    if pinned == "none":
-        return True
-    module = merge_module()
-    return isinstance(pinned, str) and module is not None and module.waits_on_no_check(pinned)  # an UnknownPin is no str: it waits on CI, and _ready_push_pulls reads it as protection
+def runs_no_ci(where: str) -> bool:
+    """True when the repo pins merge.requiredChecks "none": no CI run exists, so a push has no run to cancel. "first-proof" is no such pin: CI is live, and a ready branch still merges on the first proof of its head, so a push moves the head under that proof. Reads no merge tool: "none" is the one string pinned_required returns before a load."""
+    return pinned_required(where) == "none"
 
 
 def ignored_checks(module, where: str):
@@ -632,7 +628,7 @@ def ready_push_hit(stripped: str, cwd: str, read_verb):
             if not where or read_verb("push", args) or not uses_merge_tool(where):
                 continue
             branches, archive_only = _ready_push_branches(args, where, overrides)
-            if archive_only or waits_on_no_ci(where):  # a repo that runs no CI has no run to cancel
+            if archive_only or runs_no_ci(where):  # a repo that runs no CI has no run to cancel
                 continue
             if where not in pulls:
                 pulls[where] = _ready_push_pulls(where)
