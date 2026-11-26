@@ -1344,6 +1344,12 @@ MUTATIONS = [
      '        table = (lambda reads: None if None in reads else [row for read in reads for row in read])([_open_files_under([p]) for p in waiting])',
      "test_leftover_temp_reads_the_process_table_and_open_files_once_for_three_candidates",
      "posix"),
+    ("one read: the batch open-files read drops its holders",
+     "sweep",
+     '            holders = None if table is None else [pid for pid, name in table if _cwd_under_checkout(name, path)]',
+     '            holders = None if table is None else []',
+     "test_a_holder_in_the_batch_read_keeps_its_folder_and_leaves_the_other_a_candidate",
+     "posix"),
     # The parallel preview (ParallelPreviewTests). only_on="posix" on all but "all at once": a
     # Windows preview stays serial (PREVIEW_THREADS), so no test can see these there.
     ("parallel preview: confirm no longer forces the one-at-a-time map",

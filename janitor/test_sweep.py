@@ -5312,11 +5312,22 @@ _SPONSOR = ("import os, subprocess, sys, time\n"
 # reads a run makes. The cwd table lists this user's processes only, read through the real lsof with
 # `-p`, so no case scans every process on the machine. `$LSOF_LATE` adds table lines from start number
 # `$LSOF_FROM` on: a process that enters a tree after the first read. `$LSOF_FAIL` fails every cwd read.
-# An open-files read (`+D`) finds nothing. A per-pid read goes to the real lsof unchanged.
+# An open-files read (`+D`) lists nothing, as a clear read does, unless `$LSOF_OPEN` names a file of lines
+# to print: a holder inside a folder of the batch. As real lsof does, a `+D` folder that does not exist
+# makes the read print nothing and exit 1, so the other folders of that batch read as clear too.
+# `$LSOF_REAL_OPEN` sends the open-files read to the real lsof. A per-pid read goes to the real lsof unchanged.
 LSOF_STUB = r"""#!/bin/sh
 printf '%s\n' "$*" >> "${LSOF_COUNT:-/dev/null}"
 case "$*" in
-  *"+D"*) exit 1 ;;
+  *"+D"*)
+    if [ -n "$LSOF_REAL_OPEN" ]; then exec "@REAL@" "$@"; fi
+    prev=""
+    for arg in "$@"; do
+      if [ "$prev" = "+D" ] && [ ! -e "$arg" ]; then echo "lsof: WARNING: can't stat($arg)" >&2; exit 1; fi
+      prev="$arg"
+    done
+    if [ -n "$LSOF_OPEN" ]; then cat "$LSOF_OPEN"; fi
+    exit 1 ;;
   *"-d cwd"*) ;;
   *) exit 1 ;;
 esac
@@ -5334,6 +5345,13 @@ if [ -n "$LSOF_LATE" ]; then
 fi
 exit $status
 """
+
+# A process that opens one file for writing and keeps it open while it sleeps: the open file a `+D` read lists.
+_HOLD = ("import sys, time\n"
+         "handle = open(sys.argv[1], 'w', encoding='utf-8')\n"
+         "handle.write('held')\n"
+         "handle.flush()\n"
+         "time.sleep(120)\n")
 
 
 class _AgentEndFixture(unittest.TestCase):
@@ -5355,12 +5373,13 @@ class _AgentEndFixture(unittest.TestCase):
         """Put the stub `lsof` first on PATH, so every read a hook or an in-process run makes goes
         through it. Its starts are logged to `self.lsof_count`. Windows reads no lsof here: no stub."""
         self.lsof_count = os.path.join(self.root, "lsof-starts.txt")
+        self.real_lsof = shutil.which("lsof")  # None when the machine has no lsof: a real-read case skips
         if sys.platform.startswith("win"):
             return
         folder = os.path.join(self.root, "lsof-bin")
         os.makedirs(folder)
         stub = os.path.join(folder, "lsof")
-        write(stub, LSOF_STUB.replace("@REAL@", shutil.which("lsof") or ""))
+        write(stub, LSOF_STUB.replace("@REAL@", self.real_lsof or ""))
         os.chmod(stub, 0o755)
         patch = mock.patch.dict(os.environ, {"PATH": folder + os.pathsep + os.environ.get("PATH", ""),
                                              "LSOF_COUNT": self.lsof_count})
@@ -5562,12 +5581,18 @@ class _AgentEndFixture(unittest.TestCase):
         commit = run_vcs(path, *IDENT, "commit", "-q", "-m", "unpushed lane work")
         require(commit.returncode == 0, "commit in %s failed: %s" % (path, commit.stderr.strip()))
 
-    def sleeper(self, cwd):
-        """A plain sleeping process with its cwd in CWD, started by this test process (the host)."""
-        proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)"], cwd=cwd,
-                                stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+    def sleeper(self, cwd, holds=None):
+        """A plain sleeping process with its cwd in CWD, started by this test process (the host). With HOLDS,
+        it first opens that file for writing and keeps it open, so the file is an open file whatever the cwd;
+        this returns once the file is written, so the open is visible to lsof."""
+        argv = [sys.executable, "-c", _HOLD if holds else "import time; time.sleep(120)"]
+        if holds:
+            argv.append(holds)
+        proc = subprocess.Popen(argv, cwd=cwd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                                 stderr=subprocess.DEVNULL)
         self.addCleanup(self.stop, proc)
+        if holds:
+            _read_when_ready(holds)
         return proc
 
     @staticmethod
@@ -5646,6 +5671,13 @@ class OneLsofPerRunTests(_AgentEndFixture):
 
     def open_file_starts(self):
         return self.count_starts(lambda argv: "+D" in argv)
+
+    def open_file_argv_lines(self):
+        """The logged argv of every open-files (`+D`) start, in order."""
+        if not os.path.exists(self.lsof_count):
+            return []
+        with open(self.lsof_count, encoding="utf-8") as handle:
+            return [line for line in handle if "+D" in line]
 
     def test_one_agent_end_reap_reads_the_process_table_once_for_three_kept_trees(self):
         own = self.add("ending")
@@ -5756,6 +5788,24 @@ class OneLsofPerRunTests(_AgentEndFixture):
         shared = self.open_file_starts() - before
         self.assertEqual(shared, 1, "two folders with no process inside started the open-files read %d times; "
                                     "want exactly once" % shared)
+
+    def test_a_holder_in_the_batch_read_keeps_its_folder_and_leaves_the_other_a_candidate(self):
+        held = os.path.join(self.root, "held")
+        clear = os.path.join(self.root, "clear")
+        os.makedirs(held)
+        os.makedirs(clear)
+        open_file = os.path.join(self.root, "open-files.txt")
+        write(open_file, "p2147483\nn%s\n" % os.path.join(os.path.realpath(held), "held.txt"))  # one holder, in HELD
+        with self.darwin(), mock.patch.dict(os.environ, {"LSOF_OPEN": open_file}):
+            answers = sweep._busy_reasons([held, clear])
+        reads = self.open_file_argv_lines()
+        self.assertEqual(len(reads), 1, "the two folders made %d open-files reads; want one batch read: %r"
+                         % (len(reads), reads))
+        self.assertTrue(all(folder in reads[0] for folder in (held, clear)),
+                        "the one open-files read does not name both folders: %r" % reads[0])
+        self.assertIsNotNone(answers[held], "a folder with a live holder in the batch read was not kept: %r"
+                             % answers)
+        self.assertIsNone(answers[clear], "a folder with no holder in the batch read was kept: %r" % answers)
 
 
 class AgentEndOwnWorktreeTests(_AgentEndFixture):
