@@ -1,0 +1,1 @@
+- scope-suites-shared-teardown: reported, not re-run here: two scope suites fail 19 cases when one pytest call runs both. lint/test_ci_scope.py defines a tearDownModule, the likely shared cause. The second suite is not found by name. Seen: 2026-11-18 x1

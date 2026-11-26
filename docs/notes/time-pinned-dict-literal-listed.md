@@ -1,0 +1,1 @@
+- time-pinned-dict-literal-listed: the time-pinned finder lists a Python dict literal in an asserted call, `assert report({'ms': time.monotonic() - t0}) < 5`, both before and after PR 3668. The JS object-literal case stays unlisted (lint/find_time_pinned.py). Seen: 2026-11-18 x1

@@ -1,0 +1,1 @@
+- range-loop-sleep-not-capped: PR 3669 (the finder deadline poll) lists a fixed sleep in a range loop with a count stop as wait-cap, a capped wait, not sleep. Measured on that PR's branch. A bare range loop stays sleep there. On main the same loop raises NameError, because `scope_taint` is no longer defined (lint/find_time_pinned.py). Seen: 2026-11-18 x1

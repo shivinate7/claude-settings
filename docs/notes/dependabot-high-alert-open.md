@@ -1,0 +1,1 @@
+- dependabot-high-alert-open: a Dependabot high alert is reported open on main. Its package and advisory are unknown: the REST read of open alerts returned HTTP 403 to a record-writer session at 2026-11-18 15:55 CST. Read it with a token that has alert access. Seen: 2026-11-18 x1

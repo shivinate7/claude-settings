@@ -1,0 +1,1 @@
+- builder-test-runs-refused: reported, not re-run here: the builder-test-edit guard in hooks/guard.py refuses a builder's test runs, but its reason text covers test edits only. Seen: 2026-11-18 x1
