@@ -1,0 +1,1 @@
+- cut-runs-for-any-list-text: The main-ref cost note (hooks/session_start.sh:223) says cut runs only for list text before the Remedy line. The loop at line 240 keeps every non-Remedy line, so cut at line 244 runs for any list text: after the Remedy line, or with no Remedy line at all (the exit 2 unknown case). Seen: 2026-11-25 x1

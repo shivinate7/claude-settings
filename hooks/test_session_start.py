@@ -16,6 +16,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from unittest import mock
 
@@ -122,17 +123,16 @@ class SessionStartAgentWorktreeNoticeTests(unittest.TestCase):
         os.makedirs(self.primary)
         vcs(self.primary, "init", "-q", "-b", "main", ".")
         # Ignores the worktree folder, so the dirty count in the hook's first line never moves.
-        with open(os.path.join(self.primary, ".gitignore"), "w", encoding="utf-8") as handle:
-            handle.write(".claude/\n")
-        with open(os.path.join(self.primary, "f.txt"), "w", encoding="utf-8") as handle:
-            handle.write("base\n")
+        self.put(os.path.join(self.primary, ".gitignore"), ".claude/\n")
+        self.put(os.path.join(self.primary, "f.txt"), "base\n")
         vcs(self.primary, "add", "-A")
         vcs(self.primary, "commit", "-q", "-m", "first")
         self.made = 0
 
-    def put(self, path, text):
+    def put(self, path, text, newline="\n"):
+        # LF on every platform. Text mode writes CRLF on Windows, and a CRLF file reads dirty or clean by the reader's core.autocrlf.
         os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path, "w", encoding="utf-8") as handle:
+        with open(path, "w", encoding="utf-8", newline=newline) as handle:
             handle.write(text)
 
     def add_agent_worktrees(self, count):
@@ -168,6 +168,7 @@ class SessionStartAgentWorktreeNoticeTests(unittest.TestCase):
             body["source"] = source
         payload = json.dumps(body, separators=(",", ":") if compact else None)
         env = dict(os.environ, CLAUDE_CONFIG_DIR=self.config, CLAUDE_SETTINGS_FETCH_TIMEOUT=fetch_timeout)
+        env.update(getattr(self, "pinned_env", {}))  # a case may pin git's config, such as an empty global file
         if path_dir is not None:
             env["PATH"] = path_dir + os.pathsep + env.get("PATH", "")
         if trace_file is not None:
@@ -3085,6 +3086,535 @@ class SessionStartRolePickTests(unittest.TestCase):
         lane = "Pick lane for one line of work, or coordinator for a standing build."
         self.assertFalse(self.names(lane, r"\bone[ -]lane\b"))
         self.assertFalse(self.names(lane, r"\bsolo\b"))
+
+
+# The main-ref installer and the hook it arms, as the claude-settings checkout ships them. A fixture copies them at run time,
+# so the installer it runs is the real one, never a copy kept here.
+MAIN_REF_SRC = os.path.join(HERE, "..", "githooks", "main-ref")
+# The installer from before --check. Run with --check it would arm the copy, so session start must never run it. Read from its home.
+OLD_INSTALLER = os.path.join(HERE, "..", "githooks", "test_fixtures", "main-ref-install-no-check.sh")
+# The pre-commit hook, which arms a copy on any line that holds its marker text as a substring.
+PRE_COMMIT = os.path.join(HERE, "..", "githooks", "pre-commit", "pre-commit")
+# The hang guard for a hung installer. The hook's bound is one second, so a run that ends has ended well inside this.
+HANG_GUARD = 20
+# A fixed old modification time for a fixture's files, so no tracked file shares a second with git's index.
+OLD_MTIME = 1000000000
+# The dash binary, where the runner has one. The dash cases run the hook and its installer under it, as the CI runner's sh is dash.
+# A case that finds none skips; it never installs one.
+DASH = shutil.which("dash")
+DASH_SKIP = "no dash binary on PATH; the case never installs one"
+# Why a case that needs the sh shim is skipped on Windows: Git's sh launcher puts its own folders ahead of PATH, so the
+# shim logs no call (the probe in assert_shim_is_live shows it). Each such case names this one reason.
+SH_SHIM_SKIP = ("the sh shim does not stand in for Git Bash's sh on Windows: Git's sh launcher puts its own folders "
+                "ahead of PATH, so the shim logs no call")
+
+
+def process_state(pid):
+    """The ps state of a pid: '' when no process has it, 'Z...' for a zombie no parent has reaped."""
+    answer = subprocess.run(["ps", "-o", "stat=", "-p", str(pid)], capture_output=True, text=True, timeout=60)
+    return answer.stdout.strip()
+
+
+def process_command(pid):
+    """The command line of a pid, so a failure message names what is still running."""
+    answer = subprocess.run(["ps", "-o", "command=", "-p", str(pid)], capture_output=True, text=True, timeout=60)
+    return answer.stdout.strip()
+
+
+def pre_commit_marker():
+    """The marker text the pre-commit hook matches, read from its file so no copy of it is kept here."""
+    with open(PRE_COMMIT, encoding="utf-8") as handle:
+        found = re.findall(r'^MAIN_REF_MARKER = "(.*)"$', handle.read(), re.MULTILINE)
+    if len(found) != 1:
+        sys.exit("fixture setup failed: expected one MAIN_REF_MARKER in %s, found %d" % (PRE_COMMIT, len(found)))
+    return found[0]
+
+
+class SessionStartMainRefTests(SessionStartAgentWorktreeNoticeTests):
+    """Session start prints one line when the main-ref installer's --check finds the armed copy missing or behind main.
+    It also prints one line with the installer's own text when --check says unknown or exits some other way. The words
+    come from --check itself. A healthy copy prints nothing, and a repo with no installer prints nothing."""
+
+    def setUp(self):
+        super().setUp()
+        # An empty global git config, so a core.hooksPath set on this machine cannot move where --check looks.
+        self.empty_global = os.path.join(self.root, "gitconfig")
+        open(self.empty_global, "w", encoding="utf-8").close()
+        self.pinned_env = {"GIT_CONFIG_GLOBAL": self.empty_global, "GIT_CONFIG_NOSYSTEM": "1"}
+
+    def make_repo(self, name, branch="main"):
+        """A checkout on `branch` (main, as the base setUp makes its own), with no remote. The installer is not shipped yet."""
+        where = os.path.join(self.root, name)
+        os.makedirs(where)
+        vcs(where, "init", "-q", "-b", branch, ".")
+        self.put(os.path.join(where, ".gitignore"), ".claude/\n")
+        self.put(os.path.join(where, "f.txt"), "base\n")
+        vcs(where, "add", "-A")
+        vcs(where, "commit", "-q", "-m", "first")
+        return where
+
+    def ship(self, where, installer=os.path.join(MAIN_REF_SRC, "install.sh")):
+        """Commits githooks/main-ref on main: the installer given, and the hook it copies."""
+        folder = os.path.join(where, "githooks", "main-ref")
+        os.makedirs(folder, exist_ok=True)
+        shutil.copy(installer, os.path.join(folder, "install.sh"))
+        shutil.copy(os.path.join(MAIN_REF_SRC, "reference-transaction"), os.path.join(folder, "reference-transaction"))
+        vcs(where, "add", "-A")
+        vcs(where, "commit", "-q", "-m", "ship main-ref")
+
+    def installer(self, where):
+        return os.path.join(where, "githooks", "main-ref", "install.sh")
+
+    def arm(self, where):
+        """The installer's own install mode, so the armed copy is the one it writes."""
+        answer = subprocess.run([sh_exe(), self.installer(where)], cwd=where, capture_output=True, text=True,
+                                env=dict(os.environ, **self.pinned_env), timeout=60)
+        if answer.returncode != 0 or not os.path.isfile(os.path.join(where, ".git", "hooks", "reference-transaction")):
+            sys.exit("fixture setup failed: the installer did not arm %s: %s" % (where, answer.stderr.strip()))
+
+    def check(self, where):
+        """The installer's --check, run in `where`: (exit code, stdout, stderr)."""
+        answer = subprocess.run([sh_exe(), self.installer(where), "--check"], cwd=where, capture_output=True, text=True,
+                                env=dict(os.environ, **self.pinned_env), timeout=60)
+        return answer.returncode, answer.stdout, answer.stderr
+
+    def session(self, where, path_dir=None, remote=None):
+        """Session start in `where`, as the harness runs it: (exit code, raw stdout). Its stderr lands in self.last_stderr."""
+        argv, env, payload, cwd = self.hook_launch(remote=remote, session_cwd=where, path_dir=path_dir)
+        answer = subprocess.run(argv, input=payload, capture_output=True, text=True, env=env, cwd=cwd, timeout=120)
+        self.last_stderr = answer.stderr
+        return answer.returncode, answer.stdout
+
+    def normal(self, text, where):
+        """The output with the fixture's own path named <repo>: the checkout line prints that path, and each fixture has its own.
+        Git prints forward slashes on Windows, where the fixture's paths are backslash ones, so both forms are named.
+        The longer form goes first: a short /var/... path is a piece of the /private/var/... form git prints."""
+        paths = {where, os.path.realpath(where)}
+        paths |= {path.replace("\\", "/") for path in paths}
+        for path in sorted(paths, key=len, reverse=True):
+            text = text.replace(path, "<repo>")
+        return text
+
+    def control(self):
+        """Session start in the checkout with no main-ref folder: the output the hook gives with nothing to report from main-ref."""
+        code, text = self.session(self.primary)
+        self.assertEqual(code, 0, "the control run exited %d" % code)
+        return self.normal(text, self.primary)
+
+    def files_under(self, *folders):
+        """Every file path under the folders, so a case names the files it added."""
+        found = set()
+        for folder in folders:
+            for dirpath, _, names in os.walk(folder):
+                found.update(os.path.join(dirpath, name) for name in names)
+        return found
+
+    def sh_shim(self, name, target=None):
+        """A folder whose `sh` logs each call that names main-ref/install.sh to a log outside the fixtures, then runs `target`
+        (the real sh when none is given). Returns the folder and the log path. Written LF, with forward-slash paths, as
+        make_git_stub writes its git stub, so sh reads it under Git for Windows."""
+        folder = os.path.join(self.root, "shim-" + name)
+        log = os.path.join(self.root, "sh-starts-" + name + ".log")
+        os.makedirs(folder)
+        script = os.path.join(folder, "sh")
+        with open(script, "w", encoding="utf-8", newline="\n") as handle:
+            handle.write("#!/bin/sh\ncase \"$*\" in *main-ref/install.sh*) printf '%%s\\n' \"$*\" >> '%s' ;; esac\nexec '%s' \"$@\"\n"
+                         % (log.replace("\\", "/"), (target or sh_exe()).replace("\\", "/")))
+        os.chmod(script, 0o755)
+        return folder, log
+
+    def installer_starts(self, log):
+        """How many calls to the installer the shim logged; 0 when no log exists because nothing ran."""
+        return len([line for line in log_lines(log) if "main-ref/install.sh" in line])
+
+    def mktemp_shim(self, name, tmpdir):
+        """A folder whose `mktemp` makes each temp file in `tmpdir` and logs the path it hands out. macOS mktemp ignores TMPDIR,
+        so the folder comes from the shim's template. Returns the folder and the log path. Written LF, with forward-slash paths."""
+        folder = os.path.join(self.root, "shim-mktemp-" + name)
+        log = os.path.join(self.root, "mktemp-" + name + ".log")
+        os.makedirs(folder)
+        script = os.path.join(folder, "mktemp")
+        with open(script, "w", encoding="utf-8", newline="\n") as handle:
+            handle.write("#!/bin/sh\nout=$('%s' '%s/tmp.XXXXXXXXXX') || exit 1\nprintf '%%s\\n' \"$out\" >> '%s'\nprintf '%%s\\n' \"$out\"\n"
+                         % (shutil.which("mktemp").replace("\\", "/"), tmpdir.replace("\\", "/"), log.replace("\\", "/")))
+        os.chmod(script, 0o755)
+        return folder, log
+
+    def run_as(self, where, shell=None, path_dir=None, tmpdir=None):
+        """Session start in `where`, run by `shell` (the harness's sh when None), with `path_dir` first on PATH and `tmpdir` as
+        TMPDIR. Returns (exit code, stdout, stderr)."""
+        argv, env, payload, cwd = self.hook_launch(session_cwd=where, path_dir=path_dir)
+        if shell is not None:
+            argv[0] = shell
+        if tmpdir is not None:
+            env["TMPDIR"] = tmpdir
+        answer = subprocess.run(argv, input=payload, capture_output=True, text=True, env=env, cwd=cwd, timeout=120)
+        return answer.returncode, answer.stdout, answer.stderr
+
+    def recorded_pids(self, pidfile):
+        """The pids a case's installer wrote to its pid file, in the order written."""
+        with open(pidfile, encoding="utf-8") as handle:
+            return [int(text) for text in handle.read().split()]
+
+    def still_running(self, pids):
+        """The pids that stay a live process (not gone, not a zombie). Polls until none is left or HANG_GUARD runs out, so a
+        pid that dies at once costs no wait; the cap is the hang guard, well above one run."""
+        deadline = time.monotonic() + HANG_GUARD
+        while True:
+            alive = []
+            for pid in pids:
+                state = process_state(pid)
+                if state and not state.startswith("Z"):
+                    alive.append(pid)
+            if not alive or time.monotonic() >= deadline:
+                return alive
+            time.sleep(0.05)
+
+    def kill_recorded(self, pidfile):
+        """Kills the pids a case's own installer recorded, so no sleep the case started outlives it."""
+        if not os.path.isfile(pidfile):
+            return
+        for pid in self.recorded_pids(pidfile):
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+
+    def snapshot(self, *folders):
+        """Every file path under the folders with its modification time, so a case proves a file was not added, removed or touched."""
+        return {path: os.stat(path).st_mtime_ns for path in self.files_under(*folders)}
+
+    def settle_index(self, where):
+        """One unshimmed session, after every file in the checkout gets one old fixed mtime. A git read rewrites an index whose
+        entries share its second (racily clean), which a later session would show as a touched .git/index. An old mtime keeps
+        every entry out of that race, so the one write the index can get lands here, before a snapshot."""
+        for dirpath, dirnames, names in os.walk(where):
+            dirnames[:] = [name for name in dirnames if name != ".git"]
+            for name in names:
+                os.utime(os.path.join(dirpath, name), (OLD_MTIME, OLD_MTIME))
+        self.session(where)
+
+    def kill_group(self, proc):
+        """Kills the process group a case started with start_new_session, so no shim sleep outlives the case."""
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+
+    def heredoc_installer(self, name, body_line):
+        """The real installer with its marker line taken out, then a no-op heredoc at its end whose body is `body_line`.
+        The marker text is in that heredoc and nowhere else, so the heredoc is the only text that can arm the check."""
+        with open(os.path.join(MAIN_REF_SRC, "install.sh"), encoding="utf-8") as handle:
+            base, count = re.subn(r"^# main-ref-check: 1[^\n]*\n", "", handle.read(), flags=re.MULTILINE)
+        self.assertEqual(count, 1, "scope: the installer has %d marker lines, want 1" % count)
+        self.assertNotIn(pre_commit_marker(), base, "scope: the marker text is already in the installer outside the heredoc")
+        path = os.path.join(self.root, name)
+        # LF, as the checked-in installer is (eol=lf), so the copy shipped here has the bytes the missing-copy case ships.
+        self.put(path, base + "\n: <<'NOTE'\n%s\nNOTE\n" % body_line, newline="\n")
+        return path
+
+    def assert_one_missing_copy_line(self, where, control):
+        """The missing-copy assertions: one main-ref line that names the remedy --check gives and the hook, the rest unchanged.
+        `where` is a repo that carries an installer --check finds unarmed, and `control` is the output with nothing to report."""
+        code, _, err = self.check(where)
+        self.assertEqual(code, 1, "--check should report the missing copy, exit %d: %r" % (code, err))
+        err_lines = err.splitlines()
+        self.assertTrue(err_lines, "--check printed nothing for the missing copy")
+        remedy = [line.strip()[len("Remedy:"):].strip() for line in err_lines if line.strip().startswith("Remedy:")]
+        self.assertEqual(len(remedy), 1, "--check printed no remedy line: %r" % err)
+        hook = os.path.basename(err_lines[0].split()[-1])
+        code, text = self.session(where)
+        self.assertEqual(code, 0, "the hook exited %d" % code)
+        lines = self.normal(text, where).splitlines()
+        extra = [line for line in lines if line not in control.splitlines()]
+        self.assertEqual(len(extra), 1, "expected one main-ref line for the missing copy, got %r" % extra)
+        self.assertEqual([line for line in lines if line != extra[0]], control.splitlines(),
+                         "the other lines changed: %r" % lines)
+        self.assertIn(remedy[0], extra[0], "the line does not name the remedy --check gives: %r" % extra[0])
+        self.assertIn(hook, extra[0], "the line does not name the missing hook %r: %r" % (hook, extra[0]))
+        self.assertEqual(self.last_stderr, "", "the hook wrote to stderr: %r" % self.last_stderr)
+
+    def assert_shim_is_live(self, folder, log):
+        """Before a case counts starts, the shim must log one call the hook's own way. A probe script runs with sh_argv and
+        `folder` first on PATH, as the hook runs, and calls `sh` by name. A shim that is dead, or that sh does not reach, fails
+        here with that cause, not as a zero count. The probe's logged line is then removed, so the case counts from zero."""
+        probe = os.path.join(folder, "probe.sh")
+        with open(probe, "w", encoding="utf-8", newline="\n") as handle:
+            handle.write("sh -c 'exit 0' main-ref/install.sh\n")
+        _argv, env, _payload, where = self.hook_launch(path_dir=folder)
+        answer = subprocess.run(sh_argv(folder, probe), capture_output=True, text=True, env=env, cwd=where, timeout=60)
+        self.assertEqual(self.installer_starts(log), 1,
+                         "the shim did not log a probe's call to sh, the way the hook runs it: exit %d, stderr %r"
+                         % (answer.returncode, answer.stderr.strip()))
+        self.assertEqual(answer.returncode, 0, "the probe run exited %d: %r" % (answer.returncode, answer.stderr.strip()))
+        os.remove(log)
+
+    def assert_installer_is_not_run(self, label, installer):
+        """Session start, in a repo that ships `installer`, starts no installer and writes no file."""
+        where = self.make_repo(label)
+        self.ship(where, installer=installer)
+        folder, log = self.sh_shim(label)
+        self.assert_shim_is_live(folder, log)
+        watched = (self.config, self.primary, where)
+        before = self.files_under(*watched)
+        code, _ = self.session(where, path_dir=folder)
+        self.assertEqual(code, 0, "the hook exited %d" % code)
+        self.assertEqual(self.installer_starts(log), 0, "session start ran the installer in case %s, which it must not run" % label)
+        self.assertEqual(self.files_under(*watched) - before, set(),
+                         "session start wrote a file for the installer in case %s, which it must not run" % label)
+
+    def test_a_missing_copy_prints_one_line_that_names_the_hook_and_the_remedy(self):
+        control = self.control()
+        where = self.make_repo("missing")
+        self.ship(where)
+        self.assert_one_missing_copy_line(where, control)
+
+    def test_a_copy_in_place_prints_no_main_ref_line_and_nothing_else_changes(self):
+        control = self.control()
+        where = self.make_repo("armed")
+        self.ship(where)
+        self.arm(where)
+        # Scope: the installer itself says the copy is in place, so silence is the right answer here.
+        self.assertEqual(self.check(where), (0, "", ""), "--check should be silent when the copy is in place")
+        code, text = self.session(where)
+        self.assertEqual(code, 0, "the hook exited %d" % code)
+        self.assertEqual(self.last_stderr, "", "the hook wrote to stderr: %r" % self.last_stderr)
+        self.assertEqual([line for line in text.splitlines() if "main-ref" in line], [],
+                         "a main-ref line printed with the copy in place")
+        self.assertEqual(self.normal(text, where), control, "the other output changed for a healthy copy")
+
+    def test_outside_a_git_repo_prints_no_main_ref_line(self):
+        outside = os.path.join(self.root, "outside")
+        os.makedirs(outside)
+        # A remote session prints the tier line, so the line proves the hook ran; without it, silence proves nothing.
+        code, text = self.session(outside, remote="true")
+        self.assertEqual(code, 0, "the hook exited %d" % code)
+        self.assertEqual(self.last_stderr, "", "the hook wrote to stderr: %r" % self.last_stderr)
+        lines = text.splitlines()
+        self.assertIn(hook_role_line(), lines, "control: the hook did not run: %r" % lines)
+        self.assertEqual([line for line in lines if "main-ref" in line], [], "a main-ref line printed outside git")
+
+    def test_a_repo_without_the_installer_prints_no_main_ref_line(self):
+        code, text = self.session(self.primary)
+        self.assertEqual(code, 0, "the hook exited %d" % code)
+        self.assertEqual(self.last_stderr, "", "the hook wrote to stderr: %r" % self.last_stderr)
+        lines = text.splitlines()
+        self.assertTrue(any(line.startswith("checkout ") for line in lines), "control: no checkout line: %r" % lines)
+        self.assertEqual([line for line in lines if "main-ref" in line], [], "a main-ref line printed with no installer")
+
+    @unittest.skipIf(os.name == "nt", SH_SHIM_SKIP)
+    def test_an_installer_from_before_check_is_never_run(self):
+        self.assert_installer_is_not_run("old", OLD_INSTALLER)
+
+    @unittest.skipIf(os.name == "nt", SH_SHIM_SKIP)
+    def test_the_check_starts_once_and_writes_no_file(self):
+        control = self.control()
+        for state in ("missing", "armed"):
+            with self.subTest(state=state):
+                where = self.make_repo(state)
+                self.ship(where)
+                if state == "armed":
+                    self.arm(where)
+                folder, log = self.sh_shim(state)
+                self.assert_shim_is_live(folder, log)
+                watched = (self.config, self.primary, where)
+                self.settle_index(where)
+                before = self.snapshot(*watched)
+                code, text = self.session(where, path_dir=folder)
+                self.assertEqual(code, 0, "the hook exited %d" % code)
+                after = self.snapshot(*watched)
+                changed = sorted(path for path in set(before) | set(after) if before.get(path) != after.get(path))
+                self.assertEqual(changed, [], "session start added, removed or touched a file in the %s state: %r" % (state, changed))
+                self.assertEqual(self.installer_starts(log), 1,
+                                 "expected one start of the installer's --check, got %d" % self.installer_starts(log))
+                if state == "armed":
+                    self.assertEqual(self.normal(text, where), control, "the other output changed for a healthy copy")
+
+    def test_an_unknown_check_prints_one_line_with_the_installers_own_text(self):
+        """A repo whose default branch is not main: --check has no main to compare with, so it exits 2 and says unknown."""
+        where = self.make_repo("no-main", branch="master")
+        self.ship(where)
+        code, _, err = self.check(where)
+        self.assertEqual(code, 2, "scope: --check should exit 2 with no main to compare, exit %d: %r" % (code, err))
+        unknown = [line for line in err.splitlines() if line.startswith("main-ref check: unknown:")]
+        self.assertEqual(len(unknown), 1, "scope: --check printed no unknown line: %r" % err)
+        code, text = self.session(where)
+        self.assertEqual(code, 0, "the hook exited %d" % code)
+        self.assertEqual(self.last_stderr, "", "the hook wrote to stderr: %r" % self.last_stderr)
+        found = [line for line in self.normal(text, where).splitlines() if "main-ref" in line]
+        self.assertEqual(len(found), 1, "expected one main-ref line for an unknown check, got %r" % found)
+        self.assertIn(unknown[0], found[0], "the line does not carry the installer's unknown text: %r" % found[0])
+
+    def test_an_installer_that_exits_three_prints_one_line_with_its_text(self):
+        """A marked installer whose --check exits 3, which is neither a finding (1) nor an unknown (2)."""
+        installer = os.path.join(self.root, "exit-three-install.sh")
+        self.put(installer, "#!/bin/sh\n# main-ref-check: 1\n"
+                            "echo 'main-ref check: unknown: the fixture read failed' >&2\nexit 3\n", newline="\n")
+        where = self.make_repo("exit-three")
+        self.ship(where, installer=installer)
+        code, _, err = self.check(where)
+        self.assertEqual(code, 3, "scope: the fixture should exit 3, exit %d: %r" % (code, err))
+        self.assertEqual(len(err.splitlines()), 1, "scope: the fixture should print one stderr line: %r" % err)
+        code, text = self.session(where)
+        self.assertEqual(code, 0, "the hook exited %d" % code)
+        self.assertEqual(self.last_stderr, "", "the hook wrote to stderr: %r" % self.last_stderr)
+        found = [line for line in self.normal(text, where).splitlines() if "main-ref" in line]
+        self.assertEqual(len(found), 1, "expected one main-ref line for exit 3, got %r" % found)
+        self.assertIn(err.splitlines()[0], found[0], "the line does not carry the installer's own text: %r" % found[0])
+
+    def test_a_list_line_over_400_characters_is_cut_to_400_and_the_remedy_prints_whole(self):
+        """The installer's stderr: one list line over 400 characters, then a Remedy line. The 400-character cap is on the list
+        part only, so the printed line is the list's first 400 characters, one space, and the whole Remedy line."""
+        list_text = "main-ref copy is behind main: " + " ".join("item-%03d" % number for number in range(120))
+        remedy = "Remedy: sh githooks/main-ref/install.sh"
+        self.assertGreater(len(list_text), 400, "scope: the list line is not over 400 characters")
+        installer = os.path.join(self.root, "long-list-install.sh")
+        self.put(installer, "#!/bin/sh\n# main-ref-check: 1\necho '%s' >&2\necho '%s' >&2\nexit 1\n" % (list_text, remedy),
+                 newline="\n")
+        where = self.make_repo("long-list")
+        self.ship(where, installer=installer)
+        code, _, err = self.check(where)
+        self.assertEqual(code, 1, "scope: the fixture should exit 1, exit %d: %r" % (code, err))
+        self.assertEqual(err.splitlines(), [list_text, remedy], "scope: the fixture did not print its list and Remedy lines: %r" % err)
+        code, text = self.session(where)
+        self.assertEqual(code, 0, "the hook exited %d" % code)
+        self.assertEqual(self.last_stderr, "", "the hook wrote to stderr: %r" % self.last_stderr)
+        found = [line for line in self.normal(text, where).splitlines() if "main-ref" in line]
+        self.assertEqual(len(found), 1, "expected one main-ref line for the long list, got %r" % found)
+        line = found[0]
+        self.assertTrue(line.endswith(" " + remedy), "the Remedy line is not printed whole after the list: %r" % line)
+        listed = line[:-len(" " + remedy)]
+        self.assertEqual(listed, list_text[:400], "the list part is %d characters, want its first 400: %r" % (len(listed), listed))
+
+    @unittest.skipIf(DASH is None, DASH_SKIP)
+    @unittest.skipIf(os.name == "nt", SH_SHIM_SKIP)
+    def test_the_hook_run_by_dash_prints_what_the_sh_run_prints_and_no_stderr(self):
+        """Under dash, bounded_run's `set -m` has no tty to act on and prints a line to stderr on each call. The hook and its
+        installer run under dash here, as on the CI runner, where sh is dash. The sh run is the control."""
+        where = self.make_repo("dash-run")
+        self.ship(where)
+        folder, log = self.sh_shim("dash-run", target=DASH)
+        sh_code, sh_text, sh_err = self.run_as(where)
+        self.assertEqual(sh_err, "", "control: the sh run wrote to stderr: %r" % sh_err)
+        code, text, err = self.run_as(where, shell=DASH, path_dir=folder)
+        self.assertEqual(self.installer_starts(log), 1,
+                         "scope: the dash run never started the installer's --check, so it proves nothing")
+        self.assertEqual(err, "", "the hook run by dash wrote to stderr: %r" % err)
+        self.assertEqual(code, sh_code, "the hook exited %d under dash and %d under sh" % (code, sh_code))
+        self.assertEqual(self.normal(text, where), self.normal(sh_text, where),
+                         "the stdout under dash differs from the sh run's stdout")
+
+    @unittest.skipIf(DASH is None, DASH_SKIP)
+    @unittest.skipIf(os.name == "nt", "the hung installer is a POSIX sh script in its own process group")
+    def test_a_hung_check_under_dash_is_stopped_within_the_bound_with_no_child_left(self):
+        """Under dash the hook's group kill does nothing, since dash's kill rejects `--`, so the bound must end the installer's
+        own children too. The installer writes its own pid and its sleep's pid; both must be gone once the hook has ended."""
+        pids = os.path.join(self.root, "dash-hung-pids")
+        installer = os.path.join(self.root, "dash-hung-install.sh")
+        self.put(installer, "#!/bin/sh\n# main-ref-check: 1\necho $$ > '%s'\nsleep 40 &\necho $! >> '%s'\nwait\n" % (pids, pids))
+        where = self.make_repo("dash-hung")
+        self.ship(where, installer=installer)
+        folder, log = self.sh_shim("dash-hung", target=DASH)
+        self.addCleanup(self.kill_recorded, pids)
+        argv, env, payload, cwd = self.hook_launch(session_cwd=where, path_dir=folder, fetch_timeout="2")
+        argv[0] = DASH
+        proc = subprocess.Popen(argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                env=env, cwd=cwd, start_new_session=True, text=True)
+        self.addCleanup(self.kill_group, proc)
+        try:
+            out, err = proc.communicate(payload, timeout=HANG_GUARD)
+        except subprocess.TimeoutExpired:
+            self.kill_group(proc)
+            proc.communicate()
+            self.fail("session start did not end within %d s of a hung --check under dash; the bound did not end it" % HANG_GUARD)
+        self.assertEqual(proc.returncode, 0, "the hook exited %d: %r" % (proc.returncode, err))
+        self.assertEqual(self.installer_starts(log), 1, "scope: the hung installer never started under dash, so the bound proves nothing")
+        self.assertTrue(os.path.isfile(pids), "scope: the hung installer wrote no pid file, so the check proves nothing")
+        found = self.recorded_pids(pids)
+        self.assertEqual(len(found), 2, "scope: the installer wrote %d pids, want its own and its sleep's" % len(found))
+        left = self.still_running(found)
+        self.assertEqual(left, [], "the hook ended, but these of its hung check are still running: %r"
+                         % [(pid, process_command(pid)) for pid in left])
+
+    def test_a_session_start_leaves_no_file_in_the_temp_dir(self):
+        """The temp folder stays empty after session start. The main-ref step makes a stderr file, removes it, and keeps its path
+        in a variable set by a prefix assignment. In sh's POSIX mode that assignment outlives the function call, so each later
+        git call in the hook recreates the file. macOS mktemp ignores TMPDIR, so the shim sets the folder in its template."""
+        where = self.make_repo("temp-leak")
+        self.ship(where)
+        tmpdir = tempfile.mkdtemp(prefix="tmpdir-", dir=self.root)
+        folder, log = self.mktemp_shim("temp-leak", tmpdir)
+        code, text, err = self.run_as(where, path_dir=folder, tmpdir=tmpdir)
+        self.assertEqual(code, 0, "the hook exited %d" % code)
+        self.assertTrue(any("main-ref" in line for line in self.normal(text, where).splitlines()),
+                        "scope: the main-ref check printed no line, so the check did not run: %r" % text)
+        self.assertTrue(log_lines(log), "scope: the hook made no temp file, so the folder check proves nothing")
+        left = sorted(os.listdir(tmpdir))
+        self.assertEqual(left, [], "session start left %d file(s) in the temp folder: %r" % (len(left), left))
+
+    @unittest.skipIf(os.name == "nt", "the hung installer is a POSIX sh script in its own process group")
+    def test_a_hung_check_does_not_hold_session_start(self):
+        """A marked installer whose --check sleeps past the hang guard. The hook's bound is one second, so it must end the
+        hang and print one line that says the check did not finish; the guard is the assert, not the wait."""
+        installer = os.path.join(self.root, "hung-install.sh")
+        self.put(installer, "#!/bin/sh\n# main-ref-check: 1\nsleep 40\n")
+        where = self.make_repo("hung")
+        self.ship(where, installer=installer)
+        folder, log = self.sh_shim("hung")
+        argv, env, payload, cwd = self.hook_launch(session_cwd=where, path_dir=folder, fetch_timeout="1")
+        proc = subprocess.Popen(argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                env=env, cwd=cwd, start_new_session=True, text=True)
+        self.addCleanup(self.kill_group, proc)
+        try:
+            out, err = proc.communicate(payload, timeout=HANG_GUARD)
+        except subprocess.TimeoutExpired:
+            self.kill_group(proc)
+            proc.communicate()
+            self.fail("session start did not end within %d s of a hung --check; the one-second bound did not end it" % HANG_GUARD)
+        self.assertEqual(proc.returncode, 0, "the hook exited %d: %r" % (proc.returncode, err))
+        self.assertEqual(err, "", "the hook wrote to stderr: %r" % err)
+        self.assertEqual(self.installer_starts(log), 1, "scope: the hung installer never started, so the bound proves nothing")
+        found = [line for line in self.normal(out, where).splitlines() if "main-ref" in line]
+        self.assertEqual(len(found), 1, "expected one line that says the check did not finish, got %r" % found)
+        self.assertIn("unknown", found[0], "the line does not say unknown: %r" % found[0])
+
+    def test_an_indented_marker_arms_the_check_as_the_pre_commit_hook_does(self):
+        """The pre-commit hook arms on any line that holds its marker text. Session start must arm on the same indented line."""
+        with open(os.path.join(MAIN_REF_SRC, "install.sh"), encoding="utf-8") as handle:
+            indented, count = re.subn(r"^# main-ref-check:", "  # main-ref-check:", handle.read(), flags=re.MULTILINE)
+        self.assertEqual(count, 1, "scope: the installer has %d marker lines, want 1" % count)
+        self.assertIn(pre_commit_marker(), indented, "scope: the pre-commit marker is not in the indented installer")
+        installer = os.path.join(self.root, "indented-install.sh")
+        self.put(installer, indented, newline="\n")
+        control = self.control()
+        where = self.make_repo("indented")
+        self.ship(where, installer=installer)
+        self.assert_one_missing_copy_line(where, control)
+
+    def test_a_marker_line_in_a_heredoc_arms_the_check_as_the_pre_commit_hook_does(self):
+        """One marker rule: the pre-commit hook arms on the marker text anywhere in the installer, a heredoc body included.
+        Session start reads the same text, so a column-zero marker line inside a heredoc arms the check."""
+        installer = self.heredoc_installer("heredoc-column-zero-install.sh", "# " + pre_commit_marker())
+        control = self.control()
+        where = self.make_repo("heredoc-column-zero")
+        self.ship(where, installer=installer)
+        self.assert_one_missing_copy_line(where, control)
+
+    def test_an_indented_marker_line_in_a_heredoc_arms_the_check_as_the_pre_commit_hook_does(self):
+        """One marker rule, as above: an indented marker line inside a heredoc also arms the check, since the match is a substring."""
+        installer = self.heredoc_installer("heredoc-indented-install.sh", "  # " + pre_commit_marker())
+        control = self.control()
+        where = self.make_repo("heredoc-indented")
+        self.ship(where, installer=installer)
+        self.assert_one_missing_copy_line(where, control)
+
+    def test_marker_text_mid_line_in_a_heredoc_arms_the_check_as_the_pre_commit_hook_does(self):
+        """One marker rule, as above: the marker text anywhere on a heredoc line arms the check, not only at a line start."""
+        installer = self.heredoc_installer("heredoc-mid-line-install.sh", "set the marker as # " + pre_commit_marker())
+        control = self.control()
+        where = self.make_repo("heredoc-mid-line")
+        self.ship(where, installer=installer)
+        self.assert_one_missing_copy_line(where, control)
 
 
 if __name__ == "__main__":
