@@ -101,7 +101,7 @@ def select_runs(runs, pr, repo, default_branch, own_run_id=None):
 
 
 def _utc(text):
-    """A GitHub UTC timetext as a datetime, or None when it is not in that form."""
+    """A GitHub UTC time as a datetime, or None when it is not in that form."""
     if not isinstance(text, str):
         return None
     try:
