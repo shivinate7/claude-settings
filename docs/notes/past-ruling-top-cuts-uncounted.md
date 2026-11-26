@@ -1,0 +1,1 @@
+- past-ruling-top-cuts-uncounted: `_step_rulings` keeps the top 30 step units (`STEP_TOP`), and `_ruled_candidates` keeps the top 8 ruled-store entries (`RULED_TOP`). Both cuts happen before `_fit`. Neither leaves a count in the judge's text, unlike the size cut. Seen: 2026-11-25 x1
