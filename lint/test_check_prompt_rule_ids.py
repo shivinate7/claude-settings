@@ -152,11 +152,11 @@ class PromptScanTests(unittest.TestCase):
     """What the reader counts as an id inside a prompt, and what it leaves alone."""
 
     def test_ordinary_hyphenated_words_are_not_ids(self):
-        # Control: output-ghost-real is an id (a family word) and must be read; the others are not.
+        # Control: output-ghost-real is an id (named after the word rule) and must be read; the others are not.
         src = ('INSTRUCTIONS = (\n'
                '    "Run red-run first, and never owner-override a guard. "\n'
                '    "Cite the decision test-practices, and a tokens-made-up-thing word. "\n'
-               '    "Flag output-ghost-real in a reply."\n'
+               '    "Flag rule output-ghost-real in a reply."\n'
                ')\n')
         root = make_tree(hooks={"reply_judge.py": src})
         self.assertEqual(lint().prompt_ids(root),
@@ -178,9 +178,11 @@ class PromptScanTests(unittest.TestCase):
 
     def test_a_comment_opener_inside_a_string_does_not_hide_what_follows(self):
         # `#`, `//` and `/*` sit inside the string; the lone quote in "Don't" must not end the scan early.
+        # The id opens its own string piece, a rule-list line.
         src = ('INSTRUCTIONS = (\n'
                '    "Use # for headings, // for paths and /* for blocks. "\n'
-               '    "Don\'t hide output-ghost-after-openers: the rule."\n'
+               '    "Don\'t stop here. "\n'
+               '    "output-ghost-after-openers: the rule."\n'
                ')\n')
         root = make_tree(hooks={"reply_judge.py": src})
         self.assertEqual(lint().prompt_ids(root),
@@ -255,7 +257,7 @@ class RealTreeTests(unittest.TestCase):
         self.assertIn("output-start-with-point", found)
 
     def test_real_tree_no_longer_names_measure_before_priority(self):
-        # Red until the builder fixes measure-before-priority in hooks/reply_judge.py (no anchor; its home is style-measure-before-priority); green after that fix.
+        # The reply judge names style-measure-before-priority, the anchored id; the dead form is named nowhere.
         named = [m for m in lint().problems(ROOT) if re.search(r"(?<![\w-])measure-before-priority(?![\w-])", m)]
         self.assertEqual(named, [])
 
