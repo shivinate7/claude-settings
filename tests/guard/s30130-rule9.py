@@ -2661,14 +2661,19 @@ def _slash_c_builder_hit(name, target):
     primary = _c_form_fixture(name)
     cwd = "/c/" + os.path.basename(primary)
     guard = _load_guard_module()
-    real_expanded, real_name = guard._expanded, os.name
+    # guard.py reads `_expanded` for its own paths, and drive_form_cwd reads the one in guard_checkout.py.
+    # Both are wrapped, so the probe and the target read the `/c/` cwd the same way.
+    checkout = guard.drive_form_cwd.__globals__
+    real_expanded, real_checkout, real_name = guard._expanded, checkout["_expanded"], os.name
     guard._expanded = _slash_c_expanded(real_expanded, ROOT)
+    checkout["_expanded"] = _slash_c_expanded(real_checkout, ROOT)
     os.name = "nt"
     try:
         return guard.role_write_hit("builder", {"content": "x"}, target, cwd, "")
     finally:
         os.name = real_name
         guard._expanded = real_expanded
+        checkout["_expanded"] = real_checkout
 
 
 def worktree_home_cwd_builder_refuse_case():
