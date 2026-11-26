@@ -1904,7 +1904,7 @@ jobs:
   shell-macos:
     runs-on: macos-latest
     needs: scope
-    if: ${{ github.event_name != 'pull_request' && github.event_name != 'push' && (needs.scope.outputs.shell_macos == 'true' || github.event_name != 'pull_request') }}
+    if: ${{ github.event_name != 'pull_request' && github.event_name != 'push' && (needs.scope.outputs.shell_macos == 'true' || github.event_name != 'pull_request') && needs.scope.outputs.records_only_skip != 'true' }}
     # A push to main and a pull_request start no macOS runner (owner, 01:33 CST Nov 16: "turn off all mac runs for now").
     # It runs on a dispatch, and on a daily that runs (nightly-skip may skip the daily). all-jobs-passed does not need it.
     # 75 (interim, stopgap, owner 12:11 CST Nov 10; decision ci-job-caps). Newest 29 completed push runs on main, latest attempt of each (run 42445434802 to run 43184587111):
@@ -1975,7 +1975,7 @@ jobs:
   checks-macos:
     runs-on: macos-latest
     needs: scope
-    if: ${{ github.event_name != 'pull_request' && github.event_name != 'push' && (needs.scope.outputs.checks_macos == 'true' || needs.scope.outputs.sweep == 'true' || github.event_name != 'pull_request') }}
+    if: ${{ github.event_name != 'pull_request' && github.event_name != 'push' && (needs.scope.outputs.checks_macos == 'true' || needs.scope.outputs.sweep == 'true' || github.event_name != 'pull_request') && needs.scope.outputs.tool_pins == 'true' }}
     # A push to main and a pull_request start no macOS runner (owner, 01:33 CST Nov 16: "turn off all mac runs for now").
     # It runs on a dispatch, and on a daily that runs (nightly-skip may skip the daily). all-jobs-passed does not need it.
     # Cap 75 min, a stopgap under the owner's 2026-11-01 18:44 CST ruling in decision ci-job-caps: slowest 30.5 min
@@ -2241,7 +2241,7 @@ jobs:
   checks-macos-b:
     runs-on: macos-latest
     needs: scope
-    if: ${{ github.event_name != 'pull_request' && github.event_name != 'push' && (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') }}
+    if: ${{ github.event_name != 'pull_request' && github.event_name != 'push' && (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && needs.scope.outputs.records_only_skip != 'true' }}
     # A push to main and a pull_request start no macOS runner (owner, 01:33 CST Nov 16: "turn off all mac runs for now").
     # It runs on a dispatch, and on a daily that runs (nightly-skip may skip the daily). all-jobs-passed does not need it.
     # 75 (interim, stopgap, owner 12:11 CST Nov 10; decision ci-job-caps). The newest 29 completed push runs on main, latest attempt of each (run 42522167511 to run 43206612905):
