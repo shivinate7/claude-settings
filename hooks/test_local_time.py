@@ -41,7 +41,6 @@ The expected strings are hardcoded here. They are never computed with zoneinfo i
 import ast
 import contextlib
 import importlib.util
-import inspect
 import io
 import json
 import os
@@ -2161,7 +2160,7 @@ def case_opus_model_ask_loop_wakeup_check_in_without_its_record_never_grants():
                   "files %r" % ov_files(cfg))
 
 
-def case_opus_model_ask_source_gate_covers_typed_forms():
+def case_opus_model_ask_source_check_covers_typed_forms():
     # A typed form is a plain ask under the one rule, so the source gate covers it: with source "system", `opus 2h` makes
     # no judge call and writes no Opus override. `override 15m` is the override route's, untouched by the source.
     cfg, calls, _, _ = opus_type("opus 2h", answer={"ok": True}, extra={"source": "system"})
@@ -3814,7 +3813,7 @@ def suite_cases():
         case_opus_model_ask_source_user_grants,
         case_opus_model_ask_source_absent_falls_back_to_the_transcript,
         case_opus_model_ask_loop_wakeup_check_in_without_its_record_never_grants,
-        case_opus_model_ask_source_gate_covers_typed_forms,
+        case_opus_model_ask_source_check_covers_typed_forms,
         case_opus_scope_context_names_builders_grants_builder,
         case_opus_scope_reads_the_plain_prompts_oldest_first,
         case_opus_scope_reads_only_the_transcript_tail,
