@@ -195,6 +195,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `guard-log-read-weekly` | Owner, 2026-10-13. | [`docs/decisions/guard-log-read-weekly.md`](../docs/decisions/guard-log-read-weekly.md) |
 | `guard-reads-turn-guard-on` | Every file the guard suite reads turns the guard flag on | [`docs/decisions/guard-reads-turn-guard-on.md`](../docs/decisions/guard-reads-turn-guard-on.md) |
 | `guard-remedy-not-to-owner` | Question: where does a Stop refusal's remedy live when the owner sees the refusal in chat? | [`docs/decisions/guard-remedy-not-to-owner.md`](../docs/decisions/guard-remedy-not-to-owner.md) |
+| `guard-split-by-family` | Owner, 2026-10-12 and 2026-10-13: | [`docs/decisions/guard-split-by-family.md`](../docs/decisions/guard-split-by-family.md) |
 | `guard-that-cries-wolf-is-spent` | CLAUDE.md: "Trust a guard only once it goes red on the defect it guards." The other half: a guard that goes red when nothing is wrong is spent, because the reader stops reading it. | [`docs/decisions/guard-that-cries-wolf-is-spent.md`](../docs/decisions/guard-that-cries-wolf-is-spent.md) |
 | `guards-never-ask` | Question: what does a hook guard do with an act it would have asked the owner about? | [`docs/decisions/guards-never-ask.md`](../docs/decisions/guards-never-ask.md) |
 | `haiku-prompt-hooks` | **Prompt hooks judge rules that no script can parse.** Each refuses the call when it finds a breach (owner ruling 2026-10-07). | [`docs/decisions/haiku-prompt-hooks.md`](../docs/decisions/haiku-prompt-hooks.md) |
