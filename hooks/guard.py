@@ -569,6 +569,9 @@ Other tools, in `judge` order:
                        from a handoff that holds it now; an edit that cannot
                        be applied, an unreadable file, a prompt with no marker or one that cannot be read,
                        and a failed import allow. Another file, a repo's own HANDOFF.md included, passes.
+                       A Bash call that puts content on the session handoff is judged too, as a Write of that
+                       content (the `handoff-shell-write` entry below): a rewrite agent put a handoff there with
+                       `cp`, and these rules ran on Write and Edit only.
                        An override lifts it. Cost: reads on demand inside this call, one small read of the
                        prompt file and, for an edit, of the handoff; no new log, hook, file or process start.
                        (precompact-handoff, item 14)
@@ -576,8 +579,9 @@ Other tools, in `judge` order:
                        estimates over HANDOFF_MAX_TOKENS (reread_check.py; ceil(UTF-8 bytes / 3.5)), unless the result is
                        smaller than the file on disk. The reason gives the estimate, the limit and the cut order
                        (history, then past review rounds, then mid-run CI reads). An edit that cannot be applied allows.
-                       An override lifts it. Cost: a path compare for any other file; the handoff on disk is read for an
-                       Edit (as handoff-sections does) and statted for a Write whose text is over the limit.
+                       A Bash call that puts content on the session handoff is judged too (see handoff-sections).
+                       An override lifts it. Cost: a path compare for any other file; the handoff on
+                       disk is read for an Edit (as handoff-sections does) and statted for a Write whose text is over the limit.
                        (precompact-handoff, "Every handoff and compaction check", rule 1)
   handoff-checked-stamp
                        deny. A Write, Edit or MultiEdit to a session handoff (as handoff-sections judges it)
@@ -595,7 +599,20 @@ Other tools, in `judge` order:
                        transcript, handoff or prompt, and a failed import allow. An override lifts it. Cost:
                        reads on demand inside this call, the transcript once and only when a stamp changed,
                        one more small read of the prompt, and for a Write the handoff on disk; no new log,
-                       hook, file or process start. (precompact-handoff, item 15)
+                       hook, file or process start. A Bash call that puts content on the session handoff is judged
+                       too (see handoff-sections). (precompact-handoff, item 15)
+  handoff-shell-write
+                       deny. A Bash or PowerShell call that writes a session handoff whose text the guard cannot
+                       read before the command runs: a pipe from a program, computed text, a file the command makes
+                       itself, a `sed -i`, or a python script whose text or path is no literal. A write it can read
+                       is judged by the three rules above: `cp` or `mv` of a readable file, `cat FILE > PATH`, a
+                       `cat > PATH` or `tee PATH` with a heredoc, `python3 -c` with literal text; `>>` and `tee -a`
+                       add to the file on disk. A read of the handoff, a copy out of it, an append to the session's
+                       `.inbox.md` and a command that only names the path in a string pass. The targets come from
+                       `shell_write_hit` and `interpreter_write_hit`, the frozen-path readers. The reason names the
+                       Write tool. An override lifts it. Cost: a substring test for a call that never says
+                       `handoffs`; for one that does, the readers' parse and a read of the source file.
+                       (precompact-handoff, "a Bash write to the handoff is judged too")
   env-file, frozen-path, config-edit, agent-model-cap
                        the write-tool forms of the rules above. Every deny runs over all path
                        fields of a call before any ask.
@@ -784,7 +801,7 @@ while True:
         _loading = "guard_frozen"
         from guard_frozen import (
             FROZEN_REASON, MUTATING_COMMAND, PROTECTED_MUTATING_COMMAND, _holds_frozen, _resolve_vars, _shell_write_hit, interpreter_may_write,
-            interpreter_write_hit, is_frozen, is_project_config, project_config_shell_hit, shell_write_hit,
+            interpreter_scripts, interpreter_write_hit, is_frozen, is_project_config, project_config_shell_hit, shell_write_hit,
             is_protected, protected_reason, protected_shell_hit,
             PROJECT_FROZEN_FILES,  # noqa: F401  re-export: test_shared_names and test_wrappers read guard.PROJECT_FROZEN_FILES
         )
@@ -1613,25 +1630,35 @@ HANDOFF_SECTIONS_REASON = (
 )
 
 
-def handoff_sections_result(tool, tool_input, target, cwd):
-    """(before, after): the text a Write, Edit or MultiEdit would leave in a session handoff file, and the
-    text the file holds now (None for a Write, which is judged on its own text). None when the target
-    is not a session handoff (`<config dir>/handoffs/<session id>.md`, the path
-    precompact_handoff.handoff_path builds; `<id>.inbox.md` and any other file there are not) or the
-    result cannot be worked out (an edit whose old text is absent, an unreadable file): the tool fails on
-    its own then, and the rule allows. Reads the target only for an Edit or MultiEdit, once."""
-    if tool not in ("Write", "Edit", "MultiEdit") or not target.lower().endswith(".md"):
-        return None
+def session_handoff_path(target, cwd, shell=False):
+    """The absolute path of `target` when it is a session handoff (`<config dir>/handoffs/<session id>.md`, the path
+    precompact_handoff.handoff_path builds; `<id>.inbox.md` and any other file there are not), else ''. A path a shell
+    command names (`shell`) has its quotes dropped and its `$VAR` expanded too. A path compare: it reads no file."""
+    if shell:
+        target = target.strip("'\"")
+    if not target.lower().endswith(".md"):
+        return ""
     path = os.path.expanduser(target)
+    path = os.path.expandvars(path) if shell else path
     path = path if os.path.isabs(path) else os.path.join(cwd or "", path)
     folder = os.path.join(guard_core.config_dir(), "handoffs")
     here = os.path.dirname(path)
     same = (os.path.normcase(os.path.normpath(here)) == os.path.normcase(os.path.normpath(folder))
             or os.path.normcase(os.path.realpath(here)) == os.path.normcase(os.path.realpath(folder)))
-    if not same:
-        return None
     stem = os.path.basename(path)[:-3]
-    if not stem or "." in stem:
+    return path if same and stem and "." not in stem else ""
+
+
+def handoff_sections_result(tool, tool_input, target, cwd):
+    """(before, after): the text a Write, Edit or MultiEdit would leave in a session handoff file, and the
+    text the file holds now (None for a Write, which is judged on its own text). None when the target
+    is not a session handoff (`session_handoff_path`) or the
+    result cannot be worked out (an edit whose old text is absent, an unreadable file): the tool fails on
+    its own then, and the rule allows. Reads the target only for an Edit or MultiEdit, once."""
+    if tool not in ("Write", "Edit", "MultiEdit"):
+        return None
+    path = session_handoff_path(target, cwd)
+    if not path:
         return None
     if tool == "Write":
         content = tool_input.get("content")
@@ -1726,6 +1753,244 @@ def handoff_stamp_hit(tool, tool_input, target, cwd, transcript, result):
     lines = ["  %s: %s." % (pid, "read or run " + " or ".join(tokens[:3]) if tokens else "any read")
              for pid, tokens in unbacked]
     return "\n".join(lines), ", ".join(pid for pid, _tokens in unbacked)
+
+
+def judge_handoff_write(tool, tool_input, target, cwd, transcript, result=False):
+    """Refuse a write to a session handoff that the three handoff rules refuse, in their order: a missing section
+    (handoff-sections), a size over the limit (handoff-too-big), an unbacked restamp (handoff-checked-stamp). `result` is
+    the (before, after) pair of texts the write leaves, as handoff_sections_result gives it; False asks that function
+    (a Write, Edit or MultiEdit), and a Bash write passes the pair it built (`handoff_shell_judge`). Cost: a path
+    compare for any other file; the stat of the handoff on disk only for a Write whose text is over the limit."""
+    if result is False:
+        result = handoff_sections_result(tool, tool_input, target, cwd)
+    dropped = handoff_sections_hit(tool, tool_input, target, cwd, result)
+    if dropped:
+        refuse(tool, "deny", "handoff-sections", HANDOFF_SECTIONS_REASON % dropped, dropped)
+    if result:
+        oversize = reread_check.too_big_estimate(result, handoff_target_path(target, cwd))
+        if oversize:
+            refuse(tool, "deny", "handoff-too-big", HANDOFF_TOO_BIG_REASON % (oversize, reread_check.HANDOFF_MAX_TOKENS),
+                   "%d estimated tokens" % oversize)
+    stamped = handoff_stamp_hit(tool, tool_input, target, cwd, transcript, result)  # glossary-ok: main's name for the rule, moved unchanged
+    if stamped:
+        refuse(tool, "deny", "handoff-checked-stamp", HANDOFF_STAMP_REASON % stamped[0], stamped[1])  # glossary-ok: the rule's fixed id and its reason, moved unchanged
+
+
+HANDOFF_SHELL_WRITE_REASON = (
+    "Rule (handoff-shell-write): this command puts content on the session handoff that the guard cannot read before "
+    "the command runs (a pipe from a program, computed text, or a file the command makes itself), so the handoff "
+    "rules cannot judge it. "
+    "Remedy: write the handoff with the Write tool, then repeat the call. "
+    "(decision precompact-handoff, a Bash write to the handoff is judged too)"
+)
+
+HANDOFF_FOLDER_NAME = re.compile(r"handoffs", re.IGNORECASE)   # the gate: a command that never says it cannot name the folder
+HANDOFF_READ_CAP = 1 << 20   # a source file is read to this many bytes: a handoff that long is over the limit anyway
+
+
+def _read_text(path):
+    """The text of a file, up to HANDOFF_READ_CAP bytes, or None when it is missing, a folder or unreadable."""
+    try:
+        with open(path, "rb") as handle:
+            return handle.read(HANDOFF_READ_CAP + 1).decode("utf-8", "replace")
+    except OSError:
+        return None
+
+
+def _handoff_heredoc_texts(segments, bodies):
+    """{segment number: heredoc text} for each segment that owns exactly one heredoc: the body and the newline that ends
+    its last line, as the shell hands it on. The body of an unquoted delimiter is left out when it holds `$` or a
+    backtick, which the shell expands. A segment with a `<<-` or `<<<`, or two heredocs, and a count of headers that
+    does not match the bodies, are left out too."""
+    heads = [len(heredoc_heads(segment)[0]) for segment in segments]
+    if sum(heads) != len(bodies):
+        return {}
+    texts, used = {}, 0
+    for number, count in enumerate(heads):
+        quote, body = (bodies[used][0], bodies[used][1]) if count == 1 else ("", None)
+        used += count
+        if body is None or "<<-" in segments[number] or "<<<" in segments[number]:
+            continue
+        if not quote and ("$" in body or "`" in body):
+            continue
+        texts[number] = body + "\n"
+    return texts
+
+
+def _handoff_segment_write(segment, where, heredoc):
+    """(path, text, append) for the write one shell segment makes onto a session handoff, when the guard can tell its
+    text before it runs: `cp` or `mv` of a readable file, `cat FILE... > PATH`, a `cat > PATH` or `tee PATH` fed by a
+    heredoc of the segment (`heredoc`), a bare `> PATH`. Else (path or '', None, False). A segment with no such write,
+    or with more than one, is unknown. Targets come from the readers the redirect, `tee` and `cp`/`mv` rules use."""
+    tokens = segment_tokens(strip_redirections(segment))
+    starts = command_indexes(tokens) if tokens else []
+    if tokens is None or len(starts) > 1:
+        return "", None, False
+    verb = basename(tokens[starts[0]]).lower() if starts else ""
+    args = tokens[starts[0] + 1:] if starts else []
+    writes = []   # (kind, path, append, source)
+    for target, append in _redirect_writes(segment):
+        path = session_handoff_path(target, where, True)
+        if path:
+            writes.append(("redirect", path, append, ""))
+    if verb == "tee":
+        append = any(arg == "--append" or (arg.startswith("-") and not arg.startswith("--") and "a" in arg) for arg in args)
+        for target in _verb_written_paths("tee", args):
+            path = session_handoff_path(target, where, True)
+            if path:
+                writes.append(("tee", path, append, ""))
+    elif verb in ("cp", "mv"):
+        for _verb, source, dest, _into in scratchpad_copies(segment, where):
+            path = session_handoff_path(dest, where, True)
+            if path:
+                writes.append(("copy", path, False, source))
+    if len(writes) != 1:
+        return "", None, False
+    kind, path, append, source = writes[0]
+    if kind == "copy":
+        return path, _read_text(source), False
+    if kind == "tee":
+        return path, heredoc, append
+    if verb in ("", ":", "true") and not args:
+        return path, "", append
+    if verb != "cat" or any(arg.startswith("-") or "$" in arg or "`" in arg for arg in args):
+        return path, None, append
+    if not args:
+        return path, heredoc, append
+    texts = [_read_text(shell_abs(arg, where) or "") for arg in args]
+    return path, (None if None in texts else "".join(texts)), append
+
+
+def _py_handoff_writes(script, where):
+    """[(path, text, append)] for the writes a python script makes onto a session handoff, each read only when it is
+    `open(PATH, MODE).write(TEXT)`, `with open(PATH, MODE) as f:` holding only `f.write(TEXT)` calls, or
+    `Path(PATH).write_text(TEXT)`, with PATH, MODE and TEXT string literals and the call run once. A write of another
+    shape, a script that does not parse and a write to a path that is no literal are ('', None, False): unknown."""
+    import ast
+    import textwrap
+    unknown = ("", None, False)
+    try:
+        tree = ast.parse(textwrap.dedent(script))
+    except (SyntaxError, ValueError):
+        return [unknown]
+    parents = {child: node for node in ast.walk(tree) for child in ast.iter_child_nodes(node)}
+    branching = (ast.For, ast.AsyncFor, ast.While, ast.If, ast.Try, ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda,
+                 ast.comprehension, ast.IfExp)
+
+    def literal(node):
+        return node.value if isinstance(node, ast.Constant) and isinstance(node.value, str) else None
+
+    def argument(call, index, name):
+        if len(call.args) > index:
+            return call.args[index]
+        return next((each.value for each in call.keywords if each.arg == name), None)
+
+    def runs_once(node):
+        while node in parents:
+            node = parents[node]
+            if isinstance(node, branching):
+                return False
+        return True
+
+    def with_text(item):
+        variable = item.optional_vars.id if isinstance(item.optional_vars, ast.Name) else None
+        body = parents[item].body if variable else []
+        nodes = [n for statement in body for n in ast.walk(statement)]
+        names = [n for n in nodes if isinstance(n, ast.Name) and n.id == variable]
+        calls = [n for n in nodes if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+                 and isinstance(n.func.value, ast.Name) and n.func.value.id == variable]
+        if not variable or any(isinstance(n, branching) for n in nodes):
+            return None
+        texts = [literal(call.args[0]) if call.func.attr == "write" and len(call.args) == 1 else None for call in calls]
+        if len(names) != len(calls) or None in texts:
+            return None
+        order = sorted(zip(calls, texts), key=lambda pair: (pair[0].lineno, pair[0].col_offset))
+        return "".join(text for _call, text in order)
+
+    out = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        if isinstance(func, ast.Name) and func.id == "open":
+            mode_node = argument(node, 1, "mode")
+            mode = "r" if mode_node is None else literal(mode_node)
+            if mode is not None and not set(mode) & set("wax+"):
+                continue   # a read
+            named = literal(argument(node, 0, "file"))
+            path = session_handoff_path(named, where, True) if named is not None else ""
+            if mode is None or named is None:
+                out.append(unknown)
+            elif path:
+                up = parents.get(node)
+                call = parents.get(up)
+                if isinstance(up, ast.Attribute) and up.attr == "write" and isinstance(call, ast.Call) \
+                        and call.func is up and len(call.args) == 1:
+                    text = literal(call.args[0]) if runs_once(call) else None
+                elif isinstance(up, ast.withitem):
+                    text = with_text(up) if runs_once(parents[up]) else None
+                else:
+                    text = None
+                out.append((path, text, "a" in mode) if text is not None else unknown)
+        elif isinstance(func, ast.Attribute) and func.attr == "write_text":
+            owner = func.value
+            made = (isinstance(owner, ast.Call) and len(owner.args) == 1
+                    and (isinstance(owner.func, ast.Name) and owner.func.id == "Path"
+                         or isinstance(owner.func, ast.Attribute) and owner.func.attr == "Path"))
+            named = literal(owner.args[0]) if made else None
+            path = session_handoff_path(named, where, True) if named is not None else ""
+            text = literal(argument(node, 0, "data")) if runs_once(node) else None
+            if named is None or (path and text is None):
+                out.append(unknown)
+            elif path:
+                out.append((path, text, False))
+    return out
+
+
+def handoff_shell_writes(raw, cwd):
+    """[(path, text, append)] for each write a shell call makes onto a session handoff, `text` None when it cannot be
+    told before the command runs; None for a call that writes none. The targets are the ones `shell_write_hit` and
+    `interpreter_write_hit` find (the readers of the frozen-path and protected-path rules), judged with
+    `session_handoff_path`. The command is read segment by segment, so each write keeps its own text. A hit that no
+    segment explains is unknown; a crash of the read allows, as every scan here does. Cost: a substring test for a call
+    that never says `handoffs`; the readers' parse only after it; a file read only for a write onto a handoff."""
+    if not HANDOFF_FOLDER_NAME.search(raw):
+        return None
+    try:
+        def is_handoff(word, where):
+            return bool(session_handoff_path(word, where, True))
+        shell_hit = shell_write_hit(raw, cwd, is_handoff, follow_cd=True)
+        py_hit = interpreter_write_hit(raw, cwd, is_handoff)
+        if not shell_hit and not py_hit:
+            return None
+        writes = []
+        if shell_hit:
+            kept, bodies = _split_heredocs(raw)
+            ends = []
+            segments = split_segments(_resolve_vars("\n".join(kept)), ends)
+            heredocs = _handoff_heredoc_texts(segments, bodies)
+            for number, segment in enumerate(segments):
+                where = dir_before_segment(segments, number, cwd, ends) or cwd
+                if segment.strip() and shell_write_hit(segment, where, is_handoff):
+                    writes.append(_handoff_segment_write(segment, where, heredocs.get(number)))
+        if py_hit:
+            for kind, script, at in interpreter_scripts(raw, cwd):
+                writes += _py_handoff_writes(script, at) if kind == "py" else []
+        return writes or [("", None, False)]
+    except Exception:
+        return None
+
+
+def handoff_shell_judge(tool, raw, cwd, transcript):
+    """Judge a shell call that writes a session handoff as the three handoff rules judge a Write of the same text. A
+    `>>` or `tee -a` leaves the handoff on disk with the text added. A write whose text is not known before the command
+    runs is refused under handoff-shell-write."""
+    for path, text, append in handoff_shell_writes(raw, cwd) or ():
+        if text is None:
+            refuse(tool, "deny", "handoff-shell-write", HANDOFF_SHELL_WRITE_REASON, path or "shell write")
+        before = _read_text(path) if append else None
+        result = (None, text) if before is None else (before, before + text)
+        judge_handoff_write(tool, {}, path, cwd, transcript, result)
 
 
 OTHER_CHECKOUT_REASON = (
@@ -6440,6 +6705,10 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         if matched:
             refuse(tool, "deny", "builder-test-edit", BUILDER_TEST_REASON, matched)
 
+    # 7c2. A write onto a session handoff (rules handoff-sections, handoff-too-big, handoff-checked-stamp, and
+    # handoff-shell-write for text the guard cannot read first). Not in never_lifted: the owner may mean the write.
+    handoff_shell_judge(tool, raw, cwd, transcript)
+
     # 7d. A read-only agent's shell write (rule readonly-shell-write): a redirect, `tee`, `touch` or `mktemp` to a
     # file outside its own session's scratchpad, here or in an ssh remote command.
     if readonly_agent(payload):
@@ -8223,6 +8492,12 @@ def _redirect_targets(segment: str):
     """The target of each unquoted output redirect in one segment that writes no file (`_null_device`) and is no
     descriptor duplicate (`2>&1`). An input redirect and a heredoc header (`<<`) write nothing. A comparison's `>`
     is already masked (`_mask_comparisons`)."""
+    for target, _append in _redirect_writes(segment):
+        yield target
+
+
+def _redirect_writes(segment: str):
+    """(target, append) for each redirect `_redirect_targets` counts; `append` is True for `>>`."""
     for found in REDIRECTION.finditer(segment):
         word = found.group()
         if word[0] == "<" or not unquoted_at(segment, found.start()):
@@ -8247,7 +8522,7 @@ def _redirect_targets(segment: str):
             except ValueError:
                 pass
         if target and not _null_device(target):
-            yield target
+            yield target, ">>" in word[:operator]
 
 
 def _mktemp_paths(args):
@@ -8870,23 +9145,9 @@ def judge(payload) -> None:
         if is_frozen(target, cwd):
             refuse(tool, "deny", "frozen-path", FROZEN_REASON, target)
 
-        # 7a. A write that leaves a session handoff without a required section (rule handoff-sections).
-        # Not in never_lifted: the owner may mean the write.
-        handoff_result = handoff_sections_result(tool, tool_input, target, cwd)
-        dropped = handoff_sections_hit(tool, tool_input, target, cwd, handoff_result)
-        if dropped:
-            refuse(tool, "deny", "handoff-sections", HANDOFF_SECTIONS_REASON % dropped, dropped)
-        # 7a''. A write that leaves a session handoff over the size limit (rule handoff-too-big), from any writer.
-        # Not in never_lifted: the owner may mean the write. Cost: a path compare for any other file; the stat of the
-        # handoff on disk only for a Write whose text is over the limit.
-        oversize = reread_check.too_big_estimate(handoff_result, handoff_target_path(target, cwd)) if handoff_result else 0
-        if oversize:
-            refuse(tool, "deny", "handoff-too-big", HANDOFF_TOO_BIG_REASON % (oversize, reread_check.HANDOFF_MAX_TOKENS),
-                   "%d estimated tokens" % oversize)
-        # 7a'. A write that restamps a premise's Checked value with no evidence (rule handoff-checked-stamp).
-        stamped = handoff_stamp_hit(tool, tool_input, target, cwd, payload.get("transcript_path"), handoff_result)
-        if stamped:
-            refuse(tool, "deny", "handoff-checked-stamp", HANDOFF_STAMP_REASON % stamped[0], stamped[1])
+        # 7a. The three handoff rules (handoff-sections, handoff-too-big, handoff-checked-stamp). Not in never_lifted:
+        # the owner may mean the write.
+        judge_handoff_write(tool, tool_input, target, cwd, payload.get("transcript_path"))
         # 7d. A path the repo that holds the target lists as protected (decision protected-path). Cost: the
         # holding checkout's extras file, read once per call, only when the target sits in a checkout.
         if is_protected(target, cwd):
