@@ -7070,6 +7070,156 @@ class SupersededRuns(Env):
         c4, _ = host.gh(["api", f"repos/{{owner}}/{{repo}}/actions/runs?head_sha={sha}", "-X", "GET"])
         self.assertNotEqual(c4, 0)
 
+class CancelledProofReadsLiveHead(Env):
+    """A proven head whose runs were cancelled with no failed job reads like a pending one, so the live head's own green run is the proof. A failed job
+    still refuses. The shape: the tool's clean merge of main on a lane commit, whose runs the lane's next push cancelled (concurrency
+    cancel-in-progress), and whose own run is green. The fake gh serves each head's rows and runs, so classify, judge_runs and head_state read the
+    state strings the real code reads. Not a GhHalf subclass: the GhHalf tests must not run twice."""
+    set, calls, gh_host, go, proven_parent = GhHalf.set, GhHalf.calls, GhHalf.gh_host, GhHalf.go, GhHalf.proven_parent
+
+    def setUp(self):
+        super().setUp()
+        gh_case_setup(self)
+
+    def merged_over_lane_commit(self, proven_rows, proven_runs, live_rows, live_runs):
+        """The live head is git's clean merge of main above the lane commit, the proven head. The proven head answers `proven_rows` and `proven_runs`,
+        and the live head answers `live_rows` and `live_runs` on every read. -> (proven, live)."""
+        self.leave_no_pending_record()  # a pending record's claim would sit above the proven head and end the walk there
+        push_base(self, {"elsewhere.txt": "main moved\n"})  # main gains a commit the head lacks; push_base then merges main into the head (head_takes_base)
+        proven = self.proven_parent(rows=proven_rows)  # the head is git's clean merge of main, so its first parent is the lane commit
+        self.set(sha_runs={proven: proven_runs}, checks_seq=[live_rows], runs_seq=[live_runs])
+        live = self.head()
+        sh(self.co, "git", "fetch", "-q", "origin")  # the proof walk reads the commits in the checkout the tool runs in
+        self.assertNotEqual(proven, live, "fixture: the live head is the proven head")
+        self.assertEqual(merge.proven_head(self.co, live, "main", lambda: True), proven, "fixture: the proof walk does not stop at the lane commit")
+        return proven, live
+
+    def assert_refused_unmerged(self, rc, out, before):
+        self.assertEqual(rc, 1, out)
+        self.assertNotIn(MERGE_CALL, self.calls(), "the merge call was sent:\n" + out)
+        self.assertEqual(self.refs(), before, "pushed on a refused merge:\n" + out)
+
+    def test_a_cancelled_proof_with_no_failed_job_merges_on_the_live_heads_green_run(self):
+        proven, live = self.merged_over_lane_commit(
+            proven_rows=[("checks", "cancel", job_link(OLD_RUN, 101)), ("lint", "cancel", job_link(OLD_RUN, 102))],
+            proven_runs=[("checks", "completed", "cancelled", OLD_RUN)],
+            live_rows=[("checks", "pass", job_link(NEW_RUN, 201))],
+            live_runs=[("checks", "completed", "success", NEW_RUN)])
+        host = self.gh_host()
+        # scope first: the proven head reads red by its cancels alone, and the live head reads green
+        state = host.head_state(7, proven)
+        self.assertTrue(state.startswith("red: ") and "cancel" in state and "fail" not in state, "scope: the proven head is not red by cancels alone: " + state)
+        self.assertEqual(host.head_state(7, live), "green", "scope: the live head is not green")
+        rc, out = self.go()
+        self.assertEqual(rc, 0, "a cancelled proof with no failed job did not merge on the live head's own green run:\n" + out)
+        self.assertIn(MERGE_CALL, self.calls(), "the merge call was not sent:\n" + out)
+        self.assertEqual(self.paused, [], "waited instead of merging on the live head's own green run:\n" + out)
+
+    def test_a_cancelled_run_beside_a_skipped_one_with_no_failure_merges_on_the_live_heads_green_run(self):
+        # A cancelled run and a skipped run of one workflow, neither failed: the proof reads like a pending one, as in the case above.
+        proven, live = self.merged_over_lane_commit(
+            proven_rows=[("checks", "cancel", job_link(NEW_RUN, 101)), ("checks", "skipping", job_link(OLD_RUN, 202))],
+            proven_runs=[("checks", "completed", "cancelled", NEW_RUN), ("checks", "completed", "skipped", OLD_RUN)],
+            live_rows=[("checks", "pass", job_link(NEW_RUN + 1, 201))],
+            live_runs=[("checks", "completed", "success", NEW_RUN + 1)])
+        host = self.gh_host()
+        # scope first: the proven head is red by a cancel and a skip, with no failed job, and the live head reads green
+        state = host.head_state(7, proven)
+        self.assertTrue(state.startswith("red: ") and "cancel" in state and "fail" not in state, "scope: the proven head is not red by cancels alone: " + state)
+        self.assertEqual(host.head_state(7, live), "green", "scope: the live head is not green")
+        rc, out = self.go()
+        self.assertEqual(rc, 0, "a cancelled run beside a skipped one, with no failure, did not merge on the live head's own green run:\n" + out)
+        self.assertIn(MERGE_CALL, self.calls(), "the merge call was not sent:\n" + out)
+        self.assertEqual(self.paused, [], "waited instead of merging on the live head's own green run:\n" + out)
+
+    def test_a_failed_job_under_a_cancelled_proof_refuses_control(self):
+        # Control, passes on today's code and after the fix: a failed job on the proven head is red, so the live head's green run does not prove it.
+        proven, live = self.merged_over_lane_commit(
+            proven_rows=[("checks", "cancel", job_link(OLD_RUN, 101)), ("lint", "fail", job_link(OLD_RUN, 102))],
+            proven_runs=[("checks", "completed", "cancelled", OLD_RUN)],
+            live_rows=[("checks", "pass", job_link(NEW_RUN, 201))],
+            live_runs=[("checks", "completed", "success", NEW_RUN)])
+        host = self.gh_host()
+        self.assertIn("lint: fail", host.head_state(7, proven), "scope: the proven head does not read its failed job")
+        self.assertEqual(host.head_state(7, live), "green", "scope: the live head is not green")
+        before = self.refs()
+        rc, out = self.go()
+        self.assert_refused_unmerged(rc, out, before)
+        self.assertIn("lint: fail", out, "the refusal does not name the failed job of the proven head:\n" + out)
+
+    def test_a_cancelled_proof_under_a_pending_live_run_refuses_control(self):
+        # Control, passes on today's code and after the fix: the live head's own run is pending, so nothing is proven, and the refusal does not wait.
+        proven, live = self.merged_over_lane_commit(
+            proven_rows=[("checks", "cancel", job_link(OLD_RUN, 101))],
+            proven_runs=[("checks", "completed", "cancelled", OLD_RUN)],
+            live_rows=[("checks", "pending", "")],
+            live_runs=[("checks", "in_progress", "")])
+        host = self.gh_host()
+        self.assertTrue(host.head_state(7, live).startswith("pending: "), "scope: the live head is not pending")
+        before = self.refs()
+        rc, out = self.go()
+        self.assert_refused_unmerged(rc, out, before)
+        self.assertEqual(self.paused, [], "waited on the live head's pending run instead of refusing:\n" + out)
+
+    def test_a_cancelled_proof_under_a_red_live_run_refuses_control(self):
+        # Control, passes on today's code and after the fix: a red own run of the live head is never covered by the proof under it.
+        proven, live = self.merged_over_lane_commit(
+            proven_rows=[("checks", "cancel", job_link(OLD_RUN, 101))],
+            proven_runs=[("checks", "completed", "cancelled", OLD_RUN)],
+            live_rows=[("checks", "fail", job_link(NEW_RUN, 201))],
+            live_runs=[("checks", "completed", "failure", NEW_RUN)])
+        host = self.gh_host()
+        self.assertTrue(host.head_state(7, live).startswith("red: "), "scope: the live head is not red")
+        before = self.refs()
+        rc, out = self.go()
+        self.assert_refused_unmerged(rc, out, before)
+
+    def test_a_cancelled_proof_under_an_unread_live_run_refuses_control(self):
+        # Control, passes on today's code and after the fix: an unread own run of the live head is never a green proof. The checks read fails from the
+        # second read of a route on (checks_broken), so the proven head's read answers and the live head's read does not.
+        proven, live = self.merged_over_lane_commit(
+            proven_rows=[("checks", "cancel", job_link(OLD_RUN, 101))],
+            proven_runs=[("checks", "completed", "cancelled", OLD_RUN)],
+            live_rows=[("checks", "pass", job_link(NEW_RUN, 201))],
+            live_runs=[("checks", "completed", "success", NEW_RUN)])
+        self.set(n_runs=0, n_status=0, checks_broken=True, broken_from=1)
+        host = self.gh_host()
+        self.assertTrue(host.head_state(7, proven).startswith("red: "), "scope: the proven head was not read")
+        self.assertTrue(host.head_state(7, live).startswith("unknown ("), "scope: the live head's read did not fail")
+        self.set(n_runs=0, n_status=0)  # the run reads the proven head first, then the live head, as the scope reads did
+        before = self.refs()
+        rc, out = self.go()
+        self.assert_refused_unmerged(rc, out, before)
+
+    def test_a_cancelled_proof_with_no_run_of_the_live_head_refuses_control(self):
+        # Control, passes on today's code and after the fix: a cancelled run alone is never proof, and a live head with no run of its own has none.
+        proven, live = self.merged_over_lane_commit(
+            proven_rows=[("checks", "cancel", job_link(OLD_RUN, 101))],
+            proven_runs=[("checks", "completed", "cancelled", OLD_RUN)],
+            live_rows=[],
+            live_runs=[])
+        host = self.gh_host()
+        self.assertTrue(host.head_state(7, live).startswith("pending: "), "scope: the live head has a run of its own: " + host.head_state(7, live))
+        before = self.refs()
+        rc, out = self.go()
+        self.assert_refused_unmerged(rc, out, before)
+        self.assertEqual(self.paused, [], "waited on a run the live head does not have instead of refusing:\n" + out)
+
+    def test_a_cancelled_own_run_of_the_live_head_under_a_green_proof_refuses_control(self):
+        # Control, passes on today's code and after the fix: the ruling names a cancelled proof, not a cancelled run of the live head itself. A green
+        # proof under a cancelled own run is refused, as it is today.
+        proven, live = self.merged_over_lane_commit(
+            proven_rows=[("checks", "pass", job_link(OLD_RUN, 101))],
+            proven_runs=[("checks", "completed", "success", OLD_RUN)],
+            live_rows=[("checks", "cancel", job_link(NEW_RUN, 201))],
+            live_runs=[("checks", "completed", "cancelled", NEW_RUN)])
+        host = self.gh_host()
+        self.assertEqual(host.head_state(7, proven), "green", "scope: the proven head is not green")
+        self.assertTrue(host.head_state(7, live).startswith("red: "), "scope: the live head's cancelled run does not read red")
+        before = self.refs()
+        rc, out = self.go()
+        self.assert_refused_unmerged(rc, out, before)
+
 class RestRoutes(Env):
     """c53: the merge tool reads and merges through the REST API (`gh api`), never GraphQL, which a Claude Code cloud session answers with HTTP 403
     (the fake gh answers it that way, and a GraphQL call that reaches it fails the test). Each case pins one way a REST read could count a pending or
