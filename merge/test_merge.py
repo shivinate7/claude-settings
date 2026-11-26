@@ -8284,12 +8284,12 @@ class HeadConfigOnConfirm(Env):
         self.assertEqual(rc, 0, "a ready PR that leaves the stamp alone was refused: " + out + err)
         self.assertTrue(getattr(self.host, "merged", False), "a ready PR that leaves the stamp alone did not merge: " + out + err)
 
-    def head_config_read_fails(self, fail):
-        """Patch merge.sh so the head-config read fails: the `--name-status` diff whose path is the stamp (merge.head_config_refusal).
-        `fail(args)` returns (rc, text) or raises. -> the list of args it saw. Every other git call runs for real."""
+    def head_config_read_fails(self, fail, is_read=lambda args: "diff" in args and "--name-status" in args and merge.DEFAULT_CONFIG in args):
+        """Patch merge.sh so one head-config read fails. `is_read(args)` picks that git call; by default it is the `--name-status` diff whose path is
+        the stamp (merge.head_config_refusal). `fail(args)` returns (rc, text) or raises. -> the list of args it saw. Every other git call runs for real."""
         real_sh, seen = merge.sh, []
         def stub(args, cwd=None, input=None, env=None, stdout_only=False, **kw):  # kw: as in ClaudeMdFlag.unreadable
-            if "diff" in args and "--name-status" in args and merge.DEFAULT_CONFIG in args:
+            if is_read(args):
                 seen.append(args)
                 return fail(args)
             return real_sh(args, cwd=cwd, input=input, env=env, stdout_only=stdout_only, **kw)
@@ -8329,6 +8329,38 @@ class HeadConfigOnConfirm(Env):
         except subprocess.TimeoutExpired as e:  # a read that times out is an unknown refusal, never an exception out of the merge tool
             self.fail("the head-config read's TimeoutExpired escaped the confirm instead of refusing as unknown: %s" % e)
         self.assertTrue(seen, "the head-config read never ran, so the stub probed nothing: " + out + err)
+        self.assert_unknown_and_nothing_claimed(rc, out, err, claims_before)
+
+    def test_a_timed_out_head_config_show_refuses_as_unknown_and_claims_nothing(self):
+        head = self.lane_writes_config(json.dumps(CONFIG) + "\n")  # a stamp the running tool takes: only the head's `git show` of it is broken
+        self.assertFalse(self.host.draft, "precondition: the PR is a draft, so the confirm takes the draft step, not the ready path under test")
+        self.assertEqual(self.host.state, "green", "precondition: the PR's rollup is not green, so the refusal would not be the only thing that stops the merge")
+        def slow(args):
+            raise subprocess.TimeoutExpired(args, 1)
+        def head_config_show(args):  # the read head_config_refusal makes, not the same stamp read that load_config's head_none_stamp makes first
+            return f"{head}:{merge.DEFAULT_CONFIG}" in args and any(f.function == "head_config_refusal" for f in inspect.stack()[1:])
+        seen = self.head_config_read_fails(slow, is_read=head_config_show)
+        claims_before = self.claims()
+        try:
+            rc, out, err = self.run_args("7", "--confirm")
+        except subprocess.TimeoutExpired as e:  # a read that times out is an unknown refusal, never an exception out of the merge tool
+            self.fail("the head's `git show` of the stamp timed out, and its TimeoutExpired escaped the confirm instead of refusing as unknown: %s" % e)
+        self.assertTrue(seen, "the head's `git show` of the stamp never ran, so the stub probed nothing: " + out + err)
+        self.assert_unknown_and_nothing_claimed(rc, out, err, claims_before)
+
+    def test_a_timed_out_workflow_listing_at_the_head_refuses_as_unknown_and_claims_nothing(self):
+        head = self.lane_writes_config(json.dumps(CONFIG) + "\n")  # a stamp the running tool takes: only the workflow listing parse_config reads at the head is broken
+        self.assertFalse(self.host.draft, "precondition: the PR is a draft, so the confirm takes the draft step, not the ready path under test")
+        self.assertEqual(self.host.state, "green", "precondition: the PR's rollup is not green, so the refusal would not be the only thing that stops the merge")
+        def slow(args):
+            raise subprocess.TimeoutExpired(args, 1)
+        seen = self.head_config_read_fails(slow, is_read=lambda args: "ls-tree" in args and head in args and ".github/workflows" in args)
+        claims_before = self.claims()
+        try:
+            rc, out, err = self.run_args("7", "--confirm")
+        except subprocess.TimeoutExpired as e:  # a read that times out is an unknown refusal, never an exception out of the merge tool
+            self.fail("the workflow listing at the head timed out, and its TimeoutExpired escaped the confirm instead of refusing as unknown: %s" % e)
+        self.assertTrue(seen, "the workflow listing at the head never ran, so the stub probed nothing: " + out + err)
         self.assert_unknown_and_nothing_claimed(rc, out, err, claims_before)
 
 class ReadyChecksRun(unittest.TestCase):
