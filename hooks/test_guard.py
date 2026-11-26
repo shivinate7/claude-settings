@@ -142,6 +142,7 @@ FAMILIES = {
     "write": "the silent write",
     "readonly-shell-write": "a read-only agent's shell write: a redirect, tee, touch or mktemp, in the shell or inside an ssh command, is refused; its own scratchpad, the null devices, the reads, a writing role and a call with no agent pass",
     "push-delete": "push and delete",
+    "force-push-main": "the push-main forms merged into force-push: a non-forced push that writes the default branch is refused under force-push, its reason names the default branch and the lane-branch remedy and carries no lease retry; the forced pushes to other branches, a delete of the default branch, the agent and all-branch refusals, and the passes keep their own rules",
     "linked-node-modules": "a dependency install or a recursive delete through a node_modules that is a link",
     "env": "environment files",
     "argv": "process arguments: a ps, pgrep or /proc form that prints other processes' full arguments is refused; pid-and-name forms, quoted or heredoc text and the guard's own readers pass",
