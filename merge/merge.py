@@ -8300,12 +8300,12 @@ def lane_own_pr_refusal(info, h, marking_ready=False):
     """A lane's confirm or ready mark is refused unless the pull request is in LANE_MERGE_REPO (the repo read from `h`, repo_full_name; a read that fails refuses) and is its own: its head ref is one of lane_head_refs of the step its role record names.
     A confirm also needs it ready, because a draft would take the records step, which marks it ready. With `marking_ready` the draft is the point, so the draft test is skipped. -> the refusal text without its cite (the raise adds it), or None (not a lane, or its own pull request).
     The text names neither flag it refuses."""
-    from shared_names import OLD_SETTINGS_REPO, lane_head_refs  # hooks/shared_names.py, the one home of a lane's head refs and of the old owner, on sys.path from the top of this file
+    from shared_names import lane_head_refs  # hooks/shared_names.py, the one home of a lane's head refs, on sys.path from the top of this file
     record = read_merge_record()
     if not record or record["role"] != LANE_ROLE:
         return None
     try:
-        in_repo = repo_full_name(h).casefold() in (LANE_MERGE_REPO.casefold(), OLD_SETTINGS_REPO.casefold())  # the repo moved owners; the old slug is accepted until a follow-up drops it
+        in_repo = repo_full_name(h).casefold() == LANE_MERGE_REPO.casefold()
     except Exception:  # an unread repo is no proof of the one repo: fail closed
         in_repo = False
     if not in_repo:

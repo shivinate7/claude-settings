@@ -518,7 +518,7 @@ GH_STEP = (  # a gh command left to the owner, with no switch in its block
     "> **Done**\n> Input Needed: a branch-protection change on claude-settings main needs admin.\n\n"
     "Run this in Git Bash:\n\n"
     "```bash\ncd ~/claude-settings\n"
-    "gh api -X PATCH repos/shivinate7/claude-settings/branches/main/protection/required_status_checks -f strict=true\n"
+    "gh api -X PATCH repos/swlshiv/claude-settings/branches/main/protection/required_status_checks -f strict=true\n"
     "```\n"
 )
 

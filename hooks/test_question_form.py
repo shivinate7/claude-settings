@@ -1168,10 +1168,8 @@ def case_page_reasons_are_one_table():
 
 # The default gh login is shivinate7; ssemwal-cdc is only for a repo shivinate7 cannot reach
 # (decision `act-in-place`). The value pins live in test_shared_names.py; the literals here are the inputs.
-GH_PATCH = ("gh api -X PATCH repos/shivinate7/claude-settings/branches/main/protection/"
+GH_PATCH = ("gh api -X PATCH repos/swlshiv/claude-settings/branches/main/protection/"
             "required_status_checks -f strict=true")
-# The same PATCH after the repo moved to the swlshiv org: the fallback login must not reach it either.
-GH_PATCH_ORG = GH_PATCH.replace("repos/shivinate7/", "repos/swlshiv/", 1)
 GH_WHY = "Why yours: a session on your computer was asked first and none could reach the remote"
 
 
@@ -1201,24 +1199,24 @@ def case_gh_login_hit_direct():
     gh_hit("gh login switch: the incident PATCH with no switch is denied", gh_task(GH_PATCH, GH_PATCH), True)
     gh_hit("gh login switch: a switch after the gh line is denied",
            gh_task(GH_PATCH + "\ngh auth switch -u shivinate7", GH_PATCH + "\ngh auth switch -u shivinate7"), True)
-    gh_hit("gh login switch: ssemwal-cdc before a shivinate7/ repo is denied",
+    gh_hit("gh login switch: ssemwal-cdc before a swlshiv/ settings repo is denied",
            gh_task("gh auth switch -u ssemwal-cdc && " + GH_PATCH, "gh auth switch -u ssemwal-cdc; " + GH_PATCH), True)
     gh_hit("gh login switch: a cd then gh pr ready, with no switch, is denied",
            gh_task("cd x && gh pr ready 5", "cd x; gh pr ready 5"), True)
     gh_hit("gh login switch: a login outside the pair is denied",
            gh_task("gh auth switch -u someoneelse && gh pr ready 5", "gh auth switch -u someoneelse; gh pr ready 5"), True)
     gh_hit("gh login switch: a gh command after a pipe is denied",
-           gh_task("printf '{}' | gh api -X PUT repos/shivinate7/claude-settings/branches/main/protection --input -",
-                   "'{}' | gh api -X PUT repos/shivinate7/claude-settings/branches/main/protection --input -"), True)
+           gh_task("printf '{}' | gh api -X PUT repos/swlshiv/claude-settings/branches/main/protection --input -",
+                   "'{}' | gh api -X PUT repos/swlshiv/claude-settings/branches/main/protection --input -"), True)
     gh_hit("gh login switch: a gh command after a semicolon is denied",
            gh_task("cd x; gh pr ready 5", "cd x; gh pr ready 5"), True)
     gh_hit("gh login switch: a continued gh api with no switch is denied",
-           gh_task("gh api -X PATCH \\\n  repos/shivinate7/claude-settings/branches/main/protection/required_status_checks \\\n  -f strict=true",
-                   "gh api -X PATCH `\n  repos/shivinate7/claude-settings/branches/main/protection/required_status_checks `\n  -f strict=true"),
+           gh_task("gh api -X PATCH \\\n  repos/swlshiv/claude-settings/branches/main/protection/required_status_checks \\\n  -f strict=true",
+                   "gh api -X PATCH `\n  repos/swlshiv/claude-settings/branches/main/protection/required_status_checks `\n  -f strict=true"),
            True)
     gh_hit("gh login switch: a # inside quotes does not hide a gh command is denied",
-           gh_task('echo "# note" && gh api repos/shivinate7/claude-settings/branches/main/protection',
-                   'echo "# note"; gh api repos/shivinate7/claude-settings/branches/main/protection'), True)
+           gh_task('echo "# note" && gh api repos/swlshiv/claude-settings/branches/main/protection',
+                   'echo "# note"; gh api repos/swlshiv/claude-settings/branches/main/protection'), True)
     gh_hit("gh login switch: a # after a quote does not cut off a gh command is denied",
            gh_task('echo "x #" ; gh pr ready 5', 'echo "x #" ; gh pr ready 5'), True)
     gh_hit("gh login switch: a gh command after a multi-line quoted argument is denied",
@@ -1269,16 +1267,12 @@ def case_gh_login_hit_direct():
            gh_task("gh auth switch -u shivinate7 && " + GH_PATCH, GH_PATCH), True)
     gh_hit("gh login switch: a switch to shivinate7 in powershell only is denied",
            gh_task(GH_PATCH, "gh auth switch -u shivinate7; " + GH_PATCH), True)
-    gh_hit("gh login switch: ssemwal-cdc on a shivinate7/ repo in mac only is denied",
+    gh_hit("gh login switch: ssemwal-cdc on a swlshiv/ settings repo in mac only is denied",
            gh_task("gh auth switch -u ssemwal-cdc && " + GH_PATCH, "gh auth switch -u shivinate7; " + GH_PATCH), True)
-    gh_hit("gh login switch: ssemwal-cdc on a shivinate7/ repo in powershell only is denied",
+    gh_hit("gh login switch: ssemwal-cdc on a swlshiv/ settings repo in powershell only is denied",
            gh_task("gh auth switch -u shivinate7 && " + GH_PATCH, "gh auth switch -u ssemwal-cdc; " + GH_PATCH), True)
-    gh_hit("gh login switch: ssemwal-cdc on a swlshiv/ repo in mac only is denied",
-           gh_task("gh auth switch -u ssemwal-cdc && " + GH_PATCH_ORG, "gh auth switch -u shivinate7; " + GH_PATCH_ORG), True)
-    gh_hit("gh login switch: ssemwal-cdc on a swlshiv/ repo in powershell only is denied",
-           gh_task("gh auth switch -u shivinate7 && " + GH_PATCH_ORG, "gh auth switch -u ssemwal-cdc; " + GH_PATCH_ORG), True)
-    gh_hit("gh login switch: a switch to shivinate7 on a swlshiv/ repo is allowed",
-           gh_task("gh auth switch -u shivinate7 && " + GH_PATCH_ORG, "gh auth switch -u shivinate7; " + GH_PATCH_ORG), False)
+    gh_hit("gh login switch: a switch to shivinate7 on a swlshiv/ settings repo is allowed",
+           gh_task("gh auth switch -u shivinate7 && " + GH_PATCH, "gh auth switch -u shivinate7; " + GH_PATCH), False)
 
     # Cases for PowerShell paths, gh text in a quoted body, a lone quote, sudo and env.
     # The mac twin of a PowerShell path uses forward slashes: bash reads `"C:\repo\"` as an open quote.
@@ -3450,12 +3444,12 @@ def case_item_stray_field_refused_from_a_record_branch_checkout():
 # The fixture is the incident item ma144-tab-bar (mailaudit #144) as it was written, opened, with the repo field.
 
 CROSS_REPO_RULE = "question-checked-with-repo"
-PAGE_REPO_NAME = "shivinate7/claude-settings"  # the page's repo: the origin of tcj.origin_page_repo()
+PAGE_REPO_NAME = "swlshiv/claude-settings"  # the page's repo: the origin of tcj.origin_page_repo()
 OTHER_REPO = "shivinate7/mailaudit"
 CHECKED = "session_013ABCdefGHI"
 MA144_ID = "ma144-tab-bar"
 MA144_OWNER_SESSION = "session_013NEJKymmzw37seAr3Qq5nv"  # the session id in MA144's owner field
-VI_FRAGMENTS = (r"\brepo\b", r"shivinate7/claude-settings")
+VI_FRAGMENTS = (r"\brepo\b", r"swlshiv/claude-settings")
 
 MA144 = json.loads(r'''{"added":"2026-11-08T04:12:00Z","context":"Goal: MANIFEST works well on the open iPhone Duo, in the Card in Hand design you picked on 2026-10-27 12:25 CDT.\nProblem (rule): degen puts its tab bar under the left page. The design lane's pick departs from that ruling, so it needs your word.\nBased on (read): README.md:12, choice 3.\nDeparts from: degen's Duo layout, tab bar under the left page — MANIFEST puts it under the right page.","designs":[{"drawn":951,"file":"docs/design/duo-card-in-hand/png/3-a.png","label":"Under the right page","option":"a","slug":"ma144-3-a"},{"drawn":951,"file":"docs/design/duo-card-in-hand/png/3-b.png","label":"Under the left page, on the keys","option":"b","slug":"ma144-3-b"},{"drawn":951,"file":"docs/design/duo-card-in-hand/png/3-c.png","label":"Under the left page, under the keys","option":"c","slug":"ma144-3-c"}],"home":"mailaudit #144","id":"ma144-tab-bar","kind":"decision","look":true,"n":389,"options":[{"design":"ma144-3-a","gain":"It never moves, and it shows while you type.","how":"The tab bar stays under the right page in every pose.","key":"a","label":"Under the right page, always","lose":"Degen puts it on the left, so the two apps differ."},{"design":"ma144-3-b","gain":"Same side as degen.","how":"The tab bar sits under the left page and rides on top of the keys.","key":"b","label":"Under the left page, on top of the keys","lose":"It jumps 256 pt each time the keys move."},{"design":"ma144-3-c","gain":"Same as degen.","how":"The tab bar sits under the left page, below the keys.","key":"c","label":"Under the left page, under the keys, as degen does","lose":"You must drop the keys to change tabs."}],"owner":"batch runner 9 (session_013NEJKymmzw37seAr3Qq5nv)","pick":"a","ref":"mailaudit #144 (Duo round 2, Card in Hand; branch design/duo-round2, head 441b4e46d); its README, section Choices","short":"Duo tab bar place","status":"open","title":"Duo tab bar: where does it sit?","why":"The design lane picks a: it never moves, and it shows while you type."}''')
 
@@ -3526,10 +3520,10 @@ def case_cross_repo_same_repo_passes():
 
 def case_cross_repo_compares_lowercase():
     """(iv) The page's repo in other case passes. Only the case differs, so the compare folds case."""
-    cross("(iv) Shivinate7/Claude-Settings is the page repo", "set", ma144(repo="Shivinate7/Claude-Settings"),
+    cross("(iv) Swlshiv/Claude-Settings is the page repo", "set", ma144(repo="Swlshiv/Claude-Settings"),
           PAGE_REPO_NAME)
-    at_page("(iv) Shivinate7/Claude-Settings is the page repo", "set",
-            ma144_write(repo="Shivinate7/Claude-Settings"), tcj.origin_page_repo())
+    at_page("(iv) Swlshiv/Claude-Settings is the page repo", "set",
+            ma144_write(repo="Swlshiv/Claude-Settings"), tcj.origin_page_repo())
 
 
 def case_cross_repo_no_page_repo_passes():
@@ -3702,14 +3696,14 @@ def case_cross_repo_required_when_page_repo_unknown():
 
 
 def case_cross_repo_malformed_repo_is_a_format_refusal():
-    """(xvi) A repo that is not owner/name is refused with the format reason. shivinate7/claude-settings.git passes the
+    """(xvi) A repo that is not owner/name is refused with the format reason. swlshiv/claude-settings.git passes the
     repo-name pattern, so it is judged as a repo off the page's own and asks for checked_with."""
-    cross_format("(xvi) repo shivinate7/claude-settings.git, no checked_with",
-                 ma144(repo="shivinate7/claude-settings.git"))
-    cross_format("(xvi) repo shivinate7/claude-settings.git, a session-shaped checked_with",
-                 ma144(repo="shivinate7/claude-settings.git", checked=CHECKED))
-    at_page("(xvi) repo shivinate7/claude-settings.git, at the page's checkout", "set",
-            ma144_write(repo="shivinate7/claude-settings.git"), tcj.origin_page_repo(), (r"owner/name",))
+    cross_format("(xvi) repo swlshiv/claude-settings.git, no checked_with",
+                 ma144(repo="swlshiv/claude-settings.git"))
+    cross_format("(xvi) repo swlshiv/claude-settings.git, a session-shaped checked_with",
+                 ma144(repo="swlshiv/claude-settings.git", checked=CHECKED))
+    at_page("(xvi) repo swlshiv/claude-settings.git, at the page's checkout", "set",
+            ma144_write(repo="swlshiv/claude-settings.git"), tcj.origin_page_repo(), (r"owner/name",))
 
 
 def case_cross_repo_malformed_repo_controls():

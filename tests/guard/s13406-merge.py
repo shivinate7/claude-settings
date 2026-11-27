@@ -1682,8 +1682,8 @@ def lane_repo_org_tag_case():
     return _lane_repo_tags_check("lane-repo-org-tag", '["cs-build:lane", "cs-repo:swlshiv/claude-settings"]', "true")
 
 
-def lane_repo_old_tag_case():
-    return _lane_repo_tags_check("lane-repo-old-tag", '["cs-build:lane", "cs-repo:shivinate7/claude-settings"]', "true")
+def lane_repo_old_tag_refused_case():
+    return _lane_repo_tags_check("lane-repo-old-tag", '["cs-build:lane", "cs-repo:shivinate7/claude-settings"]', "false")
 
 
 def lane_repo_other_owner_case():

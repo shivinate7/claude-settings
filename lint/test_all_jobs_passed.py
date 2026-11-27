@@ -502,7 +502,7 @@ jobs:
       # - retired-job
       - test-mac # the mac job
     steps:
-      - uses: shivinate7/claude-settings/actions/all-jobs-passed@@PIN@ # v1.2.0
+      - uses: swlshiv/claude-settings/actions/all-jobs-passed@@PIN@ # v1.2.0
         with:
           needs: ${{ toJSON(needs) }} # every job above
 """.replace("@PIN@", CHILD_PIN)
@@ -634,7 +634,7 @@ CHILD_FALSE_ALARMS = [
      "    needs:\n        - lint\n        # - retired-job\n        - test-mac # the mac job\n"),
     ("block-list needs at the key's indent", NEEDS_BLOCK,
      "    needs:\n    - lint\n    # - retired-job\n    - test-mac # the mac job\n"),
-    ("a comment after steps:", "    steps:\n      - uses: shivinate7", "    steps: # note\n      - uses: shivinate7"),
+    ("a comment after steps:", "    steps:\n      - uses: swlshiv", "    steps: # note\n      - uses: swlshiv"),
     ("CRLF line endings", "\n", "\r\n"),
 ]
 

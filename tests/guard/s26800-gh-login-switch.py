@@ -7,7 +7,7 @@ FAMILY = "gh-login-switch"
 # gh command. Why: a handed PATCH needs admin, and the owner could not tell which login would run it.
 # A decision is not judged by this rule.
 
-GL_PATCH = ("gh api -X PATCH repos/shivinate7/claude-settings/branches/main/protection/"
+GL_PATCH = ("gh api -X PATCH repos/swlshiv/claude-settings/branches/main/protection/"
             "required_status_checks -f strict=true")
 GL_SWITCH = "gh auth switch -u shivinate7"
 GL_DOC = "gh-login-main-protection"
@@ -27,25 +27,25 @@ gl("today's incident: a branch-protection PATCH with no switch is denied", "deny
 gl("the refusal names the switch to add", "deny", GL_PATCH, GL_PATCH, carries=("gh auth switch",))
 gl("a switch after the gh line is denied", "deny", GL_PATCH + "\n" + GL_SWITCH, GL_PATCH + "\n" + GL_SWITCH)
 gl("a cd then gh pr ready, with no switch, is denied", "deny", "cd x && gh pr ready 5", "cd x; gh pr ready 5")
-gl("a switch to ssemwal-cdc before a shivinate7/ repo is denied", "deny",
+gl("a switch to ssemwal-cdc before the swlshiv/ settings repo is denied", "deny",
    "gh auth switch -u ssemwal-cdc && " + GL_PATCH, "gh auth switch -u ssemwal-cdc; " + GL_PATCH)
-gl("the long form, a switch to ssemwal-cdc before a shivinate7/ repo, is denied", "deny",
+gl("the long form, a switch to ssemwal-cdc before the swlshiv/ settings repo, is denied", "deny",
    "gh auth switch --user ssemwal-cdc && " + GL_PATCH, "gh auth switch --user ssemwal-cdc; " + GL_PATCH)
 gl("a switch to a login outside the pair is denied", "deny",
    "gh auth switch -u someoneelse && gh pr ready 5", "gh auth switch -u someoneelse; gh pr ready 5")
 gl("a gh command after a semicolon, with no switch, is denied", "deny", "cd x; gh pr ready 5", "cd x; gh pr ready 5")
 gl("a gh command after a pipe, with no switch, is denied", "deny",
-   "printf '{}' | gh api -X PUT repos/shivinate7/claude-settings/branches/main/protection --input -",
-   "'{}' | gh api -X PUT repos/shivinate7/claude-settings/branches/main/protection --input -")
+   "printf '{}' | gh api -X PUT repos/swlshiv/claude-settings/branches/main/protection --input -",
+   "'{}' | gh api -X PUT repos/swlshiv/claude-settings/branches/main/protection --input -")
 gl("a gh api piped to a parser, with no switch, is denied", "deny",
-   "gh api repos/shivinate7/claude-settings/branches/main/protection | jq .",
-   "gh api repos/shivinate7/claude-settings/branches/main/protection | ConvertFrom-Json")
+   "gh api repos/swlshiv/claude-settings/branches/main/protection | jq .",
+   "gh api repos/swlshiv/claude-settings/branches/main/protection | ConvertFrom-Json")
 gl("a gh api split by line continuations, with no switch, is denied", "deny",
-   "gh api -X PATCH \\\n  repos/shivinate7/claude-settings/branches/main/protection/required_status_checks \\\n  -f strict=true",
-   "gh api -X PATCH `\n  repos/shivinate7/claude-settings/branches/main/protection/required_status_checks `\n  -f strict=true")
+   "gh api -X PATCH \\\n  repos/swlshiv/claude-settings/branches/main/protection/required_status_checks \\\n  -f strict=true",
+   "gh api -X PATCH `\n  repos/swlshiv/claude-settings/branches/main/protection/required_status_checks `\n  -f strict=true")
 gl("a # inside quotes does not hide a gh command, with no switch, is denied", "deny",
-   'echo "# note" && gh api repos/shivinate7/claude-settings/branches/main/protection',
-   'echo "# note"; gh api repos/shivinate7/claude-settings/branches/main/protection')
+   'echo "# note" && gh api repos/swlshiv/claude-settings/branches/main/protection',
+   'echo "# note"; gh api repos/swlshiv/claude-settings/branches/main/protection')
 gl("a # after a quote does not cut off a gh command, with no switch, is denied", "deny",
    'echo "x #" ; gh pr ready 5', 'echo "x #" ; gh pr ready 5')
 gl("a gh command after a multi-line quoted argument, with no switch, is denied", "deny",
@@ -78,8 +78,8 @@ gl("ssemwal-cdc on a repo not under shivinate7 is allowed", "allow",
 gl("a lone quote in a comment line before the switch is allowed", "allow",
    "# Don't forget\n" + GL_SWITCH + "\ngh pr ready 5", "# Don't forget\n" + GL_SWITCH + "\ngh pr ready 5")
 gl("a continued gh api after the switch is allowed", "allow",
-   GL_SWITCH + "\ngh api -X PATCH \\\n  repos/shivinate7/claude-settings/branches/main/protection/required_status_checks \\\n  -f strict=true",
-   GL_SWITCH + "\ngh api -X PATCH `\n  repos/shivinate7/claude-settings/branches/main/protection/required_status_checks `\n  -f strict=true")
+   GL_SWITCH + "\ngh api -X PATCH \\\n  repos/swlshiv/claude-settings/branches/main/protection/required_status_checks \\\n  -f strict=true",
+   GL_SWITCH + "\ngh api -X PATCH `\n  repos/swlshiv/claude-settings/branches/main/protection/required_status_checks `\n  -f strict=true")
 gl("a multi-line quoted argument after the switch is allowed", "allow",
    GL_SWITCH + '\ngh pr comment 5 --body "first\nsecond"', GL_SWITCH + '\ngh pr comment 5 --body "first\nsecond"')
 
@@ -108,9 +108,9 @@ gl("a bare switch to ssemwal-cdc, then gh api on a shivinate7 repo, one per line
 # Deny pins: each shell judges its own text. A switch in one shell does not stand for the other.
 gl("a switch to shivinate7 in mac only is denied", "deny", GL_SWITCH + " && " + GL_PATCH, GL_PATCH)
 gl("a switch to shivinate7 in powershell only is denied", "deny", GL_PATCH, GL_SWITCH + "; " + GL_PATCH)
-gl("ssemwal-cdc on a shivinate7/ repo in mac only is denied", "deny",
+gl("ssemwal-cdc on the swlshiv/ settings repo in mac only is denied", "deny",
    "gh auth switch -u ssemwal-cdc && " + GL_PATCH, GL_SWITCH + "; " + GL_PATCH)
-gl("ssemwal-cdc on a shivinate7/ repo in powershell only is denied", "deny",
+gl("ssemwal-cdc on the swlshiv/ settings repo in powershell only is denied", "deny",
    GL_SWITCH + " && " + GL_PATCH, "gh auth switch -u ssemwal-cdc; " + GL_PATCH)
 gl("ssemwal-cdc on a repo not under shivinate7 in powershell only is allowed", "allow",
    GL_SWITCH + " && gh api repos/shivinate7/x", "gh auth switch -u ssemwal-cdc; gh api repos/ssemwal-cdc/ops-tools/pulls/5")

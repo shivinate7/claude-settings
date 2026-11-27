@@ -17,8 +17,8 @@ def _build_merge_origins():
 lazy_fixture(list(MERGE_ORIGINS), _build_merge_origins)
 CLOUD_ENV = {**ROLE_ENV, "CLAUDE_CODE_REMOTE": "true"}  # decide() drops CLAUDE_CODE_REMOTE, then applies a case's env
 TX_A = role_path("repo-o-a")             # a lane whose record names cs-repo:o/a
-TX_LANE_CS = role_path("repo-lane-o-a-settings")  # a lane whose record names cs-repo:o/a and cs-repo:shivinate7/claude-settings
-TX_LANE_CS_ONLY = role_path("repo-lane-claude-settings")  # a lane whose record names cs-repo:shivinate7/claude-settings only
+TX_LANE_CS = role_path("repo-lane-o-a-settings")  # a lane whose record names cs-repo:o/a and cs-repo:swlshiv/claude-settings
+TX_LANE_CS_ONLY = role_path("repo-lane-claude-settings")  # a lane whose record names cs-repo:swlshiv/claude-settings only
 TX_DEGEN = role_path("repo-lane-degen")  # a lane whose record names cs-repo:shivinate7/degen only
 TX_LANE_NONE = role_path("repo-lane-none")  # a lane whose record names no repo
 TX_RUNNER = role_path("repo-runner-claude-settings")
@@ -262,10 +262,10 @@ def strip_redirections_case():
 LOG_CHECKS_EXTRA.append(("merge-confirm-repo: strip_redirections keeps quoted text and cuts only the unquoted redirect",
                          strip_redirections_case))
 
-# The own-tags cases of section 13406: the lane merge repo's cs-repo tag names either owner, not another owner's repo.
+# The own-tags cases of section 13406: the lane merge repo's cs-repo tag names the org repo only; the old owner's name holds no role.
 for _label, _check in (
         ("merge-lane-repo: a cs-repo tag naming swlshiv/claude-settings holds the lane merge role", lane_repo_org_tag_case),
-        ("merge-lane-repo: a cs-repo tag naming shivinate7/claude-settings holds the lane merge role", lane_repo_old_tag_case),
+        ("merge-lane-repo: a cs-repo tag naming shivinate7/claude-settings holds no lane merge role", lane_repo_old_tag_refused_case),
         ("merge-lane-repo: a cs-repo tag naming someoneelse/claude-settings holds no lane merge role",
          lane_repo_other_owner_case)):
     FIXTURELESS_CHECKS.add(_check)

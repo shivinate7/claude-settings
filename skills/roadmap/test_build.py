@@ -6923,11 +6923,11 @@ class SharedTagNames(unittest.TestCase):
 
     def test_repo_tag_names_reads_the_tag_strictly(self):
         # The one reading of a repo tag: the exact `cs-repo:` prefix, no strip, owner/name without case.
-        slug = "shivinate7/claude-settings"
+        slug = "swlshiv/claude-settings"
         self.assertTrue(hasattr(build, "repo_tag_names"), "build has no repo_tag_names")
-        self.assertTrue(build.repo_tag_names("cs-repo:shivinate7/claude-settings", slug))
-        for tag in ("cs-repo:shivinate7/claude-settings ", " cs-repo:shivinate7/claude-settings",
-                    "CS-REPO:shivinate7/claude-settings", "cs-repo:claude-settings", None, 7):
+        self.assertTrue(build.repo_tag_names("cs-repo:swlshiv/claude-settings", slug))
+        for tag in ("cs-repo:swlshiv/claude-settings ", " cs-repo:swlshiv/claude-settings",
+                    "CS-REPO:swlshiv/claude-settings", "cs-repo:claude-settings", None, 7):
             with self.subTest(tag=tag):
                 self.assertFalse(build.repo_tag_names(tag, slug))
 

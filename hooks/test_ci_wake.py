@@ -551,7 +551,7 @@ with open(FAST_SLEEP_LAUNCHER, "w", encoding="utf-8") as f:
 def pr(number, draft=False, branch="hook-wave-2", sha=SHA, repo=None):
     out = {"number": number, "isDraft": draft, "headRefName": branch, "headRefOid": sha,
            "state": "OPEN",
-           "url": "https://github.com/%s/pull/%d" % (repo or "shivinate7/claude-settings", number)}
+           "url": "https://github.com/%s/pull/%d" % (repo or "swlshiv/claude-settings", number)}
     if repo:
         out["repo"] = repo   # answers only a gh call that reaches this repo (the stub's here())
     return out

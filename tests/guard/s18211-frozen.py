@@ -272,7 +272,7 @@ add("frozen mirror: Write of a sibling folder named with the mirror's name as a 
 DUP_HOOKS_CWD = slash(os.path.join(CFG, "hooks"))   # the config directory's hooks folder, as a cwd
 # ALLOW: a descriptor dup, from the live pin and from the config directory's hooks folder.
 sh("frozen dup: the REST branch delete from the live pin, a 2>&1 tail, is allowed",
-   'cd /home/user && for b in batch-38 batch-37; do gh api -X DELETE "repos/shivinate7/claude-settings/git/refs/heads/$b" 2>&1 | tail -1; echo "$b exit $?"; done',
+   'cd /home/user && for b in batch-38 batch-37; do gh api -X DELETE "repos/swlshiv/claude-settings/git/refs/heads/$b" 2>&1 | tail -1; echo "$b exit $?"; done',
    "allow", cwd=LIVE_PIN)
 sh("frozen dup: git fetch 2>&1 from the live pin's clone is allowed",
    "cd /home/user/claude-settings && git fetch origin main 2>&1 | tail -1", "allow", cwd=LIVE_PIN)
