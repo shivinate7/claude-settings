@@ -6738,6 +6738,45 @@ class GhHalf(Env):
         self.assertIn("reads BEHIND", out, "the refusal does not name BEHIND:\n" + out)
         self.assertNotIn(MERGE_CALL, self.calls(), "the merge call was sent for a lifted head reading BEHIND")
 
+    # The repo owner's own comments in an org repo read MEMBER, not OWNER, so the author is the login as well as the association.
+
+    def lint_by_on_pending_head(self, by):
+        """A pending head with a lane-lint PASS for it, written by `by`. -> (the head, the host, the lint bodies the read gives pull request 7)."""
+        head = self.pending_head(checks=[("checks", "pending", "")], runs=[("checks", "in_progress", "")])
+        comment = lint_comment(501, head, by=by)
+        self.set(issue_comments=[comment])
+        host = self.gh_host()
+        # scope first: the comment names the live head, and the head's own run is pending; neither reads the author
+        self.assertIn(f"Head: {head}", comment["body"], "scope: the comment does not name the live head")
+        self.assertTrue(host.head_state(7).startswith("pending: "), "scope: the head is not pending: " + host.head_state(7))
+        return head, host, host.issue_comments("1970-01-01T00:00:00Z")[1].get(7, [])
+
+    def assert_lint_by_counts(self, by):
+        head, host, lints = self.lint_by_on_pending_head(by)
+        who = "%s (%s)" % (by["login"], by["association"])
+        self.assertEqual(merge.lint_state(lints, head), "pass", "a lane-lint PASS by %s did not count as proof" % who)
+        rc, out = self.run_merge("7", "--confirm", host=host)
+        self.assertEqual(rc, 0, "a lane-lint PASS by %s did not lift the pending run:\n%s" % (who, out))
+        self.assertIn(MERGE_CALL, self.calls(), "the merge call was not sent for a lane-lint PASS by %s" % who)
+
+    def assert_lint_by_does_not_count(self, by):
+        head, host, lints = self.lint_by_on_pending_head(by)
+        who = "%s (%s)" % (by["login"], by["association"])
+        self.assertEqual(merge.lint_state(lints, head), "none", "a lane-lint PASS by %s counted as proof" % who)
+        rc, out = self.run_merge("7", "--confirm", host=host)
+        self.assertEqual(rc, 1, "a lane-lint PASS by %s lifted the pending run:\n%s" % (who, out))
+        self.assertIn("a check is pending: checks", out, "the refusal does not name the pending run:\n" + out)
+        self.assertNotIn(MERGE_CALL, self.calls(), "the merge call was sent for a lane-lint PASS by %s" % who)
+
+    def test_a_lint_pass_by_the_owner_login_as_a_member_counts_as_proof(self):
+        self.assert_lint_by_counts(SHIVINATE_MEMBER)
+
+    def test_a_lint_pass_by_the_owner_login_as_an_owner_still_counts_as_proof(self):
+        self.assert_lint_by_counts(SHIVINATE_OWNER)
+
+    def test_a_lint_pass_by_another_member_does_not_count_as_proof(self):
+        self.assert_lint_by_does_not_count(OTHER_MEMBER)
+
 # Run ids on one head: a concurrency-cancelled run, the newer run of the same workflow, and a run of another workflow.
 OLD_RUN, NEW_RUN, CI_RUN = 41368432206, 41368432483, 41368432300
 MID_RUN = 41368432350  # a run of the same workflow between OLD_RUN and NEW_RUN
@@ -20737,6 +20776,9 @@ PASS_CID = 9051726  # the id of an older review-record comment that passes, besi
 LANE_LINT_MARKER = "<!-- lane-lint -->"  # the first line of a lane's lint comment (decision lanes-run-no-full-ci-job); lint_body pins the rest of its form
 OWNER = {"login": "o", "association": "OWNER"}  # the repo's owner, as a comment object names its author
 NOT_OWNER = {"login": "mallory", "association": "NONE"}
+SHIVINATE_MEMBER = {"login": "shivinate7", "association": "MEMBER"}  # the repo owner's login in an org repo: its comments read MEMBER
+SHIVINATE_OWNER = {"login": "shivinate7", "association": "OWNER"}  # the same login in a personal repo
+OTHER_MEMBER = {"login": "someone", "association": "MEMBER"}  # another member of the org
 
 def lint_body(head, verdict="PASS", n=7):
     """The one literal of a lane-lint comment: the marker, the pull request, the head the lint read, and its verdict."""
