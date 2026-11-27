@@ -6,7 +6,8 @@
 #   Cloud setup script:  the paste block in the environment's settings fetches this file.
 set -u
 
-REPO="shivinate7/claude-settings"
+REPO="swlshiv/claude-settings"
+OLD_REPO="shivinate7/claude-settings"   # the repo moved to the swlshiv org: an origin naming the old owner still matches until a follow-up drops it
 REF="${CLAUDE_SETTINGS_REF:-stable}"   # stable: the branch sessions install from. CLAUDE_SETTINGS_REF=main is the recovery.
 RAW="${CLAUDE_SETTINGS_RAW:-https://raw.githubusercontent.com/${REPO}/${REF}}"
 CLAUDE_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
@@ -14,7 +15,7 @@ CAP="${CLAUDE_SETTINGS_SETUP_CAP:-240}"
 
 verdict() { printf 'claude-settings setup: %s\n' "$*"; }
 
-# True when git origin URL $1 names $REPO on github.com, in https, ssh or scp form. A copy of
+# True when git origin URL $1 names $REPO or $OLD_REPO on github.com, in https, ssh or scp form. A copy of
 # origin_matches_repo in install.sh, because install.sh cannot be sourced: it runs on load.
 origin_is_repo() {
   o=$(printf '%s' "$1" | tr -d '\r\n')
@@ -22,7 +23,8 @@ origin_is_repo() {
   o="${o%.git}"
   case "$o" in
     *://*@github.com/"$REPO"|*://github.com/"$REPO"|*://*@github.com:*/"$REPO"|*://github.com:*/"$REPO") return 0 ;;
-    *@github.com:"$REPO") return 0 ;;
+    *://*@github.com/"$OLD_REPO"|*://github.com/"$OLD_REPO"|*://*@github.com:*/"$OLD_REPO"|*://github.com:*/"$OLD_REPO") return 0 ;;
+    *@github.com:"$REPO"|*@github.com:"$OLD_REPO") return 0 ;;
   esac
   return 1
 }

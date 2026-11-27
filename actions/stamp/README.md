@@ -257,7 +257,7 @@ rule for yet. `--claim` and `--check` refuse it before they write anything.
 ## The composite action
 
 ```yaml
-uses: shivinate7/claude-settings/actions/stamp@<sha>
+uses: swlshiv/claude-settings/actions/stamp@<sha>
 ```
 
 **Pin it by commit SHA. Never use `@main`.**
@@ -290,7 +290,7 @@ jobs:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           fetch-depth: 0   # the base tree, the merge base, and the default-branch question
-      - uses: shivinate7/claude-settings/actions/stamp@<sha>
+      - uses: swlshiv/claude-settings/actions/stamp@<sha>
         with:
           mode: check
           config: .github/stamp.json

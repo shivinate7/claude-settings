@@ -2,7 +2,7 @@
 # Shim for the merge tool. Finds the claude-settings checkout and starts merge/launch.py there.
 # No merge logic lives here. README: "The `merge` command".
 import os, re, shutil, signal, stat, subprocess, sys, tempfile, threading
-OK = r"(https://github\.com/|git@github\.com:)shivinate7/claude-settings(\.git)?/?"
+OK = r"(https://github\.com/|git@github\.com:)(swlshiv|shivinate7)/claude-settings(\.git)?/?"  # the repo moved owners: both match until a follow-up drops the old one
 def rmtree_retry(path):  # standalone shim: can't import merge/launch.py's copy of this
     def handler(func, p, exc):
         try:
@@ -25,7 +25,7 @@ def find():
     if m: return os.path.expanduser(m.group(1))
     d = tempfile.mkdtemp(prefix="claude-settings-")  # the repo is public: no credential needed
     # nowindow: the clone prints its errors on the caller's terminal; the wrapper's no-window flag could hide that output
-    if subprocess.run(["git", "clone", "-q", "https://github.com/shivinate7/claude-settings", d]).returncode:
+    if subprocess.run(["git", "clone", "-q", "https://github.com/swlshiv/claude-settings", d]).returncode:
         rmtree_retry(d)
         sys.exit("merge: clone of claude-settings failed")
     made.append(d)
@@ -33,7 +33,7 @@ def find():
 made = []
 d = find()
 try:
-    if not origin(d): sys.exit(f"merge: {d} is not a checkout of shivinate7/claude-settings; stopped before any PR read")
+    if not origin(d): sys.exit(f"merge: {d} is not a checkout of swlshiv/claude-settings; stopped before any PR read")
     # The launcher stays in this process's group, so a KILL to the group reaches it and merge.py, which no handler could catch.
     # A forwarded TERM, HUP or INT reaches the launcher, which forwards it to merge.py: a signal to this shim alone would leave them running.
     # Own copy of hooks/_nowindow.py's forward_signals: this standalone shim imports no repo code, and the checkout at `d` may predate it.

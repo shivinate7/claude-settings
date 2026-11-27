@@ -149,7 +149,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: shivinate7/claude-settings/actions/all-jobs-passed@<full-sha>  # <version>
+      - uses: swlshiv/claude-settings/actions/all-jobs-passed@<full-sha>  # <version>
         with:
           needs: ${{ toJSON(needs) }}
 ```
@@ -359,7 +359,7 @@ needed job fails the rollup unless `scope-skips` names it (step 19).
       - name: Decide whether the push can skip
         id: decide
         if: ${{ github.event_name == 'push' }}
-        uses: shivinate7/claude-settings/actions/push-skip@<full-sha>  # <version>
+        uses: swlshiv/claude-settings/actions/push-skip@<full-sha>  # <version>
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}

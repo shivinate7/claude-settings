@@ -137,6 +137,52 @@ def case_gh_logins_pinned():
             "GH_DEFAULT_LOGIN=%r GH_FALLBACK_LOGIN=%r" % (default, fallback))
 
 
+def case_settings_repo_is_the_org_repo():
+    """The settings repo moved from shivinate7 to the swlshiv org: every emitted settings slug names the org repo."""
+    repo = getattr(_shared(), "SETTINGS_REPO", None)
+    return repo == "swlshiv/claude-settings", "SETTINGS_REPO=%r" % (repo,)
+
+
+def case_login_stays_with_the_person():
+    """The org move renames the repo owner only. The person's gh login stays shivinate7."""
+    login = getattr(_shared(), "GH_DEFAULT_LOGIN", None)
+    return login == "shivinate7", "GH_DEFAULT_LOGIN=%r" % (login,)
+
+
+def _guard_merge_parse():
+    """The parsed guard_merge.py: the names it imports from shared_names, and each module-level binding of one name
+    as (name, value node). One parse serves the lane repo case and the tag prefix case."""
+    with open(os.path.join(HERE, "guard_merge.py"), encoding="utf-8") as handle:
+        tree = ast.parse(handle.read())
+    imported = {alias.asname or alias.name for node in ast.walk(tree)
+                if isinstance(node, ast.ImportFrom) and node.module == "shared_names" for alias in node.names}
+    bindings = [(node.targets[0].id, node.value) for node in tree.body
+                if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name)]
+    return imported, bindings
+
+
+def case_lane_merge_repo_is_the_org_repo():
+    """guard_merge.py binds LANE_MERGE_REPO to SETTINGS_REPO, imported from shared_names: the one home of the org repo
+    name, which must hold the org repo. A literal binding fails, the org name included, since a copy is a second home
+    (building-one-home-per-capability). Read from the parsed module; one cause per failure."""
+    imported, bindings = _guard_merge_parse()
+    own = [value for name, value in bindings if name == "LANE_MERGE_REPO"]
+    if len(own) != 1:
+        return False, "guard_merge.py binds LANE_MERGE_REPO %d times at module level, want once" % len(own)
+    value = own[0]
+    if isinstance(value, ast.Constant):
+        return False, "guard_merge.py LANE_MERGE_REPO binds the literal %r at line %d, not SETTINGS_REPO" % (
+            value.value, value.lineno)
+    if not (isinstance(value, ast.Name) and value.id == "SETTINGS_REPO"):
+        return False, "guard_merge.py LANE_MERGE_REPO binds something other than SETTINGS_REPO at line %d" % value.lineno
+    if "SETTINGS_REPO" not in imported:
+        return False, "guard_merge.py does not import SETTINGS_REPO from shared_names"
+    if any(name == "SETTINGS_REPO" for name, _ in bindings):
+        return False, "guard_merge.py rebinds SETTINGS_REPO at module level, which hides the shared name"
+    repo = getattr(_shared(), "SETTINGS_REPO", None)
+    return repo == "swlshiv/claude-settings", "shared_names.SETTINGS_REPO=%r, want swlshiv/claude-settings" % (repo,)
+
+
 def case_config_dir_answers_as_guard():
     shared = _shared()
     saved = os.environ.get("CLAUDE_CONFIG_DIR")
@@ -520,12 +566,8 @@ def case_report_guard_lane_tag_is_the_shared_object():
 def case_guard_merge_binds_tag_prefixes_to_shared_names():
     """hooks/guard_merge.py binds ROLE_TAG_PREFIX and TOPIC_TAG_PREFIX to the shared_names tags, by an imported name,
     not to a copied literal. TOPIC_TAG_PREFIX already reads TOPIC_TAG, so it is the green control beside ROLE_TAG_PREFIX."""
-    with open(os.path.join(HERE, "guard_merge.py"), encoding="utf-8") as handle:
-        tree = ast.parse(handle.read())
-    imported = {alias.asname or alias.name for node in ast.walk(tree)
-                if isinstance(node, ast.ImportFrom) and node.module == "shared_names" for alias in node.names}
-    bound = {node.targets[0].id: node.value for node in tree.body
-             if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name)}
+    imported, bindings = _guard_merge_parse()
+    bound = dict(bindings)
     problems = []
     for name, tag in (("ROLE_TAG_PREFIX", "BUILD_TAG"), ("TOPIC_TAG_PREFIX", "TOPIC_TAG")):
         value = bound.get(name)
@@ -542,6 +584,10 @@ CASES = [
     ("(b) shared_names holds today's watched names and config_dir", case_values_pinned),
     ("(b) shared_names.config_dir answers as the guard's does", case_config_dir_answers_as_guard),
     ("(b2) shared_names holds the gh login pair: shivinate7 default, ssemwal-cdc fallback", case_gh_logins_pinned),
+    ("(b3) shared_names.SETTINGS_REPO is swlshiv/claude-settings after the org move", case_settings_repo_is_the_org_repo),
+    ("(b4) the gh login stays shivinate7 after the org move", case_login_stays_with_the_person),
+    ("(b5) guard_merge.py's LANE_MERGE_REPO binds shared_names' SETTINGS_REPO, the org repo after the move",
+     case_lane_merge_repo_is_the_org_repo),
     ("(c) the guard's names are shared_names' own objects", case_guard_reexports_same_objects),
     ("(d) config_watch.py holds no literal watched name", case_config_watch_has_no_literal_copy),
     ("(e) guard_frozen.py and guard_core.py hold no literal copy of a watched name or config_dir",

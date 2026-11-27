@@ -16,7 +16,7 @@ list --active  asks GitHub for each child by name. It leaves out an archived chi
 add            writes one line at its sorted place and keeps every other line. It refuses a duplicate name, an
                extra or missing argument, a malformed argument, and claude-settings itself in any letter case
                (exit 2).
-scan           prints each repo of the token's owner that carries .github/stamp.json and is not in the file
+scan           prints each repo of the SETTINGS_OWNER org that carries .github/stamp.json and is not in the file
                (matched by name; never claude-settings). It writes nothing.
 
 Every subcommand refuses a malformed line with its number (exit 2). The real fetch runs `gh api`, so the token
@@ -37,9 +37,11 @@ import sys
 HERE = os.path.dirname(os.path.realpath(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(HERE), "hooks"))
 import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
+from shared_names import OLD_SETTINGS_REPO, SETTINGS_OWNER, SETTINGS_REPO  # noqa: E402  the one home of the repo owner
 
 DEFAULT_FILE = os.path.join(os.path.dirname(HERE), "docs", "children.txt")
-SELF = "shivinate7/claude-settings"
+SELF = SETTINGS_REPO
+SELVES = (SETTINGS_REPO, OLD_SETTINGS_REPO)  # the repo moved owners: neither name is a child until a follow-up drops the old one
 # A segment never starts with a dash and is never only dots: `..` would climb a path, a leading dash reads as an option.
 SEGMENT = r"(?!-)(?!\.+(?:/|\Z))[A-Za-z0-9_.-]+"
 NAME = re.compile(SEGMENT + "/" + SEGMENT)
@@ -63,7 +65,7 @@ def check_entry(name, since):
     if not NAME.fullmatch(name):
         raise Refused("name is not owner/name: %s" % name)
     check_since(since)
-    if name.casefold() == SELF.casefold():
+    if name.casefold() in {s.casefold() for s in SELVES}:
         raise Refused("%s is not a child" % SELF)
 
 
@@ -167,7 +169,7 @@ def cmd_add(path, lines, rows, fields):
 def owner_repos(fetch):
     repos, page = [], 1
     while True:
-        batch = fetch("user/repos?affiliation=owner&per_page=%d&page=%d" % (PAGE, page))
+        batch = fetch("orgs/%s/repos?per_page=%d&page=%d" % (SETTINGS_OWNER, PAGE, page))
         repos.extend(batch)
         if len(batch) < PAGE:
             return repos
@@ -175,7 +177,7 @@ def owner_repos(fetch):
 
 
 def cmd_scan(rows, fetch):
-    known = {r[0].casefold() for r in rows} | {SELF.casefold()}
+    known = {r[0].casefold() for r in rows} | {s.casefold() for s in SELVES}
     unknown = 0
     try:
         repos = owner_repos(fetch)

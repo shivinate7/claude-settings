@@ -57,7 +57,8 @@ ROOT = _test_temp.run_folder()
 INSTALL = os.path.join(REPO, "install.sh")
 REAL_CP = shutil.which("cp") or "cp"
 REAL_MV = shutil.which("mv") or "mv"
-REPO_URL = "https://github.com/shivinate7/claude-settings.git"
+from shared_names import SETTINGS_REPO  # noqa: E402  the settings repo's one home (hooks/shared_names.py)
+REPO_URL = "https://github.com/" + SETTINGS_REPO + ".git"
 REF = "stable"
 RECORD = ".claude-settings-install.json"
 ROOT_FILES = ("install.sh", "CLAUDE.md", "landed-dirs.txt", "retired-files.txt")
@@ -313,7 +314,9 @@ class Fixture:
     """One case's world under the run folder: a bare origin with a seed, a fake HOME, and the shims."""
 
     def __init__(self, name, home_name="home"):
-        self.root = os.path.join(ROOT, name)
+        # The resolved path: install.sh resolves its checkout, and on macOS the run folder sits under a link (/var is
+        # /private/var), so HOME must be the resolved path too, or the pointer line changes between two runs.
+        self.root = os.path.realpath(os.path.join(ROOT, name))
         self.home = os.path.join(self.root, home_name)
         self.cfg = os.path.join(self.home, ".claude")
         self.installs = os.path.join(self.cfg, "installs")

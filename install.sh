@@ -21,7 +21,8 @@ set -u
 # install.ps1 is the Windows installer. Write nothing first.
 case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) echo "install.sh does not run on Windows. Use install.ps1: powershell -ExecutionPolicy Bypass -File ./install.ps1"; exit 0;; esac
 
-REPO="shivinate7/claude-settings"
+REPO="swlshiv/claude-settings"
+OLD_REPO="shivinate7/claude-settings"   # the repo moved to the swlshiv org: an origin naming the old owner still matches until a follow-up drops it
 REF="${CLAUDE_SETTINGS_REF:-stable}"   # stable: the branch sessions install from. CLAUDE_SETTINGS_REF=main is the recovery.
 RAW="https://raw.githubusercontent.com/${REPO}/${REF}"
 TARBALL="https://github.com/${REPO}/archive/refs/heads/${REF}.tar.gz"
@@ -34,15 +35,16 @@ CLOUD=0
 
 log() { printf 'claude-settings: %s\n' "$*"; }
 
-# Exact match for a git origin URL against $REPO on github.com, not a substring test and
+# Exact match for a git origin URL against $REPO or $OLD_REPO on github.com, not a substring test and
 # not host-agnostic. Trims trailing whitespace/newline and a trailing slash, drops a
 # trailing ".git", then requires the host to be exactly "github.com" and the remaining
-# path to be exactly "$REPO" (not merely to end with it). Matches:
-#   https://github.com/shivinate7/claude-settings.git   (and without .git)
-#   git@github.com:shivinate7/claude-settings.git       (and without .git)
-#   ssh://git@github.com:22/shivinate7/claude-settings.git
-# and rejects a different host (gitlab.com), extra leading path segments
-# (github.com/mirror/shivinate7/claude-settings), and anything with no recognizable
+# path to be exactly "$REPO" or "$OLD_REPO" (not merely to end with it). Matches:
+#   https://github.com/swlshiv/claude-settings.git      (and without .git)
+#   git@github.com:swlshiv/claude-settings.git          (and without .git)
+#   ssh://git@github.com:22/swlshiv/claude-settings.git
+# and the same three forms with shivinate7 as owner, and rejects a different host (gitlab.com),
+# extra leading path segments
+# (github.com/mirror/swlshiv/claude-settings), and anything with no recognizable
 # host at all (a bare relative path, a file:// URL). Case is not folded: an origin
 # spelled "GITHUB.COM" is rejected too, the safe direction for a mismatch.
 origin_matches_repo() {
@@ -71,7 +73,7 @@ origin_matches_repo() {
   esac
 
   [ "$host" = "github.com" ] || return 1
-  [ "$path" = "$REPO" ]
+  [ "$path" = "$REPO" ] || [ "$path" = "$OLD_REPO" ]
 }
 
 # A candidate directory is this repo's checkout only if: it is inside a git worktree,

@@ -1170,6 +1170,8 @@ def case_page_reasons_are_one_table():
 # (decision `act-in-place`). The value pins live in test_shared_names.py; the literals here are the inputs.
 GH_PATCH = ("gh api -X PATCH repos/shivinate7/claude-settings/branches/main/protection/"
             "required_status_checks -f strict=true")
+# The same PATCH after the repo moved to the swlshiv org: the fallback login must not reach it either.
+GH_PATCH_ORG = GH_PATCH.replace("repos/shivinate7/", "repos/swlshiv/", 1)
 GH_WHY = "Why yours: a session on your computer was asked first and none could reach the remote"
 
 
@@ -1271,6 +1273,12 @@ def case_gh_login_hit_direct():
            gh_task("gh auth switch -u ssemwal-cdc && " + GH_PATCH, "gh auth switch -u shivinate7; " + GH_PATCH), True)
     gh_hit("gh login switch: ssemwal-cdc on a shivinate7/ repo in powershell only is denied",
            gh_task("gh auth switch -u shivinate7 && " + GH_PATCH, "gh auth switch -u ssemwal-cdc; " + GH_PATCH), True)
+    gh_hit("gh login switch: ssemwal-cdc on a swlshiv/ repo in mac only is denied",
+           gh_task("gh auth switch -u ssemwal-cdc && " + GH_PATCH_ORG, "gh auth switch -u shivinate7; " + GH_PATCH_ORG), True)
+    gh_hit("gh login switch: ssemwal-cdc on a swlshiv/ repo in powershell only is denied",
+           gh_task("gh auth switch -u shivinate7 && " + GH_PATCH_ORG, "gh auth switch -u ssemwal-cdc; " + GH_PATCH_ORG), True)
+    gh_hit("gh login switch: a switch to shivinate7 on a swlshiv/ repo is allowed",
+           gh_task("gh auth switch -u shivinate7 && " + GH_PATCH_ORG, "gh auth switch -u shivinate7; " + GH_PATCH_ORG), False)
 
     # Cases for PowerShell paths, gh text in a quoted body, a lone quote, sudo and env.
     # The mac twin of a PowerShell path uses forward slashes: bash reads `"C:\repo\"` as an open quote.

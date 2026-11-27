@@ -308,6 +308,7 @@ except Exception as e:  # a missing or broken module: one line, no traceback whe
     raise ImportError(_why) from e  # an importer, such as the merge guard, must see a failed load, not a process exit
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))  # required_check, pin_note and git_reads, loaded below
+from shared_names import GH_DEFAULT_LOGIN, SETTINGS_REPO  # noqa: E402  the owner's login (hooks/shared_names.py)
 from required_check import REQUIRED_CHECK  # noqa: E402  the one home of the required check's name (hooks/required_check.py)
 import ruled_store  # noqa: E402  the one reader of the ruling store (lint/ruled_store.py)
 import stale_cites  # noqa: E402  the one home of the rule dirs (lint/stale_cites.py); the lint dir is on sys.path from the records import above
@@ -1260,6 +1261,11 @@ class RecordBody(str):
     record body and every row of `records` keeps its shape; unparsed_note reads `cid` to name a record that does not parse."""
     cid = None
 
+def is_lane_lint_author(c):
+    """True when the comment `c` is the repo owner's: its association is OWNER, or MEMBER with the owner's login (in an org repo the owner's own comments read MEMBER). Another member's does not count."""
+    assoc = c.get("author_association")
+    return assoc == LANE_LINT_AUTHOR or (assoc == LANE_LINT_MEMBER and (c.get("user") or {}).get("login") == GH_DEFAULT_LOGIN)
+
 def sort_comment(c, records, lints, number=None):
     """Sort the issue comment `c` into `records` ({PR number: [(body, created_at, updated_at)]}) or `lints` ({PR number: [bodies]}): a review record
     when the review record marker is its whole first line, a lane-lint comment when the lint marker is and the author is the repo's owner. The
@@ -1271,7 +1277,7 @@ def sort_comment(c, records, lints, number=None):
         body = RecordBody(body)
         body.cid = c.get("id")
         records.setdefault(n, []).append((body, c.get("created_at"), c.get("updated_at")))
-    elif n is not None and first == [LANE_LINT_MARKER] and c.get("author_association") == LANE_LINT_AUTHOR:
+    elif n is not None and first == [LANE_LINT_MARKER] and is_lane_lint_author(c):
         lints.setdefault(n, []).append(body)
 
 def sort_pointer(c, pointers):
@@ -6495,6 +6501,7 @@ REVIEW_MARKER = "<!-- review-record -->"
 # The lane-lint comment (decision lanes-run-no-full-ci-job): `merge --lane-lint <pr>` posts it on a PASS, and `--reviewed` and the join read it. The one home of its form.
 LANE_LINT_MARKER = "<!-- lane-lint -->"
 LANE_LINT_AUTHOR = "OWNER"  # the check trusts the comment's author, not its text
+LANE_LINT_MEMBER = "MEMBER"  # the association the owner's login reads in an org repo; only GH_DEFAULT_LOGIN counts
 
 def lint_body(n, head, result="PASS"):
     """-> the lane-lint comment text: the marker, the pull request, the head the lint read, and its result, one per line."""
@@ -8249,7 +8256,7 @@ def replaced_names(info, n):
 LANE_ROLE = "lane"  # a lane's merge role: its role record also names its step, and it merges only its own pull request (ruling own-lanes-merge-claude-settings-prs)
 STANDING_ROLE = "standing"  # ruling own-tiny-fixes-b: a coordinator, triage or the consultant merges its own pull request (decision session-tiers)
 MERGE_ROLES = {"batch-runner", LANE_ROLE, STANDING_ROLE}  # the tiers that may run `merge <pr> --confirm` in a cloud session; the standing one only past standing_refusal, the lane one only on its own pull request
-LANE_MERGE_REPO = "shivinate7/claude-settings"  # the one repo whose pull requests a lane merges itself; the lane role covers it alone
+LANE_MERGE_REPO = SETTINGS_REPO  # the one repo whose pull requests a lane merges itself; the lane role covers it alone
 LOCAL_MERGE_ROLES = {"batch-runner"}  # the roles a local session's role file may name; the lane role is a cloud role only
 
 
@@ -8293,12 +8300,12 @@ def lane_own_pr_refusal(info, h, marking_ready=False):
     """A lane's confirm or ready mark is refused unless the pull request is in LANE_MERGE_REPO (the repo read from `h`, repo_full_name; a read that fails refuses) and is its own: its head ref is one of lane_head_refs of the step its role record names.
     A confirm also needs it ready, because a draft would take the records step, which marks it ready. With `marking_ready` the draft is the point, so the draft test is skipped. -> the refusal text without its cite (the raise adds it), or None (not a lane, or its own pull request).
     The text names neither flag it refuses."""
-    from shared_names import lane_head_refs  # hooks/shared_names.py, the one home of a lane's head refs, on sys.path from the top of this file
+    from shared_names import OLD_SETTINGS_REPO, lane_head_refs  # hooks/shared_names.py, the one home of a lane's head refs and of the old owner, on sys.path from the top of this file
     record = read_merge_record()
     if not record or record["role"] != LANE_ROLE:
         return None
     try:
-        in_repo = repo_full_name(h).casefold() == LANE_MERGE_REPO.casefold()
+        in_repo = repo_full_name(h).casefold() in (LANE_MERGE_REPO.casefold(), OLD_SETTINGS_REPO.casefold())  # the repo moved owners; the old slug is accepted until a follow-up drops it
     except Exception:  # an unread repo is no proof of the one repo: fail closed
         in_repo = False
     if not in_repo:

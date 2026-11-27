@@ -2,7 +2,7 @@
 
 ## The ruling
 
-`main` of shivinate7/claude-settings requires no status check. Owner, 2026-11-15 19:08 CST, chat, ruling
+`main` of swlshiv/claude-settings requires no status check. Owner, 2026-11-15 19:08 CST, chat, ruling
 `own-all-jobs-passed-removed` (the status requirement removed): "all jobs passed has been removed as a status
 requirement". The `all-jobs-passed` job in `.github/workflows/checks.yml` still runs the shared action
 `actions/all-jobs-passed`. No protection requires its status.
@@ -31,7 +31,7 @@ Built-today lines in this record were not re-read by the edit of 2026-11-12 11:2
 - Today, classic protection blocks force pushes and branch deletion. No repo has a ruleset yet (lane brief; not re-read by this edit).
 - Owner reports the one check removed (19:08 CST, 2026-11-15); not re-read by this edit. A new job goes in the `needs` of `all-jobs-passed`, which reports a status and no protection requires. Merge stops when a pinned `merge.requiredChecks` list in `stamp.json` differs from a non-empty list from the ruleset (or from classic protection, when the ruleset names no check), and names both sets. An empty or unreadable list does not stop it: the pinned list stays in force, and an unreadable one is said aloud, an unreadable ruleset included. It is not read as classic protection instead (`refuse_pinned_mismatch`, sweep row `pinned-mismatch`; roadmap step c189, the merge tool and branch protection work).
 - The switch is one `protect.py` write, to a ruleset. Until its code drops the check, the preview and set below write the removed one-check form: do not run `--confirm` for it. Preview
-  `python3 ~/.claude/skills/project-ops/scripts/protect.py --repo shivinate7/claude-settings --check all-jobs-passed`,
+  `python3 ~/.claude/skills/project-ops/scripts/protect.py --repo swlshiv/claude-settings --check all-jobs-passed`,
   then the same with `--confirm`. With no ruleset on the branch it POSTs one. With a ruleset that differs from the ruled form it PUTs that ruleset in place: its other rules, its conditions and its strict value stay. A ruleset already in the form is left alone. The preview names what differs, such as the checks the ruleset holds now.
   Classic protection pinned app id 15368 (GitHub Actions) (last read 2026-11-03 19:19 CST, before the 19:08 CST ruling: `checks` [{all-jobs-passed, 15368}]). The ruled ruleset body names only the check's context, with no `integration_id`, so it pins no app id. Whether GitHub pins one on its own is unmeasured. The classic write needed the
   shivinate7 login: `ssemwal-cdc` has push, not admin. A handed block (commands handed to the owner to run, decision `act-in-place`) opens with `gh auth switch -u shivinate7`. A cloud session acts as `shivinate7` with admin, but the auto-mode classifier refused its direct classic PATCH as a CI bypass. Whether it refuses the ruleset POST or PUT from `protect.py --confirm`, and whether a ruleset write needs admin, is unmeasured.

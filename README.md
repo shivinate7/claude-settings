@@ -43,7 +43,7 @@ stays in the clone. The mods install from the marketplace instead (decision
 ### Windows
 
 ```powershell
-git clone https://github.com/shivinate7/claude-settings C:\src\claude-settings
+git clone https://github.com/swlshiv/claude-settings C:\src\claude-settings
 cd C:\src\claude-settings
 powershell -ExecutionPolicy Bypass -File .\install.ps1
 ```
@@ -56,7 +56,7 @@ re-copies them after every pull on `main`.
 
 ```bash
 mkdir -p ~/Developer
-git clone https://github.com/shivinate7/claude-settings ~/Developer/claude-settings
+git clone https://github.com/swlshiv/claude-settings ~/Developer/claude-settings
 cd ~/Developer/claude-settings
 bash install.sh
 ```
@@ -75,13 +75,13 @@ line and the session starts without the install.
 
 ```bash
 f=$(mktemp)
-if ! curl -fsS --max-time 20 https://raw.githubusercontent.com/shivinate7/claude-settings/stable/cloud-setup.sh -o "$f" \
-   && ! curl -fsS --max-time 20 https://raw.githubusercontent.com/shivinate7/claude-settings/main/cloud-setup.sh -o "$f"; then
+if ! curl -fsS --max-time 20 https://raw.githubusercontent.com/swlshiv/claude-settings/stable/cloud-setup.sh -o "$f" \
+   && ! curl -fsS --max-time 20 https://raw.githubusercontent.com/swlshiv/claude-settings/main/cloud-setup.sh -o "$f"; then
   : > "$f"
   for d in ${CLAUDE_SETTINGS_SEARCH_ROOTS:-/home/user /root}; do
     for c in "$d"/*/cloud-setup.sh; do
       case "$(git -C "${c%/*}" config --get remote.origin.url 2>/dev/null)" in
-        *github.com[/:]shivinate7/claude-settings|*github.com[/:]shivinate7/claude-settings.git) cp "$c" "$f" && break 2 ;;
+        *github.com[/:]swlshiv/claude-settings|*github.com[/:]swlshiv/claude-settings.git|*github.com[/:]shivinate7/claude-settings|*github.com[/:]shivinate7/claude-settings.git) cp "$c" "$f" && break 2 ;;
       esac
     done
   done
@@ -100,7 +100,7 @@ rewrites `settings.json` after Claude Code reads it.
 * `CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL=sonnet`
 * `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=1`
 * `PLAYWRIGHT_SKIP_BROWSER_GC=1` (decision `playwright-install-once`)
-* `MAILBOX_REPO=https://github.com/shivinate7/session-mailbox.git` (decision `session-messages`)
+* `MAILBOX_REPO=https://github.com/swlshiv/session-mailbox.git` (decision `session-messages`)
 
 The cloud image already has Playwright's Chromium in `/opt/pw-browsers`. Sessions set
 `PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers` and `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1`. A setup
@@ -219,7 +219,7 @@ A flag prefix is an error, not the flag it starts (`merge 5 --conf` fails; write
   on PATH. The launcher holds no merge logic. It finds this clone through `CLAUDE_SETTINGS_DIR`,
   then the `@` line in `CLAUDE.md` under `CLAUDE_CONFIG_DIR` (default `~/.claude`). With
   neither, it clones the public repo into a temporary folder. The checkout must have `origin`
-  set to `shivinate7/claude-settings`. Any other result stops before a pull request read. A
+  set to `swlshiv/claude-settings` (`shivinate7/claude-settings`, its owner before the move, still passes). Any other result stops before a pull request read. A
   repo's own wrapper, such as a `make merge` target, may hold the same lookup instead.
 * **Another checkout.** A batch runner that merges in a second checkout runs
   `~/.claude/bin/merge -C <checkout> <pr> --confirm`, never `cd <checkout> && merge ...`. The flag

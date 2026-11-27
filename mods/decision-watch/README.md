@@ -60,7 +60,7 @@ The last line is "Stops seen: N". N counts the STOP seen lines now in the log. T
 
 Refresh the installed `~/.claude/hooks/decision_watch.py` first. Replace it with this repo's `hooks/decision_watch.py`. An old copy ignores `--emit-prompt`, so each turn runs `claude -p`.
 
-1. Install: `/plugin install decision-watch --marketplace shivinate7/claude-settings`, then restart the session.
+1. Install: `/plugin install decision-watch --marketplace swlshiv/claude-settings`, then restart the session.
 2. Finish a turn. Run `/dw`. Check that the last line counts the turn.
 
 ## Check

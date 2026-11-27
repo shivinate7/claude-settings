@@ -28,5 +28,5 @@ runs:
       shell: bash
       env:
         GITHUB_TOKEN: ${{ github.token }}
-        FACTS_REPO: shivinate7/claude-settings
+        FACTS_REPO: swlshiv/claude-settings
       run: python3 "${{ github.action_path }}/../../lint/compliance_probes.py" facts "${{ github.action_path }}/../.."

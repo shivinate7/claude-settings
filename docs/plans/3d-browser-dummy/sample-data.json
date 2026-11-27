@@ -237,7 +237,7 @@
    "options": [],
    "steps": [
     "Open the Claude app on your Mac and start a local Claude Code session.",
-    "Paste this prompt and send it: Work in my degen checkout (clone shivinate7/degen if missing). Read \u2026",
+    "Paste this prompt and send it: Work in my degen checkout (clone swlshiv/degen if missing). Read \u2026",
     "Done when that session prints the five key names: team_id, device_udid, asc_key_id, asc_issuer_id, \u2026"
    ],
    "pick": null

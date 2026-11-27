@@ -168,7 +168,9 @@ make_uname_stub() {
 # exactly what GitHub's archive/refs/heads/<ref>.tar.gz would serve: a top-level
 # "claude-settings-main" directory holding every tracked file.
 tarsrc="$work/tarsrc/claude-settings-main"; mkdir -p "$tarsrc"
-( cd "$REPO_ROOT" && git ls-files -z | tar -cf - --null -T - ) | tar -xf - -C "$tarsrc"
+# A copy with no .git (a source export, such as a red run's copy) has no ls-files list, so it walks the tree.
+( cd "$REPO_ROOT" && if [ -e .git ]; then git ls-files -z; else find . -path ./.git -prune -o -type f -print0; fi ) \
+  | tar -cf - --null -T - | tar -xf - -C "$tarsrc"
 tar -czf "$work/repo.tar.gz" -C "$work/tarsrc" claude-settings-main
 
 # Make a bare-bones fake checkout of the repo at $1, with CLAUDE.md/settings.json content
@@ -365,6 +367,14 @@ case_origins() {
   origin_case "origin: wrong host (gitlab.com) does not match" "https://gitlab.com/shivinate7/claude-settings.git" no
   origin_case "origin: extra leading path segment does not match" "https://github.com/mirror/shivinate7/claude-settings.git" no
   origin_case "origin: bare path with no host does not match" "file:///local/shivinate7/claude-settings" no
+  # The repo moved to the swlshiv org: its origins match in the same forms as the old owner's.
+  origin_case "origin: swlshiv https with .git matches"        "https://github.com/swlshiv/claude-settings.git"   yes
+  origin_case "origin: swlshiv https without .git matches"     "https://github.com/swlshiv/claude-settings"       yes
+  origin_case "origin: swlshiv ssh with .git matches"          "git@github.com:swlshiv/claude-settings.git"       yes
+  origin_case "origin: swlshiv ssh without .git matches"       "git@github.com:swlshiv/claude-settings"           yes
+  origin_case "origin: swlshiv name-suffix-evil does not match" "https://github.com/swlshiv/claude-settings-evil.git" no
+  origin_case "origin: swlshiv owner-prefix-evil does not match" "https://github.com/evil-swlshiv/claude-settings.git" no
+  origin_case "origin: someoneelse owner does not match"      "https://github.com/someoneelse/claude-settings.git" no
 }
 
 # ---- Case 7: no $CLAUDE_PROJECT_DIR, cwd not the checkout -> bounded root search finds it --
@@ -2040,8 +2050,12 @@ cloud_settings1() {
 
   # CLAUDE_CODE_REMOTE is set, as in a cloud container. The repo's startup pull hook exits on it. Without it,
   # the startup entries install.sh runs here would start a background fetch.
-  out=$(cd "$co" && env -i PATH="$PATH" HOME="$h" CLAUDE_CONFIG_DIR="$cfg" CLAUDE_CODE_REMOTE=true \
-        bash ./install.sh --cloud 2>&1); rc=$?
+  # The checkout sits under $work, a temp folder, so install.sh would skip it and fetch the tarball. This case
+  # reads this checkout's settings.json, so the temp root names a folder that holds nothing. The curl stub
+  # answers any fetch that still runs, so no case reaches the network.
+  stub_bin="$work/cloud_settings1-bin"; make_curl_stub "$stub_bin"
+  out=$(cd "$co" && env -i PATH="$stub_bin:$PATH" HOME="$h" CLAUDE_CONFIG_DIR="$cfg" CLAUDE_CODE_REMOTE=true \
+        CLAUDE_SETTINGS_TEMP_ROOTS="$work/no-such-temp-root" bash ./install.sh --cloud 2>&1); rc=$?
   fires='def fires: (.matcher // "") as $m | if ($m == "" or $m == "*") then true else ("startup" | test("^(" + $m + ")$")) end;'
   want=$(jq -c "$fires"' [.hooks.SessionStart[] | select(fires | not)]' "$REPO_ROOT/settings.json")
   got=$(jq -c "$fires"' [.hooks.SessionStart[] | select(fires | not)]' "$cfg/settings.json" 2>/dev/null)
@@ -3190,7 +3204,11 @@ PATH_LINE='export PATH="$HOME/.claude/bin:$PATH"'
 run_path_install() {
   # $1 = checkout, $2 = HOME, $3 = CLAUDE_CONFIG_DIR, $4 = SHELL value,
   # $5 = install.sh argument (optional, e.g. --cloud), $6 = one extra VAR=value (optional, e.g. CLAUDE_CODE_REMOTE=true)
-  ( cd "$1" && env -i PATH="$PATH" HOME="$2" CLAUDE_CONFIG_DIR="$3" SHELL="$4" ${6:+"$6"} bash ./install.sh ${5:+"$5"} 2>&1 )
+  # The checkouts sit under $work, a temp folder: the temp root names a folder that holds nothing, so install.sh
+  # takes the checkout. The curl stub on PATH answers any fetch that still runs, so no case reaches the network.
+  [ -e "$work/path-bin/curl" ] || make_curl_stub "$work/path-bin"
+  ( cd "$1" && env -i PATH="$work/path-bin:$PATH" HOME="$2" CLAUDE_CONFIG_DIR="$3" SHELL="$4" \
+      CLAUDE_SETTINGS_TEMP_ROOTS="$work/no-such-temp-root" ${6:+"$6"} bash ./install.sh ${5:+"$5"} 2>&1 )
 }
 
 path_case1() {
@@ -5089,6 +5107,8 @@ write_redirect() {
     printf '[url "file://%s"]\n' "$2"
     printf '\tinsteadOf = https://github.com/shivinate7/claude-settings.git\n'
     printf '\tinsteadOf = https://github.com/shivinate7/claude-settings\n'
+    printf '\tinsteadOf = https://github.com/swlshiv/claude-settings.git\n'
+    printf '\tinsteadOf = https://github.com/swlshiv/claude-settings\n'
     printf '[url "file://%s/no-network/"]\n' "$work"
     printf '\tinsteadOf = https://github.com/\n'
     printf '[protocol]\n\tallow = never\n[protocol "file"]\n\tallow = always\n'
@@ -5154,7 +5174,7 @@ caseK1() {
     bad "$name" "clone HEAD is $(git -C "$co" rev-parse HEAD), want the fixture main $want"
   elif [ "$(git -C "$co" symbolic-ref -q HEAD)" != refs/heads/main ]; then
     bad "$name" "clone is not on branch main: $(git -C "$co" symbolic-ref -q HEAD)"
-  elif [ "$(git -C "$co" config --get remote.origin.url)" != "https://github.com/shivinate7/claude-settings.git" ]; then
+  elif [ "$(git -C "$co" config --get remote.origin.url)" != "https://github.com/swlshiv/claude-settings.git" ]; then
     bad "$name" "clone origin is $(git -C "$co" config --get remote.origin.url)"
   elif [ "$(git -C "$co" config --get claude-settings.cloudMirror)" != true ]; then
     bad "$name" "clone has no claude-settings.cloudMirror marker"

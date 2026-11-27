@@ -1545,7 +1545,7 @@ class SettingsDefault(unittest.TestCase):
     def test_settings_env_names_the_mailbox_store(self):
         with open(os.path.join(REPO, "settings.json"), encoding="utf-8") as handle:
             env = json.load(handle).get("env", {})
-        self.assertEqual(env.get("MAILBOX_REPO"), "https://github.com/shivinate7/session-mailbox.git",
+        self.assertEqual(env.get("MAILBOX_REPO"), "https://github.com/swlshiv/session-mailbox.git",
                          "settings.json env has no MAILBOX_REPO default, so a session reads no mail: %r" % env.get("MAILBOX_REPO"))
 
 
