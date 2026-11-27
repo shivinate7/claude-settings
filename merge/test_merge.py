@@ -4671,7 +4671,7 @@ NET_TLS = 'Get "https://api.github.com/repos/o/r/pulls/7": net/http: TLS handsha
 NET_WSARECV = 'Get "https://api.github.com/repos/o/r/pulls/7": read tcp 10.0.0.5:51322->140.82.112.6:443: wsarecv: An existing connection was forcibly closed by the remote host'
 NET_DEADLINE = 'Get "https://api.github.com/repos/o/r/pulls/7": context deadline exceeded'
 NET_REFUSED = 'Get "https://api.github.com/repos/o/r/pulls/7": dial tcp 140.82.112.6:443: connect: connection refused'
-NET_HOST = "fatal: unable to access 'https://github.com/shivinate7/claude-settings/': Could not resolve host: github.com"
+NET_HOST = "fatal: unable to access 'https://github.com/swlshiv/claude-settings/': Could not resolve host: github.com"
 
 # Rate-limit texts (`gh run list` answered HTTP 403). The request id and the
 # timestamp in a text belong to the request. They are no reset time.
@@ -4827,12 +4827,12 @@ class CloseKeywordReason(Env):
     NINE = ("close", "closes", "closed", "fix", "fixes", "fixed", "resolve", "resolves", "resolved")
     REFUSED = ([f"{word} #2390" for word in NINE]
                + ["FiXeS #2390", "CLOSED #2390", "rEsOlVeS #2390", "fixes: #2390", "fixes:#2390", "fixes#2390", "Resolves:   #2390",
-                  "fixes shivinate7/claude-settings#2390", "closes owner/repo#2390", "base red; this fixes #2390 too",
+                  "fixes swlshiv/claude-settings#2390", "closes owner/repo#2390", "base red; this fixes #2390 too",
                   "fixes   #2390", "fixes : #2390", "fixes\t#2390", "fixes\n#2390"])
     REFUSED_URL = ([f"{word} https://github.com/o/r/issues/2390" for word in NINE]
                    + ["Fixes: https://github.com/o/r/issues/2390", "resolves http://github.com/o/r/issues/2390",
                       "closed www.github.com/o/r/issues/2390", "fix https://github.com/o/r/pull/2390",
-                      "fixes https://www.github.com/o/r/issues/2390", "closes:https://github.com/shivinate7/claude-settings/issues/2390",
+                      "fixes https://www.github.com/o/r/issues/2390", "closes:https://github.com/swlshiv/claude-settings/issues/2390",
                       "base red; this fixes https://github.com/o/r/issues/2390 too"])
     ALLOWED = ("PR #2390", "#2390", "fix the base", "fix the base, see #2390", "prefixes #2390", "cause and fix: PR 2390",
                "see https://github.com/o/r/issues/2390", "fix https://example.com/issues/5",
@@ -5370,7 +5370,7 @@ class GhHalf(Env):
         self.assertFalse(self.lock_ref())
 
     def test_a_git_fetch_http2_stream_error_after_the_claim_push_stops_without_a_revert(self):
-        self.fetch_fails_after_the_claim_push("fatal: unable to access 'https://github.com/shivinate7/claude-settings/': HTTP/2 stream 1 was not closed cleanly: INTERNAL_ERROR (err 2)")
+        self.fetch_fails_after_the_claim_push("fatal: unable to access 'https://github.com/swlshiv/claude-settings/': HTTP/2 stream 1 was not closed cleanly: INTERNAL_ERROR (err 2)")
 
     # ---- a read that could not run after the claim push keeps the claim (standing-merge-grant: only a proven refusal reverts it)
 
@@ -10528,9 +10528,9 @@ class NetErrorLines(unittest.TestCase):
     def test_each_network_string_a_retried_path_once_drove_is_a_network_error(self):
         """The one matcher, is_net, for every retried path: the git fetch after the claim push, a lost merge reply, the
         required-checks read and the merge reply. These rows held full git flows before (M13). One e2e case per path stays."""
-        for out in ("fatal: unable to access 'https://github.com/shivinate7/claude-settings/': Empty reply from server",
-                    "fatal: unable to access 'https://github.com/shivinate7/claude-settings/': GnuTLS recv error (-9): Error decoding the received TLS packet.",
-                    "fatal: unable to access 'https://github.com/shivinate7/claude-settings/': Failed sending data to the peer",
+        for out in ("fatal: unable to access 'https://github.com/swlshiv/claude-settings/': Empty reply from server",
+                    "fatal: unable to access 'https://github.com/swlshiv/claude-settings/': GnuTLS recv error (-9): Error decoding the received TLS packet.",
+                    "fatal: unable to access 'https://github.com/swlshiv/claude-settings/': Failed sending data to the peer",
                     "kex_exchange_identification: Connection closed by remote host\nfatal: Could not read from remote repository.",
                     NET_DEADLINE,
                     NET_REFUSED,
@@ -14676,7 +14676,7 @@ def at(minutes):
 
 def check(name, bucket, minutes):
     """One check run as a row of name, bucket, link, startedAt and completedAt: the job ran from START for `minutes`. CapsHost serves it as a REST check run."""
-    return {"name": name, "bucket": bucket, "link": "https://github.com/shivinate7/claude-settings/actions/runs/100/job/200",
+    return {"name": name, "bucket": bucket, "link": "https://github.com/swlshiv/claude-settings/actions/runs/100/job/200",
             "startedAt": at(0), "completedAt": at(minutes)}
 
 
@@ -18550,7 +18550,7 @@ class ConfirmBatchHint(CloudSession):
 
     def test_at_threshold_lane_gets_hand_to_batch_runner_and_no_build_command(self):
         self.put_role("lane", step="feat")
-        self.host.repo = "shivinate7/claude-settings"  # ruling own-lanes-merge-claude-settings-prs: a lane merges its own pull request in this repo (LaneOwnMerge.setUp)
+        self.host.repo = "swlshiv/claude-settings"  # ruling own-lanes-merge-claude-settings-prs: a lane merges its own pull request in this repo (LaneOwnMerge.setUp)
         rc, text, reads = self.hint_run("7", "--confirm", "--head", self.head(), depth=3, ready=self.ready_pulls(merge.BUILD_THRESHOLD), cloud=True)
         self.assertEqual(reads.calls, 1, "scope: the ready list was read %d times, want once: %s" % (reads.calls, text))
         self.assertEqual(rc, 0, text)
@@ -19517,7 +19517,7 @@ class LaneOwnMerge(CloudSession):
     def setUp(self):
         super().setUp()
         self.put_role("lane", step="feat")
-        self.host.repo = "shivinate7/claude-settings"  # ruling own-lanes-merge-claude-settings-prs: the lane's pull request is in this repo
+        self.host.repo = "swlshiv/claude-settings"  # ruling own-lanes-merge-claude-settings-prs: the lane's pull request is in this repo
 
     def assert_role_file(self, step="feat"):
         """The case probes the lane branch, so the role file it writes is read back first (P7). The file, not the reader, is read."""
@@ -19616,7 +19616,7 @@ class LaneRefusals(CloudSession):
     def setUp(self):
         super().setUp()
         self.put_role("lane", step="feat")
-        self.host.repo = "shivinate7/claude-settings"  # the repo check passes, so each refusal below is the check its name gives
+        self.host.repo = "swlshiv/claude-settings"  # the repo check passes, so each refusal below is the check its name gives
 
     def assert_refused_quietly(self, *argv):
         """A lane's run refused: rc 1, nothing merged, nothing pushed, a line on stderr that names neither --confirm nor --ready. -> stderr"""
@@ -22324,7 +22324,7 @@ class ReviewArgs(ReviewEnv):
     def test_run_goes_with_touches_and_nothing_else(self):
         """--run is refused unless it goes with --touches. The refusal names its pairing, by id or by URL. The batch blame pairing is gone
         with the batch flags, so --blame is an unknown argument."""
-        url = f"https://github.com/shivinate7/claude-settings/actions/runs/{TOUCH_RUN}"
+        url = f"https://github.com/swlshiv/claude-settings/actions/runs/{TOUCH_RUN}"
         # Setup first: the allowed pairing reads the run, so a refusal below cannot come from a fixture that reads nothing.
         rc, out, err = self.run_args("--touches", "--run", TOUCH_RUN, host=incident_host(logs={TOUCH_RUN: [failed_case(TOUCH_CASE_A)]}))
         self.assertEqual(rc, 0, "setup: --touches --run ID did not run:\n" + out + err)
@@ -30391,7 +30391,7 @@ class TouchesRead(Env):
     def test_a_run_url_is_read_as_the_run_id_it_names(self):
         """--run takes an Actions run URL as well as the id: the URL is read as the id it names, so both forms give one answer."""
         logs = {TOUCH_RUN: [failed_case(TOUCH_CASE_A)]}
-        url = f"https://github.com/shivinate7/claude-settings/actions/runs/{TOUCH_RUN}"
+        url = f"https://github.com/swlshiv/claude-settings/actions/runs/{TOUCH_RUN}"
         by_id = incident_host(logs=logs)  # the control: the id, as the run's own query reads it
         rc, out, err = self.run_args("--touches", "--run", TOUCH_RUN, host=by_id)
         self.assertEqual(by_id.log_calls, [TOUCH_RUN], "setup: the id read did not read run %s: %s" % (TOUCH_RUN, by_id.log_calls))

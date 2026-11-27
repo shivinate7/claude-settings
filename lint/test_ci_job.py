@@ -2846,7 +2846,7 @@ class CodeCheckFromCopiedInstall(Job):
     git = LintTools.git
     lane = LintTools.lane
     # The remote form is the copied-install route; the local forms run the repo under test's own action.
-    CODE = step("Code check", uses="shivinate7/claude-settings/actions/code-check@main")
+    CODE = step("Code check", uses="swlshiv/claude-settings/actions/code-check@main")
     LOCAL_DOT = step("Code check", uses="./actions/code-check")
     LOCAL_DOLLAR = step("Code check", uses="$/actions/code-check")  # local: the form checks.yml writes
     LINT = ("--lint", "--base", "origin/main")
@@ -2924,7 +2924,7 @@ class ZizmorBranches(Job):
 
     install = CodeCheckFromCopiedInstall.install  # one home of the copied install: this class calls it, it does not copy it
     LOCAL_DOLLAR = step(ZIZMOR, uses="$/actions/zizmor", **{"with": {"paths": ".github/ actions/"}})
-    REMOTE = step(ZIZMOR, uses="shivinate7/claude-settings/actions/zizmor@main", **{"with": {"paths": ".github/ actions/"}})
+    REMOTE = step(ZIZMOR, uses="swlshiv/claude-settings/actions/zizmor@main", **{"with": {"paths": ".github/ actions/"}})
     LINT = ("--lint",)
 
     def pipx_env(self):
@@ -3335,11 +3335,11 @@ class PinnedHarness(Job):
 
     @staticmethod
     def code_step(ref):
-        return step("Code check", uses="shivinate7/claude-settings/actions/code-check@%s" % ref)
+        return step("Code check", uses="swlshiv/claude-settings/actions/code-check@%s" % ref)
 
     @staticmethod
     def zizmor_step(ref):
-        return step(ZIZMOR, uses="shivinate7/claude-settings/actions/zizmor@%s" % ref, **{"with": {"paths": ".github/ actions/"}})
+        return step(ZIZMOR, uses="swlshiv/claude-settings/actions/zizmor@%s" % ref, **{"with": {"paths": ".github/ actions/"}})
 
     def add_ste_lint(self):
         """Two commits on the source's main, each holding this checkout's ste-lint files. The first is the pin. The second
@@ -3380,7 +3380,7 @@ class PinnedHarness(Job):
     def pin_child(self, action, sha):
         """The child's checks workflow pins `action` at `sha`. bin/ste-changed reads each pin from the linted repo's workflows."""
         write_lf(os.path.join(self.root, ".github", "workflows", "checks.yml"),
-                 "jobs:\n  checks:\n    steps:\n      - uses: shivinate7/claude-settings/actions/%s@%s\n" % (action, sha))
+                 "jobs:\n  checks:\n    steps:\n      - uses: swlshiv/claude-settings/actions/%s@%s\n" % (action, sha))
 
     def write_child_code_check(self):
         """The child repo's own code-check action, which a local uses: runs in place."""
@@ -3462,7 +3462,7 @@ class PinnedHarness(Job):
     def test_a_stale_ste_lint_pin_under_the_flag_fails_as_it_does_without_it(self):
         pin = self.add_ste_lint()
         self.pin_child("ste-lint", pin)
-        ste = step("STE lint", uses="shivinate7/claude-settings/actions/ste-lint@%s" % pin)
+        ste = step("STE lint", uses="swlshiv/claude-settings/actions/ste-lint@%s" % pin)
         (rc0, lines0, text0), (rc, lines, text) = self.both_runs(ste, "--step", "STE lint", "--base", "origin/main")
         drift = [ln for ln in text0.splitlines() if ln.startswith("ste-changed: CI pins ste-lint at %s" % pin[:7])]
         self.assertEqual(len(drift), 1, "precondition: without the flag no drift line names the stale pin\n" + text0)
@@ -3570,8 +3570,8 @@ class PinnedHarness(Job):
     @unittest.skipUnless(os.name == "posix", "the git stub is a shell script")
     def test_two_steps_pinned_at_one_sha_export_it_once(self):
         env, calls = self.git_stub(RUN_FOLDER)
-        steps = step("Code check", uses="shivinate7/claude-settings/actions/code-check@%s" % self.pin_a) + \
-            step("Code check again", uses="shivinate7/claude-settings/actions/code-check@%s" % self.pin_a)
+        steps = step("Code check", uses="swlshiv/claude-settings/actions/code-check@%s" % self.pin_a) + \
+            step("Code check again", uses="swlshiv/claude-settings/actions/code-check@%s" % self.pin_a)
         rc, lines, text = self.run_step(steps, "--step", "Code check", "--step", "Code check again", "--base", "origin/main",
                                         "--pinned", env=env)
         self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS", "PASS"]), "the two pinned steps did not both PASS\n" + text)
@@ -3582,7 +3582,7 @@ class PinnedHarness(Job):
         """The export folder carries the pid of the ci-job run that made it, so a sweep can tell, after that run dies, that its pid is dead."""
         env, calls = self.git_stub(RUN_FOLDER)
         env = {**env, "TMPDIR": tempfile.mkdtemp(prefix="pin-tmp-", dir=RUN_FOLDER)}  # this run's own temp folder: other runs' exports stay out
-        steps = step("Code check", uses="shivinate7/claude-settings/actions/code-check@%s" % self.pin_a)
+        steps = step("Code check", uses="swlshiv/claude-settings/actions/code-check@%s" % self.pin_a)
         rc, lines, text = self.run_step(steps, "--step", "Code check", "--base", "origin/main", "--pinned", env=env)
         self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS"]), "the pinned step did not PASS\n" + text)
         found = self.stub_calls(calls, "pin-folder")
@@ -3773,7 +3773,7 @@ class WindowsShell(unittest.TestCase):
         os.makedirs(os.path.dirname(run_sh))
         open(run_sh, "w").close()
         self.ci_job.BIN = os.path.join(claude_settings, "bin")  # the action is read from the checkout beside bin/ci-job
-        state, body = self.zizmor_plan("shivinate7/claude-settings/actions/zizmor@main")
+        state, body = self.zizmor_plan("swlshiv/claude-settings/actions/zizmor@main")
         self.assertEqual(state, "run")
         self.assertIn('\n"$BASH" "%s"\n' % run_sh.replace("\\", "/"), body,
                       "a run.sh outside the checkout is not run by its absolute path\n" + body)
@@ -4172,7 +4172,7 @@ class RerunCache(unittest.TestCase):
         """The remote zizmor step, run by `script`, whose run.sh is run_sh. The first run runs it, a rerun prints PASS (cached) and
         runs nothing, and an edit to run.sh makes the next run run it again. `config` is the CLAUDE_CONFIG_DIR the copy reads its pointer from."""
         ambient = {"CLAUDE_CONFIG_DIR": config, "PATH": stub_pipx()[0]}  # a stub pipx: the zizmor branch needs one on PATH, and run.sh is the probe
-        steps = (step("zizmor", uses="shivinate7/claude-settings/actions/zizmor@main"),)
+        steps = (step("zizmor", uses="swlshiv/claude-settings/actions/zizmor@main"),)
         _, _, first, out = self.lane_run(*steps, script=script, ambient=ambient)
         self.assertEqual(first, ["zizmor"], "scope: the first run should run the zizmor step, got %r\n%s" % (first, out))
         _, lines, ran, out = self.lane_run(*steps, script=script, ambient=ambient)

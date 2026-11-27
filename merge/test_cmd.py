@@ -10,7 +10,7 @@ merge.cmd starts. README: "The `merge` command". Never touches a real checkout.
 import os, shutil, subprocess, sys, tempfile, unittest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-URL = "https://github.com/shivinate7/claude-settings"
+URL = "https://github.com/swlshiv/claude-settings"
 LAUNCHER = [os.path.join(ROOT, "bin", "merge.cmd")] if os.name == "nt" else [sys.executable, os.path.join(ROOT, "bin", "merge")]
 
 class Launcher(unittest.TestCase):
@@ -36,7 +36,7 @@ class Launcher(unittest.TestCase):
 
     def test_near_match_origins_stop_before_any_run(self):
         # Another owner and another repo (the wrong origin), owner swapped, repo swapped, and names that only start or end like the real one.
-        self.origin("https://github.com/shivinate7/claude-settings")
+        self.origin("https://github.com/swlshiv/claude-settings")
         for url in ("https://github.com/someone/else",
                     "https://github.com/someone/claude-settings",
                     "git@github.com:someone/claude-settings.git",
@@ -63,15 +63,16 @@ class Launcher(unittest.TestCase):
                 self.assertEqual(r.returncode, 7, url + r.stdout + r.stderr)
                 self.assertIn("ARGS", r.stdout, url)
 
-    def test_old_owner_origins_still_pass_through(self):
-        # The old owner keeps passing during the move, in both forms.
+    def test_old_owner_origins_stop_before_any_run(self):
+        # The old owner is dropped: its origins are another repo now, in both forms.
         for url in ("https://github.com/shivinate7/claude-settings",
                     "git@github.com:shivinate7/claude-settings.git"):
             with self.subTest(url=url):
                 self.origin(url)
                 r = self.run_launcher("12", "--confirm")
-                self.assertEqual(r.returncode, 7, url + r.stdout + r.stderr)
-                self.assertIn("ARGS", r.stdout, url)
+                self.assertEqual(r.returncode, 1, url + r.stdout + r.stderr)
+                self.assertIn("is not a checkout of swlshiv/claude-settings", r.stderr, url)
+                self.assertNotIn("ARGS", r.stdout, url)
 
     def test_other_owner_origins_stop_before_any_run(self):
         for url in ("https://github.com/someoneelse/claude-settings",

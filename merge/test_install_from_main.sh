@@ -107,7 +107,7 @@ live_clone() {
   git -C "$1" config user.name t
   if [ "$2" = payload ]; then
     payload_files "$1"
-    git -C "$1" remote add origin https://github.com/shivinate7/claude-settings.git
+    git -C "$1" remote add origin https://github.com/swlshiv/claude-settings.git
   else
     stub_installers "$1"
   fi
@@ -337,7 +337,7 @@ case8() {
   # This case pins the fail-open on a fetch failure only: the fetch fails here at once, with no network, and the
   # helper installs local main with its WARN line. A reachable origin is not this case: a local-only commit is
   # refused (case43), and an origin whose main is unrelated to local main is refused (case45).
-  git -C "$d/clone" config "url.$d/no-origin.git.insteadOf" https://github.com/shivinate7/claude-settings.git
+  git -C "$d/clone" config "url.$d/no-origin.git.insteadOf" https://github.com/swlshiv/claude-settings.git
   c0=$(git -C "$d/clone" rev-parse main)
   git -C "$d/clone" worktree add -q --detach "$d/clone-live" "$c0"
   git -C "$d/clone" worktree add -q -b feature "$d/linked"

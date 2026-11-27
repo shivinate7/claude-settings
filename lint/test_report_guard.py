@@ -5392,7 +5392,7 @@ class RewriteStampTests(unittest.TestCase):
             "rewrites": "RECORDED: rewrites decision `ci-job-caps` for the owner ruling of 2026-11-01 18:44 CST (PR #1001)",
             "rewrite of": "RECORDED: a rewrite of decision `ci-job-caps`, for the owner ruling of 2026-11-01 18:44 CST (PR #1001)",
             # Catches: a lone quote, a `//` and a `#` in one sentence hide the rewrite or the id.
-            "lone quote and URL": "RECORDED: rewrote decision `ci-job-caps` in place, for the owner's ruling of 2026-11-01 18:44 CST (PR #1001, https://github.com/shivinate7/claude-settings/pull/1001#issuecomment-2)",
+            "lone quote and URL": "RECORDED: rewrote decision `ci-job-caps` in place, for the owner's ruling of 2026-11-01 18:44 CST (PR #1001, https://github.com/swlshiv/claude-settings/pull/1001#issuecomment-2)",
         }
         for name, done in variants.items():
             with self.subTest(variant=name):
@@ -7177,7 +7177,7 @@ class AnsweredNeedsSourceTests(unittest.TestCase):
     def test_an_green_each_source_cites_the_word(self):
         rows = [
             # Catches: a URL is not read as a source.
-            "Answered at https://github.com/shivinate7/claude-settings/pull/1008 today.",
+            "Answered at https://github.com/swlshiv/claude-settings/pull/1008 today.",
             # Catches: a PR ref #<n> is not read as a source.
             "Answered on PR #1008.",
             # Catches: a commit hash is not read as a source.

@@ -34,7 +34,7 @@ SHARED_NAMES = os.path.join(REPO, "hooks", "shared_names.py")
 HANDOFF_PROMPT = os.path.join(REPO, "hooks", "precompact_handoff_prompt.md")
 TEMPLATES = os.path.join(REPO, "skills", "project-ops", "templates")
 
-OWNER_REPO = "shivinate7/claude-settings"
+OWNER_REPO = "swlshiv/claude-settings"
 ORIGIN_URL = "https://github.com/" + OWNER_REPO
 GRANT = "Grant: B is good, 13:19 CST Nov 10"
 SLUG = "fan-settings"

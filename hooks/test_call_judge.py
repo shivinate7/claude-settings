@@ -186,7 +186,7 @@ def make_repo(name, decisions=None, steps=None, debts=None, page=PAGE_URL, visib
 # The waiting page's repo with a GitHub origin. PAGE_REPO above has no origin, so lint/layout.py repo_name reads it
 # as unknown. The cross-repo rule (question-checked-with-repo) judges a decision's repo against this origin's repo,
 # so its cases judge the write with cwd set here.
-PAGE_ORIGIN_URL = "https://github.com/shivinate7/claude-settings.git"
+PAGE_ORIGIN_URL = "https://github.com/swlshiv/claude-settings.git"
 
 
 def origin_page_repo():

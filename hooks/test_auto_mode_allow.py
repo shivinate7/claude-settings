@@ -8,7 +8,7 @@ owner about a branch delete after the archive push that guard_branch_worktree's 
 - autoMode.allow keeps the built-in exceptions ("$defaults"), and no autoMode list drops its own.
 - One allow entry quotes every command in the guard's remedy verbatim, read from
   BRANCH_DELETE_DENY_REASON itself, so a change to the remedy fails here until the entry follows.
-- One "Owner PR Housekeeping:" entry quotes the measured PR close, names the bound shivinate7,
+- One "Owner PR Housekeeping:" entry quotes the measured PR close, names the bound swlshiv org,
   and never covers merge, approve, branch delete, force push, a base branch change, or a repo
   outside it (decision auto-mode-owner-acts). Its Covers text names the visible conversation
   and the batch's integration pull request.
@@ -129,7 +129,7 @@ MESSAGE_REFUSED = (("permissions", "permission"), ("settings", "setting"),
 PR_EXTRA_REFUSED = (("--delete-branch", "--delete-branch"), ("auto-merge", "auto[- ]merge"))
 MESSAGE_EXTRA_REFUSED = (("posted_to_shared_channel", "posted_to_shared_channel"),)
 # (name, case-insensitive pattern) for each term an entry names before its "Never covers" sentence.
-PR_SCOPE = (("owner", "owned by shivinate7"),
+PR_SCOPE = (("owner", "owned by the swlshiv org"),
             ("coordinator or batch runner", "coordinator or batch runner"),
             ("replaced, empty or batched", "replaced, empty or batched"))
 MESSAGE_SCOPE = (("own account", "own account"), ("Remote Control", "Remote Control"))
@@ -1059,7 +1059,7 @@ class OwnerPrHousekeepingIsAllowed(unittest.TestCase):
 
     def test_entry_binds_the_owner(self):
         unquoted = re.sub(r"`[^`]+`", "", allow_entry(OWNER_PR) or "")
-        self.assertIn("shivinate7", unquoted, "entry must name the bound owner outside quotes")
+        self.assertIn("swlshiv", unquoted, "entry must name the bound owner outside quotes")
 
     def test_never_covers_names_each_refused_act(self):
         clause = never_covers(allow_entry(OWNER_PR))

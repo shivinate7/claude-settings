@@ -59,7 +59,7 @@ import sys
 sys.path.insert(0, sys.argv[1])
 import test_all_jobs_passed as t
 anchor = "          needs: ${{ toJSON(needs) }} # every job above\n"
-pinned_uses = "shivinate7/claude-settings/actions/all-jobs-passed@" + t.CHILD_PIN
+pinned_uses = "swlshiv/claude-settings/actions/all-jobs-passed@" + t.CHILD_PIN
 assert t.CHILD_GOOD.count(anchor) == 1 and t.CHILD_GOOD.count(pinned_uses) == 1, "the all-jobs-passed step changed: the map must follow it"
 text = t.CHILD_GOOD.replace(pinned_uses, "$/actions/all-jobs-passed").replace(anchor, anchor + "          scope-skips: '{\"lint\": [\"code\"]}'\n", 1)
 sys.stdout.write(text)
