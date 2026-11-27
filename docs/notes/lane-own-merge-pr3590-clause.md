@@ -1,0 +1,1 @@
+- lane-own-merge-pr3590-clause: The Lane Own Merge entry in `settings.json` (PR 4019, not yet on main) drops main's clause "PR 3590 merged 15:43 CST Nov 16" (PR 3590 is the private-repo setup PR) while it restores the private-repos sentence. Restore the clause, or record why it goes. Seen: 2026-11-27 x1
