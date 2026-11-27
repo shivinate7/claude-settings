@@ -208,7 +208,7 @@ LSP_STEP_REMEDY = "so this would start a second lane on one step"  # a fragment 
 def write_lsp_transcripts():
     """The carrier's whole list read, written as JSONL under this run's role folder."""
     os.makedirs(ROLE_DIR, exist_ok=True)
-    rows = [stepdup_row(LSP_CARRIER, STEPDUP_LIVE, ["cs-build:lane", LSP_STEP_TAG, "cs-repo:shivinate7/claude-settings"])]
+    rows = [stepdup_row(LSP_CARRIER, STEPDUP_LIVE, ["cs-build:lane", LSP_STEP_TAG, "cs-repo:" + ARCH_REPO_SETTINGS])]
     with open(role_path("lsp-step-carrier"), "w", encoding="utf-8") as handle:
         handle.write("\n".join(stepdup_list("l1", rows)) + "\n")
 

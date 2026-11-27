@@ -114,7 +114,7 @@ add("lane-start-settings: lane tag with a no-break-space-only source_url is deni
     model="sonnet", source_url="\u00a0")
 add("lane-start-settings: upper-case lane tag with no model is denied", "deny", "lane-start-settings",
     tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD,
-    tags=["CS-BUILD:LANE", "cs-repo:shivinate7/claude-settings"], source_url=LANE_SOURCE_URL)
+    tags=["CS-BUILD:LANE", "cs-repo:" + ARCH_REPO_SETTINGS], source_url=LANE_SOURCE_URL)
 add("lane-start-settings: a denied lane with no source_url names source_url in its reason", "deny",
     "lane-start-settings", tool=LANE_TOOL, title=LANE_TITLE, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=OWN_LANE_TAGS,
     model="sonnet", carries="source_url")
@@ -130,7 +130,7 @@ LANE_START_GH = os.path.join(ROOT, "lanestart-gh")
 
 def build_lane_start_gh():
     """The stand-in pull request tool for claude-settings: it answers only that repo, and holds no open pull request."""
-    make_fake_gh(LANE_START_GH, "main", need=["shivinate7/claude-settings"])
+    make_fake_gh(LANE_START_GH, "main", need=[ARCH_REPO_SETTINGS])
 
 
 lazy_fixture([LANE_START_GH], build_lane_start_gh)
@@ -139,11 +139,11 @@ lazy_fixture([LANE_START_GH], build_lane_start_gh)
 # and no open pull request, so lane-start-settings is the one broken rule and its refusal prints.
 add("lane-start-settings: lane tag among several tags with no source_url is denied", "deny", "lane-start-settings",
     tool=LANE_TOOL, title=LANE_TITLE, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD,
-    tags=["cs-repo:shivinate7/claude-settings", "cs-step:lane-start-settings", "cs-build:lane"], model="sonnet",
+    tags=["cs-repo:" + ARCH_REPO_SETTINGS, "cs-step:lane-start-settings", "cs-build:lane"], model="sonnet",
     transcript=role_path("lane-start-listed"), env_path=fake_gh_path(LANE_START_GH))
 add("lane-start-settings: lane tag among several tags with a model and a source_url is allowed", "allow",
     tool=LANE_TOOL, title=LANE_TITLE, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD,
-    tags=["cs-repo:shivinate7/claude-settings", "cs-step:lane-start-settings", "cs-build:lane"],
+    tags=["cs-repo:" + ARCH_REPO_SETTINGS, "cs-step:lane-start-settings", "cs-build:lane"],
     model="sonnet", source_url=LANE_SOURCE_URL,
     transcript=role_path("lane-start-listed"), env_path=fake_gh_path(LANE_START_GH))
 add("lane-start-settings: coordinator call with no model and no source_url is allowed", "allow",
@@ -211,7 +211,7 @@ add("floor lane: a lane refused below the floor names source_url in its reason",
     model="haiku", source_url=LANE_SOURCE_URL, carries="source_url")
 add("floor lane: an upper-case lane tag on haiku gets the lane remedy", "deny", "agent-model-floor",
     tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD,
-    tags=["CS-BUILD:LANE", "cs-repo:shivinate7/claude-settings"],
+    tags=["CS-BUILD:LANE", "cs-repo:" + ARCH_REPO_SETTINGS],
     model="haiku", source_url=LANE_SOURCE_URL, carries="model sonnet", lacks=LANE_FLOOR_LACKS)
 add("floor lane: a lane tag given as one string on haiku gets the lane remedy", "deny", "agent-model-floor",
     tool=LANE_TOOL, title=LANE_TITLE, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags="cs-build:lane",

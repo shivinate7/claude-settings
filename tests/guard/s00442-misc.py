@@ -175,7 +175,8 @@ ARCHDRAFT_INTEG = os.path.join(ROOT, "archdraft-integ")        # an open draft b
 ARCHDRAFT_LANE_BEHIND = os.path.join(ROOT, "archdraft-lane-behind")  # an open draft on the lane/<slug> head, head behind main
 # The branch read (lane-closes-after-records). The incident: a lane tagged for claude-settings and q_max, its branch pushed
 # to q_max alone. Its fakes name both repos (make_fake_gh's `repos`), and each repo answers for itself.
-ARCH_REPO_SETTINGS = "shivinate7/claude-settings"
+from shared_names import SETTINGS_REPO  # noqa: E402  the settings repo's one home (hooks/shared_names.py)
+ARCH_REPO_SETTINGS = SETTINGS_REPO
 ARCH_REPO_QMAX = "shivinate7/q_max"
 ARCH_BRANCH = "claude/qmax-hosted-db-gate-notes"  # ahead of main in q_max, on no pull request
 ARCH_BRANCH_OTHER = "claude/other-y1"             # another branch of q_max, on an open pull request

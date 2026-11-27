@@ -910,7 +910,7 @@ ROLE_LINES = {
     "repo-lane-claude-settings": role_call("g1", ["cs-build:lane", CS_REPO_TAG]),
     "repo-lane-degen": role_call("g1", ["cs-build:lane", "cs-repo:shivinate7/degen"]),
     "repo-lane-none": role_call("g1", ["cs-build:lane"]),
-    "repo-runner-claude-settings": role_call("g1", ["cs-build:batch-runner", "cs-repo:shivinate7/claude-settings"]),
+    "repo-runner-claude-settings": role_call("g1", ["cs-build:batch-runner", CS_REPO_TAG]),
     "repo-runner-children": role_call("g1", ["cs-build:batch-runner", "cs-repo:shivinate7/mailaudit"]),
     "repo-empty-tags": role_call("g1", []),
     # lane-one-topic shapes. A lane is one topic: its cs-topic tag, beside one or more cs-step tags. An older
