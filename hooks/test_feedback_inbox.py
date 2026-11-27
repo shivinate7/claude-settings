@@ -4872,6 +4872,7 @@ def case_standing_grant_without_a_once_item_keeps_today_reason():
 
 CLAUDE_SETTINGS_ORIGIN = "https://github.com/swlshiv/claude-settings.git"  # layout.repo_name reads the slug from it
 CLAUDE_SETTINGS_SLUG = "swlshiv/claude-settings"
+OLD_SETTINGS_ORIGIN = "https://github.com/shivinate7/claude-settings.git"  # a checkout made before the org move still names the old owner
 PAGE_CODE_URL = "https://claude.ai/code/artifact/3f9c1e2a-5b7d-4e8f-9a1b-2c3d4e5f6a7b"  # PAGE_URL's id, in the /code/ form
 PAGE_COMMENT = """[Artifact comment sent to Claude]
 Artifact: {url}
@@ -4913,13 +4914,14 @@ NOT_THE_WRITER = "session_000000000000000000000003"  # the writer a transcript n
 FORM_FAIL_OPEN = "Feedback guard: page form not checked"  # the systemMessage a page-form stand-down prints
 
 
-def claude_settings_repo():
+def claude_settings_repo(origin=CLAUDE_SETTINGS_ORIGIN, key="claude-settings"):
     """The claude-settings fixture: origin names the GitHub repo, the waiting page is PAGE_URL, and origin's record
-    branch holds two step files, one that names skills/waiting-page and one that does not."""
-    return shared_repo("claude-settings", lambda: record_repo(
-        "claude-settings", {"roadmap/data/steps/%s.json" % TEMPLATE_STEP: TEMPLATE_STEP_TEXT,
-                            "roadmap/data/steps/%s.json" % PLAIN_STEP: PLAIN_STEP_TEXT},
-        origin=CLAUDE_SETTINGS_ORIGIN))
+    branch holds two step files, one that names skills/waiting-page and one that does not. `origin` and `key` pick
+    another checkout of the same repo, such as one whose origin still names the old owner."""
+    return shared_repo(key, lambda: record_repo(
+        key, {"roadmap/data/steps/%s.json" % TEMPLATE_STEP: TEMPLATE_STEP_TEXT,
+              "roadmap/data/steps/%s.json" % PLAIN_STEP: PLAIN_STEP_TEXT},
+        origin=origin))
 
 
 def writer_records(sid):
@@ -5064,6 +5066,23 @@ def case_page_form_other_repo_passes():
     want = (("verbatim", True), ("artifact", True), ("repo", False), ("writer", True))
     if expect_facts(name, page_comment_facts(cfg, sid, other, PAGE_CODE_URL, ASKED_WAKE), want):
         expect_silent(name, p)
+
+
+def case_page_form_old_origin_checkout_blocks():
+    """Red (ruling c164: a page comment is never answered by a thread reply). A checkout whose origin still names the
+    old owner is the settings repo for this rule, so the Stop blocks with the rule's reason. On head the scope comes
+    back None for it, and the rule passes silently."""
+    import layout  # lint/layout.py: the one home of the repo's slug
+    cfg, sid = new_cfg(), "page-form-old-origin"
+    root = claude_settings_repo(origin=OLD_SETTINGS_ORIGIN, key="claude-settings-old-origin")
+    name = "page-form red: Asked comment, [note], in a checkout whose origin names the old owner"
+    check(name + ": scope origin names the old owner", layout.repo_name(root) == "shivinate7/claude-settings",
+          layout.repo_name(root))
+    p = page_comment_run(cfg, sid, ASKED_WAKE, [NOTE_ITEM], cwd=root)
+    reason = block_reason(p)
+    check(name + ": blocks", p.code == 0 and reason is not None, p.desc())
+    if reason is not None:
+        check(name + ": reason names page-form-to-template", "page-form-to-template" in reason, reason)
 
 
 def case_page_form_not_the_writer_passes():
@@ -5412,6 +5431,7 @@ CASES = (
     case_page_form_plain_saved_wake_passes,
     case_page_form_other_artifact_passes,
     case_page_form_other_repo_passes,
+    case_page_form_old_origin_checkout_blocks,
     case_page_form_not_the_writer_passes,
     case_page_form_failed_record_read_stands_down,
     case_page_form_saved_wake_with_a_note_blocks,
