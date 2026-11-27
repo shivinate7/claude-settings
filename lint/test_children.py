@@ -35,7 +35,7 @@ BETA = "shivinate7/beta-example"
 GAMMA = "shivinate7/gamma-example"
 DELTA = "shivinate7/delta-example"
 APP404 = "shivinate7/app-404"
-SELF = "shivinate7/claude-settings"
+SELF = "swlshiv/claude-settings"
 ORDERED = "%s 2026-01-05\n%s 2026-02-01\n" % (ALPHA, GAMMA)
 COMMENTED = "# child repos\n\n%s 2026-01-05\n\n# later\n%s 2026-02-01\n" % (ALPHA, GAMMA)
 ACTIVE = "%s 2026-01-05\n%s 2026-01-06\n%s 2026-02-01\n" % (ALPHA, BETA, GAMMA)
@@ -399,7 +399,7 @@ class AddCommand(unittest.TestCase):
                 self.assertEqual(read(path), before, "a refused add changed the list")
 
     def test_refuses_claude_settings_in_any_letter_case(self):
-        for name in (SELF, "Shivinate7/claude-settings", "SHIVINATE7/CLAUDE-SETTINGS", "shivinate7/Claude-Settings"):
+        for name in (SELF, "Swlshiv/claude-settings", "SWLSHIV/CLAUDE-SETTINGS", "swlshiv/Claude-Settings"):
             with self.subTest(name=name):
                 path = fixture(EMPTY)
                 before = read(path)

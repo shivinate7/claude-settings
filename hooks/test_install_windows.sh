@@ -36,7 +36,7 @@ sed 's/#.*//; s/[[:space:]]//g' "$co/landed-dirs.txt" | grep -v '^$' | while rea
 printf '# fixture\n' > "$co/CLAUDE.md"
 printf '{}\n' > "$co/settings.json"
 ( cd "$co" && git init -q -b main && git config user.email t@example.com && git config user.name t \
-    && git remote add origin https://github.com/shivinate7/claude-settings.git \
+    && git remote add origin https://github.com/swlshiv/claude-settings.git \
     && git add -A && git commit -q -m init ) || { printf 'FAIL - %s: could not build the fixture clone\n' "$NAME"; exit 1; }
 
 out=$(cd "$co" && env -i PATH="$PATH" HOME="$h" timeout 60 bash ./install.sh 2>&1)

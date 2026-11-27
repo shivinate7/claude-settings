@@ -333,7 +333,7 @@ class CiWake(Quiet):
     def test_mcp_ready_call_reaches_python_with_same_bytes(self):
         # The cloud's ready route (ci-wake-mcp-ready). The row's gh, pr, ready grep never applies to an MCP
         # call. This call passes the draft false pattern, because its draft field is false.
-        payload = self.mcp_payload({"owner": "shivinate7", "repo": "claude-settings", "pullNumber": 12,
+        payload = self.mcp_payload({"owner": "swlshiv", "repo": "claude-settings", "pullNumber": 12,
                                     "draft": False})
         result = run_row(self.command(), self.script, payload)
         self.assert_reaches_python(result, self.script)
@@ -356,7 +356,7 @@ class CiWake(Quiet):
     def test_mcp_ready_call_without_draft_starts_no_python(self):
         # The draft pattern reads tool_input, not the ready words in the body, so a call that marks no
         # PR ready starts no python.
-        tool_input = {"owner": "shivinate7", "repo": "claude-settings", "pullNumber": 12,
+        tool_input = {"owner": "swlshiv", "repo": "claude-settings", "pullNumber": 12,
                       "body": "Next: gh pr ready 12 after review."}
         self.assertNotIn("draft", tool_input)
         self.assert_mcp_watch(tool_input, want=False)
@@ -364,14 +364,14 @@ class CiWake(Quiet):
         self.assert_does_nothing(result)
 
     def test_mcp_ready_call_with_draft_true_starts_no_python(self):
-        tool_input = {"owner": "shivinate7", "repo": "claude-settings", "pullNumber": 12, "draft": True}
+        tool_input = {"owner": "swlshiv", "repo": "claude-settings", "pullNumber": 12, "draft": True}
         self.assert_mcp_watch(tool_input, want=False)
         _, result = self.mcp_row(tool_input)
         self.assert_does_nothing(result)
 
     def test_mcp_ready_call_with_compact_draft_false_reaches_python(self):
         # Compact JSON: the row's draft pattern allows zero spaces after the colon.
-        tool_input = {"owner": "shivinate7", "repo": "claude-settings", "pullNumber": 12, "draft": False}
+        tool_input = {"owner": "swlshiv", "repo": "claude-settings", "pullNumber": 12, "draft": False}
         self.assert_mcp_watch(tool_input, want=True)
         payload, result = self.mcp_row(tool_input, compact=True)
         self.assertIn('"draft":false', payload)

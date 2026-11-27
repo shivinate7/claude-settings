@@ -20,7 +20,7 @@ set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$HERE/.." && pwd)"
 SETUP_SH="${CLOUD_SETUP_SH_UNDER_TEST:-$REPO_ROOT/cloud-setup.sh}"
-ORIGIN="https://github.com/shivinate7/claude-settings.git"
+ORIGIN="https://github.com/swlshiv/claude-settings.git"
 RAW_REPO="https://raw.githubusercontent.com/swlshiv/claude-settings"  # the org repo cloud-setup.sh fetches from (its REPO)
 DEAD_RAW="http://127.0.0.1:9/raw"
 DEAD_PROXY="http://127.0.0.1:9"

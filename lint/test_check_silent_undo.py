@@ -1334,7 +1334,7 @@ class RenamedFile(unittest.TestCase):
         self.assertEqual(self.r.verdict(), [])
 
 
-ALLPASS = "      - uses: shivinate7/claude-settings/actions/all-jobs-passed@1cc47f015bdaf073d8cb0f043a988c28d09aa3e1 # main, Oct %d\n"
+ALLPASS = "      - uses: swlshiv/claude-settings/actions/all-jobs-passed@1cc47f015bdaf073d8cb0f043a988c28d09aa3e1 # main, Oct %d\n"
 
 
 class PinComment:

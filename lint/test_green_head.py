@@ -31,7 +31,7 @@ import tracked_tree  # noqa: E402  rm_tree removes the run folder
 
 SCRIPT = os.environ.get("CI_GREEN_HEAD") or os.path.join(HERE, "..", ".github", "scripts", "green-head.sh")
 BASH = shutil.which("bash")
-REPO = "shivinate7/claude-settings"
+REPO = "swlshiv/claude-settings"
 PR = "7"
 HEAD_SHA = "aa" * 20
 GREEN_SHA = "bb" * 20

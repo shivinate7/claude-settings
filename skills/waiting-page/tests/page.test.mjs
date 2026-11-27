@@ -4778,7 +4778,7 @@ test("ask-phase-out: control: no Mark all control is drawn with a routed ask and
 const APR_FILED = { read: "2026-10-26T02:00:00Z", filed: "2026-10-26T03:00:00Z" };
 const APR_ROUTED = mk("apr-routed", 77, { added: at(7), dismissed: "2026-11-09T16:00:00Z" });
 const APR_LANE = mk("apr-lane", 78, { added: at(8), dismissed: "2026-11-09T16:00:00Z", lane: "ci-done-comment" });
-const APR_WAITS = mk("apr-waits", 79, { added: at(9), dismissed: "2026-11-09T16:00:00Z", waits: { repo: "shivinate7/claude-settings", run: 123 } });
+const APR_WAITS = mk("apr-waits", 79, { added: at(9), dismissed: "2026-11-09T16:00:00Z", waits: { repo: "swlshiv/claude-settings", run: 123 } });
 const APR_UNREAD = mk("apr-unread", 80, { added: at(10) });
 // A page whose store holds one answered, filed item as `it`, with no read mark unless `it` carries one. The open TASK keeps open() waiting for a card.
 const aprOpen = (t, it) => open(t, { items: [AP_OPEN], rawItems: { [it.id]: it }, answers: answerOf(it), receipts: { [it.id]: APR_FILED } });

@@ -4870,8 +4870,8 @@ def case_standing_grant_without_a_once_item_keeps_today_reason():
 # session only. The step file is read from the record branch's remote-tracking ref, as the filing check reads
 # its copy. Every case captures the comment through the capture hook, so the block is the harness's shape.
 
-CLAUDE_SETTINGS_ORIGIN = "https://github.com/shivinate7/claude-settings.git"  # layout.repo_name reads the slug from it
-CLAUDE_SETTINGS_SLUG = "shivinate7/claude-settings"
+CLAUDE_SETTINGS_ORIGIN = "https://github.com/swlshiv/claude-settings.git"  # layout.repo_name reads the slug from it
+CLAUDE_SETTINGS_SLUG = "swlshiv/claude-settings"
 PAGE_CODE_URL = "https://claude.ai/code/artifact/3f9c1e2a-5b7d-4e8f-9a1b-2c3d4e5f6a7b"  # PAGE_URL's id, in the /code/ form
 PAGE_COMMENT = """[Artifact comment sent to Claude]
 Artifact: {url}

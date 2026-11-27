@@ -313,8 +313,8 @@ def tokens_of(text):
     return found if found is not None else guard.segment_tokens("echo")
 
 
-LANE_START_REPO_TAGS = ("cs-repo:shivinate7/claude-settings", "cs-repo:o/r")
-LANE_START_URL = "https://github.com/shivinate7/claude-settings"
+LANE_START_REPO_TAGS = ("cs-repo:swlshiv/claude-settings", "cs-repo:o/r")
+LANE_START_URL = "https://github.com/swlshiv/claude-settings"
 
 
 def lane_start_hits_for(rng, text, env):
