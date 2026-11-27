@@ -21,6 +21,7 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$HERE/.." && pwd)"
 SETUP_SH="${CLOUD_SETUP_SH_UNDER_TEST:-$REPO_ROOT/cloud-setup.sh}"
 ORIGIN="https://github.com/shivinate7/claude-settings.git"
+RAW_REPO="https://raw.githubusercontent.com/swlshiv/claude-settings"  # the org repo cloud-setup.sh fetches from (its REPO)
 DEAD_RAW="http://127.0.0.1:9/raw"
 DEAD_PROXY="http://127.0.0.1:9"
 BASE_PATH="$PATH"
@@ -538,7 +539,7 @@ caseV() {
   fake_curl "$c" fail
   # An empty CLAUDE_SETTINGS_RAW is unset for the script's ${VAR:-default}, so the default RAW applies.
   run_setup "$c" v "CLAUDE_SETTINGS_RAW="
-  if ! grep -qF "raw.githubusercontent.com/shivinate7/claude-settings/stable/install.sh" "$c/curl.log" 2>/dev/null; then
+  if ! grep -qF "$RAW_REPO/stable/install.sh" "$c/curl.log" 2>/dev/null; then
     bad "$name" "the raw install.sh was not fetched from the stable branch; curl was called with: $(brief "$c/curl.log")"
   else
     ok "$name"
@@ -571,7 +572,7 @@ caseVF1() {
   c=$(new_case caseVF1)
   stable_404_curl "$c"
   run_setup "$c" vf1 "CLAUDE_SETTINGS_RAW="
-  if ! grep -qF "raw.githubusercontent.com/shivinate7/claude-settings/main/install.sh" "$c/curl.log" 2>/dev/null; then
+  if ! grep -qF "$RAW_REPO/main/install.sh" "$c/curl.log" 2>/dev/null; then
     bad "$name" "no fetch of main's install.sh after the stable 404; curl was called with: $(brief "$c/curl.log")"
   else
     ok "$name"
@@ -600,9 +601,9 @@ caseVREF() {
   c=$(new_case caseVREF)
   fake_curl "$c" fail
   run_setup "$c" vref "CLAUDE_SETTINGS_RAW= CLAUDE_SETTINGS_REF=main"
-  if grep -qF "raw.githubusercontent.com/shivinate7/claude-settings/stable/install.sh" "$c/curl.log" 2>/dev/null; then
+  if grep -qF "$RAW_REPO/stable/install.sh" "$c/curl.log" 2>/dev/null; then
     bad "$name" "the stable branch's install.sh was fetched under CLAUDE_SETTINGS_REF=main; curl was called with: $(brief "$c/curl.log")"
-  elif ! grep -qF "raw.githubusercontent.com/shivinate7/claude-settings/main/install.sh" "$c/curl.log" 2>/dev/null; then
+  elif ! grep -qF "$RAW_REPO/main/install.sh" "$c/curl.log" 2>/dev/null; then
     bad "$name" "no fetch of main's install.sh under CLAUDE_SETTINGS_REF=main; curl was called with: $(brief "$c/curl.log")"
   else
     ok "$name"
