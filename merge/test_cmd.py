@@ -49,7 +49,7 @@ class Launcher(unittest.TestCase):
                 subprocess.run(["git", "-C", self.co, "remote", "set-url", "origin", url], check=True)
                 r = self.run_launcher("12", "--confirm")
                 self.assertEqual(r.returncode, 1, url + r.stdout + r.stderr)
-                self.assertIn("is not a checkout of shivinate7/claude-settings", r.stderr, url)
+                self.assertIn("is not a checkout of swlshiv/claude-settings", r.stderr, url)
                 self.assertNotIn("ARGS", r.stdout, url)
 
     def test_owner_moved_origins_pass_through(self):

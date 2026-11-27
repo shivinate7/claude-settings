@@ -5099,6 +5099,8 @@ write_redirect() {
     printf '[url "file://%s"]\n' "$2"
     printf '\tinsteadOf = https://github.com/shivinate7/claude-settings.git\n'
     printf '\tinsteadOf = https://github.com/shivinate7/claude-settings\n'
+    printf '\tinsteadOf = https://github.com/swlshiv/claude-settings.git\n'
+    printf '\tinsteadOf = https://github.com/swlshiv/claude-settings\n'
     printf '[url "file://%s/no-network/"]\n' "$work"
     printf '\tinsteadOf = https://github.com/\n'
     printf '[protocol]\n\tallow = never\n[protocol "file"]\n\tallow = always\n'
@@ -5164,7 +5166,7 @@ caseK1() {
     bad "$name" "clone HEAD is $(git -C "$co" rev-parse HEAD), want the fixture main $want"
   elif [ "$(git -C "$co" symbolic-ref -q HEAD)" != refs/heads/main ]; then
     bad "$name" "clone is not on branch main: $(git -C "$co" symbolic-ref -q HEAD)"
-  elif [ "$(git -C "$co" config --get remote.origin.url)" != "https://github.com/shivinate7/claude-settings.git" ]; then
+  elif [ "$(git -C "$co" config --get remote.origin.url)" != "https://github.com/swlshiv/claude-settings.git" ]; then
     bad "$name" "clone origin is $(git -C "$co" config --get remote.origin.url)"
   elif [ "$(git -C "$co" config --get claude-settings.cloudMirror)" != true ]; then
     bad "$name" "clone has no claude-settings.cloudMirror marker"
