@@ -47,6 +47,8 @@ An allow rule for `merge --role` waits on the tag check of #878 (merge role read
 
 Owner, 18:56 CST Nov 26, 2026 (org port): Lane Own Merge and Owner PR Housekeeping cover repos owned by shivinate7 or the swlshiv org; the follow-up that drops the old owner narrows it to swlshiv.
 
+Owner, 19:36 CST Nov 26: Session Installer and Lane Replaced PR Close take the same both-owner wording.
+
 ### Sent messages sorted
 
 A scan of refused `send_message` calls on 2026-11-06 sorted them. Owner request: item 315 b on the owner's waiting page (lane brief judge-send-message-refusals, 2026-11-06 17:05 CST). This section holds no owner ruling.
