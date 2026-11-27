@@ -179,7 +179,7 @@ tar -czf "$work/repo.tar.gz" -C "$work/tarsrc" claude-settings-main
 make_checkout() {
   dir="$1"
   md_body="$2"
-  origin="${3:-https://github.com/shivinate7/claude-settings.git}"
+  origin="${3:-https://github.com/swlshiv/claude-settings.git}"
   mkdir -p "$dir"
   cp "$REPO_ROOT/landed-dirs.txt" "$dir/landed-dirs.txt"
   for sub in $(landed_dirs); do mkdir -p "$dir/$sub"; done
@@ -344,7 +344,7 @@ origin_case() {
     fi
   else
     if [ "$(normalize_path "$pointer")" = "$(normalize_path "$co")" ]; then
-      bad "$case_name" "adversarial origin [$origin_url] was wrongly accepted as shivinate7/claude-settings"
+      bad "$case_name" "adversarial origin [$origin_url] was wrongly accepted as swlshiv/claude-settings"
     elif [ "$(normalize_path "$pointer")" = "$(normalize_path "$h/claude-settings")" ] && [ -f "$h/claude-settings/CLAUDE.md" ]; then
       ok "$case_name"
     else
@@ -355,15 +355,15 @@ origin_case() {
 }
 
 case_origins() {
-  # REPO is shivinate7/claude-settings.
-  origin_case "origin: https with .git matches"        "https://github.com/shivinate7/claude-settings.git" yes
-  origin_case "origin: https without .git matches"      "https://github.com/shivinate7/claude-settings"     yes
-  origin_case "origin: ssh with .git matches"           "git@github.com:shivinate7/claude-settings.git"     yes
-  origin_case "origin: ssh without .git matches"        "git@github.com:shivinate7/claude-settings"         yes
+  # REPO is swlshiv/claude-settings.
+  origin_case "origin: old owner https with .git is refused"        "https://github.com/shivinate7/claude-settings.git" no
+  origin_case "origin: old owner https without .git is refused"     "https://github.com/shivinate7/claude-settings"     no
+  origin_case "origin: old owner ssh with .git is refused"          "git@github.com:shivinate7/claude-settings.git"     no
+  origin_case "origin: old owner ssh without .git is refused"       "git@github.com:shivinate7/claude-settings"         no
   origin_case "origin: name-suffix-evil does not match" "https://github.com/shivinate7/claude-settings-evil.git" no
   origin_case "origin: owner-prefix-evil does not match" "https://github.com/evil-shivinate7/claude-settings.git" no
   origin_case "origin: owner-notshivinate7 does not match" "https://github.com/notshivinate7/claude-settings.git" no
-  origin_case "origin: ssh with explicit port matches"      "ssh://git@github.com:22/shivinate7/claude-settings.git" yes
+  origin_case "origin: old owner ssh with explicit port is refused" "ssh://git@github.com:22/shivinate7/claude-settings.git" no
   origin_case "origin: wrong host (gitlab.com) does not match" "https://gitlab.com/shivinate7/claude-settings.git" no
   origin_case "origin: extra leading path segment does not match" "https://github.com/mirror/shivinate7/claude-settings.git" no
   origin_case "origin: bare path with no host does not match" "file:///local/shivinate7/claude-settings" no
@@ -4330,7 +4330,7 @@ live_pin_fixture() {
   git -C "$lp_co" worktree lock --reason "claude-settings live pin" "$lp_pin" >/dev/null 2>&1 \
     || { lp_msg="cannot lock the pin"; return 1; }
   ln -s "$lp_pin" "$lp_link" && [ -L "$lp_link" ] || { lp_msg="cannot make the link"; return 1; }
-  git -C "$lp_co" remote set-url origin https://github.com/shivinate7/claude-settings.git \
+  git -C "$lp_co" remote set-url origin https://github.com/swlshiv/claude-settings.git \
     || { lp_msg="cannot set origin to the GitHub URL"; return 1; }
   lp_head=$(git -C "$lp_pin" rev-parse HEAD 2>/dev/null)
   lp_main=$(git -C "$lp_co" rev-parse --verify -q refs/heads/main 2>/dev/null)
@@ -4630,7 +4630,7 @@ mergepin5() {
   if ! live_pin_fixture mergepin5; then bad "$name" "fixture: $lp_msg"; return; fi
   rm -f "$lp_co/settings.json" || { bad "$name" "fixture: cannot remove the clone's settings.json"; return; }
   cwd_co="$work/mergepin5-cwd"
-  git clone -q "$lp_bare" "$cwd_co" && git -C "$cwd_co" remote set-url origin https://github.com/shivinate7/claude-settings.git \
+  git clone -q "$lp_bare" "$cwd_co" && git -C "$cwd_co" remote set-url origin https://github.com/swlshiv/claude-settings.git \
     || { bad "$name" "fixture: cannot make the cwd checkout"; return; }
   cfg="$work/mergepin5-cfg"; seed_pointer "$cfg" "$lp_pin"
   h=$(new_home); write_redirect "$h" "$lp_bare"
@@ -5105,8 +5105,8 @@ fixture_sha() { git -C "$1/bare.git" rev-parse refs/heads/main; }
 write_redirect() {
   {
     printf '[url "file://%s"]\n' "$2"
-    printf '\tinsteadOf = https://github.com/shivinate7/claude-settings.git\n'
-    printf '\tinsteadOf = https://github.com/shivinate7/claude-settings\n'
+    printf '\tinsteadOf = https://github.com/swlshiv/claude-settings.git\n'
+    printf '\tinsteadOf = https://github.com/swlshiv/claude-settings\n'
     printf '\tinsteadOf = https://github.com/swlshiv/claude-settings.git\n'
     printf '\tinsteadOf = https://github.com/swlshiv/claude-settings\n'
     printf '[url "file://%s/no-network/"]\n' "$work"
@@ -5264,9 +5264,9 @@ caseK4() {
   make_github_fixture "$fx"; first=$(fixture_sha "$fx")
   write_redirect "$h" "$fx/bare.git"
   setup_err=$(env -i PATH="$PATH" HOME="$h" git clone -q --depth 1 --branch main \
-    https://github.com/shivinate7/claude-settings.git "$co" 2>&1)
+    https://github.com/swlshiv/claude-settings.git "$co" 2>&1)
   if [ "$(git -C "$co" rev-parse HEAD 2>/dev/null)" != "$first" ] \
-     || [ "$(git -C "$co" config --get remote.origin.url)" != "https://github.com/shivinate7/claude-settings.git" ]; then
+     || [ "$(git -C "$co" config --get remote.origin.url)" != "https://github.com/swlshiv/claude-settings.git" ]; then
     bad "$name" "setup: no unmarked clone at $first with the GitHub origin: $setup_err"
     return
   fi
@@ -5521,7 +5521,7 @@ advance_stable_fixture() {
 # It also writes $work/npm-stub/npm, an npm that does nothing: a local install in a case must not reach the registry.
 local_stable_clone() {
   git clone -q "$2/bare.git" "$1"
-  git -C "$1" remote set-url origin https://github.com/shivinate7/claude-settings.git
+  git -C "$1" remote set-url origin https://github.com/swlshiv/claude-settings.git
   mkdir -p "$work/npm-stub"; printf '#!/bin/sh\nexit 0\n' > "$work/npm-stub/npm"; chmod +x "$work/npm-stub/npm"
 }
 
@@ -5883,7 +5883,7 @@ caseK18() {
   make_git_log_stub "$bin" "$log"
   # A session's own checkout: a clone, origin the GitHub URL, detached at origin's stable, as a cloud session starts it.
   git clone -q "$fx/bare.git" "$co"
-  git -C "$co" config remote.origin.url https://github.com/shivinate7/claude-settings.git
+  git -C "$co" config remote.origin.url https://github.com/swlshiv/claude-settings.git
   git -C "$co" checkout -q --detach "$(git -C "$fx/bare.git" rev-parse refs/heads/stable)"
   git -C "$co" update-ref -d refs/remotes/origin/roadmap 2>/dev/null || :
   rf_want=$(git -C "$fx/bare.git" rev-parse refs/heads/roadmap)
@@ -6270,7 +6270,7 @@ move_fixture() {
   git -C "$fx/src" push -q "$fx/bare.git" HEAD:refs/heads/main
   want=$(fixture_sha "$fx")
   git clone -q "$fx/bare.git" "$co"
-  git -C "$co" config remote.origin.url https://github.com/shivinate7/claude-settings.git
+  git -C "$co" config remote.origin.url https://github.com/swlshiv/claude-settings.git
   git -C "$co" checkout -q --detach "$old"
   write_redirect "$h" "$fx/bare.git"
 }
