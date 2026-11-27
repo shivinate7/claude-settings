@@ -60,6 +60,6 @@ jobs:
     timeout-minutes: 2
     steps:
       # macos may be skipped only when scope ruled it out (docs-only change); then judge scope alone.
-      - uses: shivinate7/claude-settings/actions/all-jobs-passed@e305bdbcdb540ee20ba5104cd1a7ac1d9ebb27b7  # claude-settings main 2026-10-27, "Merge pull request #652 from shivinate7/batch-oct27a" (no tags)
+      - uses: swlshiv/claude-settings/actions/all-jobs-passed@e305bdbcdb540ee20ba5104cd1a7ac1d9ebb27b7  # claude-settings main 2026-10-27, "Merge pull request #652 from shivinate7/batch-oct27a" (no tags)
         with:
           needs: ${{ needs.scope.outputs.macos == 'true' && toJSON(needs) || format('{{"scope":{0}}}', toJSON(needs.scope)) }}

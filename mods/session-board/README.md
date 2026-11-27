@@ -99,7 +99,7 @@ Checked: the session id in `claude agents --json` equals the id the mod writes. 
 
 ## Try in the desktop app
 
-1. Install: `/plugin install session-board --marketplace shivinate7/claude-settings`, then restart the session.
+1. Install: `/plugin install session-board --marketplace swlshiv/claude-settings`, then restart the session.
 2. Run `/board`. Check that the pane draws, that rows open, and that a session without the mod shows "no detail".
 3. Start a long turn in a second session. Check that its row reads "working", then "waiting" at the end.
 4. Trigger a permission prompt. Check that the row reads "permission".

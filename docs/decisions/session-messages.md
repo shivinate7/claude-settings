@@ -35,7 +35,7 @@ Why:
 Wake routes under study. All unmeasured.
 
 - (a) Doorbell (open, see above): `mail send` also fires a short `send_message`. Works cloud to cloud. Cloud to the owner's computer is refused.
-- (b) One long-lived pull request per session in shivinate7/session-mailbox. Each message is also a
+- (b) One long-lived pull request per session in swlshiv/session-mailbox. Each message is also a
   comment. The receiver subscribes with `subscribe_pr_activity` (the tool that watches PR activity).
 - (c) A GitHub webhook to a session's `watch_url`. Likely blocked: the signing secret is sealed to the
   artifact service.
@@ -153,7 +153,7 @@ Ruling: every message goes through the git mailbox, read at turn start (owner, p
 Not built, doorbell open: a doorbell for a local computer (option B) and a local relay (option C). Owner note: "i think
 B and C can still work too though probably."
 Store: answered. Page item 308 (the store), owner pick a, relayed by triage 2026-11-06: a private repo,
-shivinate7/session-mailbox. The owner allowed Cloudflare if it is faster. Lane verdict: git.
+swlshiv/session-mailbox. The owner allowed Cloudflare if it is faster. Lane verdict: git.
 - The per-turn check is one `ls-remote`: 391 to 608 ms over 5 runs from a cloud session.
 - A Worker would save about 0.3 s. It adds a server, a secret on every machine and a network allowlist.
 - Cloudflare stays a later swap behind `MAILBOX_REPO`.
@@ -216,7 +216,7 @@ Design:
 
 ## Reach across GitHub accounts
 
-- The store is the private repo shivinate7/session-mailbox. A cloud session under the owner's second
+- The store is the private repo swlshiv/session-mailbox. A cloud session under the owner's second
   account, ssemwal-cdc, reaches it only if that account can read and write it.
 - Done by the owner. Owner's words, 2026-11-10 10:19 CST: "ssemwal-cdc long has been invited and accepted."
   The invite date is unknown.

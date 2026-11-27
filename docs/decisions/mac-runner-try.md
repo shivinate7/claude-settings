@@ -16,7 +16,7 @@ The try: the macOS leg of `lane-touched-tests.yml` (the `run` job) may run on th
 - The `run` job's `runs-on` reads `MAC_RUNS_ON` for a same-repository pull request. The macOS leg runs on the label that the variable holds.
 - Unset or empty means hosted: the macOS leg runs on `macos-latest`.
 - The Windows leg never reads the variable. The `touched` job runs on Linux.
-- Before `On`, read the Actions setting that guards fork pull requests: `gh api repos/shivinate7/claude-settings/actions/permissions/fork-pr-contributor-approval`. Expect `all_external_contributors`.
+- Before `On`, read the Actions setting that guards fork pull requests: `gh api repos/swlshiv/claude-settings/actions/permissions/fork-pr-contributor-approval`. Expect `all_external_contributors`.
 - On: `gh variable set MAC_RUNS_ON --body <label>`. Off: `gh variable delete MAC_RUNS_ON`.
 - Set the value to the runner's own label, which is `claude-settings-mac`. Note `mac-runs-on-bare-self-hosted` says why a bare label is wrong.
 - Before a maintainer lets a held fork run go, read the fork's workflow diff. That run goes to the Mac if the fork's copy names it.

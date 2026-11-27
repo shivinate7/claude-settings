@@ -2,11 +2,11 @@
 # Sorted by name. Read and edited by lint/children.py. The name is the key and the file holds no repo id (this repo is public).
 # A renamed child is unknown to the reader until its line is fixed here by pull request.
 # A `since` of 2026-11-25 on the child with no stamp commit is a default, not a measured date.
-shivinate7/banchi 2026-10-01
-shivinate7/degen 2026-10-10
-shivinate7/home 2026-10-28
-shivinate7/ios-adblock 2026-10-11
-shivinate7/joyous 2026-10-30
-shivinate7/mailaudit 2026-10-29
-shivinate7/q_max 2026-09-29
-shivinate7/sillage 2026-11-25
+swlshiv/banchi 2026-10-01
+swlshiv/degen 2026-10-10
+swlshiv/home 2026-10-28
+swlshiv/ios-adblock 2026-10-11
+swlshiv/joyous 2026-10-30
+swlshiv/mailaudit 2026-10-29
+swlshiv/q_max 2026-09-29
+swlshiv/sillage 2026-11-25

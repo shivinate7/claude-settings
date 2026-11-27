@@ -16,7 +16,7 @@ Read at degen a2ae7ba. Line numbers are for that commit. Re-read each line befor
 In `.github/workflows/check.yml`, in the job that runs "STE lint", add one step:
 
     - name: CLAUDE.md cites records
-      uses: shivinate7/claude-settings/actions/claude-md-cites@<sha>
+      uses: swlshiv/claude-settings/actions/claude-md-cites@<sha>
 
 `<sha>` is the claude-settings main commit that holds `actions/claude-md-cites`. Move the other claude-settings pins in that file to the same commit (decision `action-pins-follow-sessions`). Put the line fix and the step in one PR.
 

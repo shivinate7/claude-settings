@@ -17,6 +17,8 @@ import sys
 
 HERE = os.path.dirname(os.path.realpath(__file__))
 sys.path.insert(0, HERE)
+sys.path.insert(0, os.path.join(os.path.dirname(HERE), "hooks"))
+from shared_names import OLD_SETTINGS_REPO, SETTINGS_REPO  # noqa: E402  the one home of the repo owner, stdlib only
 from test_windows_split import (ALL_JOBS_PASSED_JOB, CHECKS_JOB, MACOS_JOBS, NIGHTLY_SKIP_JOB, PUSH_OFF_JOBS, PUSH_SKIP_JOB, RECORDS_ONLY_CONDITION, all_jobs, checks_if_problems, draft_guard_only, drop_condition, eval_if, eval_value, job_needs_of,  # noqa: E402,F401  the one home of the scope condition and scalar parsers
                                 job_if_without_records, push_guard_only, push_off_only, shard_base, shard_push_off, unwrap, yaml_scalar)  # NIGHTLY_SKIP_JOB and PUSH_SKIP_JOB are read from here by actions/push-skip/push-skip.py
 from workflow_steps import job_block, step_blocks, step_key  # noqa: E402  the one home of the step parser
@@ -34,7 +36,8 @@ TO_JSON = "${{ toJSON(needs) }}"
 FAN_IN = "ci-done"  # comments on a red run; it needs all-jobs-passed, and all-jobs-passed never needs it
 CHECKOUT_PIN = re.compile(r"actions/checkout@[0-9a-f]{40}")
 STEP_KEYS_BARRED = ("if", "continue-on-error")  # either one lets a failed needed job leave the action step green
-REMOTE_ACTION = "shivinate7/claude-settings/actions/all-jobs-passed"  # how a child repo names the shared action
+REMOTE_ACTION = SETTINGS_REPO + "/actions/all-jobs-passed"  # how a child repo names the shared action
+OLD_REMOTE_ACTION = OLD_SETTINGS_REPO + "/actions/all-jobs-passed"  # a child that has not moved to the org's name yet; read as the same action until a follow-up drops it
 COMMIT_SHA = re.compile(r"[0-9a-f]{40}")
 
 
@@ -341,7 +344,7 @@ def child_if_problems(block):
 def child_action_problems(block):
     """One step uses the shared action at a 40-hex commit, fed toJSON(needs). A tag or branch can move, so it is red."""
     uses = [(yaml_scalar(step_key(st, "uses") or ""), st) for st in step_blocks(steps_part(block))]
-    ours = [(u, st) for u, st in uses if u.partition("@")[0] == REMOTE_ACTION]
+    ours = [(u, st) for u, st in uses if u.partition("@")[0] in (REMOTE_ACTION, OLD_REMOTE_ACTION)]
     if len(ours) != 1:
         return [f"{ALL_JOBS_PASSED_JOB} has {len(ours)} steps that use {REMOTE_ACTION}, want 1"]
     ref, step = ours[0][0].partition("@")[2], ours[0][1]

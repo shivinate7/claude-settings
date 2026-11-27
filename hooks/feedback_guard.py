@@ -181,7 +181,7 @@ import report_guard  # noqa: E402  the one home of the Stop output and its corre
 import override  # noqa: E402  the one home of the roadmap record ref and folder
 import ruling_home  # noqa: E402  the one home of "a branch's tree holds this file"
 import precompact_handoff  # noqa: E402  the one home of the handoff path
-from shared_names import MACHINE_TAGS, SETTINGS_REPO, TEMPLATE_DIR  # noqa: E402  the one home of the machine notice tags, the repo, and the template dir
+from shared_names import MACHINE_TAGS, OLD_SETTINGS_REPO, SETTINGS_REPO, TEMPLATE_DIR  # noqa: E402  the one home of the machine notice tags, the repo, and the template dir
 from guard_core import SHELL_TOOLS  # noqa: E402  the one home of the shell tool names (Bash, PowerShell)
 
 ITEM = re.compile(r"- (fb-\S+)(?:\s+(.*))?$")
@@ -592,7 +592,7 @@ class Homes:
             return None
         try:
             root = self._cwd_root()
-            if root is None or layout.repo_name(root) != SETTINGS_REPO.lower() or not layout.is_waiting_page_url(
+            if root is None or layout.repo_name(root) not in (SETTINGS_REPO.lower(), OLD_SETTINGS_REPO.lower()) or not layout.is_waiting_page_url(
                     root, url):
                 return None
             return root, layout.record_branch(root)

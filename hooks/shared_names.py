@@ -106,7 +106,13 @@ GH_DEFAULT_LOGIN = "shivinate7"
 GH_FALLBACK_LOGIN = "ssemwal-cdc"
 # The repo that holds the shared waiting-page template, and the folder of it (rule page-form-to-template: a page
 # comment is rewritten into the template, never answered by a thread reply). The one home of both strings.
-SETTINGS_REPO = GH_DEFAULT_LOGIN + "/claude-settings"
+# The GitHub org that owns the settings repo and its child repos, and the person's account that owned them before the
+# move. The gh logins above name the person and stay; these two name repo owners. A matcher accepts both owners until
+# the old one is dropped by a follow-up; an emitter names SETTINGS_OWNER alone.
+SETTINGS_OWNER = "swlshiv"
+OLD_SETTINGS_OWNER = "shivinate7"
+SETTINGS_REPO = SETTINGS_OWNER + "/claude-settings"
+OLD_SETTINGS_REPO = OLD_SETTINGS_OWNER + "/claude-settings"
 TEMPLATE_DIR = "skills/waiting-page"
 
 # The tags a session carries (decision session-tiers, Tier tags). The roadmap build reads them from live sessions and

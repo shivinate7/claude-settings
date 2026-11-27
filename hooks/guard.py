@@ -184,7 +184,7 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        record (read from the transcript) does not show in its cs-build tags. The standing tier
                        needs the own newest record to show a coordinator, triage or consultant tag, with no set_session_tags after it.
                        For the lane tier, also a `--step` that is no cs-step tag of that record, or a record with no cs-repo
-                       tag for shivinate7/claude-settings. Read inside wrappers
+                       tag for swlshiv/claude-settings. Read inside wrappers
                        (`bash -c`, `$(...)`) too. Also a cloud `merge <pr> --ready` from a session whose own
                        record carries cs-build:lane and that cs-repo tag, or an MCP update_pull_request with draft false from
                        one, except a lane's own: `merge --role lane --step <its step> <pr> --ready`, where the

@@ -18,7 +18,7 @@ This repo runs no STE lint job. In the workflow that runs `all-jobs-passed`, add
       runs-on: ubuntu-latest
       steps:
         - uses: actions/checkout@<the pin this repo uses>
-        - uses: shivinate7/claude-settings/actions/claude-md-cites@<sha>
+        - uses: swlshiv/claude-settings/actions/claude-md-cites@<sha>
 
 `<sha>` is the claude-settings main commit that holds `actions/claude-md-cites`. Put the line fix and the job in one PR.
 

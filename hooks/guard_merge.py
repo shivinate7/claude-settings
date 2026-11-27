@@ -22,7 +22,7 @@ from guard_core import (
 )
 import own_session  # the one home of the own get_session read, small so report_guard imports it too
 from required_check import REQUIRED_CHECK  # the one home of the rollup job's name
-from shared_names import opens_fence, BUILD_TAG, CONSULTANT_TAG, CREATE_SESSION_TOOL, DATA_TOOL, LANE_BRIEF_MARKER, LANE_GRANT_MARKER, LANE_TAG, REPO_TAG, STEP_TAG, TOPIC_TAG, grant_line_holds_words, is_lane_create_session, lane_head_refs, lane_tags, repo_tag_names  # the one home of the lane tags and head refs, shared with the roadmap build
+from shared_names import opens_fence, BUILD_TAG, CONSULTANT_TAG, CREATE_SESSION_TOOL, DATA_TOOL, LANE_BRIEF_MARKER, LANE_GRANT_MARKER, LANE_TAG, OLD_SETTINGS_REPO, REPO_TAG, STEP_TAG, TOPIC_TAG, grant_line_holds_words, is_lane_create_session, lane_head_refs, lane_tags, repo_tag_names  # the one home of the lane tags and head refs, shared with the roadmap build
 from guard_pointer import (
     pointer_checkout,
 )
@@ -1878,7 +1878,8 @@ LOCAL_ROLE_TIERS = ("batch-runner",)  # glossary-ok: the name a test reads; the 
 ROLE_WITH_STEP = "lane"  # the role whose call also names a step (--step), proved by a cs-step tag of the own record
 STANDING_ROLE = "standing"  # ruling own-tiny-fixes-b: a standing session, not a batch runner, merges its own pull request
 STANDING_HOLDERS = ("coordinator", "triage", CONSULTANT_TAG.split(":", 1)[1])  # the cs-build tags that prove the standing session role (decision session-tiers)  # glossary-ok: session-tiers is the decision
-LANE_MERGE_REPO = "shivinate7/claude-settings"  # the one repo whose lanes hold the lane merge role; agrees with merge.py LANE_MERGE_REPO, which this module cannot import
+LANE_MERGE_REPO = "swlshiv/claude-settings"  # the one repo whose lanes hold the lane merge role; agrees with merge.py LANE_MERGE_REPO, which this module cannot import
+LANE_MERGE_REPOS = (LANE_MERGE_REPO, OLD_SETTINGS_REPO)  # the repo moved owners: a tag naming the old owner holds the role until a follow-up drops it
 ROLE_TAG_PREFIX = BUILD_TAG
 ROLE_REASON = (
     "merge-role-proof: this session's own record does not prove the merge tier it claims. "
@@ -1978,7 +1979,7 @@ def _nested_segments(text: str, depth: int = 0):
 
 def _tags_name_lane_merge_repo(tags) -> bool:
     """True when a cs-repo tag of the own record names LANE_MERGE_REPO: the only repo whose lanes hold the lane merge role. Own tags only, no REST read."""
-    return any(repo_tag_names(tag, LANE_MERGE_REPO) for tag in tags)
+    return any(repo_tag_names(tag, repo) for tag in tags for repo in LANE_MERGE_REPOS)
 
 
 def role_proof_hit(stripped: str, transcript: str) -> str:

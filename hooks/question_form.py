@@ -80,7 +80,7 @@ def install_path(*parts):
 
 from precompact_handoff import PREMISE_KINDS  # noqa: E402  the one home of the premise kinds
 from own_session import _CREATED_ID as SESSION_ID  # noqa: E402  the one home of the session id shape
-from shared_names import GH_DEFAULT_LOGIN, GH_FALLBACK_LOGIN, SETTINGS_REPO  # noqa: E402  the one home of the gh logins
+from shared_names import GH_DEFAULT_LOGIN, GH_FALLBACK_LOGIN, SETTINGS_OWNER, SETTINGS_REPO  # noqa: E402  the one home of the gh logins
 
 PASS = ("", "")
 FORM_RULE, STAKE_RULE = "question-form", "owner-judge"
@@ -883,6 +883,8 @@ GH_LOGIN_REASON = ("A gh command handed to the owner runs as whichever gh login 
                    % (GH_DEFAULT_LOGIN, GH_FALLBACK_LOGIN, GH_DEFAULT_LOGIN))
 GH_NO_SWITCH = "gh command with no gh auth switch before it"
 GH_WORD = re.compile(r"(?<![\w-])gh(?![\w-])")
+# The repo prefixes the fallback login cannot reach: the person's own account and the org that now owns the repos.
+GH_DEFAULT_REPO_PREFIXES = tuple(owner + "/" for owner in (GH_DEFAULT_LOGIN, SETTINGS_OWNER))
 
 
 def _switch_login(args) -> str:
@@ -916,9 +918,9 @@ def _gh_calls(guard_core, reading):
 def _gh_script_hit(guard_core, reading, command) -> str:
     """The matched text when one shell's `reading` of `command` runs a gh command other than
     `gh auth ...` with no switch to a login in GH_LOGINS before it, or runs one as GH_FALLBACK_LOGIN
-    while `command` names a GH_DEFAULT_LOGIN repo. A segment the reader cannot parse counts as a gh
+    while `command` names a repo of the GH_DEFAULT_LOGIN or the SETTINGS_OWNER org. A segment the reader cannot parse counts as a gh
     command when the word gh is in it, and never as a switch: the check fails closed there."""
-    names_default_repo = (GH_DEFAULT_LOGIN + "/").lower() in command.lower()
+    default_repo = next((prefix for prefix in GH_DEFAULT_REPO_PREFIXES if prefix in command.lower()), "")
     login = ""
     for call in _gh_calls(guard_core, reading):
         if call is not None and list(call[1:2]) == ["auth"]:
@@ -929,8 +931,8 @@ def _gh_script_hit(guard_core, reading, command) -> str:
             if login:
                 return "gh command after a switch to %s, a login outside the pair" % login
             return GH_NO_SWITCH
-        if login == GH_FALLBACK_LOGIN and names_default_repo:
-            return "gh command as %s on a %s/ repo" % (GH_FALLBACK_LOGIN, GH_DEFAULT_LOGIN)
+        if login == GH_FALLBACK_LOGIN and default_repo:
+            return "gh command as %s on a %s repo" % (GH_FALLBACK_LOGIN, default_repo)
     return ""
 
 
@@ -968,7 +970,7 @@ def gh_edit_hit(old, new) -> str:
     one reason GH_NO_SWITCH is excused for an edit that only changes gh commands `old` already held: it
     adds no gh command, and it holds no switch in `old` or `new` for the edit to remove or move, so the
     switch the stored command keeps still stands. Every other reason stands. So does an edit that adds
-    a GH_DEFAULT_LOGIN repo name, since the stored login may be GH_FALLBACK_LOGIN."""
+    a repo name of either owner, since the stored login may be GH_FALLBACK_LOGIN."""
     hit = gh_login_hit({"command": new})
     if hit != GH_NO_SWITCH:
         return hit
@@ -976,9 +978,9 @@ def gh_edit_hit(old, new) -> str:
     new_gh, new_switch = _gh_counts(new)
     if not old_gh or new_gh > old_gh or old_switch or new_switch:
         return hit
-    repo = GH_DEFAULT_LOGIN + "/"
-    if new.lower().count(repo) > old.lower().count(repo):
-        return "gh edit that names a %s/ repo, and the stored login is unseen" % GH_DEFAULT_LOGIN
+    for prefix in GH_DEFAULT_REPO_PREFIXES:
+        if new.lower().count(prefix) > old.lower().count(prefix):
+            return "gh edit that names a %s repo, and the stored login is unseen" % prefix
     return ""
 
 

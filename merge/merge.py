@@ -8249,7 +8249,7 @@ def replaced_names(info, n):
 LANE_ROLE = "lane"  # a lane's merge role: its role record also names its step, and it merges only its own pull request (ruling own-lanes-merge-claude-settings-prs)
 STANDING_ROLE = "standing"  # ruling own-tiny-fixes-b: a coordinator, triage or the consultant merges its own pull request (decision session-tiers)
 MERGE_ROLES = {"batch-runner", LANE_ROLE, STANDING_ROLE}  # the tiers that may run `merge <pr> --confirm` in a cloud session; the standing one only past standing_refusal, the lane one only on its own pull request
-LANE_MERGE_REPO = "shivinate7/claude-settings"  # the one repo whose pull requests a lane merges itself; the lane role covers it alone
+LANE_MERGE_REPO = "swlshiv/claude-settings"  # the one repo whose pull requests a lane merges itself; the lane role covers it alone
 LOCAL_MERGE_ROLES = {"batch-runner"}  # the roles a local session's role file may name; the lane role is a cloud role only
 
 
@@ -8293,12 +8293,12 @@ def lane_own_pr_refusal(info, h, marking_ready=False):
     """A lane's confirm or ready mark is refused unless the pull request is in LANE_MERGE_REPO (the repo read from `h`, repo_full_name; a read that fails refuses) and is its own: its head ref is one of lane_head_refs of the step its role record names.
     A confirm also needs it ready, because a draft would take the records step, which marks it ready. With `marking_ready` the draft is the point, so the draft test is skipped. -> the refusal text without its cite (the raise adds it), or None (not a lane, or its own pull request).
     The text names neither flag it refuses."""
-    from shared_names import lane_head_refs  # hooks/shared_names.py, the one home of a lane's head refs, on sys.path from the top of this file
+    from shared_names import OLD_SETTINGS_REPO, lane_head_refs  # hooks/shared_names.py, the one home of a lane's head refs and of the old owner, on sys.path from the top of this file
     record = read_merge_record()
     if not record or record["role"] != LANE_ROLE:
         return None
     try:
-        in_repo = repo_full_name(h).casefold() == LANE_MERGE_REPO.casefold()
+        in_repo = repo_full_name(h).casefold() in (LANE_MERGE_REPO.casefold(), OLD_SETTINGS_REPO.casefold())  # the repo moved owners; the old slug is accepted until a follow-up drops it
     except Exception:  # an unread repo is no proof of the one repo: fail closed
         in_repo = False
     if not in_repo:

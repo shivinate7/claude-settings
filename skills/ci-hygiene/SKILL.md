@@ -282,7 +282,7 @@ CI claims in README or docs go stale too. See the `fresh-prose` skill.
 
 Each template has one home: a composite action under `actions/<name>/`, or a plain file (decision
 `opt-in-ci-templates-composite`, opt-in templates are composite actions). Adopt an action with
-`uses: shivinate7/claude-settings/actions/<name>@<full-sha>`, or copy the file. Each line below
+`uses: swlshiv/claude-settings/actions/<name>@<full-sha>`, or copy the file. Each line below
 gives the action's purpose from its `action.yml`.
 
 The seven opt-in templates of that decision:
