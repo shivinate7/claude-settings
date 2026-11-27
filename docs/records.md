@@ -222,7 +222,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `lists-one-line-per-item` | The owner's words are quoted below. | [`docs/decisions/lists-one-line-per-item.md`](../docs/decisions/lists-one-line-per-item.md) |
 | `local-time-central` | Owner, 2026-10-12: a session tells the owner times in US Central (America/Chicago), DST-aware, 24-hour clock. | [`docs/decisions/local-time-central.md`](../docs/decisions/local-time-central.md) |
 | `mac-runner-try` | Owner, 13:18 CST Nov 25 2026, typed in the consultant's chat. | [`docs/decisions/mac-runner-try.md`](../docs/decisions/mac-runner-try.md) |
-| `main-branch-protection` | `main` of shivinate7/claude-settings requires no status check. | [`docs/decisions/main-branch-protection.md`](../docs/decisions/main-branch-protection.md) |
+| `main-branch-protection` | `main` of swlshiv/claude-settings requires no status check. | [`docs/decisions/main-branch-protection.md`](../docs/decisions/main-branch-protection.md) |
 | `map-facts-are-checked` | Owner, 2026-10-30 16:09 CDT. | [`docs/decisions/map-facts-are-checked.md`](../docs/decisions/map-facts-are-checked.md) |
 | `map-lists-record-named` | Owner, Cockpit item 268 (`banchi-map-binary-hints`), choice a, 2026-11-06 13:08 CST: "Yes: list every file a decision or debt names." Not picked: "banchi only: map its 8 files", and "Accept the loss". | [`docs/decisions/map-lists-record-named.md`](../docs/decisions/map-lists-record-named.md) |
 | `map-skill-lives-here` | Owner, 2026-10-16: `skills/plain-english-map/` in claude-settings is the one home of the skill. | [`docs/decisions/map-skill-lives-here.md`](../docs/decisions/map-skill-lives-here.md) |
@@ -237,7 +237,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `mistake-means-missing-guard` | Owner, 2026-11-06 11:38 CST: AI sometimes assumes it broke something by accident. | [`docs/decisions/mistake-means-missing-guard.md`](../docs/decisions/mistake-means-missing-guard.md) |
 | `mockup-home` | Git is each artifact's home (owner ruling fb-1458-1, 2026-11-02 14:58 CST, option A). | [`docs/decisions/mockup-home.md`](../docs/decisions/mockup-home.md) |
 | `mods-deferred-table` | These mods stay deferred recordings on the repo. | [`docs/decisions/mods-deferred-table.md`](../docs/decisions/mods-deferred-table.md) |
-| `mods-install-via-marketplace` | The shared `settings.json` declares one marketplace, `claude-settings`, from the GitHub repo `shivinate7/claude-settings`, with `autoUpdate` set to true. | [`docs/decisions/mods-install-via-marketplace.md`](../docs/decisions/mods-install-via-marketplace.md) |
+| `mods-install-via-marketplace` | The shared `settings.json` declares one marketplace, `claude-settings`, from the GitHub repo `swlshiv/claude-settings`, with `autoUpdate` set to true. | [`docs/decisions/mods-install-via-marketplace.md`](../docs/decisions/mods-install-via-marketplace.md) |
 | `mods-no-cli-key-headless` | No CLI API key for headless runs. | [`docs/decisions/mods-no-cli-key-headless.md`](../docs/decisions/mods-no-cli-key-headless.md) |
 | `mutant-anchor-census` | A mutant names an anchor: the exact text it replaces. | [`docs/decisions/mutant-anchor-census.md`](../docs/decisions/mutant-anchor-census.md) |
 | `mutants-one-file-per-rule` | A new mutant row goes in `hooks/mutants/<rule-slug>.py`, one file per rule. | [`docs/decisions/mutants-one-file-per-rule.md`](../docs/decisions/mutants-one-file-per-rule.md) |
