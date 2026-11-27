@@ -111,7 +111,8 @@ GH_FALLBACK_LOGIN = "ssemwal-cdc"
 SETTINGS_OWNER = "swlshiv"
 SETTINGS_REPO = SETTINGS_OWNER + "/claude-settings"
 # The names the settings repo had before the move: the person's account, whose login is GH_DEFAULT_LOGIN. GitHub redirects
-# them here, so an old checkout's origin still names one. A reader that refuses such a name reads this; none accepts it.
+# them here, so an old checkout's origin still names one. lint/children.py reads it as this repo (refused as a child);
+# no matcher accepts it.
 PRE_MOVE_SETTINGS_REPOS = (GH_DEFAULT_LOGIN + "/claude-settings",)
 TEMPLATE_DIR = "skills/waiting-page"
 
