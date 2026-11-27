@@ -2050,8 +2050,12 @@ cloud_settings1() {
 
   # CLAUDE_CODE_REMOTE is set, as in a cloud container. The repo's startup pull hook exits on it. Without it,
   # the startup entries install.sh runs here would start a background fetch.
-  out=$(cd "$co" && env -i PATH="$PATH" HOME="$h" CLAUDE_CONFIG_DIR="$cfg" CLAUDE_CODE_REMOTE=true \
-        bash ./install.sh --cloud 2>&1); rc=$?
+  # The checkout sits under $work, a temp folder, so install.sh would skip it and fetch the tarball. This case
+  # reads this checkout's settings.json, so the temp root names a folder that holds nothing. The curl stub
+  # answers any fetch that still runs, so no case reaches the network.
+  stub_bin="$work/cloud_settings1-bin"; make_curl_stub "$stub_bin"
+  out=$(cd "$co" && env -i PATH="$stub_bin:$PATH" HOME="$h" CLAUDE_CONFIG_DIR="$cfg" CLAUDE_CODE_REMOTE=true \
+        CLAUDE_SETTINGS_TEMP_ROOTS="$work/no-such-temp-root" bash ./install.sh --cloud 2>&1); rc=$?
   fires='def fires: (.matcher // "") as $m | if ($m == "" or $m == "*") then true else ("startup" | test("^(" + $m + ")$")) end;'
   want=$(jq -c "$fires"' [.hooks.SessionStart[] | select(fires | not)]' "$REPO_ROOT/settings.json")
   got=$(jq -c "$fires"' [.hooks.SessionStart[] | select(fires | not)]' "$cfg/settings.json" 2>/dev/null)
@@ -3200,7 +3204,11 @@ PATH_LINE='export PATH="$HOME/.claude/bin:$PATH"'
 run_path_install() {
   # $1 = checkout, $2 = HOME, $3 = CLAUDE_CONFIG_DIR, $4 = SHELL value,
   # $5 = install.sh argument (optional, e.g. --cloud), $6 = one extra VAR=value (optional, e.g. CLAUDE_CODE_REMOTE=true)
-  ( cd "$1" && env -i PATH="$PATH" HOME="$2" CLAUDE_CONFIG_DIR="$3" SHELL="$4" ${6:+"$6"} bash ./install.sh ${5:+"$5"} 2>&1 )
+  # The checkouts sit under $work, a temp folder: the temp root names a folder that holds nothing, so install.sh
+  # takes the checkout. The curl stub on PATH answers any fetch that still runs, so no case reaches the network.
+  [ -e "$work/path-bin/curl" ] || make_curl_stub "$work/path-bin"
+  ( cd "$1" && env -i PATH="$work/path-bin:$PATH" HOME="$2" CLAUDE_CONFIG_DIR="$3" SHELL="$4" \
+      CLAUDE_SETTINGS_TEMP_ROOTS="$work/no-such-temp-root" ${6:+"$6"} bash ./install.sh ${5:+"$5"} 2>&1 )
 }
 
 path_case1() {
