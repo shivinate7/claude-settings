@@ -149,6 +149,13 @@ def case_login_stays_with_the_person():
     return login == "shivinate7", "GH_DEFAULT_LOGIN=%r" % (login,)
 
 
+def case_old_owner_slug_is_no_shared_name():
+    """The old owner is dropped: no name shared_names holds is the old settings slug, in any letter case."""
+    held = sorted(name for name, value in vars(_shared()).items()
+                  if isinstance(value, str) and value.casefold() == "shivinate7/claude-settings")
+    return not held, "shared_names still holds the old settings slug as %s" % (held,)
+
+
 def _guard_merge_parse():
     """The parsed guard_merge.py: the names it imports from shared_names, and each module-level binding of one name
     as (name, value node). One parse serves the lane repo case and the tag prefix case."""
@@ -586,6 +593,7 @@ CASES = [
     ("(b2) shared_names holds the gh login pair: shivinate7 default, ssemwal-cdc fallback", case_gh_logins_pinned),
     ("(b3) shared_names.SETTINGS_REPO is swlshiv/claude-settings after the org move", case_settings_repo_is_the_org_repo),
     ("(b4) the gh login stays shivinate7 after the org move", case_login_stays_with_the_person),
+    ("(b6) no name shared_names holds is the old owner's settings slug", case_old_owner_slug_is_no_shared_name),
     ("(b5) guard_merge.py's LANE_MERGE_REPO binds shared_names' SETTINGS_REPO, the org repo after the move",
      case_lane_merge_repo_is_the_org_repo),
     ("(c) the guard's names are shared_names' own objects", case_guard_reexports_same_objects),
