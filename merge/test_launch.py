@@ -16,7 +16,9 @@ import tracked_tree  # noqa: E402  copies what git lists, so no fixture lists fi
 from proc_fixture import alive, default_sigint, kill_all, stop_group, wait_for, wait_gone  # noqa: E402  the one home of the signal-test helpers (testing/proc_fixture.py)
 sys.path.insert(0, os.path.join(ROOT, "lint"))
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
-URL = "https://github.com/shivinate7/claude-settings"
+sys.path.insert(0, os.path.join(ROOT, "hooks"))
+from shared_names import SETTINGS_REPO  # noqa: E402  the settings repo's one home (hooks/shared_names.py)
+URL = "https://github.com/" + SETTINGS_REPO
 
 def put(path, text):
     with open(path, "w") as f:
