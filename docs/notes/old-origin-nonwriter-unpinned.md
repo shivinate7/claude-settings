@@ -1,0 +1,1 @@
+- old-origin-nonwriter-unpinned: In the old-origin block of `page_form_problem` (`hooks/feedback_guard.py`, about line 1008, added by PR 4019, not yet on main), no test pins that a non-writer session in an old-origin checkout passes. A mutant that drops `and pages.is_writer(session)` stayed green (review round 2, 06:25 CST Nov 27). Seen: 2026-11-27 x1
