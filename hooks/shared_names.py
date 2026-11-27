@@ -110,6 +110,9 @@ GH_FALLBACK_LOGIN = "ssemwal-cdc"
 # two name the repo owner, and a matcher and an emitter both use them.
 SETTINGS_OWNER = "swlshiv"
 SETTINGS_REPO = SETTINGS_OWNER + "/claude-settings"
+# The names the settings repo had before the move: the person's account, whose login is GH_DEFAULT_LOGIN. GitHub redirects
+# them here, so an old checkout's origin still names one. A reader that refuses such a name reads this; none accepts it.
+PRE_MOVE_SETTINGS_REPOS = (GH_DEFAULT_LOGIN + "/claude-settings",)
 TEMPLATE_DIR = "skills/waiting-page"
 
 # The tags a session carries (decision session-tiers, Tier tags). The roadmap build reads them from live sessions and

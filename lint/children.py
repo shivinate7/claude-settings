@@ -37,11 +37,11 @@ import sys
 HERE = os.path.dirname(os.path.realpath(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(HERE), "hooks"))
 import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
-from shared_names import SETTINGS_OWNER, SETTINGS_REPO  # noqa: E402  the one home of the repo owner
+from shared_names import PRE_MOVE_SETTINGS_REPOS, SETTINGS_OWNER, SETTINGS_REPO  # noqa: E402  the one home of the repo owner
 
 DEFAULT_FILE = os.path.join(os.path.dirname(HERE), "docs", "children.txt")
 SELF = SETTINGS_REPO
-SELVES = (SETTINGS_REPO, "shivinate7/claude-settings")  # GitHub redirects the old owner's name to this repo, so the old name is no child either
+SELVES = (SETTINGS_REPO,) + PRE_MOVE_SETTINGS_REPOS  # GitHub redirects a pre-move name here, so it is no child either
 # A segment never starts with a dash and is never only dots: `..` would climb a path, a leading dash reads as an option.
 SEGMENT = r"(?!-)(?!\.+(?:/|\Z))[A-Za-z0-9_.-]+"
 NAME = re.compile(SEGMENT + "/" + SEGMENT)

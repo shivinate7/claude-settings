@@ -81,7 +81,7 @@ if ! curl -fsS --max-time 20 https://raw.githubusercontent.com/swlshiv/claude-se
   for d in ${CLAUDE_SETTINGS_SEARCH_ROOTS:-/home/user /root}; do
     for c in "$d"/*/cloud-setup.sh; do
       case "$(git -C "${c%/*}" config --get remote.origin.url 2>/dev/null)" in
-        *github.com[/:]swlshiv/claude-settings|*github.com[/:]swlshiv/claude-settings.git|*github.com[/:]shivinate7/claude-settings|*github.com[/:]shivinate7/claude-settings.git) cp "$c" "$f" && break 2 ;;
+        *github.com[/:]swlshiv/claude-settings|*github.com[/:]swlshiv/claude-settings.git) cp "$c" "$f" && break 2 ;;
       esac
     done
   done
@@ -219,7 +219,7 @@ A flag prefix is an error, not the flag it starts (`merge 5 --conf` fails; write
   on PATH. The launcher holds no merge logic. It finds this clone through `CLAUDE_SETTINGS_DIR`,
   then the `@` line in `CLAUDE.md` under `CLAUDE_CONFIG_DIR` (default `~/.claude`). With
   neither, it clones the public repo into a temporary folder. The checkout must have `origin`
-  set to `swlshiv/claude-settings` (`shivinate7/claude-settings`, its owner before the move, still passes). Any other result stops before a pull request read. A
+  set to `swlshiv/claude-settings`. Any other result stops before a pull request read. A
   repo's own wrapper, such as a `make merge` target, may hold the same lookup instead.
 * **Another checkout.** A batch runner that merges in a second checkout runs
   `~/.claude/bin/merge -C <checkout> <pr> --confirm`, never `cd <checkout> && merge ...`. The flag

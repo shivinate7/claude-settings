@@ -181,7 +181,7 @@ import report_guard  # noqa: E402  the one home of the Stop output and its corre
 import override  # noqa: E402  the one home of the roadmap record ref and folder
 import ruling_home  # noqa: E402  the one home of "a branch's tree holds this file"
 import precompact_handoff  # noqa: E402  the one home of the handoff path
-from shared_names import MACHINE_TAGS, SETTINGS_REPO, TEMPLATE_DIR  # noqa: E402  the one home of the machine notice tags, the repo, and the template dir
+from shared_names import MACHINE_TAGS, PRE_MOVE_SETTINGS_REPOS, SETTINGS_REPO, TEMPLATE_DIR  # noqa: E402  the one home of the machine notice tags, the repo, and the template dir
 from guard_core import SHELL_TOOLS  # noqa: E402  the one home of the shell tool names (Bash, PowerShell)
 
 ITEM = re.compile(r"- (fb-\S+)(?:\s+(.*))?$")
@@ -583,16 +583,16 @@ class Homes:
                 self._templated[key] = TEMPLATE_DIR in run.stdout
         return self._templated[key]
 
-    def page_form_scope(self, url):
-        """(root, branch) when the cwd is the claude-settings repo and `url` is its waiting page; else None. The
-        layout or git failing stands the rule down: None."""
+    def page_form_scope(self, url, repos=(SETTINGS_REPO,)):
+        """(root, branch) when the cwd is a checkout of one of `repos` (default: the claude-settings repo) and `url` is
+        its waiting page; else None. The layout or git failing stands the rule down: None."""
         try:
             import layout
         except ImportError:
             return None
         try:
             root = self._cwd_root()
-            if root is None or layout.repo_name(root) != SETTINGS_REPO.lower() or not layout.is_waiting_page_url(
+            if root is None or layout.repo_name(root) not in [r.lower() for r in repos] or not layout.is_waiting_page_url(
                     root, url):
                 return None
             return root, layout.record_branch(root)
@@ -1004,7 +1004,14 @@ def page_form_problem(text, items, homes, pages, session):
     if wake.startswith((SAVED_WAKE, UNDONE_WAKE)) and "(" not in wake.partition("Items:")[2]:
         return None  # a plain save or an undo: no owner words to route
     scope = homes.page_form_scope(banner.group(1))
-    if scope is None or not pages.is_writer(session):
+    if scope is None:
+        if homes.page_form_scope(banner.group(1), PRE_MOVE_SETTINGS_REPOS) is not None and pages.is_writer(session):
+            return ("this checkout's origin still names %s, which the repo had before the move, so the page form rule"
+                    " cannot read its scope and a thread reply would pass unchecked (rule page-form-to-template, ruling c164):"
+                    " point origin at %s (`git remote set-url origin`) and answer again"
+                    % (", ".join(PRE_MOVE_SETTINGS_REPOS), SETTINGS_REPO))
+        return None
+    if not pages.is_writer(session):
         return None
     try:
         for it in items:
