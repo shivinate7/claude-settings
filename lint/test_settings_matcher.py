@@ -570,7 +570,7 @@ class ModsAutoUpdate(unittest.TestCase):
     def test_claude_settings_marketplace_auto_updates(self):
         with open(SETTINGS, encoding="utf-8") as f:
             entry = json.load(f)["extraKnownMarketplaces"]["claude-settings"]
-        self.assertEqual(entry["source"], {"source": "github", "repo": "shivinate7/claude-settings"})
+        self.assertEqual(entry["source"], {"source": "github", "repo": "swlshiv/claude-settings"})
         self.assertIs(entry.get("autoUpdate"), True)
 
 
